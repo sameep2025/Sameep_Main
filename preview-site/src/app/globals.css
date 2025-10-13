@@ -1,0 +1,23 @@
+/* Reset styles */
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+/* Use font from layout.js */
+body {
+  font-family: poppins, sans-serif;
+  background-color: #cae0d1;
+  color: #000;
+}
+
+/* Links hover example */
+a {
+  text-decoration: none;
+  color: inherit;
+}
+
+a:hover {
+  color: #059669;
+}

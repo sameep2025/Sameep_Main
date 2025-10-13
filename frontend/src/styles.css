@@ -1,0 +1,167 @@
+/* Global body */
+body {
+  font-family: Arial, sans-serif;
+  margin: 0;
+  background: #f9fafb; /* Light gray background */
+  color: #4f4f4f; /* Dark gray text */
+  padding: 0;
+}
+
+/* Buttons */
+button {
+  cursor: pointer;
+  font-weight: bold;
+  border: none;
+  border-radius: 6px;
+  padding: 10px 16px;
+  transition: 0.2s;
+  background-color: #2f80ed; /* Blue */
+  color: #fff;
+}
+
+button:hover {
+  opacity: 0.9;
+  background-color: #1f6cd9; /* Darker blue */
+}
+
+/* Sidebar */
+.sidebar {
+  width: 220px;
+  height: 100vh;
+  background-color: #ffffff; /* White sidebar */
+  color: #4f4f4f; /* Dark gray text */
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 15px;
+  box-shadow: 2px 0 5px rgba(0,0,0,0.1);
+}
+
+.sidebar h2 {
+  margin: 0 0 20px 0;
+  font-size: 22px;
+  color: #2f80ed; /* Blue heading */
+}
+
+.sidebar a {
+  color: #4f4f4f;
+  text-decoration: none;
+  font-weight: 500;
+  padding: 8px 12px;
+  border-radius: 6px;
+  width: 100%;
+  display: block;
+}
+
+.sidebar a:hover {
+  background-color: #f2f6ff; /* Light blue hover */
+  color: #2f80ed;
+}
+
+.sidebar a.active {
+  background-color: #2f80ed; /* Active link */
+  color: #ffffff;
+}
+
+/* Logout */
+.sidebar .logout {
+  color: #eb5757; /* Red */
+  font-weight: bold;
+}
+
+/* Category grid */
+.grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  margin-top: 20px;
+}
+
+/* Cards */
+.category-card, .card {
+  background: #ffffff; /* White card */
+  color: #333; /* Normal text */
+  border: 1px solid #ddd;
+  border-radius: 12px;
+  padding: 12px;
+  width: 220px;
+  text-align: center;
+  transition: 0.2s;
+  box-shadow: 0 2px 5px rgba(0,0,0,0.05);
+}
+
+.category-card:hover, .card:hover {
+  transform: scale(1.03);
+  box-shadow: 0 0 12px rgba(47,128,237,0.3); /* Blue glow */
+}
+
+.category-card img, .card img {
+  width: 100%;
+  height: 140px;
+  object-fit: cover;
+  border-radius: 6px;
+  margin-bottom: 10px;
+}
+
+/* Modal overlay */
+.modal, .create-category-modal {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: rgba(0,0,0,0.6);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 1000;
+}
+
+/* Modal content */
+.modal-content, .create-category-modal-content {
+  background: #ffffff;
+  color: #333;
+  padding: 25px;
+  border-radius: 12px;
+  width: 350px;
+  max-width: 90%;
+  box-shadow: 0 0 20px rgba(0,0,0,0.15);
+}
+
+.modal-content h2, .create-category-modal-content h2 {
+  margin-top: 0;
+  text-align: center;
+  color: #2f80ed; /* Blue heading */
+}
+
+/* Modal inputs */
+.modal-content input[type="text"],
+.modal-content input[type="file"],
+.create-category-modal-content input[type="text"],
+.create-category-modal-content input[type="file"] {
+  padding: 8px;
+  margin-bottom: 12px;
+  border-radius: 5px;
+  border: 1px solid #ccc;
+  width: 100%;
+  background: #f9fafb;
+  color: #333;
+}
+
+/* Modal buttons side by side */
+.modal-buttons {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.modal-buttons button {
+  flex: 1;
+  background-color: #2f80ed;
+  color: #fff;
+}
+
+.modal-buttons button:hover {
+  background-color: #1f6cd9;
+}
