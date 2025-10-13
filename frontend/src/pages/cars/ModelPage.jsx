@@ -1,21 +1,25 @@
 import React, { useState, useEffect } from "react";
 import axios from "axios";
 
-export default function BikeModelsPage() {
+export default function CarModelsPage() {
   const [models, setModels] = useState([]);
   const [brands, setBrands] = useState([]);
   const [bodyTypes, setBodyTypes] = useState([]);
+  const [fuelTypes, setFuelTypes] = useState([]);
+  const [transmissions, setTransmissions] = useState([]);
 
   const [showModal, setShowModal] = useState(false);
   const [editModel, setEditModel] = useState(null);
 
   const [form, setForm] = useState({
-    category: "bike",
+    category: "car",
     brand: "",
     bodyType: "",
+    fuelType: "",
+    transmission: "",
     model: "",
     variant: "",
-    seats: 2,
+    seats: 4,
   });
 
   // ---------- FETCH MASTERS ----------
@@ -30,11 +34,11 @@ export default function BikeModelsPage() {
     }
   };
 
-  // ---------- FETCH BIKE MODELS ----------
+  // ---------- FETCH CAR MODELS ----------
   const fetchModels = async () => {
     try {
       const res = await axios.get("http://localhost:5000/api/models", {
-        params: { category: "bike" },
+        params: { category: "car" },
       });
       setModels(res.data);
     } catch (err) {
@@ -44,8 +48,10 @@ export default function BikeModelsPage() {
 
   // ---------- INITIAL LOAD ----------
   useEffect(() => {
-    fetchMasters("bikeBrand", setBrands);
-    fetchMasters("bikeBodyType", setBodyTypes);
+    fetchMasters("brand", setBrands);
+    fetchMasters("bodyType", setBodyTypes);
+    fetchMasters("fuelType", setFuelTypes);
+    fetchMasters("transmission", setTransmissions);
     fetchModels();
   }, []);
 
@@ -57,13 +63,14 @@ export default function BikeModelsPage() {
     }
 
     try {
+      const payload = { ...form };
       if (editModel) {
         await axios.put(
           `http://localhost:5000/api/models/${editModel._id}`,
-          form
+          payload
         );
       } else {
-        await axios.post("http://localhost:5000/api/models", form);
+        await axios.post("http://localhost:5000/api/models", payload);
       }
 
       setShowModal(false);
@@ -80,12 +87,14 @@ export default function BikeModelsPage() {
   const handleEdit = (model) => {
     setEditModel(model);
     setForm({
-      category: "bike",
+      category: "car",
       brand: model.brand || "",
       bodyType: model.bodyType || "",
+      fuelType: model.fuelType || "",
+      transmission: model.transmission || "",
       model: model.model || "",
       variant: model.variant || "",
-      seats: model.seats || 2,
+      seats: model.seats || 4,
     });
     setShowModal(true);
   };
@@ -105,18 +114,20 @@ export default function BikeModelsPage() {
   // ---------- RESET FORM ----------
   const resetForm = () => {
     setForm({
-      category: "bike",
+      category: "car",
       brand: "",
       bodyType: "",
+      fuelType: "",
+      transmission: "",
       model: "",
       variant: "",
-      seats: 2,
+      seats: 4,
     });
   };
 
   return (
     <div style={{ padding: 30 }}>
-      <h2 style={{ marginBottom: 16, color: "#00AEEF" }}>Bike Models</h2>
+      <h2 style={{ marginBottom: 16, color: "#00AEEF" }}>Car Models</h2>
 
       <button
         onClick={() => {
@@ -152,6 +163,8 @@ export default function BikeModelsPage() {
           <div style={{ minWidth: 120 }}>Model</div>
           <div style={{ minWidth: 120 }}>Variant</div>
           <div style={{ minWidth: 120 }}>Body Type</div>
+          <div style={{ minWidth: 100 }}>Fuel Type</div>
+          <div style={{ minWidth: 120 }}>Transmission</div>
           <div style={{ minWidth: 80 }}>Seats</div>
           <div style={{ minWidth: 80 }}>Actions</div>
         </div>
@@ -171,6 +184,8 @@ export default function BikeModelsPage() {
             <div style={{ minWidth: 120 }}>{m.model}</div>
             <div style={{ minWidth: 120 }}>{m.variant || "-"}</div>
             <div style={{ minWidth: 120 }}>{m.bodyType || "-"}</div>
+            <div style={{ minWidth: 100 }}>{m.fuelType || "-"}</div>
+            <div style={{ minWidth: 120 }}>{m.transmission || "-"}</div>
             <div style={{ minWidth: 80 }}>{m.seats}</div>
             <div style={{ minWidth: 80, display: "flex", gap: 8 }}>
               <span
@@ -211,7 +226,7 @@ export default function BikeModelsPage() {
               width: 400,
             }}
           >
-            <h3>{editModel ? "Edit Bike Model" : "Add Bike Model"}</h3>
+            <h3>{editModel ? "Edit Car Model" : "Add Car Model"}</h3>
 
             {/* BRAND */}
             <label>Brand</label>
@@ -222,9 +237,7 @@ export default function BikeModelsPage() {
             >
               <option value="">Select</option>
               {brands.map((b, i) => (
-                <option key={i} value={b}>
-                  {b}
-                </option>
+                <option key={i} value={b}>{b}</option>
               ))}
             </select>
 
@@ -237,9 +250,33 @@ export default function BikeModelsPage() {
             >
               <option value="">Select</option>
               {bodyTypes.map((b, i) => (
-                <option key={i} value={b}>
-                  {b}
-                </option>
+                <option key={i} value={b}>{b}</option>
+              ))}
+            </select>
+
+            {/* FUEL TYPE */}
+            <label>Fuel Type</label>
+            <select
+              value={form.fuelType}
+              onChange={(e) => setForm({ ...form, fuelType: e.target.value })}
+              style={{ width: "100%", marginBottom: 8 }}
+            >
+              <option value="">Select</option>
+              {fuelTypes.map((f, i) => (
+                <option key={i} value={f}>{f}</option>
+              ))}
+            </select>
+
+            {/* TRANSMISSION */}
+            <label>Transmission</label>
+            <select
+              value={form.transmission}
+              onChange={(e) => setForm({ ...form, transmission: e.target.value })}
+              style={{ width: "100%", marginBottom: 8 }}
+            >
+              <option value="">Select</option>
+              {transmissions.map((t, i) => (
+                <option key={i} value={t}>{t}</option>
               ))}
             </select>
 
@@ -266,9 +303,7 @@ export default function BikeModelsPage() {
               min={1}
               max={10}
               value={form.seats}
-              onChange={(e) =>
-                setForm({ ...form, seats: Number(e.target.value) })
-              }
+              onChange={(e) => setForm({ ...form, seats: Number(e.target.value) })}
               style={{ width: "100%", marginBottom: 8 }}
             />
 
