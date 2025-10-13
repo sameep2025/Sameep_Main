@@ -2,13 +2,103 @@ import React, { useState } from "react";
 import ProductsMenu from "./ProductsMenu";
 import categoryThemes from "../utils/categoryThemes";
 
-export default function TopNavBar({ businessName, categoryTree, selectedLeaf, onLeafSelect, categoryName }) {
+export default function TopNavBar({ businessName, categoryTree, selectedLeaf, onLeafSelect, categoryName, onCategoryClick }) {
   const [open, setOpen] = useState(false);
+  const [expandedCategories, setExpandedCategories] = useState({});
 
   // Use theme from props, fallback to 'default' if key missing
   const theme = categoryThemes[categoryName] || categoryThemes.default;
 
   const navItems = ["Benefits", "About", "Contact"];
+  
+  // Determine the label based on categoryType
+  const categoryType = categoryTree?.categoryType || "Services";
+  const servicesLabel = categoryType === "Products" ? "Our Products" : 
+                        categoryType === "Services" ? "Our Services" : 
+                        "Our Products & Services";
+
+  const toggleCategory = (categoryId) => {
+    setExpandedCategories(prev => ({
+      ...prev,
+      [categoryId]: !prev[categoryId]
+    }));
+  };
+
+  const handleCategoryClick = (category) => {
+    if (onCategoryClick) {
+      onCategoryClick(category);
+      setOpen(false);
+    }
+  };
+
+  // Recursive function to render category items with unlimited nesting
+  const renderCategoryItem = (category, index, level) => {
+    const categoryId = category.id || category._id || index;
+    const hasChildren = category.children && category.children.length > 0;
+    const isExpanded = expandedCategories[categoryId];
+    const paddingLeft = level * 20;
+
+    return (
+      <div key={categoryId}>
+        {/* Category Item */}
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            padding: "8px 12px",
+            paddingLeft: `${12 + paddingLeft}px`,
+            cursor: "pointer",
+            borderRadius: 6,
+            transition: "background 0.2s ease",
+            color: theme.text,
+            fontSize: level === 0 ? "14px" : "13px",
+            fontWeight: hasChildren ? 600 : 400,
+          }}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.background = theme.accent + (level === 0 ? "20" : "15");
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.background = "transparent";
+          }}
+        >
+          <span
+            onClick={(e) => {
+              e.stopPropagation();
+              if (hasChildren) {
+                toggleCategory(categoryId);
+              } else {
+                handleCategoryClick(category);
+              }
+            }}
+            style={{ flex: 1 }}
+          >
+            {category.name}
+          </span>
+          {hasChildren && (
+            <span
+              onClick={(e) => {
+                e.stopPropagation();
+                toggleCategory(categoryId);
+              }}
+              style={{ padding: "0 5px", fontSize: "12px" }}
+            >
+              {isExpanded ? "▼" : "▶"}
+            </span>
+          )}
+        </div>
+
+        {/* Nested Children - Recursive */}
+        {hasChildren && isExpanded && (
+          <div>
+            {category.children.map((child, childIndex) => 
+              renderCategoryItem(child, childIndex, level + 1)
+            )}
+          </div>
+        )}
+      </div>
+    );
+  };
 
   return (
     <header
@@ -51,7 +141,7 @@ export default function TopNavBar({ businessName, categoryTree, selectedLeaf, on
             </a>
           </li>
 
-          {/* Products Dropdown */}
+          {/* Our Services/Products - show dropdown with nested subcategories */}
           <li style={{ position: "relative" }}>
             <button
               onClick={() => setOpen(!open)}
@@ -64,12 +154,11 @@ export default function TopNavBar({ businessName, categoryTree, selectedLeaf, on
                 color: theme.text,
               }}
             >
-              Our Services ▾
+              {servicesLabel} ▾
             </button>
 
-            {open && categoryTree && (
+            {open && categoryTree?.children?.length > 0 && (
               <div
-                onClick={(e) => e.stopPropagation()}
                 style={{
                   position: "absolute",
                   top: "100%",
@@ -80,20 +169,14 @@ export default function TopNavBar({ businessName, categoryTree, selectedLeaf, on
                   boxShadow: "0 4px 12px rgba(0,0,0,0.1)",
                   zIndex: 100,
                   padding: 8,
-                  minWidth: 220,
+                  minWidth: 250,
+                  maxHeight: 500,
+                  overflowY: "auto",
                 }}
               >
-                <ProductsMenu
-                  root={categoryTree}
-                  selectedLeaf={selectedLeaf}
-                  onLeafSelect={(leaf) => {
-                    onLeafSelect(leaf);
-                    setOpen(false);
-                    const el = document.getElementById("products");
-                    if (el) el.scrollIntoView({ behavior: "smooth" });
-                  }}
-                  theme={theme}
-                />
+                {categoryTree.children.map((child, index) => 
+                  renderCategoryItem(child, index, 0)
+                )}
               </div>
             )}
           </li>
@@ -102,7 +185,11 @@ export default function TopNavBar({ businessName, categoryTree, selectedLeaf, on
           {navItems.map((item) => (
             <li key={item}>
               <a
-                href={`#${item.toLowerCase()}`}
+                onClick={(e) => {
+                  e.preventDefault();
+                  const el = document.getElementById(item.toLowerCase());
+                  if (el) el.scrollIntoView({ behavior: "smooth" });
+                }}
                 style={{
                   color: theme.text,
                   textDecoration: "none",

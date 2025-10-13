@@ -134,6 +134,7 @@ export default function ContactSection({
 
   return (
     <section
+      id="contact"
       style={{
         padding: "60px 20px",
         backgroundColor: theme.background || fallbackTheme.background,
