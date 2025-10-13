@@ -501,6 +501,7 @@ export default function VendorStatusListPage() {
         <div style={{ marginTop: 30, position: "relative" }}>
           <h2>Categories for {selectedVendor.businessName}</h2>
 
+
           {/* Preview button */}
           <button
   onClick={() => {
@@ -533,6 +534,37 @@ export default function VendorStatusListPage() {
 >
   Preview
 </button>
+<button
+            onClick={() => {
+              if (rows[0]) {
+                const categoryIdForPreview = rows[0].categoryId; // use first category
+                const homeLocs =
+                  selectedVendor.businessLocations?.filter(Boolean) || [];
+
+                window.open(
+                  `http://localhost:3001/preview/${selectedVendor._id}/${categoryIdForPreview}?homeLocs=${encodeURIComponent(
+                    JSON.stringify(homeLocs)
+                  )}&t=${Date.now()}`,
+                  "_blank"
+                );
+              } else {
+                alert("No category available for preview");
+              }
+            }}
+            style={{
+              position: "absolute",
+              right: 110,
+              top: 0,
+              padding: "6px 12px",
+              borderRadius: 6,
+              background: "#059669",
+              color: "#fff",
+              border: "none",
+              cursor: "pointer",
+            }}
+          >
+            NiksPreview
+          </button>
 
 
           {categoriesLoading ? (
