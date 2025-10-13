@@ -27,6 +27,11 @@ import BikesMainPage from "./pages/bikes/BikesMainPage";
 import BikeBrandPage from "./pages/bikes/BikeBrandsPage";
 import BikeBodyTypePage from "./pages/bikes/BikeBodyTypesPage";
 import BikeModelPage from "./pages/bikes/BikeModelsPage";
+import TempoMiniBusMainPage from "./pages/bus/TempoMiniBusMainPage";
+import TempoBusBrandPage from "./pages/bus/TempoBusBrandPage";
+import TempoBusBodyTypePage from "./pages/bus/TempoBusBodyTypePage";
+import TempoBusModelsPage from "./pages/bus/TempoBusModelsPage";
+
 
 
 // Vendor Pages (Step 1 → Step 2 → Step 3)
@@ -67,6 +72,11 @@ function App() {
 <Route path="/master/bikes/body-types" element={<BikeBodyTypePage />} />
 <Route path="/master/bikes/models" element={<BikeModelPage />} />
 
+{/* Tempo Mini Bus */}
+<Route path="/master/tempo-mini-bus" element={<TempoMiniBusMainPage />} />  {/* Main dashboard */}
+<Route path="/master/tempo-mini-bus/brands" element={<TempoBusBrandPage />} />
+<Route path="/master/tempo-mini-bus/body-types" element={<TempoBusBodyTypePage />} />
+<Route path="/master/tempo-mini-bus/models" element={<TempoBusModelsPage />} />
 
             {/* Questions */}
             <Route path="/questions" element={<Questions />} />

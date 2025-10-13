@@ -2,7 +2,8 @@ const mongoose = require("mongoose");
 
 const modelSchema = new mongoose.Schema(
   {
-    category: { type: String, enum: ["car", "bike"], required: true },
+    category: { type: String, enum: ["car", "bike", "tempoBus"], required: true },
+
     brand: { type: String, required: true },
     bodyType: { type: String },
     fuelType: { type: String },        // ✅ add this

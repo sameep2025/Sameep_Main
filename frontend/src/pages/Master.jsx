@@ -63,6 +63,7 @@ export default function MasterPage() {
           title="Manage Cars"
           onClick={() => navigate("/master/cars")}
         />
+        <MasterCard title="Manage Tempo Mini Bus" onClick={() => navigate("/master/tempo-mini-bus")} />
           <MasterCard title="Manage Bikes" onClick={() => navigate("/master/bikes")} />
 
           
