@@ -25,6 +25,17 @@ const CategorySchema = new mongoose.Schema({
   loyaltyPoints: { type: Boolean, default: false },
   linkAttributesPricing: { type: Boolean, default: false },
   freeTexts: { type: [String], default: Array(10).fill("") },
+
+  colorSchemes: [
+    {
+      name: { type: String, required: true }, // e.g. "Pink Sunset", "Ocean Blue"
+      primary: { type: String, required: true },
+      accent: { type: String, required: true },
+      background: { type: String, required: true },
+      cardBg: { type: String, required: true },
+      text: { type: String, required: true },
+    },
+  ],
   createdAt: { type: Date, default: Date.now },
 });
 
