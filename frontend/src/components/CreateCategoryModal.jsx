@@ -26,6 +26,28 @@ function CreateCategoryModal({
   const [linkAttributesPricing, setLinkAttributesPricing] = useState(false);
   const [freeTexts, setFreeTexts] = useState(Array(10).fill(""));
   const [icon, setIcon] = useState(null);
+  const [colorSchemes, setColorSchemes] = useState([]);
+
+const addColorScheme = () => {
+  setColorSchemes([
+    ...colorSchemes,
+    {
+      name: "",
+      primary: "#000000",
+      accent: "#ffffff",
+      background: "#ffffff",
+      cardBg: "#ffffff",
+      text: "#000000",
+    },
+  ]);
+};
+
+const updateColorScheme = (index, key, value) => {
+  const updated = [...colorSchemes];
+  updated[index][key] = value;
+  setColorSchemes(updated);
+};
+
 
   // Initialize form state
  useEffect(() => {
@@ -49,6 +71,21 @@ function CreateCategoryModal({
     setPostRequestsDeals(Boolean(initialData.postRequestsDeals));
     setLoyaltyPoints(Boolean(initialData.loyaltyPoints));
     setLinkAttributesPricing(Boolean(initialData.linkAttributesPricing));
+
+    // ✅ Initialize saved color schemes from backend
+setColorSchemes(
+  Array.isArray(initialData.colorSchemes) && initialData.colorSchemes.length > 0
+    ? initialData.colorSchemes.map(scheme => ({
+        name: scheme.name || "",
+        primary: scheme.primary || "#000000",
+        accent: scheme.accent || "#ffffff",
+        background: scheme.background || "#ffffff",
+        cardBg: scheme.cardBg || "#ffffff",
+        text: scheme.text || "#000000",
+      }))
+    : [] // empty array if no saved schemes
+);
+
 
     // ✅ Use backend freeTexts if available, else 10 blanks
     setFreeTexts(
@@ -111,6 +148,11 @@ function CreateCategoryModal({
       });
       if (icon) formData.append("icon", icon);
       formData.append("enableFreeText", parentId ? parentEnableFreeText : enableFreeText);
+      if (!parentId) {
+  formData.append("colorSchemes", JSON.stringify(colorSchemes));
+}
+
+
 
 
       let url = "http://localhost:5000/api/categories";
@@ -328,6 +370,99 @@ function CreateCategoryModal({
     }}
   />
 )}
+
+{/* 🎨 Color Schemes Section */}
+{/* 🎨 Color Schemes Section - only for main categories */}
+{!parentId && (
+  <>
+    <h4 style={{ ...labelStyle, marginTop: "20px" }}>🎨 Color Schemes</h4>
+
+    {colorSchemes.map((scheme, index) => (
+      <div
+        key={index}
+        style={{
+          border: "1px solid #ddd",
+          borderRadius: "10px",
+          padding: "10px",
+          marginBottom: "10px",
+          background: "#fafafa",
+        }}
+      >
+        <div style={{ marginBottom: "6px", fontWeight: "600", color: "#555" }}>
+          Scheme {index + 1}
+        </div>
+
+        {/* Column Headings */}
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(6, 1fr)",
+            gap: "6px",
+            fontSize: "0.8rem",
+            textAlign: "center",
+            color: "#666",
+            marginBottom: "4px",
+          }}
+        >
+          <div>Name</div>
+          <div>Primary</div>
+          <div>Accent</div>
+          <div>Background</div>
+          <div>CardBg</div>
+          <div>Text</div>
+        </div>
+
+        {/* Input Row */}
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(6, 1fr)",
+            gap: "6px",
+            alignItems: "center",
+          }}
+        >
+          <input
+            type="text"
+            placeholder="Name"
+            value={scheme.name}
+            onChange={(e) => updateColorScheme(index, "name", e.target.value)}
+            style={{ ...inputStyle, padding: "6px" }}
+          />
+          {["primary", "accent", "background", "cardBg", "text"].map((key) => (
+            <input
+              key={key}
+              type="color"
+              value={scheme[key]}
+              onChange={(e) => updateColorScheme(index, key, e.target.value)}
+              style={{
+                width: "100%",
+                height: "35px",
+                cursor: "pointer",
+                borderRadius: "6px",
+                border: "1px solid #ccc",
+              }}
+            />
+          ))}
+        </div>
+      </div>
+    ))}
+
+    <button
+      type="button"
+      onClick={addColorScheme}
+      style={{
+        ...submitBtnStyle,
+        background: "#28a745",
+        width: "100%",
+        marginTop: "8px",
+      }}
+    >
+      ➕ Add Color Scheme
+    </button>
+  </>
+)}
+
+
 
 {/* Subcategory Full Free Text - controlled by parentEnableFreeText */}
 {/* Subcategory Full Free Text Checkbox Only */}
