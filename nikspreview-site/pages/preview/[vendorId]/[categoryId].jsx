@@ -48,6 +48,7 @@ const findLowestPrice = (node) => {
 /* Image Box */
 const ImgBox = ({ src, alt }) => {
   const imgUrl = resolveImageUrl(src);
+  console.log("🖼️ Image URL for", alt, ":", imgUrl, "| Original src:", src);
   return (
     <div
       style={{
@@ -62,7 +63,16 @@ const ImgBox = ({ src, alt }) => {
       }}
     >
       {imgUrl ? (
-        <img src={imgUrl} alt={alt} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+        <img 
+          src={imgUrl} 
+          alt={alt} 
+          style={{ width: "100%", height: "100%", objectFit: "cover" }}
+          onError={(e) => {
+            console.error("❌ Failed to load image:", imgUrl);
+            e.currentTarget.style.display = "none";
+            e.currentTarget.parentElement.innerHTML = '<span style="color: #94a3b8; fontSize: 13px">Image failed to load</span>';
+          }}
+        />
       ) : (
         <span style={{ color: "#94a3b8", fontSize: 13 }}>No image</span>
       )}
@@ -71,31 +81,36 @@ const ImgBox = ({ src, alt }) => {
 };
 
 /* Category Card */
-const CategoryCard = ({ node, onClick, themeColor, cardBg, accentColor }) => {
+const CategoryCard = ({ node, onClick, themeColor, cardBg, accentColor, isHighlighted }) => {
   const lowestPrice = findLowestPrice(node);
   const hasSubcategories = node.children && node.children.length > 0;
   return (
     <div
       onClick={() => onClick(node)}
       style={{
-        background: cardBg,
+        background: isHighlighted ? `linear-gradient(135deg, ${themeColor}15, ${accentColor}15)` : cardBg,
         borderRadius: 16,
-        boxShadow: "0 6px 16px rgba(0,0,0,0.08)",
-        border: `1.5px solid ${themeColor}`,
+        boxShadow: isHighlighted ? `0 8px 24px ${themeColor}40` : "0 6px 16px rgba(0,0,0,0.08)",
+        border: isHighlighted ? `2.5px solid ${themeColor}` : `1.5px solid ${themeColor}`,
         padding: 18,
         display: "flex",
         flexDirection: "column",
         alignItems: "center",
         cursor: "pointer",
-        transition: "transform 0.25s ease, box-shadow 0.25s ease",
+        transition: "transform 0.25s ease, box-shadow 0.25s ease, background 0.3s ease",
+        transform: isHighlighted ? "scale(1.05)" : "scale(1)",
       }}
       onMouseEnter={(e) => {
-        e.currentTarget.style.transform = "translateY(-5px)";
-        e.currentTarget.style.boxShadow = `0 10px 20px ${themeColor}25`;
+        if (!isHighlighted) {
+          e.currentTarget.style.transform = "translateY(-5px)";
+          e.currentTarget.style.boxShadow = `0 10px 20px ${themeColor}25`;
+        }
       }}
       onMouseLeave={(e) => {
-        e.currentTarget.style.transform = "translateY(0)";
-        e.currentTarget.style.boxShadow = "0 6px 16px rgba(0,0,0,0.08)";
+        if (!isHighlighted) {
+          e.currentTarget.style.transform = "translateY(0)";
+          e.currentTarget.style.boxShadow = "0 6px 16px rgba(0,0,0,0.08)";
+        }
       }}
     >
       <ImgBox src={node.imageUrl} alt={node.name} />
@@ -334,6 +349,9 @@ function PreviewPage() {
   const [categoryTree, setCategoryTree] = useState(null);
   const [loading, setLoading] = useState(true);
   const [stack, setStack] = useState([]);
+  const [activeTab, setActiveTab] = useState("all"); // "all", "products", "services"
+  const [highlightedCategory, setHighlightedCategory] = useState(null);
+  const [selectedLeafCategory, setSelectedLeafCategory] = useState(null); // For categories with no children
 
   useEffect(() => {
     if (!router.isReady || !vendorId) return;
@@ -373,13 +391,66 @@ function PreviewPage() {
   const sectionLabel = isProducts ? "Our Products" : isServices ? "Our Services" : "Our Products & Services";
   const itemLabel = isProducts ? "product" : isServices ? "service" : "item";
 
+  // Filter children based on category type and active tab
+  const getFilteredChildren = () => {
+    // If a leaf category is selected from TopNavBar, show only that
+    if (selectedLeafCategory) {
+      return [selectedLeafCategory];
+    }
+    
+    if (!categoryTree.children) return [];
+    
+    // If it's "Products & Services", use tab filtering
+    if (isBoth) {
+      if (activeTab === "all") return categoryTree.children;
+      return categoryTree.children.filter(child => {
+        const childType = child.categoryType || "Products"; // Default to Products if not set
+        if (activeTab === "products") return childType === "Products" || childType === "Products & Services";
+        if (activeTab === "services") return childType === "Services" || childType === "Products & Services";
+        return true;
+      });
+    }
+    
+    // If it's only "Products", filter to show only products
+    if (isProducts) {
+      return categoryTree.children.filter(child => {
+        const childType = child.categoryType || "Products"; // Default to Products if not set
+        return childType === "Products" || childType === "Products & Services";
+      });
+    }
+    
+    // If it's only "Services", filter to show only services
+    if (isServices) {
+      return categoryTree.children.filter(child => {
+        const childType = child.categoryType || "Products"; // Default to Products if not set
+        return childType === "Services" || childType === "Products & Services";
+      });
+    }
+    
+    return categoryTree.children;
+  };
+
+  const filteredChildren = getFilteredChildren();
+
   return (
     <div style={{ fontFamily: "Poppins, sans-serif", background, minHeight: "100vh" }}>
       <TopNavBar 
         businessName={vendor.businessName} 
         categoryTree={categoryTree}
         categoryName={categoryTree.name.toLowerCase()}
-        onCategoryClick={(category) => setStack([category])}
+        onCategoryClick={(category) => {
+          // If category has children, open modal
+          if (category.children && category.children.length > 0) {
+            setStack([category]);
+            setHighlightedCategory(null);
+            setSelectedLeafCategory(null);
+          } else {
+            // If no children, show it as selected leaf category
+            setSelectedLeafCategory(category);
+            setHighlightedCategory(category._id || category.id);
+            setStack([]);
+          }
+        }}
       />
       <section
         id="home"
@@ -411,29 +482,173 @@ function PreviewPage() {
       </section>
 
       <main id="our-services" style={{ maxWidth: 1200, margin: "60px auto", padding: "0 24px" }}>
-        <h2 style={{ fontSize: 32, fontWeight: 700, color: primary, marginBottom: 30 }}>
-          {sectionLabel}
-        </h2>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 30 }}>
+          <h2 style={{ fontSize: 32, fontWeight: 700, color: primary, margin: 0 }}>
+            {selectedLeafCategory ? selectedLeafCategory.name : sectionLabel}
+          </h2>
+          {selectedLeafCategory && (
+            <button
+              onClick={() => {
+                setSelectedLeafCategory(null);
+                setHighlightedCategory(null);
+              }}
+              style={{
+                padding: "10px 20px",
+                background: `linear-gradient(90deg, ${primary}, ${accent})`,
+                color: "#fff",
+                border: "none",
+                borderRadius: 8,
+                fontWeight: 600,
+                fontSize: 14,
+                cursor: "pointer",
+                transition: "opacity 0.3s ease",
+              }}
+              onMouseEnter={(e) => (e.currentTarget.style.opacity = 0.85)}
+              onMouseLeave={(e) => (e.currentTarget.style.opacity = 1)}
+            >
+              ← Show All {sectionLabel}
+            </button>
+          )}
+        </div>
+        
+        {/* Tab Menu for Products & Services */}
+        {isBoth && !selectedLeafCategory && (
+          <div style={{ 
+            display: "flex", 
+            gap: 12, 
+            marginBottom: 30,
+            borderBottom: `2px solid ${primary}20`,
+            paddingBottom: 0
+          }}>
+            <button
+              onClick={() => setActiveTab("all")}
+              style={{
+                padding: "12px 24px",
+                background: activeTab === "all" ? `linear-gradient(90deg, ${primary}, ${accent})` : "transparent",
+                color: activeTab === "all" ? "#fff" : primary,
+                border: "none",
+                borderBottom: activeTab === "all" ? `3px solid ${accent}` : "3px solid transparent",
+                fontWeight: 600,
+                fontSize: 16,
+                cursor: "pointer",
+                transition: "all 0.3s ease",
+                borderRadius: "8px 8px 0 0",
+              }}
+              onMouseEnter={(e) => {
+                if (activeTab !== "all") {
+                  e.currentTarget.style.background = `${primary}10`;
+                }
+              }}
+              onMouseLeave={(e) => {
+                if (activeTab !== "all") {
+                  e.currentTarget.style.background = "transparent";
+                }
+              }}
+            >
+              All
+            </button>
+            <button
+              onClick={() => setActiveTab("products")}
+              style={{
+                padding: "12px 24px",
+                background: activeTab === "products" ? `linear-gradient(90deg, ${primary}, ${accent})` : "transparent",
+                color: activeTab === "products" ? "#fff" : primary,
+                border: "none",
+                borderBottom: activeTab === "products" ? `3px solid ${accent}` : "3px solid transparent",
+                fontWeight: 600,
+                fontSize: 16,
+                cursor: "pointer",
+                transition: "all 0.3s ease",
+                borderRadius: "8px 8px 0 0",
+              }}
+              onMouseEnter={(e) => {
+                if (activeTab !== "products") {
+                  e.currentTarget.style.background = `${primary}10`;
+                }
+              }}
+              onMouseLeave={(e) => {
+                if (activeTab !== "products") {
+                  e.currentTarget.style.background = "transparent";
+                }
+              }}
+            >
+              Products
+            </button>
+            <button
+              onClick={() => setActiveTab("services")}
+              style={{
+                padding: "12px 24px",
+                background: activeTab === "services" ? `linear-gradient(90deg, ${primary}, ${accent})` : "transparent",
+                color: activeTab === "services" ? "#fff" : primary,
+                border: "none",
+                borderBottom: activeTab === "services" ? `3px solid ${accent}` : "3px solid transparent",
+                fontWeight: 600,
+                fontSize: 16,
+                cursor: "pointer",
+                transition: "all 0.3s ease",
+                borderRadius: "8px 8px 0 0",
+              }}
+              onMouseEnter={(e) => {
+                if (activeTab !== "services") {
+                  e.currentTarget.style.background = `${primary}10`;
+                }
+              }}
+              onMouseLeave={(e) => {
+                if (activeTab !== "services") {
+                  e.currentTarget.style.background = "transparent";
+                }
+              }}
+            >
+              Services
+            </button>
+          </div>
+        )}
+        
         <div
           style={{
             display: "grid",
-            gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))",
+            gridTemplateColumns: selectedLeafCategory ? "repeat(auto-fill, minmax(300px, 1fr))" : "repeat(auto-fill, minmax(260px, 1fr))",
             gap: 30,
           }}
         >
-          {categoryTree.children?.length ? (
-            sortByPrice(categoryTree.children).map((cat) => (
-              <CategoryCard
-                key={getNodeId(cat)}
-                node={cat}
-                onClick={() => setStack([cat])}
-                themeColor={primary}
-                cardBg={cardBg}
-                accentColor={accent}
-              />
-            ))
+          {filteredChildren.length ? (
+            sortByPrice(filteredChildren).map((cat) => {
+              // If it's a selected leaf category or has no children, show as ProductCard
+              const isLeaf = !cat.children || cat.children.length === 0;
+              
+              return isLeaf ? (
+                <ProductCard
+                  key={getNodeId(cat)}
+                  node={cat}
+                  vendorId={vendorId}
+                  themeColor={primary}
+                  cardBg={cardBg}
+                  accentColor={accent}
+                  categoryType={categoryType}
+                />
+              ) : (
+                <CategoryCard
+                  key={getNodeId(cat)}
+                  node={cat}
+                  onClick={(category) => {
+                    if (category.children && category.children.length > 0) {
+                      setStack([category]);
+                      setHighlightedCategory(null);
+                      setSelectedLeafCategory(null);
+                    } else {
+                      setSelectedLeafCategory(category);
+                      setHighlightedCategory(category._id || category.id);
+                    }
+                  }}
+                  themeColor={primary}
+                  cardBg={cardBg}
+                  accentColor={accent}
+                  isHighlighted={highlightedCategory === (cat._id || cat.id)}
+                />
+              );
+            })
           ) : (
-            <p style={{ color: "#64748b" }}>No categories found.</p>
+            <p style={{ color: "#64748b" }}>No {activeTab === "all" ? "categories" : activeTab} found.</p>
           )}
         </div>
       </main>

@@ -28,6 +28,9 @@ export default function TopNavBar({ businessName, categoryTree, selectedLeaf, on
     if (onCategoryClick) {
       onCategoryClick(category);
       setOpen(false);
+      // Scroll to the services section
+      const el = document.getElementById("our-services");
+      if (el) el.scrollIntoView({ behavior: "smooth" });
     }
   };
 

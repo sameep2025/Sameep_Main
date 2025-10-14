@@ -477,8 +477,10 @@ export default function VendorStatusListPage() {
               </button>
               {/* Display non-empty business locations */}
               {/* Business Location Section */}
-              <p>
-                <b>Business Locations: </b>
+              <div>
+                <p style={{ marginBottom: 4 }}>
+                  <b>Business Locations: </b>
+                </p>
                 {v.location?.nearbyLocations?.filter((loc) => loc?.trim())
                   .length > 0 ? (
                   <ul style={{ paddingLeft: 16, margin: 4 }}>
@@ -489,9 +491,9 @@ export default function VendorStatusListPage() {
                       ))}
                   </ul>
                 ) : (
-                  <span style={{ color: "#6c757d" }}>Not Set</span>
+                  <span style={{ color: "#6c757d", paddingLeft: 4 }}>Not Set</span>
                 )}
-              </p>
+              </div>
             </li>
           ))}
         </ul>
