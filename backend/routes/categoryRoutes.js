@@ -66,8 +66,7 @@ router.post("/", upload.single("image"), async (req, res) => {
       loyaltyPoints: !parent ? req.body.loyaltyPoints === "true" : undefined,
       linkAttributesPricing: !parent ? req.body.linkAttributesPricing === "true" : undefined,
       freeTexts: !parent ? Array.from({ length: 10 }, (_, i) => req.body[`freeText${i}`] || "") : undefined,
-      imageUrl: req.files?.image ? `/uploads/${req.files.image[0].filename}` : undefined,
-    iconUrl: req.files?.icon ? `/uploads/${req.files.icon[0].filename}` : undefined,
+      imageUrl: req.file ? `/uploads/${req.file.filename}` : undefined,
     };
     // 🟢 Handle color schemes (JSON array)
 if (req.body.colorSchemes) {
@@ -153,8 +152,7 @@ router.put("/:id", upload.single("image"), async (req, res) => {
     if (categoryType !== undefined) category.categoryType = categoryType;
     if (category.categoryType === "Products") category.addToCart = addToCart === "true" || addToCart === true;
 
-    if (req.files?.image) category.imageUrl = `/uploads/${req.files.image[0].filename}`;
-    if (req.files?.icon) category.iconUrl = `/uploads/${req.files.icon[0].filename}`;
+    if (req.file) category.imageUrl = `/uploads/${req.file.filename}`;
     // 🟢 Update color schemes if provided
 if (req.body.colorSchemes) {
   try {
