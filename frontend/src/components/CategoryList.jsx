@@ -3,8 +3,9 @@ import { useNavigate } from "react-router-dom";
 import axios from "axios";
 import CategoryCard from "./CategoryCard";
 import CreateCategoryModal from "./CreateCategoryModal";
+ 
 
-function CategoryList({ parentId = null }) {
+function CategoryList({ parentId = null, onManageCombosClick, showManageCombosButton }) {
   const navigate = useNavigate();
   const [categories, setCategories] = useState([]);
   const [modalOpen, setModalOpen] = useState(false);
@@ -15,6 +16,8 @@ function CategoryList({ parentId = null }) {
   const [selectedParentId, setSelectedParentId] = useState(null);
   const [selectedParentType, setSelectedParentType] = useState(null);
   const [parentEnableFreeText, setParentEnableFreeText] = useState(false);
+  const [showCombos, setShowCombos] = useState(false);
+  
 
 
   // 🔹 handleCreated refresh
@@ -31,10 +34,14 @@ const fetchCategories = useCallback(async () => {
     // breadcrumb
     const crumbs = [];
     let currentId = parentId;
+    let first = true;
     while (currentId) {
       const catRes = await axios.get(`http://localhost:5000/api/categories/${currentId}`);
       crumbs.unshift({ id: catRes.data._id, name: catRes.data.name });
       setParentEnableFreeText(catRes.data.enableFreeText); // ✅ important
+      if (first) {
+        first = false;
+      }
       currentId = catRes.data.parent;
     }
     setBreadcrumb(crumbs);
@@ -47,6 +54,8 @@ const fetchCategories = useCallback(async () => {
   useEffect(() => {
     fetchCategories();
   }, [fetchCategories]);
+
+  // removed combos loading/rendering from CategoryList; handled in SubCategoryPage
 
   // 🔹 Open create modal (ensure parentCategoryType is correct)
   const handleOpenModal = async () => {
@@ -103,7 +112,7 @@ const fetchCategories = useCallback(async () => {
     <div>
       {/* Breadcrumb */}
       {breadcrumb.length > 0 && (
-        <div style={{ marginBottom: 12, fontWeight: "bold", fontSize: 14 }}>
+        <div style={{ marginBottom: 6, fontWeight: "bold", fontSize: 14 }}>
           <span style={{ cursor: "pointer" }} onClick={() => navigate("/categories")}>
             Categories
           </span>
@@ -156,7 +165,29 @@ const fetchCategories = useCallback(async () => {
         >
           {parentId ? "+ Create Subcategory" : "+ Create Category"}
         </button>
+
+        {showManageCombosButton && (
+          <button
+            onClick={onManageCombosClick}
+            style={{
+              padding: "8px 16px",
+              borderRadius: "8px",
+              border: "none",
+              background: "#0ea5e9",
+              color: "#fff",
+              cursor: "pointer",
+              fontWeight: "bold",
+              boxShadow: "0 2px 4px rgba(0,0,0,0.1)",
+            }}
+          >
+            Manage Combos
+          </button>
+        )}
+
+        
       </div>
+
+      
 
       {/* Modals */}
       <CreateCategoryModal
@@ -167,6 +198,7 @@ const fetchCategories = useCallback(async () => {
         parentEnableFreeText={parentEnableFreeText}
         onCreated={handleCreated}
       />
+      
       {editing && (
   <CreateCategoryModal
     show={editModalOpen}

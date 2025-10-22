@@ -34,7 +34,7 @@ exports.getCategories = async (req, res) => {
 // optional parentId in body
 exports.createCategory = async (req, res) => {
   try {
-    const { name, parentId} = req.body;
+    const { name, parentId, categoryVisibility, categoryModel, categoryPricing, socialHandle, displayType } = req.body;
     const imageFile = req.file;
 
     if (!name) return res.status(400).json({ message: "Name required" });
@@ -55,6 +55,11 @@ const imageUrl = imageFile ? `/${imageFile.path.replace(/\\/g, "/")}` : "";
       name,
       imageUrl,
       parent: parentId || null,
+      categoryVisibility,
+      categoryModel,
+      categoryPricing,
+      socialHandle,
+      displayType,
     });
 
     await category.save();

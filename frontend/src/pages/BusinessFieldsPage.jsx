@@ -183,6 +183,7 @@ function BusinessFieldModal({ show, onClose, onSave, initialData }) {
             <option value="select">Select</option>
             <option value="checkbox">Checkbox</option>
             <option value="document">Document</option>
+            <option value="image">Image</option>
           </select>
 
           {/* Show options only for select, radio, checkbox */}

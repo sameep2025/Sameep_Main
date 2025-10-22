@@ -1,5 +1,137 @@
 import { useState, useEffect } from "react";
 
+// Lightweight chip-style select with Select All and clear support
+function ChipSelect({ label, options = [], value = [], onChange, placeholder = "Select", multi = true, includeSelectAll = true }) {
+  const [open, setOpen] = useState(false);
+
+  const toggle = () => setOpen((o) => !o);
+  const close = () => setOpen(false);
+
+  const isSelected = (opt) => value.includes(opt);
+  const selectAll = () => onChange([...options]);
+  const clearAll = () => onChange([]);
+
+  const handleOptionClick = (opt) => {
+    if (multi) {
+      if (isSelected(opt)) onChange(value.filter((v) => v !== opt));
+      else onChange([...value, opt]);
+    } else {
+      onChange([opt]);
+      close();
+    }
+  };
+
+  return (
+    <div style={{ position: "relative" }}>
+      {label && <h4 style={labelStyle}>{label}</h4>}
+      <div
+        onClick={toggle}
+        style={{
+          ...inputStyle,
+          minHeight: 40,
+          display: "flex",
+          alignItems: "center",
+          gap: 6,
+          flexWrap: "wrap",
+          cursor: "pointer",
+        }}
+      >
+        {value.length === 0 ? (
+          <span style={{ color: "#888" }}>{placeholder}</span>
+        ) : (
+          value.map((v) => (
+            <span
+              key={v}
+              onClick={(e) => e.stopPropagation()}
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 6,
+                padding: "4px 8px",
+                background: "#eef6ff",
+                border: "1px solid #cce4ff",
+                borderRadius: 14,
+                color: "#1170cf",
+                fontSize: 12,
+              }}
+            >
+              {v}
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onChange(value.filter((x) => x !== v));
+                }}
+                style={{
+                  border: "none",
+                  background: "transparent",
+                  color: "#1170cf",
+                  cursor: "pointer",
+                  fontWeight: 700,
+                }}
+              >
+                ×
+              </button>
+            </span>
+          ))
+        )}
+        <span style={{ marginLeft: "auto", color: "#666" }}>▾</span>
+      </div>
+
+      {open && (
+        <div
+          style={{
+            position: "absolute",
+            zIndex: 3000,
+            left: 0,
+            right: 0,
+            background: "#fff",
+            border: "1px solid #ddd",
+            borderRadius: 10,
+            boxShadow: "0 8px 20px rgba(0,0,0,0.15)",
+            marginTop: 6,
+            maxHeight: 220,
+            overflowY: "auto",
+          }}
+        >
+          <div style={{ display: "flex", justifyContent: "space-between", padding: 8, borderBottom: "1px solid #eee" }}>
+            {includeSelectAll && multi && (
+              <button type="button" onClick={selectAll} style={{ background: "transparent", border: "none", color: "#0078d7", cursor: "pointer", fontWeight: 600 }}>
+                Select All
+              </button>
+            )}
+            <button type="button" onClick={clearAll} style={{ background: "transparent", border: "none", color: "#d9534f", cursor: "pointer", fontWeight: 600 }}>
+              Clear
+            </button>
+          </div>
+          {options.map((opt) => (
+            <div
+              key={opt}
+              onClick={() => handleOptionClick(opt)}
+              style={{
+                padding: "8px 10px",
+                cursor: "pointer",
+                background: isSelected(opt) ? "#e8f2ff" : "#fff",
+                color: isSelected(opt) ? "#0f69c9" : "#333",
+              }}
+            >
+              {multi && (
+                <input type="checkbox" readOnly checked={isSelected(opt)} style={{ marginRight: 8 }} />
+              )}
+              {opt}
+            </div>
+          ))}
+          <div style={{ padding: 8, borderTop: "1px solid #eee", textAlign: "right" }}>
+            <button type="button" onClick={close} style={{ background: "#0078d7", color: "#fff", border: "none", borderRadius: 6, padding: "6px 10px", cursor: "pointer" }}>
+              Done
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function CreateCategoryModal({
   show,
   onClose,
@@ -28,6 +160,28 @@ function CreateCategoryModal({
   const [icon, setIcon] = useState(null);
   const [colorSchemes, setColorSchemes] = useState([]);
 
+  // State for the new dropdowns
+  const [categoryVisibility, setCategoryVisibility] = useState([]);
+  const [categoryModel, setCategoryModel] = useState([]);
+  const [categoryPricing, setCategoryPricing] = useState([]);
+  const [socialHandle, setSocialHandle] = useState([]);
+  const [displayType, setDisplayType] = useState([]);
+
+  // Using chip-style control; default multi-select behavior (arrays)
+
+  // State for dropdown options
+  const [visibilityOptions, setVisibilityOptions] = useState([]);
+  const [modelOptions, setModelOptions] = useState([]);
+  const [pricingOptions, setPricingOptions] = useState([]);
+  const [socialHandleOptions, setSocialHandleOptions] = useState([]);
+  const [displayTypeOptions, setDisplayTypeOptions] = useState([]);
+  const [signupLevelOptions, setSignupLevelOptions] = useState([]);
+  const [businessFieldOptions, setBusinessFieldOptions] = useState([]);
+
+  // Signup Levels selections and per-level details
+  const [signupLevels, setSignupLevels] = useState([]); // array of level names
+  const [signupLevelDetails, setSignupLevelDetails] = useState({}); // { [levelName]: { sequence: number, businessField: string } }
+
 const addColorScheme = () => {
   setColorSchemes([
     ...colorSchemes,
@@ -48,74 +202,198 @@ const updateColorScheme = (index, key, value) => {
   setColorSchemes(updated);
 };
 
-
   // Initialize form state
- useEffect(() => {
-  if (!show) return;
+  useEffect(() => {
+    if (!show) return;
 
-  if (initialData) {
-    // ✅ Editing existing category
-    setName(initialData.name || "");
-    setImage(null); // clear any previous File object
-    setIcon(null);
-    setPrice(initialData.price ?? "");
-    setTerms(initialData.terms ?? "");
-    setVisibleToUser(Boolean(initialData.visibleToUser));
-    setVisibleToVendor(Boolean(initialData.visibleToVendor));
-    setSequence(Number(initialData.sequence ?? 0));
-    setFreeText(initialData.freeText || "");
-    setEnableFreeText(Boolean(initialData.enableFreeText));
-    setCategoryType(initialData.categoryType || "Services");
-    setAvailableForCart(Boolean(initialData.availableForCart));
-    setSeoKeywords(initialData.seoKeywords || "");
-    setPostRequestsDeals(Boolean(initialData.postRequestsDeals));
-    setLoyaltyPoints(Boolean(initialData.loyaltyPoints));
-    setLinkAttributesPricing(Boolean(initialData.linkAttributesPricing));
+    if (initialData) {
+      // Editing existing category
+      setName(initialData.name || "");
+      setImage(null);
+      setIcon(null);
+      setPrice(initialData.price ?? "");
+      setTerms(initialData.terms ?? "");
+      setVisibleToUser(Boolean(initialData.visibleToUser));
+      setVisibleToVendor(Boolean(initialData.visibleToVendor));
+      setSequence(Number(initialData.sequence ?? 0));
+      setFreeText(initialData.freeText || "");
+      setEnableFreeText(Boolean(initialData.enableFreeText));
+      setCategoryType(initialData.categoryType || "Services");
+      setAvailableForCart(Boolean(initialData.availableForCart));
+      setSeoKeywords(initialData.seoKeywords || "");
+      setPostRequestsDeals(Boolean(initialData.postRequestsDeals));
+      setLoyaltyPoints(Boolean(initialData.loyaltyPoints));
+      setLinkAttributesPricing(Boolean(initialData.linkAttributesPricing));
 
-    // ✅ Initialize saved color schemes from backend
-setColorSchemes(
-  Array.isArray(initialData.colorSchemes) && initialData.colorSchemes.length > 0
-    ? initialData.colorSchemes.map(scheme => ({
-        name: scheme.name || "",
-        primary: scheme.primary || "#000000",
-        accent: scheme.accent || "#ffffff",
-        background: scheme.background || "#ffffff",
-        cardBg: scheme.cardBg || "#ffffff",
-        text: scheme.text || "#000000",
-      }))
-    : [] // empty array if no saved schemes
-);
+      setColorSchemes(
+        Array.isArray(initialData.colorSchemes) && initialData.colorSchemes.length > 0
+          ? initialData.colorSchemes.map((scheme) => ({
+              name: scheme.name || "",
+              primary: scheme.primary || "#000000",
+              accent: scheme.accent || "#ffffff",
+              background: scheme.background || "#ffffff",
+              cardBg: scheme.cardBg || "#ffffff",
+              text: scheme.text || "#000000",
+            }))
+          : []
+      );
 
+      setFreeTexts(
+        Array.isArray(initialData.freeTexts)
+          ? initialData.freeTexts
+          : Array(10).fill("")
+      );
+    } else {
+      // Creating new category
+      setName("");
+      setImage(null);
+      setIcon(null);
+      setPrice("");
+      setTerms("");
+      setVisibleToUser(false);
+      setVisibleToVendor(false);
+      setSequence(0);
+      setFreeText("");
+      setEnableFreeText(parentEnableFreeText);
+      setCategoryType(parentCategoryType || "Services");
+      setAvailableForCart(false);
+      setSeoKeywords("");
+      setPostRequestsDeals(false);
+      setLoyaltyPoints(false);
+      setLinkAttributesPricing(false);
+      setFreeTexts(Array(10).fill(""));
+      setSignupLevels([]);
+      setSignupLevelDetails({});
+      setColorSchemes([]);
+      setCategoryVisibility([]);
+      setCategoryModel([]);
+      setCategoryPricing([]);
+      setSocialHandle([]);
+      setDisplayType([]);
+    }
+  }, [show, initialData, parentId, parentCategoryType, parentEnableFreeText]);
 
-    // ✅ Use backend freeTexts if available, else 10 blanks
-    setFreeTexts(
-      Array.isArray(initialData.freeTexts)
-        ? initialData.freeTexts
-        : Array(10).fill("")
-    );
-  } else {
-    // ✅ Creating new category
-    setName("");
-    setImage(null);
-    setIcon(null);
-    setPrice("");
-    setTerms("");
-    setVisibleToUser(false);
-    setVisibleToVendor(false);
-    setSequence(0);
-    setFreeText("");
-    setEnableFreeText(parentEnableFreeText);
-    setCategoryType(parentCategoryType || "Services");
-    setAvailableForCart(false);
-    setSeoKeywords("");
-    setPostRequestsDeals(false);
-    setLoyaltyPoints(false);
-    setLinkAttributesPricing(false);
-    setFreeTexts(Array(10).fill(""));
-  }
-}, [show, initialData, parentId, parentCategoryType, parentEnableFreeText]);
+  // Fetch dropdown options from Master data when modal is shown
+  useEffect(() => {
+    if (!show) return;
+    const base = "http://localhost:5000/api/masters";
 
+    // For resilience, try multiple possible type keys for each dataset
+    const datasets = [
+      {
+        setter: setVisibilityOptions,
+        candidates: [
+          "Manage Category Visibility",
+          "categoryVisibility",
+          "visibility",
+        ],
+      },
+      {
+        setter: setModelOptions,
+        candidates: [
+          "Manage Category Models",
+          "categoryModel",
+          "categoryModels",
+          "models",
+        ],
+      },
+      {
+        setter: setPricingOptions,
+        candidates: [
+          "Manage Category Pricing Models",
+          "categoryPricing",
+          "pricingModel",
+          "pricing",
+        ],
+      },
+      {
+        setter: setSocialHandleOptions,
+        candidates: [
+          "Manage Social Handles",
+          "socialHandle",
+          "socialHandles",
+          "social",
+        ],
+      },
+      {
+        setter: setDisplayTypeOptions,
+        candidates: [
+          "Manage Display Types",
+          "displayType",
+          "displayTypes",
+        ],
+      },
+      {
+        setter: setSignupLevelOptions,
+        candidates: [
+          "Manage Vendor Signup Levels",
+          "vendorSignupLevels",
+          "signupLevels",
+          "signupLevel",
+        ],
+      },
+      {
+        setter: setBusinessFieldOptions,
+        candidates: [
+          "Manage Business Fields",
+          "businessFields",
+          "businessField",
+        ],
+      },
+    ];
 
+    const fetchByTypes = async (types) => {
+      const results = await Promise.all(
+        types.map((t) =>
+          fetch(`${base}?type=${encodeURIComponent(t)}`)
+            .then((r) => (r.ok ? r.json() : []))
+            .catch(() => [])
+        )
+      );
+      // Merge and dedupe by name
+      const merged = results.flat().filter(Boolean);
+      const names = Array.from(
+        new Set(
+          merged
+            .map((m) => (m && typeof m === "object" ? m.name : undefined))
+            .filter(Boolean)
+        )
+      );
+      return names;
+    };
+
+    (async () => {
+      for (const ds of datasets) {
+        const names = await fetchByTypes(ds.candidates);
+        ds.setter(names);
+      }
+      if (initialData) {
+        setCategoryVisibility(Array.isArray(initialData.categoryVisibility) ? initialData.categoryVisibility : initialData.categoryVisibility ? [initialData.categoryVisibility] : []);
+        setCategoryModel(Array.isArray(initialData.categoryModel) ? initialData.categoryModel : initialData.categoryModel ? [initialData.categoryModel] : []);
+        setCategoryPricing(Array.isArray(initialData.categoryPricing) ? initialData.categoryPricing : initialData.categoryPricing ? [initialData.categoryPricing] : []);
+        setSocialHandle(Array.isArray(initialData.socialHandle) ? initialData.socialHandle : initialData.socialHandle ? [initialData.socialHandle] : []);
+        setDisplayType(Array.isArray(initialData.displayType) ? initialData.displayType : initialData.displayType ? [initialData.displayType] : []);
+        // Initialize signup levels if present
+        if (Array.isArray(initialData.signupLevels)) {
+          const levels = [];
+          const details = {};
+          initialData.signupLevels.forEach((it) => {
+            if (it && it.levelName) {
+              levels.push(it.levelName);
+              details[it.levelName] = {
+                sequence: Number(it.sequence ?? 0),
+                businessField: Array.isArray(it.businessField)
+                  ? it.businessField
+                  : (it.businessField ? [it.businessField] : []),
+              };
+            }
+          });
+          setSignupLevels(levels);
+          setSignupLevelDetails(details);
+        }
+      }
+    })();
+  }, [show, initialData]);
 
   if (!show) return null;
 
@@ -152,6 +430,23 @@ setColorSchemes(
   formData.append("colorSchemes", JSON.stringify(colorSchemes));
 }
 
+      // Append dropdown values
+      formData.append("categoryVisibility", JSON.stringify(categoryVisibility || []));
+      formData.append("categoryModel", JSON.stringify(categoryModel || []));
+      formData.append("categoryPricing", JSON.stringify(categoryPricing || []));
+      formData.append("socialHandle", JSON.stringify(socialHandle || []));
+      formData.append("displayType", JSON.stringify(displayType || []));
+      if (!parentId) {
+        const levelsPayload = (signupLevels || []).map((lvl, idx) => ({
+          levelName: lvl,
+          sequence: Number(signupLevelDetails?.[lvl]?.sequence ?? idx + 1),
+          businessField: Array.isArray(signupLevelDetails?.[lvl]?.businessField)
+            ? signupLevelDetails[lvl].businessField
+            : [],
+        }));
+        formData.append("signupLevels", JSON.stringify(levelsPayload));
+      }
+
 
 
 
@@ -168,9 +463,10 @@ setColorSchemes(
         throw new Error(errData.message || "Failed to save category");
       }
 
-      // Reset form
+      // Reset after success
       setName("");
       setImage(null);
+      setIcon(null);
       setPrice("");
       setTerms("");
       setVisibleToUser(false);
@@ -179,21 +475,24 @@ setColorSchemes(
       setFreeText("");
       setEnableFreeText(false);
       setCategoryType("Services");
-      setAvailableForCart(false);
+      setCategoryVisibility([]);
+      setCategoryModel([]);
+      setCategoryPricing([]);
+      setSocialHandle([]);
+      setDisplayType([]);
       setSeoKeywords("");
       setPostRequestsDeals(false);
       setLoyaltyPoints(false);
       setLinkAttributesPricing(false);
       setFreeTexts(Array(10).fill(""));
-      setIcon(null);
 
       onCreated?.();
       onClose?.();
-    } catch (err) {
-      console.error(err);
-      alert(err.message);
-    }
-  };
+  } catch (err) {
+    console.error(err);
+    alert(err.message);
+  }
+};
 
   return (
     <div style={overlayStyle}>
@@ -318,6 +617,115 @@ setColorSchemes(
               style={inputStyle}
             />
           
+
+          {/* Dropdowns from Master Data - only for main categories */}
+          {!parentId && (
+            <>
+              <ChipSelect
+                label="Set Category Visibility"
+                options={visibilityOptions}
+                value={categoryVisibility}
+                onChange={setCategoryVisibility}
+                placeholder="Select"
+                multi
+              />
+
+              <ChipSelect
+                label="Set Category Models"
+                options={modelOptions}
+                value={categoryModel}
+                onChange={setCategoryModel}
+                placeholder="Select"
+                multi
+              />
+
+              <ChipSelect
+                label="Set Category Pricing"
+                options={pricingOptions}
+                value={categoryPricing}
+                onChange={setCategoryPricing}
+                placeholder="Select"
+                multi
+              />
+
+              <ChipSelect
+                label="Set Social Handles"
+                options={socialHandleOptions}
+                value={socialHandle}
+                onChange={setSocialHandle}
+                placeholder="Select"
+                multi
+              />
+
+              <ChipSelect
+                label="Set Display Types"
+                options={displayTypeOptions}
+                value={displayType}
+                onChange={setDisplayType}
+                placeholder="Select"
+                multi
+              />
+
+              {/* Set Signup Levels */}
+              <ChipSelect
+                label="Set Signup Levels"
+                options={signupLevelOptions}
+                value={signupLevels}
+                onChange={(vals) => {
+                  setSignupLevels(vals);
+                  setSignupLevelDetails((prev) => {
+                    const next = { ...prev };
+                    // Ensure a details entry exists for each selected level
+                    vals.forEach((lvl, i) => {
+                      if (!next[lvl]) next[lvl] = { sequence: i + 1, businessField: [] };
+                    });
+                    // Remove entries for unselected levels
+                    Object.keys(next).forEach((k) => {
+                      if (!vals.includes(k)) delete next[k];
+                    });
+                    return next;
+                  });
+                }}
+                placeholder="Select"
+                multi
+              />
+
+              {/* Per-level details */}
+              {signupLevels.map((lvl) => (
+                <div key={lvl} style={{ border: "1px solid #eee", borderRadius: 10, padding: 12, background: "#fafafa" }}>
+                  <div style={{ fontWeight: 700, color: "#444", marginBottom: 8 }}>{lvl}</div>
+                  <h4 style={labelStyle}>Sequence</h4>
+                  <input
+                    type="number"
+                    value={Number(signupLevelDetails?.[lvl]?.sequence ?? 0)}
+                    onChange={(e) => {
+                      const val = e.target.value === "" ? 0 : Number(e.target.value);
+                      setSignupLevelDetails((prev) => ({
+                        ...prev,
+                        [lvl]: { ...prev[lvl], sequence: val },
+                      }));
+                    }}
+                    style={inputStyle}
+                  />
+                  <h4 style={labelStyle}>Business Fields</h4>
+                  <ChipSelect
+                    options={businessFieldOptions}
+                    value={Array.isArray(signupLevelDetails?.[lvl]?.businessField) ? signupLevelDetails[lvl].businessField : []}
+                    onChange={(vals) => {
+                      const arr = Array.isArray(vals) ? vals : [];
+                      setSignupLevelDetails((prev) => ({
+                        ...prev,
+                        [lvl]: { ...prev[lvl], businessField: arr },
+                      }));
+                    }}
+                    placeholder="Select"
+                    multi
+                  />
+                </div>
+              ))}
+            </>
+          )}
+
 
           {/* Price & Terms for Subcategory */}
           {parentId && (

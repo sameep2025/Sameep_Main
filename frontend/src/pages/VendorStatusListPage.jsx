@@ -165,6 +165,49 @@ export default function VendorStatusListPage() {
   const [selectedVendorForBusinessHours, setSelectedVendorForBusinessHours] =
     useState(null);
 
+  // Combos (Packages) state for combo price table
+  const [combos, setCombos] = useState([]);
+  const [combosLoading, setCombosLoading] = useState(false);
+  const [combosError, setCombosError] = useState("");
+  const [categoryNameCache, setCategoryNameCache] = useState({}); // {categoryId: name}
+  const [variantEdit, setVariantEdit] = useState(null); // { comboId, itemIndex, variantIndex|null, price, terms, labels }
+
+  const fetchCategoryName = async (id) => {
+    if (!id) return "";
+    if (categoryNameCache[id]) return categoryNameCache[id];
+    try {
+      const res = await axios.get(`http://localhost:5000/api/categories/${id}`);
+      const name = res.data?.name || "";
+      setCategoryNameCache((prev) => ({ ...prev, [id]: name }));
+      return name;
+    } catch {
+      return "";
+    }
+  };
+
+  const fetchCombos = async () => {
+    if (!categoryId) return;
+    setCombosLoading(true);
+    setCombosError("");
+    try {
+      const res = await axios.get(`http://localhost:5000/api/combos`, { params: { parentCategoryId: categoryId } });
+      const list = Array.isArray(res.data) ? res.data : [];
+      setCombos(list);
+      // Prime names for category-kind items
+      const ids = [];
+      list.forEach(c => (c.items||[]).forEach(it => { if (it.kind === 'category' && it.categoryId) ids.push(String(it.categoryId)); }));
+      const uniq = Array.from(new Set(ids));
+      await Promise.all(uniq.map(fetchCategoryName));
+    } catch (e) {
+      setCombosError(e?.response?.data?.message || "Failed to load combos");
+      setCombos([]);
+    } finally {
+      setCombosLoading(false);
+    }
+  };
+
+  useEffect(() => { fetchCombos(); }, [categoryId]);
+
   const fetchVendors = async () => {
     if (!status || !categoryId) return;
     setLoading(true);
@@ -373,265 +416,46 @@ export default function VendorStatusListPage() {
       {vendors.length === 0 ? (
         <p>No vendors found in this status.</p>
       ) : (
-        <ul style={{ listStyle: "none", padding: 0 }}>
-          {vendors.map((v) => (
-            <li
-              key={v._id}
-              style={{
-                marginBottom: 12,
-                padding: 10,
-                border: "1px solid #ccc",
-                borderRadius: 6,
-              }}
-            >
-              <p>
-                <b>Vendor Name:</b> {v.contactName || "-"}
-              </p>
-              <p>
-                <b>Contact Number:</b>{" "}
-                {v.customerId?.fullNumber || v.phone || "-"}
-              </p>
-              <p>
-                <b>Business Name:</b> {v.businessName || "-"}
-              </p>
-              {/* Display the saved home location */}
-              <p>
-                <b>Home Location: </b>
-                <span
-                  style={{
-                    fontWeight: "bold",
-                    color: v.location ? "#28a745" : "#6c757d",
-                  }}
-                >
-                  {v.location
-                    ? [v.location.area, v.location.city]
-                        .filter(Boolean)
-                        .join(", ")
-                    : "Not Set"}
-                </span>
-              </p>
 
-              <button
-                onClick={() => handleVendorClick(v)}
-                style={{
-                  marginTop: 6,
-                  padding: "4px 8px",
-                  borderRadius: "4px",
-                  background: "#00AEEF",
-                  color: "#fff",
-                  border: "none",
-                }}
-              >
-                View Categories
-              </button>
+        <table style={{ borderCollapse: 'collapse', width: '100%' }}>
+          <thead>
+            <tr>
+              <th style={{ border: '1px solid #ccc', padding: 8 }}>Vendor Name</th>
+              <th style={{ border: '1px solid #ccc', padding: 8 }}>Contact Number</th>
+              <th style={{ border: '1px solid #ccc', padding: 8 }}>Business Name</th>
+              <th style={{ border: '1px solid #ccc', padding: 8 }}>Home Location</th>
+              <th style={{ border: '1px solid #ccc', padding: 8 }}>Business Location</th>
+              <th style={{ border: '1px solid #ccc', padding: 8 }}>Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {vendors.map((v) => (
+              <tr key={v._id}>
+                <td style={{ border: '1px solid #ccc', padding: 8 }}>{v.contactName || '-'}</td>
+                <td style={{ border: '1px solid #ccc', padding: 8 }}>{v.customerId?.fullNumber || v.phone || '-'}</td>
+                <td style={{ border: '1px solid #ccc', padding: 8 }}>{v.businessName || '-'}</td>
+                <td style={{ border: '1px solid #ccc', padding: 8 }}>
+                  {v.location ? [v.location.area, v.location.city].filter(Boolean).join(', ') : 'Not Set'}
+                </td>
+                <td style={{ border: '1px solid #ccc', padding: 8 }}>
+                  {v.location?.nearbyLocations?.filter(Boolean).join(', ') || 'Not Set'}
+                </td>
+                <td style={{ border: '1px solid #ccc', padding: 8 }}>
+                  <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                    <button title="View Categories" onClick={() => navigate(`/vendors/${v._id}/categories/${categoryId}`)} style={{ padding: '4px 10px', borderRadius: 6, background: '#0ea5e9', color: '#fff', border: 'none' }}>👁️</button>
+                    <button title={v.location ? 'Update Home Location' : 'Set Home Location'} onClick={() => { setSelectedVendorForLocation(v); setShowLocationModal(true); }} style={{ padding: '4px 10px', borderRadius: 6, background: '#16a34a', color: '#fff', border: 'none' }}>🏠</button>
+                    <button title="Business Location" onClick={() => { setSelectedVendorForBusiness(v); setShowBusinessLocationModal(true); }} style={{ padding: '4px 10px', borderRadius: 6, background: '#f59e0b', color: '#fff', border: 'none' }}>🏢</button>
+                    <button title="Business Hours" onClick={() => { setSelectedVendorForBusinessHours(v); }} style={{ padding: '4px 10px', borderRadius: 6, background: '#7c3aed', color: '#fff', border: 'none' }}>⏰</button>
+                  </div>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
 
-              {/* New Home Location Button */}
-              <button
-                onClick={() => {
-                  setSelectedVendorForLocation(v);
-                  setShowLocationModal(true);
-                }}
-                style={{
-                  marginLeft: 10,
-                  padding: "4px 8px",
-                  borderRadius: "4px",
-                  background: "green",
-                  color: "#fff",
-                  border: "none",
-                }}
-              >
-                {v.location ? "Update Home Location" : "Set Home Location"}
-              </button>
-
-              <button
-                onClick={() => {
-                  setSelectedVendorForBusiness(v);
-                  setShowBusinessLocationModal(true);
-                }}
-                style={{
-                  marginLeft: 10,
-                  padding: "4px 8px",
-                  borderRadius: "4px",
-                  background: "orange",
-                  color: "#fff",
-                  border: "none",
-                }}
-              >
-                Business Location
-              </button>
-
-              <button
-                onClick={() => {
-                  setSelectedVendorForBusinessHours(v);
-                }}
-                style={{
-                  marginLeft: 10,
-                  padding: "4px 8px",
-                  borderRadius: "4px",
-                  background: "purple",
-                  color: "#fff",
-                  border: "none",
-                }}
-              >
-                Business Hours
-              </button>
-              {/* Display non-empty business locations */}
-              {/* Business Location Section */}
-              <div>
-                <p style={{ marginBottom: 4 }}>
-                  <b>Business Locations: </b>
-                </p>
-                {v.location?.nearbyLocations?.filter((loc) => loc?.trim())
-                  .length > 0 ? (
-                  <ul style={{ paddingLeft: 16, margin: 4 }}>
-                    {v.location.nearbyLocations
-                      .filter((loc) => loc?.trim())
-                      .map((loc, idx) => (
-                        <li key={idx}>{loc}</li>
-                      ))}
-                  </ul>
-                ) : (
-                  <span style={{ color: "#6c757d", paddingLeft: 4 }}>Not Set</span>
-                )}
-              </div>
-            </li>
-          ))}
-        </ul>
       )}
 
-      {selectedVendor && (
-        <div style={{ marginTop: 30, position: "relative" }}>
-          <h2>Categories for {selectedVendor.businessName}</h2>
-
-
-          {/* Preview button */}
-          <button
-  onClick={() => {
-    if (rows[0]) {
-      const categoryIdForPreview = rows[0].categoryId; // use first category
-      const homeLocs =
-        selectedVendor.businessLocations?.filter(Boolean) || [];
-
-      window.open(
-        `http://localhost:3000/preview/${selectedVendor._id}/${categoryIdForPreview}?homeLocs=${encodeURIComponent(
-          JSON.stringify(homeLocs)
-        )}&t=${Date.now()}`, // timestamp avoids cache
-        "_blank"
-      );
-    } else {
-      alert("No category available for preview");
-    }
-  }}
-  style={{
-    position: "absolute",
-    right: 0,
-    top: 0,
-    padding: "6px 12px",
-    borderRadius: 6,
-    background: "#2563EB",
-    color: "#fff",
-    border: "none",
-    cursor: "pointer",
-  }}
->
-  Preview
-</button>
-<button
-            onClick={() => {
-              if (rows[0]) {
-                const categoryIdForPreview = rows[0].categoryId; // use first category
-                const homeLocs =
-                  selectedVendor.businessLocations?.filter(Boolean) || [];
-
-                window.open(
-                  `http://localhost:3001/preview/${selectedVendor._id}/${categoryIdForPreview}?homeLocs=${encodeURIComponent(
-                    JSON.stringify(homeLocs)
-                  )}&t=${Date.now()}`,
-                  "_blank"
-                );
-              } else {
-                alert("No category available for preview");
-              }
-            }}
-            style={{
-              position: "absolute",
-              right: 110,
-              top: 0,
-              padding: "6px 12px",
-              borderRadius: 6,
-              background: "#059669",
-              color: "#fff",
-              border: "none",
-              cursor: "pointer",
-            }}
-          >
-            NiksPreview
-          </button>
-
-
-          {categoriesLoading ? (
-            <p>Loading categories...</p>
-          ) : rows.length === 0 ? (
-            <p>No categories found</p>
-          ) : (
-            <table style={{ borderCollapse: "collapse", width: "100%" }}>
-              <thead>
-                <tr>
-                  {levelHeaders.map((header, idx) => (
-                    <th
-                      key={idx}
-                      style={{ border: "1px solid #ccc", padding: "8px" }}
-                    >
-                      {header}
-                    </th>
-                  ))}
-                  <th style={{ border: "1px solid #ccc", padding: "8px" }}>
-                    Price
-                  </th>
-                  <th style={{ border: "1px solid #ccc", padding: "8px" }}>
-                    Action
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                {rows.map((row) => (
-                  <tr key={row.id}>
-                    {levelHeaders.map((_, idx) => (
-                      <td
-                        key={idx}
-                        style={{ border: "1px solid #ccc", padding: "8px" }}
-                      >
-                        {row.levels[idx] ?? "-"}
-                      </td>
-                    ))}
-                    <td>{row.price}</td>
-                    <td>
-                      <button
-                        onClick={() =>
-                          setModalCategory({
-                            id: row.categoryId,
-                            name: row.levels.slice(-1)[0],
-                            vendorPrice: row.price,
-                          })
-                        }
-                        style={{
-                          padding: "4px 8px",
-                          borderRadius: "4px",
-                          background: "#00AEEF",
-                          color: "#fff",
-                          border: "none",
-                        }}
-                      >
-                        Edit
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
-        </div>
-      )}
+      {/* In-page tables removed. Use 'View Categories' to navigate to the details page (with Preview buttons). */}
 
       {/* Modals */}
       <UpdatePriceModal
@@ -672,6 +496,42 @@ export default function VendorStatusListPage() {
               setSelectedVendor(updatedVendor);
           }}
         />
+      )}
+
+      {/* Variant/Item Price Edit Modal */}
+      {variantEdit && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1100 }}>
+          <div style={{ background: '#fff', padding: 16, borderRadius: 10, minWidth: 320 }}>
+            <h3 style={{ marginTop: 0 }}>Edit Price/Terms</h3>
+            <div style={{ fontSize: 12, color: '#475569', marginBottom: 8 }}>
+              <div><b>Combo:</b> {variantEdit.labels.combo}</div>
+              <div><b>Item:</b> {variantEdit.labels.item}</div>
+              {variantEdit.labels.size ? <div><b>Size:</b> {variantEdit.labels.size}</div> : null}
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <input type="number" placeholder="Price" value={variantEdit.price} onChange={(e) => setVariantEdit((p) => ({ ...p, price: e.target.value }))} style={{ padding: 8, border: '1px solid #ddd', borderRadius: 6 }} />
+              <input placeholder="Terms" value={variantEdit.terms} onChange={(e) => setVariantEdit((p) => ({ ...p, terms: e.target.value }))} style={{ padding: 8, border: '1px solid #ddd', borderRadius: 6 }} />
+              <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 8 }}>
+                <button onClick={() => setVariantEdit(null)} style={{ padding: '6px 10px', borderRadius: 6, background: '#e5e7eb', border: 'none' }}>Cancel</button>
+                <button onClick={async () => {
+                  try {
+                    const { comboId, itemIndex, variantIndex, price, terms } = variantEdit;
+                    const payload = { price: price === '' ? null : Number(price), terms };
+                    if (variantIndex === null) {
+                      await axios.put(`http://localhost:5000/api/combos/${comboId}/item/${itemIndex}`, payload);
+                    } else {
+                      await axios.put(`http://localhost:5000/api/combos/${comboId}/item/${itemIndex}/variant/${variantIndex}`, payload);
+                    }
+                    await fetchCombos();
+                    setVariantEdit(null);
+                  } catch (e) {
+                    alert(e?.response?.data?.message || 'Failed to update');
+                  }
+                }} style={{ padding: '6px 10px', borderRadius: 6, background: '#0ea5e9', color: '#fff', border: 'none' }}>Save</button>
+              </div>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

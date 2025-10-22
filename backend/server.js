@@ -8,6 +8,7 @@ const mongoose = require('mongoose');
 const categoryRoutes = require('./routes/categoryRoutes');
 const vendorRoutes = require('./routes/vendorRoutes');
 const masterRoutes = require('./routes/masterRoutes');
+const comboRoutes = require('./routes/comboRoutes');
 
 
 const app = express();
@@ -38,6 +39,7 @@ app.get('/', (req, res) => res.json({ ok: true }));
 app.use('/api/categories', categoryRoutes);
 app.use('/api/vendors', vendorRoutes);
 app.use('/api/masters', masterRoutes);
+app.use('/api/combos', comboRoutes);
 
 const customerRoutes = require('./routes/customerRoutes');
 app.use('/api/customers', customerRoutes);
