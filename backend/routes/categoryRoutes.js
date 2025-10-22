@@ -58,7 +58,9 @@ router.post("/", upload.single("image"), async (req, res) => {
       visibleToUser: visibleToUser === "true" || visibleToUser === true,
       visibleToVendor: visibleToVendor === "true" || visibleToVendor === true,
       categoryType: categoryType || "Products",
-      addToCart: categoryType === "Products" ? addToCart === "true" || addToCart === true : false,
+      availableForCart: req.body.availableForCart === "true" || req.body.availableForCart === "on" || req.body.availableForCart === true,
+
+
       freeText: parent ? freeText || "" : undefined,
       seoKeywords: parent ? undefined : seoKeywords || "",
       postRequestsDeals: !parent ? req.body.postRequestsDeals === "true" : undefined,
@@ -255,7 +257,9 @@ router.put("/:id", upload.single("image"), async (req, res) => {
 
     if (sequence !== undefined) category.sequence = sequence === "" ? 0 : Number(sequence);
     if (categoryType !== undefined) category.categoryType = categoryType;
-    if (category.categoryType === "Products") category.addToCart = addToCart === "true" || addToCart === true;
+    category.availableForCart = req.body.availableForCart === "true" || req.body.availableForCart === "on" || req.body.availableForCart === true;
+
+
 
     // Update dropdown fields if present (parse as arrays)
     [

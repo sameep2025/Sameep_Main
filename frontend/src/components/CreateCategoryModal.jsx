@@ -416,7 +416,8 @@ const updateColorScheme = (index, key, value) => {
       formData.append("visibleToVendor", visibleToVendor);
       formData.append("freeText", freeText);
       formData.append("categoryType", categoryType);
-      formData.append("availableForCart", !parentId ? availableForCart : false);
+      formData.append("availableForCart", availableForCart); // don't force false for parentId
+
       formData.append("seoKeywords", parentId ? "" : seoKeywords);
       formData.append("postRequestsDeals", postRequestsDeals);
       formData.append("loyaltyPoints", loyaltyPoints);
