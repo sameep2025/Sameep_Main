@@ -13,7 +13,30 @@ const defaultHours = [
 ];
 
 function BusinessHoursModal({ vendor, onClose, onUpdated }) {
-  const [hours, setHours] = useState(vendor.businessHours || defaultHours);
+  const normalizeSevenDays = (list) => {
+    const days = [
+      "Sunday",
+      "Monday",
+      "Tuesday",
+      "Wednesday",
+      "Thursday",
+      "Friday",
+      "Saturday",
+    ];
+    const byDay = {};
+    (Array.isArray(list) ? list : []).forEach((d) => {
+      if (!d?.day) return;
+      byDay[d.day.toLowerCase()] = { day: d.day, hours: d.hours || "Closed" };
+    });
+    return days.map((d) => byDay[d.toLowerCase()] || { day: d, hours: "Closed" });
+  };
+
+  const [hours, setHours] = useState(normalizeSevenDays(vendor.businessHours));
+
+  // When vendor changes (open/close on different vendor), refresh the list
+  React.useEffect(() => {
+    setHours(normalizeSevenDays(vendor.businessHours));
+  }, [vendor]);
 
   const handleHourChange = (index, value) => {
     const newHours = [...hours];

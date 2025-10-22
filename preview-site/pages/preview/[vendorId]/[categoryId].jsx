@@ -219,6 +219,33 @@ export default function PreviewPage() {
   if (!Array.isArray(root.children) || root.children.length === 0)
     return <p>No categories available</p>;
 
+    // If this category is marked as Products in DB, flatten and render only product leaves
+    const isProductsCategory = (root.categoryType || "Services") === "Products";
+    if (isProductsCategory) {
+      const collectProducts = (node, acc = []) => {
+        if (!node) return acc;
+        if (node.categoryType === "Products") acc.push(node);
+        if (Array.isArray(node.products) && node.products.length) acc.push(...node.products);
+        if (Array.isArray(node.children) && node.children.length) {
+          node.children.forEach((c) => collectProducts(c, acc));
+        }
+        return acc;
+      };
+      const products = collectProducts(root, []);
+      if (!products.length) return <p>No products found</p>;
+      return products.map((leaf) => (
+        <div key={leaf.id} style={{ display: "inline-flex", verticalAlign: "top", marginRight: 16, marginBottom: 28 }}>
+          <ParentWithSizesCard
+            node={{ name: leaf.name, children: [{ ...leaf, children: [] }] }}
+            selection={cardSelections[leaf.id]}
+            onSelectionChange={(parent, child) =>
+              setCardSelections((prev) => ({ ...prev, [leaf.id]: { parent, child } }))
+            }
+            onLeafSelect={(child) => setSelectedLeaf(child)}
+          />
+        </div>
+      ));
+    }
 
     return root.children.map((lvl1) => {
       const hasNested = lvl1.children?.some((c) => hasChildren(c));

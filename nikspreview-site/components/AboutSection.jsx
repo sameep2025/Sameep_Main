@@ -1,6 +1,8 @@
 import React from "react";
 import  categoryThemes  from "../utils/categoryThemes";
 
+
+
 // Fallback theme if category not found
 const fallbackTheme = {
   background: "#F4F4F5",
@@ -9,9 +11,9 @@ const fallbackTheme = {
   accent: "#10B981",
 };
 
-export default function AboutSection({ categoryName }) {
-  // Safely get the theme
-  const theme = categoryThemes[categoryName] || fallbackTheme;
+export default function AboutSection({ categoryName, theme: propTheme }) {
+  // Use prop theme if provided, otherwise fallback to categoryThemes
+  const theme = propTheme || categoryThemes[categoryName] || fallbackTheme;
 
   return (
     <section

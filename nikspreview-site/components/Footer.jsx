@@ -1,8 +1,8 @@
 import React from "react";
 import categoryThemes from "../utils/categoryThemes";
 
-export default function Footer({ categoryName = "default" }) {
-  const theme = categoryThemes[categoryName] || categoryThemes.default;
+export default function Footer({ categoryName = "default", theme: propTheme }) {
+  const theme = propTheme || categoryThemes[categoryName] || categoryThemes.default;
 
   return (
     <footer

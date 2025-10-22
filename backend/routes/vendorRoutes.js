@@ -34,9 +34,10 @@ async function buildVendorPreviewTree(categoryId, vendorId) {
   const category = await Category.findById(categoryId).lean();
   if (!category) return null;
 
-  // Fetch vendor-specific price
-  const priceDoc = await VendorCategoryPrice.findOne({ vendorId, categoryId }).lean();
+  // ✅ Fetch vendor-specific price from correct collection
+  const priceDoc = await VendorPrice.findOne({ vendorId, categoryId }).lean();
   const price = priceDoc?.price ?? category.price;
+
 
   // Find children recursively
   const childrenCats = await Category.find({ parent: categoryId })
@@ -395,7 +396,7 @@ router.get("/:vendorId/preview/:categoryId", async (req, res) => {
     if (!vendor) return res.status(404).json({ message: "Vendor not found" });
 
     // Load all categories
-    const allCategories = await Category.find({}, { name: 1, parent: 1, price: 1, imageUrl: 1, terms: 1, sequence: 1, categoryType: 1 })
+    const allCategories = await Category.find({}, { name: 1, parent: 1, price: 1, imageUrl: 1, terms: 1, sequence: 1 })
       .sort({ sequence: 1, createdAt: -1 })
       .lean();
 
@@ -439,7 +440,6 @@ router.get("/:vendorId/preview/:categoryId", async (req, res) => {
         vendorPrice,
         imageUrl: node.imageUrl || null,
         terms: node.terms || "",
-        categoryType: node.categoryType || "Services",
         children: (node.children || []).map(attachPrices),
       };
     };
