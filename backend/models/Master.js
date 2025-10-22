@@ -1,14 +1,24 @@
 const mongoose = require("mongoose");
 
-const masterSchema = new mongoose.Schema({
-  name: { type: String, required: true },
-  type: { type: String, required: true }, // "brand", "fuelType", "transmissionType", "bodyType"
-  sequence: { type: Number, default: 0 },
-  imageUrl: { type: String },              // optional file/image
-  fieldType: { type: String },             // "text", "number", "select", etc.
-  options: [{ type: String }],             // for select/radio/checkbox
-  value: mongoose.Schema.Types.Mixed,      // actual value
-  autoCalc: { type: Boolean, default: false },
-}, { timestamps: true });
+const MasterSchema = new mongoose.Schema(
+  {
+    name: { type: String, required: true, trim: true },
+    parent: { type: mongoose.Schema.Types.ObjectId, ref: "Master", default: null },
+    imageUrl: { type: String, default: null },
+    sequence: { type: Number, default: 0 },
+    visibleToUser: { type: Boolean, default: true },
+    visibleToVendor: { type: Boolean, default: true },
+  },
+  { timestamps: true }
+);
 
-module.exports = mongoose.model("Master", masterSchema);
+MasterSchema.index({ name: 1, parent: 1 }, { unique: true });
+
+module.exports = mongoose.model("Master", MasterSchema);
+
+
+
+
+
+
+

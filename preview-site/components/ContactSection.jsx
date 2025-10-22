@@ -16,36 +16,70 @@ export default function ContactSection({
   const [isOpenNow, setIsOpenNow] = useState({ open: false, closes: "", nextOpen: "" });
   const [modalOpen, setModalOpen] = useState(false);
 
+  const DAY_ORDER = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+
+  const normalizeHours = (list = []) => {
+    const byDay = {};
+    list.forEach((e) => {
+      const day = (e?.day || "").trim();
+      if (!day) return;
+      let hours = e.hours;
+      if (!hours && (e.open || e.close)) {
+        const open = (e.open || "").trim();
+        const close = (e.close || "").trim();
+        hours = open && close ? `${open} - ${close}` : "Closed";
+      }
+      byDay[day.toLowerCase()] = { day, hours: hours || "Closed" };
+    });
+    return DAY_ORDER.map((d) => byDay[d.toLowerCase()] || { day: d, hours: "Closed" });
+  };
+
+  const orderedHours = normalizeHours(businessHours);
   const todayIndex = new Date().getDay();
 
   const to24 = (time) => {
-    let [hour, minute] = time.split(/[: ]/);
-    let numHour = parseInt(hour);
-    const numMinute = minute ? parseInt(minute) : 0;
-    if (time.includes("PM") && numHour !== 12) numHour += 12;
-    if (time.includes("AM") && numHour === 12) numHour = 0;
-    return numHour + numMinute / 60;
+    if (!time) return NaN;
+    const match = time.trim().match(/^(\d{1,2})(?::(\d{2}))?\s*(AM|PM)?$/i);
+    if (!match) return NaN;
+    let hour = parseInt(match[1], 10);
+    const minute = match[2] ? parseInt(match[2], 10) : 0;
+    const meridiem = match[3]?.toUpperCase();
+    if (meridiem === "PM" && hour !== 12) hour += 12;
+    if (meridiem === "AM" && hour === 12) hour = 0;
+    return hour + minute / 60;
+  };
+
+  const splitRange = (range) => {
+    if (!range) return ["", ""];
+    const parts = String(range).split("-");
+    const start = (parts[0] || "").trim();
+    const end = (parts[1] || "").trim();
+    return [start, end];
   };
 
   const getNextOpenTime = () => {
     for (let i = 1; i <= 7; i++) {
       const idx = (todayIndex + i) % 7;
-      const nextDay = businessHours[idx];
-      if (nextDay?.hours && nextDay.hours !== "Closed") return nextDay.hours.split(" - ")[0];
+      const nextDay = orderedHours[idx];
+      if (nextDay?.hours && nextDay.hours !== "Closed") {
+        const [start] = splitRange(nextDay.hours);
+        return start;
+      }
     }
     return "";
   };
 
   const checkOpenStatus = () => {
     const now = new Date();
-    const today = businessHours[todayIndex];
+    const today = orderedHours[todayIndex];
     if (!today) return { open: false, closes: "", nextOpen: "" };
-    if (today.hours === "Closed") return { open: false, closes: "", nextOpen: getNextOpenTime() };
+    if (!today.hours || today.hours === "Closed") return { open: false, closes: "", nextOpen: getNextOpenTime() };
 
-    const [start, end] = today.hours.split(" - ").map((h) => h.trim());
+    const [start, end] = splitRange(today.hours);
     const nowHours = now.getHours() + now.getMinutes() / 60;
     const openStart = to24(start);
     const openEnd = to24(end);
+    if (isNaN(openStart) || isNaN(openEnd)) return { open: false, closes: "", nextOpen: "" };
 
     if (nowHours >= openStart && nowHours <= openEnd) return { open: true, closes: end, nextOpen: "" };
     return { open: false, closes: "", nextOpen: start };
@@ -155,7 +189,7 @@ export default function ContactSection({
           <div style={{ padding: "20px", border: "1px solid #ddd", borderRadius: "10px", background: "#F0FDF4", boxShadow: "0 2px 6px rgba(0,0,0,0.1)" }}>
             <h4 style={{ marginBottom: "10px", fontWeight: "bold" }}>Business Hours</h4>
             <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
-              {businessHours.map((item, idx) => (
+              {orderedHours.map((item, idx) => (
                 <li
                   key={item.day}
                   style={{

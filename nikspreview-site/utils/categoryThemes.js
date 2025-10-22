@@ -48,6 +48,14 @@ text: "#134E4A"          // Dark Teal Text
     cardBg: "#FFF5E0",
     text: "#78350F"
   },
+  "appliances servives" : {
+    primary: "#A1887F",
+    
+    accent:"#D7CCC8",
+    background:"#FAF8F7",
+    cardBg: "#EFE6E3", 
+    text:"#3E2723"  
+  },
   default: {
     primary: "#111827",
     accent: "#2563EB",
