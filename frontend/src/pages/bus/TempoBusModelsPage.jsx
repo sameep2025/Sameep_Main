@@ -38,7 +38,7 @@ export default function TempoBusModelsPage() {
       brand: data.brand,
       bodyType: data.bodyType || "",
       model: data.model,
-      variant: data.variant || "",
+      
       seats: data.seats || 0,
     };
     try {
@@ -105,8 +105,7 @@ export default function TempoBusModelsPage() {
           <label>Model</label>
           <input type="text" value={form.model} onChange={(e) => setForm({ ...form, model: e.target.value })} style={{ width: "100%", padding: 8, marginBottom: 10 }} />
 
-          <label>Variant</label>
-          <input type="text" value={form.variant} onChange={(e) => setForm({ ...form, variant: e.target.value })} style={{ width: "100%", padding: 8, marginBottom: 10 }} />
+          
 
           <label>Seats</label>
           <input type="number" value={form.seats} onChange={(e) => setForm({ ...form, seats: e.target.value })} style={{ width: "100%", padding: 8, marginBottom: 10 }} />
@@ -135,7 +134,7 @@ export default function TempoBusModelsPage() {
             <th style={{ padding: 10 }}>Body Type</th>
             <th style={{ padding: 10 }}>Seats</th>
             <th style={{ padding: 10 }}>Model</th>
-            <th style={{ padding: 10 }}>Variant</th>
+            
             <th style={{ padding: 10, textAlign: "center" }}>Actions</th>
           </tr>
         </thead>
@@ -146,7 +145,7 @@ export default function TempoBusModelsPage() {
               <td style={{ padding: 10 }}>{m.bodyType}</td>
               <td style={{ padding: 10 }}>{m.seats}</td>
               <td style={{ padding: 10 }}>{m.model}</td>
-              <td style={{ padding: 10 }}>{m.variant}</td>
+              
               <td style={{ padding: 10, textAlign: "center" }}>
                 <button onClick={() => { setEditing(m); setShowModal(true); }} style={{ border: "none", borderRadius: 5, padding: "4px 8px", cursor: "pointer", marginRight: 6 }}>✏️</button>
                 <button onClick={() => handleDelete(m)} style={{ color: "#fff", border: "none", borderRadius: 5, padding: "4px 8px", cursor: "pointer", background: "#dc3545" }}>🗑️</button>

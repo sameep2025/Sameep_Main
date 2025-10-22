@@ -25,6 +25,19 @@ const CategorySchema = new mongoose.Schema({
   loyaltyPoints: { type: Boolean, default: false },
   linkAttributesPricing: { type: Boolean, default: false },
   freeTexts: { type: [String], default: Array(10).fill("") },
+  categoryVisibility: { type: [String], default: [] },
+  categoryModel: { type: [String], default: [] },
+  categoryPricing: { type: [String], default: [] },
+  socialHandle: { type: [String], default: [] },
+  displayType: { type: [String], default: [] },
+
+  signupLevels: [
+    {
+      levelName: { type: String, required: true },
+      sequence: { type: Number, default: 0 },
+      businessField: { type: [String], default: [] },
+    },
+  ],
 
   colorSchemes: [
     {

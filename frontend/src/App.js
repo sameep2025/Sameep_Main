@@ -16,6 +16,7 @@ import SocialHandlesPage from "./pages/SocialHandlesPage";
 import BusinessFieldsPage from "./pages/BusinessFieldsPage";
 import Questions from "./pages/Questions";
 import CategoryPage from "./components/CategoryPage";
+import ComboDetailPage from "./pages/ComboDetailPage";
 import CustomersPage from "./pages/CustomersPage";
 import CarsMainPage from "./pages/cars/CarsMainPage";
 import BrandPage from "./pages/cars/BrandPage";
@@ -39,6 +40,7 @@ import Vendors from "./pages/VendorPage"; // Step 1
 import VendorStatusPage from "./pages/VendorStatusPage"; // Step 2
 import VendorStatusListPage from "./pages/VendorStatusListPage"; // Step 2 detail
 import VendorBusinessPage from "./pages/VendorBusinessPage"; // Step 3
+import VendorCategoriesDetailPage from "./pages/VendorCategoriesDetailPage";
 
 function App() {
   return (
@@ -89,10 +91,14 @@ function App() {
               element={<VendorStatusListPage />}
             /> {/* Step 2 detail */}
             <Route path="/vendors/:vendorId" element={<VendorBusinessPage />} /> {/* Step 3 */}
+            <Route path="/vendors/:vendorId/categories/:categoryId" element={<VendorCategoriesDetailPage />} />
 
             {/* Categories */}
             <Route path="/categories" element={<CategoryPage />} />
             <Route path="/categories/:parentId" element={<CategoryPage />} />
+
+            {/* Combo Details */}
+            <Route path="/combos/:comboId" element={<ComboDetailPage />} />
 
             {/* Customers */}
             <Route path="/customers" element={<CustomersPage />} />

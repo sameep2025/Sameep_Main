@@ -17,9 +17,25 @@ router.use((req, res, next) => {
       `[API DONE] ${req.method} ${req.originalUrl} → ${res.statusCode} (${duration}ms)`
     );
   });
-
   next();
 });
+
+
+// ------------------------------------------------------
+// Helper: build category path names from root → node
+// Returns array of names [level1, level2, ...]
+async function buildCategoryPathNames(categoryId) {
+  const path = [];
+  let cat = await Category.findById(categoryId).lean();
+  if (!cat) return path;
+  // Walk up to root
+  while (cat) {
+    path.unshift(cat.name);
+    if (!cat.parent) break;
+    cat = await Category.findById(cat.parent).lean();
+  }
+  return path;
+}
 
 
 // ======================================================
@@ -42,15 +58,17 @@ router.get("/:vendorId", async (req, res) => {
       console.log("No pricing found, creating default structure...");
       const categories = await Category.find().lean();
 
-      const pricing = categories.map((cat) => ({
-        categoryId: cat._id,
-        level1: cat.level1 || cat.name || null,
-        level2: cat.level2 || null,
-        level3: cat.level3 || null,
-        level4: cat.level4 || null,
-        level5: cat.level5 || null,
-        price: cat.price || 0,
-      }));
+      // Compute structured pricing with path levels
+      const pricing = [];
+      for (const cat of categories) {
+        const names = await buildCategoryPathNames(cat._id);
+        const entry = {
+          categoryId: cat._id,
+          price: typeof cat.price === "number" ? cat.price : 0,
+        };
+        names.forEach((n, i) => (entry[`level${i + 1}`] = n));
+        pricing.push(entry);
+      }
 
       record = await VendorCategoryPrice.create({
         vendorId,
@@ -93,8 +111,15 @@ router.put("/:vendorId/:categoryId", async (req, res) => {
     let vendorPricing = await VendorCategoryPrice.findOne({ vendorId });
 
     if (!vendorPricing) {
-      // if not found, create empty base
-      vendorPricing = new VendorCategoryPrice({ vendorId, pricing: [] });
+      // if not found, create empty base with vendor meta
+      const v = await Vendor.findById(vendorId).lean();
+      vendorPricing = new VendorCategoryPrice({
+        vendorId,
+        vendorName: v?.contactName || "",
+        businessName: v?.businessName || "",
+        phone: v?.phone || "",
+        pricing: [],
+      });
     }
 
     // ✅ Find existing category in array
@@ -103,29 +128,31 @@ router.put("/:vendorId/:categoryId", async (req, res) => {
     );
 
     if (itemIndex > -1) {
-      // Update existing
+      // Update existing price
       vendorPricing.pricing[itemIndex].price = price;
     } else {
-      // Add new
-      vendorPricing.pricing.push({ categoryId, price });
+      // Add new with level names
+      const names = await buildCategoryPathNames(categoryId);
+      const entry = { categoryId, price };
+      names.forEach((n, i) => (entry[`level${i + 1}`] = n));
+      vendorPricing.pricing.push(entry);
     }
 
     vendorPricing.updatedAt = new Date();
-await vendorPricing.save();
+    await vendorPricing.save();
 
-// 🔄 Sync VendorPrice collection so VendorStatusListPage stays updated
-const VendorPrice = require("../models/VendorPricing");
-await VendorPrice.findOneAndUpdate(
-  { vendorId, categoryId },
-  { vendorId, categoryId, price },
-  { upsert: true, new: true }
-);
+    // 🔄 Sync VendorPrice collection so VendorStatusListPage stays updated
+    const VendorPrice = require("../models/VendorPricing");
+    await VendorPrice.findOneAndUpdate(
+      { vendorId, categoryId },
+      { vendorId, categoryId, price },
+      { upsert: true, new: true }
+    );
 
-res.json({
-  message: "Price updated successfully",
-  data: vendorPricing,
-});
-
+    res.json({
+      message: "Price updated successfully",
+      data: vendorPricing,
+    });
   } catch (err) {
     console.error("Error updating vendor pricing:", err);
     res.status(500).json({ message: "Server error" });
