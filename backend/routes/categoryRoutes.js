@@ -53,6 +53,7 @@ router.post("/", upload.single("image"), async (req, res) => {
       sequence: parsedSequence,
       price: parent ? parsedPrice : undefined,
       terms: terms || "",
+
       enableFreeText: req.body.enableFreeText !== undefined ? (req.body.enableFreeText === "true" || req.body.enableFreeText === true) : false,
 
       visibleToUser: visibleToUser === "true" || visibleToUser === true,
@@ -67,6 +68,8 @@ router.post("/", upload.single("image"), async (req, res) => {
       loyaltyPoints: !parent ? req.body.loyaltyPoints === "true" : undefined,
       linkAttributesPricing: !parent ? req.body.linkAttributesPricing === "true" : undefined,
       freeTexts: !parent ? Array.from({ length: 10 }, (_, i) => req.body[`freeText${i}`] || "") : undefined,
+  // inventory label and linked attributes - accept for any category
+  inventoryLabelName: req.body.inventoryLabelName !== undefined ? req.body.inventoryLabelName : ( !parent ? (req.body.inventoryLabelName || "") : undefined ),
       imageUrl: req.file ? `/uploads/${req.file.filename}` : undefined,
     };
 
@@ -91,8 +94,33 @@ router.post("/", upload.single("image"), async (req, res) => {
             ? [String(req.body[key])]
             : [];
         }
+
+    // Handle uiRules JSON (per-node UI flags)
+    if (req.body.uiRules !== undefined) {
+      try {
+        const parsed = JSON.parse(req.body.uiRules);
+        if (parsed && typeof parsed === 'object') {
+          categoryData.uiRules = parsed;
+        }
+      } catch (e) {
+        // ignore invalid payload
+      }
+    }
       }
     });
+
+    // Handle linkedAttributes JSON
+    if (req.body.linkedAttributes) {
+      try {
+        const parsed = JSON.parse(req.body.linkedAttributes);
+        if (parsed && typeof parsed === 'object') {
+          categoryData.linkedAttributes = parsed;
+        }
+      } catch (e) {
+        console.warn("Invalid linkedAttributes JSON:", e.message);
+      }
+    }
+
 
     // Handle color schemes (JSON array)
     if (req.body.colorSchemes) {
@@ -236,6 +264,7 @@ router.put("/:id", upload.single("image"), async (req, res) => {
       category.loyaltyPoints = req.body.loyaltyPoints === "true";
       category.linkAttributesPricing = req.body.linkAttributesPricing === "true";
       category.freeTexts = Array.from({ length: 10 }, (_, i) => req.body[`freeText${i}`] || "");
+      if (req.body.inventoryLabelName !== undefined) category.inventoryLabelName = req.body.inventoryLabelName;
     }
 
     // Handle enableFreeText with recursive update
@@ -258,8 +287,6 @@ router.put("/:id", upload.single("image"), async (req, res) => {
     if (sequence !== undefined) category.sequence = sequence === "" ? 0 : Number(sequence);
     if (categoryType !== undefined) category.categoryType = categoryType;
     category.availableForCart = req.body.availableForCart === "true" || req.body.availableForCart === "on" || req.body.availableForCart === true;
-
-
 
     // Update dropdown fields if present (parse as arrays)
     [
@@ -284,6 +311,17 @@ router.put("/:id", upload.single("image"), async (req, res) => {
         }
       }
     });
+
+    // Update linkedAttributes if provided
+    if (req.body.linkedAttributes !== undefined) {
+      try {
+        const parsed = JSON.parse(req.body.linkedAttributes);
+        if (parsed && typeof parsed === 'object') category.linkedAttributes = parsed;
+      } catch (e) {
+        console.warn("Invalid linkedAttributes JSON on update:", e.message);
+      }
+    }
+
 
     if (req.file) category.imageUrl = `/uploads/${req.file.filename}`;
     // Update color schemes if provided

@@ -29,12 +29,11 @@ exports.getCategories = async (req, res) => {
 
 
 
-
 // CREATE category (multipart/form-data; field name: image)
 // optional parentId in body
 exports.createCategory = async (req, res) => {
   try {
-    const { name, parentId, categoryVisibility, categoryModel, categoryPricing, socialHandle, displayType } = req.body;
+    const { name, parentId, categoryVisibility, categoryModel, categoryPricing, socialHandle, displayType, uiRules } = req.body;
     const imageFile = req.file;
 
     if (!name) return res.status(400).json({ message: "Name required" });
@@ -51,15 +50,26 @@ exports.createCategory = async (req, res) => {
 const imageUrl = imageFile ? `/${imageFile.path.replace(/\\/g, "/")}` : "";
  // store relative path like /uploads/123.png
 
+    // Ensure array-like fields are parsed from JSON when sent as strings
+    const parseArrayField = (val) => {
+      if (Array.isArray(val)) return val;
+      if (typeof val === 'string' && val.trim().startsWith('[')) {
+        try { return JSON.parse(val); } catch { return []; }
+      }
+      if (val == null || val === '') return [];
+      return [val];
+    };
+
     const category = new Category({
       name,
       imageUrl,
       parent: parentId || null,
-      categoryVisibility,
-      categoryModel,
-      categoryPricing,
-      socialHandle,
-      displayType,
+      categoryVisibility: parseArrayField(categoryVisibility),
+      categoryModel: parseArrayField(categoryModel),
+      categoryPricing: parseArrayField(categoryPricing),
+      socialHandle: parseArrayField(socialHandle),
+      displayType: parseArrayField(displayType),
+      uiRules: (()=>{ try { return typeof uiRules === 'string' ? JSON.parse(uiRules || '{}') : (uiRules || {});} catch { return {}; } })(),
     });
 
     await category.save();
@@ -77,8 +87,26 @@ exports.updateCategory = async (req, res) => {
     const category = await Category.findById(id);
     if (!category) return res.status(404).json({ message: "Category not found" });
 
-    const { name, price, terms, visibleToUser, visibleToVendor } = req.body;
-    const imageFile = req.file;
+    const {
+      name,
+      price,
+      terms,
+      visibleToUser,
+      visibleToVendor,
+      sequence,
+      freeText,
+      enableFreeText,
+      categoryType,
+      availableForCart,
+      seoKeywords,
+      postRequestsDeals,
+      loyaltyPoints,
+      linkAttributesPricing,
+      inventoryLabelName,
+    } = req.body;
+
+    const imageFile = req.files?.image?.[0];
+    const iconFile = req.files?.icon?.[0];
 
     if (name && name !== category.name) {
       const dup = await Category.findOne({ name, parent: category.parent });
@@ -86,29 +114,50 @@ exports.updateCategory = async (req, res) => {
       category.name = name;
     }
 
-    // ✅ Update price: handle "null"
-    if (price !== undefined) {
-      category.price = price === "null" ? null : Number(price);
-    }
+    if (price !== undefined) category.price = price === "null" ? null : Number(price);
+    if (terms !== undefined) category.terms = terms;
+    if (sequence !== undefined) category.sequence = Number(sequence) || 0;
+    if (freeText !== undefined) category.freeText = freeText;
+    if (seoKeywords !== undefined) category.seoKeywords = seoKeywords;
+    if (inventoryLabelName !== undefined) category.inventoryLabelName = inventoryLabelName;
 
-    // Update terms
-    if (terms !== undefined) {
-      category.terms = terms; // empty string clears text
-    }
+    // Booleans
+    if (visibleToUser !== undefined) category.visibleToUser = visibleToUser === 'true' || visibleToUser === true;
+    if (visibleToVendor !== undefined) category.visibleToVendor = visibleToVendor === 'true' || visibleToVendor === true;
+    if (enableFreeText !== undefined) category.enableFreeText = enableFreeText === 'true' || enableFreeText === true;
+    if (availableForCart !== undefined) category.availableForCart = availableForCart === 'true' || availableForCart === true;
+    if (postRequestsDeals !== undefined) category.postRequestsDeals = postRequestsDeals === 'true' || postRequestsDeals === true;
+    if (loyaltyPoints !== undefined) category.loyaltyPoints = loyaltyPoints === 'true' || loyaltyPoints === true;
+    if (linkAttributesPricing !== undefined) category.linkAttributesPricing = linkAttributesPricing === 'true' || linkAttributesPricing === true;
 
-    // Update visibility
-    category.visibleToUser = visibleToUser === "true" || visibleToUser === true;
-    category.visibleToVendor = visibleToVendor === "true" || visibleToVendor === true;
+    if (categoryType) category.categoryType = categoryType;
 
-    // Update image
+    // Files
     if (imageFile) {
-      if (category.imageUrl && category.imageUrl.startsWith("/uploads/")) {
-        const fs = require("fs");
-        const path = category.imageUrl.slice(1);
-        if (fs.existsSync(path)) fs.unlinkSync(path);
-      }
+      deleteLocalFile(category.imageUrl);
       category.imageUrl = `/${imageFile.path.replace(/\\/g, "/")}`;
     }
+    if (iconFile) {
+      deleteLocalFile(category.iconUrl);
+      category.iconUrl = `/${iconFile.path.replace(/\\/g, "/")}`;
+    }
+
+    // JSON fields
+    ['colorSchemes', 'linkedAttributes', 'categoryVisibility', 'categoryModel', 'categoryPricing', 'socialHandle', 'displayType', 'signupLevels', 'uiRules'].forEach(key => {
+      if (req.body[key]) {
+        try {
+          category[key] = JSON.parse(req.body[key]);
+        } catch (e) { console.error(`Failed to parse ${key}:`, e); }
+      }
+    });
+
+    // Free texts
+    const freeTexts = [];
+    for (let i = 1; i <= 10; i++) {
+      const key = `freeText${i}`;
+      if (req.body[key] !== undefined) freeTexts.push(req.body[key]);
+    }
+    if (freeTexts.length > 0) category.freeTexts = freeTexts;
 
     await category.save();
     res.json(category);

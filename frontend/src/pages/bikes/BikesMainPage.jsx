@@ -28,6 +28,7 @@ export default function BikesMainPage() {
         <MasterCard title="Brands" onClick={() => navigate("/master/bikes/brands")} />
 <MasterCard title="Body Types" onClick={() => navigate("/master/bikes/body-types")} />
 <MasterCard title="Models" onClick={() => navigate("/master/bikes/models")} />
+        <MasterCard title="Transmission Types" onClick={() => navigate("/master/bikes/transmission-types")} />
 
       </div>
     </div>

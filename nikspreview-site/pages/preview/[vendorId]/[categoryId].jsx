@@ -942,7 +942,17 @@ function PreviewPage() {
     // show only product leaves across the entire subtree
     if (isProducts) {
       const allProducts = collectAllProducts(categoryTree);
-      return allProducts;
+      const inv = vendor?.inventorySelections?.[categoryId] || [];
+      const invLeaves = Array.isArray(inv)
+        ? inv.map((entry, idx) => {
+            const fam = entry?.scopeFamily;
+            const sel = entry?.selections?.[fam] || {};
+            const parts = Object.values(sel).filter((v) => v != null && String(v).trim() !== "");
+            const name = parts.join(" ") || "Item";
+            return { id: `inv-${idx}-${entry?.at || idx}`, name, children: [] };
+          })
+        : [];
+      return [...allProducts, ...invLeaves];
     }
 
     // If root is a Service but has Products nested, we still want to show Products
@@ -953,9 +963,24 @@ function PreviewPage() {
       }
     }
 
+    // Append inventory selections as additional leaf nodes
+    let combined = children;
+    const inv = vendor?.inventorySelections?.[categoryId] || [];
+    const invLeaves = Array.isArray(inv)
+      ? inv.map((entry, idx) => {
+          const fam = entry?.scopeFamily;
+          const sel = entry?.selections?.[fam] || {};
+          const parts = Object.values(sel).filter((v) => v != null && String(v).trim() !== "");
+          const name = parts.join(" ") || "Item";
+          return { id: `inv-${idx}-${entry?.at || idx}`, name, children: [] };
+        })
+      : [];
+    combined = [...combined, ...invLeaves];
+
+    // Apply tab filtering for both/both-forced cases
     if (isBoth || forcedProducts) {
-      if (activeTab === "all") return children;
-      return children.filter((child) => {
+      if (activeTab === "all") return combined;
+      return combined.filter((child) => {
         const childType = child.categoryType || "Products";
         if (activeTab === "products")
           return childType === "Products" || childType === "Products & Services";
@@ -966,7 +991,7 @@ function PreviewPage() {
     }
 
     // For Services root: strictly services-only
-    return children.filter((child) => {
+    return combined.filter((child) => {
       const childType = child.categoryType || "Services";
       return childType === "Services";
     });

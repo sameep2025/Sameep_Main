@@ -94,19 +94,26 @@ export default function ContactSection({
       return;
     }
 
-    if (location.lat && location.lng) {
+    if (Number.isFinite(Number(location.lat)) && Number.isFinite(Number(location.lng))) {
       const fetchAreaCity = async () => {
+        const lat = Number(location.lat);
+        const lng = Number(location.lng);
+        if (!isFinite(lat) || !isFinite(lng)) { setAreaCity(""); return; }
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 5000);
         try {
-          const res = await fetch(
-            `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${location.lat}&lon=${location.lng}`
-          );
-          const data = await res.json();
-          const city = data.address?.city || data.address?.town || data.address?.village || "";
-          const area = data.address?.suburb || data.address?.neighbourhood || "";
+          const url = `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${encodeURIComponent(lat.toFixed(6))}&lon=${encodeURIComponent(lng.toFixed(6))}`;
+          const res = await fetch(url, { signal: controller.signal, headers: { 'Accept': 'application/json' } });
+          if (!res.ok) throw new Error(`Reverse geocode HTTP ${res.status}`);
+          const data = await res.json().catch(() => ({}));
+          const city = data?.address?.city || data?.address?.town || data?.address?.village || "";
+          const area = data?.address?.suburb || data?.address?.neighbourhood || "";
           setAreaCity([area, city].filter(Boolean).join(", "));
         } catch (err) {
-          console.error("Reverse geocode failed", err);
+          console.warn("Reverse geocode failed", err?.message || err);
           setAreaCity("");
+        } finally {
+          clearTimeout(timeout);
         }
       };
       fetchAreaCity();

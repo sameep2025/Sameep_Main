@@ -10,18 +10,42 @@ const categoryRoutes = require('./routes/categoryRoutes');
 const vendorRoutes = require('./routes/vendorRoutes');
 const masterRoutes = require('./routes/masterRoutes');
 const comboRoutes = require('./routes/comboRoutes');
+const dummyComboRoutes = require('./routes/dummyComboRoutes');
 const customerRoutes = require('./routes/customerRoutes');
 const vendorPricingRoutes = require('./routes/vendorPricing');
 const modelRoutes = require('./routes/modelRoutes');
+const dummyCategoryRoutes = require('./routes/dummyCategoryRoutes');
 
 const app = express();
 
 // Connect to MongoDB
 connectDB();
 
+// On DB ready, drop unintended unique indexes on 'masters' so duplicates are allowed
+mongoose.connection.once('open', async () => {
+    try {
+        const collection = mongoose.connection.collection('masters');
+        const indexes = await collection.indexes();
+        const toDrop = indexes
+            .filter(ix => ix.unique && (ix.key?.name === 1 || (ix.key?.name === 1 && ix.key?.type === 1)))
+            .map(ix => ix.name);
+        for (const idxName of toDrop) {
+            try {
+                await collection.dropIndex(idxName);
+                console.log(`Dropped index ${idxName} on masters`);
+            } catch (e) {
+                console.warn(`Failed to drop index ${idxName}: ${e.message}`);
+            }
+        }
+    } catch (e) {
+        console.warn(`Index check on masters failed: ${e.message}`);
+    }
+});
+
 // Middleware
 app.use(cors());
 app.use(express.json());
+
 
 // Simple request logger
 app.use((req, res, next) => {
@@ -46,9 +70,11 @@ app.use('/api/categories', categoryRoutes);
 app.use('/api/vendors', vendorRoutes);
 app.use('/api/masters', masterRoutes);
 app.use('/api/combos', comboRoutes);
+app.use('/api/dummy-combos', dummyComboRoutes);
 app.use('/api/customers', customerRoutes);
 app.use('/api/vendorPricing', vendorPricingRoutes);
 app.use('/api/models', modelRoutes);
+app.use('/api/dummy-categories', dummyCategoryRoutes);
 
 // Debug: DB connection info
 app.get('/api/_debug/db', (req, res) => {

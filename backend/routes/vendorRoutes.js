@@ -1,17 +1,60 @@
 const express = require("express");
+
 const mongoose = require("mongoose");
 const Vendor = require("../models/Vendor");
 const VendorPrice = require("../models/VendorPricing");
 const Category = require("../models/Category");
 const VendorCategoryPrice = require("../models/VendorCategoryPrice");
-const Customer = require("../models/Customer"); // ✅ MISSING IMPORT
+const Customer = require("../models/Customer"); // 
 const getCategoryModel = require("../utils/getCategoryModel");
 const VendorLocation = require("../models/VendorLocation");
 
 const router = express.Router();
 
+// PUT /api/vendors/:vendorId/inventory-selections
+router.put("/:vendorId/inventory-selections", async (req, res) => {
+  try {
+    const { vendorId } = req.params;
+    const { categoryId, items } = req.body;
+    if (!vendorId || !categoryId || !Array.isArray(items)) {
+      return res.status(400).json({ message: "vendorId, categoryId and items[] are required" });
+    }
+    const vendor = await Vendor.findById(vendorId);
+    if (!vendor) return res.status(404).json({ message: "Vendor not found" });
+
+    // Ensure inventorySelections is an object
+    if (!vendor.inventorySelections || typeof vendor.inventorySelections !== 'object') vendor.inventorySelections = {};
+    vendor.inventorySelections[String(categoryId)] = items.map((it, idx) => {
+      const baseAt = Number(it.at) || Date.now();
+      const safeAt = baseAt + idx; // ensure uniqueness within batch
+      // Normalize pricesByRow map: keep only primitive number or null
+      const pbrIn = it.pricesByRow && typeof it.pricesByRow === 'object' ? it.pricesByRow : null;
+      const pricesByRow = pbrIn ? Object.fromEntries(Object.entries(pbrIn).map(([k, v]) => [String(k), (v === null || v === '' || v === undefined) ? null : Number(v)])) : undefined;
+      return {
+        at: safeAt,
+        categoryId: String(categoryId),
+        selections: it.selections && typeof it.selections === 'object' ? it.selections : {},
+        // Preserve optional scope metadata so client can filter per inventory label
+        scopeFamily: typeof it.scopeFamily === 'string' ? it.scopeFamily : (it.scopeFamily == null ? null : String(it.scopeFamily)),
+        scopeLabel: typeof it.scopeLabel === 'string' ? it.scopeLabel : (it.scopeLabel == null ? null : String(it.scopeLabel)),
+        // Optional per-selection price override (global fallback)
+        price: (it.price === null || it.price === undefined || it.price === '') ? null : Number(it.price),
+        // Optional per-row price overrides
+        ...(pricesByRow ? { pricesByRow } : {}),
+      };
+    });
+
+    vendor.markModified('inventorySelections');
+    await vendor.save();
+    res.json({ success: true, inventorySelections: vendor.inventorySelections[String(categoryId)] });
+  } catch (err) {
+    console.error("PUT /inventory-selections error:", err);
+    res.status(500).json({ message: "Server error", error: err.message });
+  }
+});
+
 /**
- * 🔹 Middleware: Log every API call in this router
+ * Middleware: Log every API call in this router
  */
 router.use((req, res, next) => {
   const start = Date.now();
@@ -229,7 +272,7 @@ router.get("/:vendorId/categories", async (req, res) => {
     if (!vendor) return res.status(404).json({ message: "Vendor not found" });
 
     // 🟣 Load ALL categories once
-    const allCategories = await Category.find({}, { name: 1, parent: 1, price: 1, imageUrl: 1, terms: 1, sequence: 1 })
+    const allCategories = await Category.find({}, { name: 1, parent: 1, price: 1, imageUrl: 1, terms: 1, sequence: 1, displayType: 1, uiRules: 1 })
       .sort({ sequence: 1, createdAt: -1 })
       .lean();
 
@@ -276,6 +319,8 @@ router.get("/:vendorId/categories", async (req, res) => {
         vendorPrice,
         imageUrl: node.imageUrl || null,
         terms: node.terms || "",
+        displayType: Array.isArray(node.displayType) ? node.displayType : (node.displayType ? [node.displayType] : []),
+        uiRules: node.uiRules || { includeLeafChildren: true },
         children: (node.children || []).map(attachPrices),
       };
     }
@@ -415,12 +460,44 @@ router.get("/:vendorId/preview/:categoryId", async (req, res) => {
       }
     });
 
-    // Load vendor-specific prices
+    // Load vendor-specific prices (base)
     const vendorPricings = await VendorPrice.find({ vendorId }, { categoryId: 1, price: 1 }).lean();
     const vendorPricingMap = {};
     vendorPricings.forEach((p) => {
       vendorPricingMap[p.categoryId.toString()] = p.price;
     });
+
+    // Merge prices from inventorySelections for the requested category
+    try {
+      const invVendor = await Vendor.findById(vendorId, { inventorySelections: 1 }).lean();
+      const invItems = Array.isArray(invVendor?.inventorySelections?.[categoryId])
+        ? invVendor.inventorySelections[categoryId]
+        : [];
+      if (invItems.length) {
+        let minPrice = Infinity;
+        invItems.forEach((item) => {
+          // global price on the selection
+          if (item?.price != null && item.price !== "") {
+            const n = Number(item.price);
+            if (!Number.isNaN(n)) minPrice = Math.min(minPrice, n);
+          }
+          // per-row price overrides
+          if (item && item.pricesByRow && typeof item.pricesByRow === "object") {
+            Object.values(item.pricesByRow).forEach((v) => {
+              if (v != null && v !== "") {
+                const n = Number(v);
+                if (!Number.isNaN(n)) minPrice = Math.min(minPrice, n);
+              }
+            });
+          }
+        });
+        if (minPrice !== Infinity) {
+          vendorPricingMap[categoryId.toString()] = minPrice;
+        }
+      }
+    } catch (e) {
+      // non-fatal; ignore inventory merge errors
+    }
 
     // Find root node starting from requested category
     let rootNode = catMap[categoryId.toString()];
@@ -440,6 +517,8 @@ router.get("/:vendorId/preview/:categoryId", async (req, res) => {
         vendorPrice,
         imageUrl: node.imageUrl || null,
         terms: node.terms || "",
+        displayType: Array.isArray(node.displayType) ? node.displayType : (node.displayType ? [node.displayType] : []),
+        uiRules: node.uiRules || { includeLeafChildren: true },
         children: (node.children || []).map(attachPrices),
       };
     };
@@ -463,6 +542,59 @@ router.get("/:vendorId/preview/:categoryId", async (req, res) => {
   } catch (err) {
     console.error("Error fetching vendor preview:", err);
     res.status(500).json({ message: "Server error", error: err.message });
+  }
+});
+// In your backend file: routes/vendors.js or api/vendors/[vendorId]/preview/[categoryId].js
+
+router.get("/:vendorId/preview/:categoryId", async (req, res) => {
+  try {
+    const { vendorId, categoryId } = req.params;
+
+    const vendor = await Vendor.findById(vendorId).lean();
+    if (!vendor) return res.status(404).json({ error: "Vendor not found" });
+
+    // 1️⃣ Get base vendorPrice collection (global category prices)
+    const vendorPricings = await VendorPrice.find({ vendorId }, { categoryId: 1, price: 1 }).lean();
+    const vendorPricingMap = {};
+    vendorPricings.forEach((p) => {
+      vendorPricingMap[p.categoryId.toString()] = p.price;
+    });
+
+    // 2️⃣ Merge per-row prices from inventorySelections
+    if (vendor.inventorySelections && typeof vendor.inventorySelections === "object") {
+      Object.entries(vendor.inventorySelections).forEach(([catId, items]) => {
+        items.forEach((item) => {
+          // prefer per-row prices if present
+          if (item.pricesByRow && typeof item.pricesByRow === "object") {
+            const validPrice = Object.values(item.pricesByRow).find((v) => v != null);
+            if (validPrice != null) vendorPricingMap[catId] = validPrice;
+          } else if (item.price != null) {
+            vendorPricingMap[catId] = item.price;
+          }
+        });
+      });
+    }
+
+    // 3️⃣ Load category tree and inject vendorPrice
+    const categoryRoot = await Category.findById(categoryId).lean();
+    function attachPrices(node) {
+      if (!node) return null;
+      const price = vendorPricingMap[node._id?.toString()] ?? node.price ?? null;
+      return {
+        ...node,
+        vendorPrice: price,
+        price,
+        displayType: Array.isArray(node.displayType) ? node.displayType : (node.displayType ? [node.displayType] : []),
+        children: node.children ? node.children.map(attachPrices) : [],
+      };
+    }
+
+    const categories = attachPrices(categoryRoot);
+
+    res.json({ categories });
+  } catch (err) {
+    console.error("Preview error:", err);
+    res.status(500).json({ error: "Server error" });
   }
 });
 

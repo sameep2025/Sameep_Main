@@ -28,10 +28,12 @@ import BikesMainPage from "./pages/bikes/BikesMainPage";
 import BikeBrandPage from "./pages/bikes/BikeBrandsPage";
 import BikeBodyTypePage from "./pages/bikes/BikeBodyTypesPage";
 import BikeModelPage from "./pages/bikes/BikeModelsPage";
+import BikeTransmissionTypePage from "./pages/bikes/BikeTransmissionTypePage";
 import TempoMiniBusMainPage from "./pages/bus/TempoMiniBusMainPage";
 import TempoBusBrandPage from "./pages/bus/TempoBusBrandPage";
 import TempoBusBodyTypePage from "./pages/bus/TempoBusBodyTypePage";
 import TempoBusModelsPage from "./pages/bus/TempoBusModelsPage";
+import DummyCategoryPage from "./components/DummyCategoryPage";
 
 
 
@@ -41,6 +43,7 @@ import VendorStatusPage from "./pages/VendorStatusPage"; // Step 2
 import VendorStatusListPage from "./pages/VendorStatusListPage"; // Step 2 detail
 import VendorBusinessPage from "./pages/VendorBusinessPage"; // Step 3
 import VendorCategoriesDetailPage from "./pages/VendorCategoriesDetailPage";
+
 
 function App() {
   return (
@@ -73,6 +76,7 @@ function App() {
 
 <Route path="/master/bikes/body-types" element={<BikeBodyTypePage />} />
 <Route path="/master/bikes/models" element={<BikeModelPage />} />
+<Route path="/master/bikes/transmission-types" element={<BikeTransmissionTypePage />} />
 
 {/* Tempo Mini Bus */}
 <Route path="/master/tempo-mini-bus" element={<TempoMiniBusMainPage />} />  {/* Main dashboard */}
@@ -95,6 +99,7 @@ function App() {
 
             {/* Categories */}
             <Route path="/categories" element={<CategoryPage />} />
+            
             <Route path="/categories/:parentId" element={<CategoryPage />} />
 
             {/* Combo Details */}
@@ -102,6 +107,10 @@ function App() {
 
             {/* Customers */}
             <Route path="/customers" element={<CustomersPage />} />
+
+            {/* Dummy Categories */}
+            <Route path="/dummy-categories" element={<DummyCategoryPage />} />
+            <Route path="/dummy-categories/:parentId" element={<DummyCategoryPage />} />
 
             {/* Fallback */}
             <Route path="*" element={<Dashboard />} />

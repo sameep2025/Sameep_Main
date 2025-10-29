@@ -6,21 +6,24 @@ export default function BikeModelsPage() {
   const [models, setModels] = useState([]);
   const [brands, setBrands] = useState([]);
   const [bodyTypes, setBodyTypes] = useState([]);
+  const [transmissions, setTransmissions] = useState([]);
   const [showModal, setShowModal] = useState(false);
   const [editing, setEditing] = useState(null);
 
   // ✅ Fetch all data
   const fetchData = async () => {
     try {
-      const [modelsRes, brandsRes, bodyTypesRes] = await Promise.all([
+      const [modelsRes, brandsRes, bodyTypesRes, transmissionsRes] = await Promise.all([
         axios.get("http://localhost:5000/api/models?category=bike"),
         axios.get("http://localhost:5000/api/masters", { params: { type: "bikeBrand" } }),
         axios.get("http://localhost:5000/api/masters", { params: { type: "bikeBodyType" } }),
+        axios.get("http://localhost:5000/api/masters", { params: { type: "bikeTransmission" } }),
       ]);
 
       setModels(modelsRes.data);
       setBrands(brandsRes.data);
       setBodyTypes(bodyTypesRes.data);
+      setTransmissions(transmissionsRes.data);
     } catch (err) {
       console.error(err);
       alert("Failed to fetch models, brands, or body types");
@@ -45,6 +48,7 @@ export default function BikeModelsPage() {
       model: data.model,
       variant: data.variant || "",
       seats: data.seatType || 0,
+      transmission: data.transmission || "",
     };
 
     try {
@@ -90,73 +94,74 @@ export default function BikeModelsPage() {
       </button>
 
       <table
-  style={{
-    width: "100%",
-    borderCollapse: "collapse",
-    marginTop: 20,
-  }}
->
-  <thead>
-    <tr style={{ background: "#00AEEF", color: "#fff", textAlign: "left" }}>
-      <th style={{ padding: 10 }}>Brand</th>
-      <th style={{ padding: 10 }}>Body Type</th>
-      <th style={{ padding: 10 }}>Seats</th>
-      <th style={{ padding: 10 }}>Model</th>
-      <th style={{ padding: 10 }}>Variant</th>
-      <th style={{ padding: 10, textAlign: "center" }}>Actions</th>
-    </tr>
-  </thead>
-  <tbody>
-    {models.map((m, i) => (
-      <tr
-        key={m._id}
         style={{
-          borderBottom: "1px solid #ccc",
-          background: i % 2 === 0 ? "#f9f9f9" : "#fff",
+          width: "100%",
+          borderCollapse: "collapse",
+          marginTop: 20,
         }}
       >
-        <td style={{ padding: 10 }}>{m.brand}</td>
-        <td style={{ padding: 10 }}>{m.bodyType}</td>
-        <td style={{ padding: 10 }}>{m.seats}</td>
-        <td style={{ padding: 10 }}>{m.model}</td>
-        <td style={{ padding: 10 }}>{m.variant}</td>
-        <td style={{ padding: 10, textAlign: "center" }}>
-          <button
-            onClick={() => {
-              setEditing(m);
-              setShowModal(true);
-            }}
-            style={{
-              // background: "#ffc107",
-              border: "none",
-              borderRadius: 5,
-              padding: "4px 8px",
-              cursor: "pointer",
-              marginRight: 6,
-            }}
-          >
-            ✏️ 
-          </button>
-          <button
-            onClick={() => handleDelete(m)}
-            style={{
-              // background: "#dc3545",
-              color: "#fff",
-              border: "none",
-              borderRadius: 5,
-              padding: "4px 8px",
-              cursor: "pointer",
-            }}
-          >
-            🗑️ 
-          </button>
-        </td>
-      </tr>
-    ))}
-  </tbody>
-</table>
-
-
+        <thead>
+          <tr style={{ background: "#00AEEF", color: "#fff", textAlign: "left" }}>
+            <th style={{ padding: 10 }}>Brand</th>
+            <th style={{ padding: 10 }}>Body Type</th>
+            <th style={{ padding: 10 }}>Transmission</th>
+            <th style={{ padding: 10 }}>Seats</th>
+            <th style={{ padding: 10 }}>Model</th>
+            <th style={{ padding: 10 }}>Variant</th>
+            <th style={{ padding: 10, textAlign: "center" }}>Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          {models.map((m, i) => (
+            <tr
+              key={m._id}
+              style={{
+                borderBottom: "1px solid #ccc",
+                background: i % 2 === 0 ? "#f9f9f9" : "#fff",
+              }}
+            >
+              <td style={{ padding: 10 }}>{m.brand}</td>
+              <td style={{ padding: 10 }}>{m.bodyType}</td>
+              <td style={{ padding: 10 }}>{m.transmission}</td>
+              <td style={{ padding: 10 }}>{m.seats}</td>
+              <td style={{ padding: 10 }}>{m.model}</td>
+              <td style={{ padding: 10 }}>{m.variant}</td>
+              <td style={{ padding: 10, textAlign: "center" }}>
+                <button
+                  onClick={() => {
+                    setEditing(m);
+                    setShowModal(true);
+                  }}
+                  style={{
+                    // background: "#ffc107",
+                    border: "none",
+                    borderRadius: 5,
+                    padding: "4px 8px",
+                    cursor: "pointer",
+                    marginRight: 6,
+                  }}
+                >
+                  ✏️ 
+                </button>
+                <button
+                  onClick={() => handleDelete(m)}
+                  style={{
+                    // background: "#dc3545",
+                    color: "#fff",
+                    border: "none",
+                    borderRadius: 5,
+                    padding: "4px 8px",
+                    cursor: "pointer",
+                  }}
+                >
+                  🗑️ 
+                </button>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      
       {showModal && (
         <ModelModal
           show={showModal}
@@ -164,9 +169,11 @@ export default function BikeModelsPage() {
           onSave={handleSave}
           brands={brands}
           bodyTypes={bodyTypes}
+          transmissions={transmissions}
           initialData={editing}
         />
       )}
     </div>
   );
 }
+

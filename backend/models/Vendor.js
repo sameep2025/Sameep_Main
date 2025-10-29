@@ -25,12 +25,16 @@ const vendorSchema = new mongoose.Schema({
     address: { type: String }
   },
 
- businessHours: [
-  {
-    day: { type: String, required: true },
-    hours: { type: String, required: true },
-  },
-],
+  businessHours: [
+    {
+      day: { type: String, required: true },
+      hours: { type: String, required: true },
+    },
+  ],
+
+  // Stores inventory selections keyed by categoryId
+  // Shape: { [categoryId]: Array<{ at:number, categoryId:string, selections: { [family]: { [field]: string } } }> }
+  inventorySelections: { type: Object, default: {} },
 
   createdAt: { type: Date, default: Date.now },
 });

@@ -3,18 +3,27 @@ const router = express.Router();
 const Model = require("../models/Model");
 
 // GET all models or filter by category
+// GET all models or filter by category
 router.get("/", async (req, res) => {
   try {
     const filter = {};
     if (req.query.category) {
-      filter.category = req.query.category; // e.g. ?category=bike
+      // Match category case-insensitively and exactly. Use a regex to avoid
+      // missing documents when stored category casing differs (e.g., 'tempoBus').
+      const cat = req.query.category.toString();
+      const escapeRegex = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      filter.category = { $regex: new RegExp(`^${escapeRegex(cat)}$`, 'i') };
     }
+
+    // Return all model fields
     const models = await Model.find(filter).sort({ createdAt: -1 });
+
     res.json(models);
   } catch (err) {
     res.status(500).json({ message: err.message });
   }
 });
+
 
 // CREATE model
 // CREATE model

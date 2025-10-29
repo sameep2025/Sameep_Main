@@ -39,6 +39,20 @@ const CategorySchema = new mongoose.Schema({
     },
   ],
 
+  // Inventory label and linked master attributes for pricing
+  inventoryLabelName: { type: String, default: "" },
+  linkedAttributes: { type: Object, default: {} },
+  // Per-node UI rules (replace legacy uiConfig usage)
+  uiRules: {
+    type: new mongoose.Schema(
+      {
+        includeLeafChildren: { type: Boolean, default: true },
+      },
+      { _id: false }
+    ),
+    default: () => ({ includeLeafChildren: true }),
+  },
+
   colorSchemes: [
     {
       name: { type: String, required: true }, // e.g. "Pink Sunset", "Ocean Blue"

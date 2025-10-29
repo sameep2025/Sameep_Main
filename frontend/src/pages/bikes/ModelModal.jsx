@@ -1,11 +1,12 @@
 import { useState, useEffect } from "react";
 
-export default function ModelModal({ show, onClose, onSave, initialData, brands, bodyTypes }) {
+export default function ModelModal({ show, onClose, onSave, initialData, brands, bodyTypes, transmissions = [] }) {
   const [brand, setBrand] = useState("");
   const [bodyType, setBodyType] = useState("");
   const [model, setModel] = useState("");
   const [variant, setVariant] = useState("");
   const [seatType, setSeatType] = useState(1);
+  const [transmission, setTransmission] = useState("");
 
   useEffect(() => {
     if (show) {
@@ -14,12 +15,13 @@ export default function ModelModal({ show, onClose, onSave, initialData, brands,
       setModel(initialData?.model || "");
       setVariant(initialData?.variant || "");
       setSeatType(initialData?.seats || 1); // ✅ fixed: use seats instead of seatType
+      setTransmission(initialData?.transmission || "");
     }
   }, [initialData, show]);
 
   const handleSubmit = (e) => {
     e.preventDefault();
-    onSave({ ...initialData, brand, bodyType, model, variant, seatType });
+    onSave({ ...initialData, brand, bodyType, model, variant, seatType, transmission });
   };
 
   if (!show) return null;
@@ -64,6 +66,16 @@ export default function ModelModal({ show, onClose, onSave, initialData, brands,
 
           <label>Variant</label>
           <input value={variant} onChange={(e) => setVariant(e.target.value)} required />
+
+          <label>Transmission</label>
+          <select value={transmission} onChange={(e) => setTransmission(e.target.value)}>
+            <option value="">Select Transmission</option>
+            {transmissions.map((t) => (
+              <option key={t._id || t.name || t} value={t.name || t}>
+                {t.name || t}
+              </option>
+            ))}
+          </select>
 
           <label>Seats</label>
           <input

@@ -68,23 +68,6 @@ function BusinessFieldCard({ field, onEdit, onDelete }) {
         {field.name}
       </h4>
 
-      {/* Field Type */}
-      <span style={{ fontSize: 12, color: "#555" }}>Type: {field.fieldType}</span>
-
-      {/* Options */}
-      {["select", "radio", "checkbox"].includes(field.fieldType) &&
-        field.options?.length > 0 && (
-          <div
-            style={{
-              fontSize: 12,
-              color: "#777",
-              marginTop: 4,
-              wordBreak: "break-word",
-            }}
-          >
-            Options: {field.options.join(", ")}
-          </div>
-      )}
     </div>
   );
 }

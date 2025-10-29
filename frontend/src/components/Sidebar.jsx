@@ -24,11 +24,11 @@ function Sidebar() {
         display: "flex",
         flexDirection: "column",
         alignItems: "flex-start",
-        borderRight: "1px solid #ddd", // ✅ subtle border like the image
+        borderRight: "1px solid #ddd", // ✅ subtle border
       }}
     >
-      <h2 style={{ color: "#00AEEF", marginBottom: "30px" }}>Sameep</h2>{" "}
-      {/* ✅ blue title */}
+      <h2 style={{ color: "#00AEEF", marginBottom: "30px" }}>Sameep</h2>
+
       <NavLink to="/dashboard" style={linkStyle}>
         📊 Dashboard
       </NavLink>
@@ -46,6 +46,14 @@ function Sidebar() {
       </NavLink>
       <NavLink to="/customers" style={linkStyle}>
         👥 Customers
+      </NavLink>
+
+      {/* ✅ Added dummy links */}
+      <NavLink to="/dummy-categories" end style={linkStyle}>
+        🧪 Dummy Categories
+      </NavLink>
+      <NavLink to="/dummy-vendor" style={linkStyle}>
+        🧑‍🔧 Dummy Vendor
       </NavLink>
     </div>
   );

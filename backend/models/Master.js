@@ -1,9 +1,13 @@
-// Original schema definition
 const mongoose = require("mongoose");
 
 const MasterSchema = new mongoose.Schema(
   {
     name: { type: String, required: true, trim: true },
+    type: { type: String, default: null },         // ✅ add this
+    fieldType: { type: String, default: null },    // ✅ add this
+    options: { type: [String], default: [] },      // ✅ add this
+    autoCalc: { type: Boolean, default: false },   // ✅ add this
+
     parent: { type: mongoose.Schema.Types.ObjectId, ref: "Master", default: null },
     imageUrl: { type: String, default: null },
     sequence: { type: Number, default: 0 },
@@ -13,10 +17,8 @@ const MasterSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
-// Keep your existing index
-MasterSchema.index({ name: 1, parent: 1 }, { unique: true });
+// Keep your indexes
 
-// Optional extra index
-MasterSchema.index({ type: 1, name: 1 }, { unique: true });
+
 
 module.exports = mongoose.model("Master", MasterSchema);
