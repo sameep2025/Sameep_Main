@@ -18,6 +18,9 @@ const dummyCategoryRoutes = require('./routes/dummyCategoryRoutes');
 
 const app = express();
 
+// Behind a load balancer/proxy (e.g., ALB), trust proxy so protocol and IP are correct
+app.set('trust proxy', 1);
+
 // Connect to MongoDB
 connectDB();
 
@@ -66,6 +69,7 @@ app.use('/uploads', express.static(uploadsDir));
 
 // Routes
 app.get('/', (req, res) => res.json({ ok: true }));
+app.get('/api/health', (req, res) => res.status(200).json({ status: 'ok' }));
 app.use('/api/categories', categoryRoutes);
 app.use('/api/vendors', vendorRoutes);
 app.use('/api/masters', masterRoutes);
