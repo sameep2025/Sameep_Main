@@ -1,10 +1,5 @@
 import axios from "axios";
-
-// Set your backend URL based on environment
-const API_BASE_URL =
-  process.env.NODE_ENV === "development"
-    ? "http://localhost:5000"
-    : "https://Sameep-V3.ap-south-1.elasticbeanstalk.com";
+import API_BASE_URL from "./config";
 
 const API = axios.create({
   baseURL: API_BASE_URL,
