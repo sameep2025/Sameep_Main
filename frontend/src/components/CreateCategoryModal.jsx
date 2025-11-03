@@ -787,6 +787,8 @@ const updateColorScheme = (index, key, value) => {
       formData.append("categoryPricing", JSON.stringify(categoryPricing || []));
       formData.append("socialHandle", JSON.stringify(socialHandle || []));
       formData.append("displayType", JSON.stringify(displayType || []));
+
+      
       try {
         formData.append("uiRules", JSON.stringify({ includeLeafChildren: !!includeLeafChildren }));
       } catch {
@@ -1008,14 +1010,6 @@ const updateColorScheme = (index, key, value) => {
                 placeholder="Select"
                 multi
               />
-              <label style={{ display: 'flex', alignItems: 'center', gap: 8, color: '#444' }}>
-                <input
-                  type="checkbox"
-                  checked={includeLeafChildren}
-                  onChange={(e) => setIncludeLeafChildren(e.target.checked)}
-                />
-                Include children of selected item inside card
-              </label>
               <ChipSelect
                 label="Set Signup Levels"
                 options={signupLevelOptions}
@@ -1080,19 +1074,11 @@ const updateColorScheme = (index, key, value) => {
                 style={inputStyle}
               />
               <textarea
-                placeholder="Terms & Conditions"
-                value={terms}
-                onChange={(e) => setTerms(e.target.value)}
-                style={textareaStyle}
-              />
-              <ChipSelect
-                label="Set Display Types"
-                options={displayTypeOptions}
-                value={displayType}
-                onChange={setDisplayType}
-                placeholder="Select"
-                multi
-              />
+            placeholder="Terms & Conditions"
+            value={terms}
+            onChange={(e) => setTerms(e.target.value)}
+            style={textareaStyle}
+          />
             </>
           )}
           {!parentId &&

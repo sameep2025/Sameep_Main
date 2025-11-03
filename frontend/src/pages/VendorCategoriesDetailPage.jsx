@@ -456,6 +456,13 @@ export default function VendorCategoriesDetailPage() {
     return out;
   }, [rows, rowMatches]);
 
+  const hasInventory = useMemo(() => {
+    try {
+      const entries = Object.entries(linkedAttributes || {}).filter(([k, v]) => k.endsWith(':inventoryLabels') && Array.isArray(v) && v.length > 0);
+      return (entries.length > 0) || Boolean(inventoryLabelName);
+    } catch { return Boolean(inventoryLabelName); }
+  }, [linkedAttributes, inventoryLabelName]);
+
   return (
     <div style={{ padding: 20 }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
@@ -608,7 +615,12 @@ export default function VendorCategoriesDetailPage() {
                 {levelHeaders.map((h, i) => (
                   <th key={i} style={{ border: '1px solid #ccc', padding: 8 }}>{h}</th>
                 ))}
-                <th style={{ border: '1px solid #ccc', padding: 8 }}>Attributes</th>
+                {hasInventory ? (
+                  <th style={{ border: '1px solid #ccc', padding: 8 }}>Attributes</th>
+                ) : null}
+                {!hasInventory ? (
+                  <th style={{ border: '1px solid #ccc', padding: 8 }}>Images</th>
+                ) : null}
                 <th style={{ border: '1px solid #ccc', padding: 8 }}>Price</th>
                 <th style={{ border: '1px solid #ccc', padding: 8 }}>Action</th>
               </tr>
@@ -619,77 +631,97 @@ export default function VendorCategoriesDetailPage() {
                   {levelHeaders.map((_, i) => (
                     <td key={i} style={{ border: '1px solid #ccc', padding: 8 }}>{row.levels[i] ?? '-'}</td>
                   ))}
-                  {/* Attributes column - single item per row */}
-                  <td style={{ border: '1px solid #ccc', padding: 8 }}>
-                    {match ? (
-                      (() => {
-                        const blocks = Object.entries(match.selections || {}).flatMap(([fam, fields]) => {
-                          const entries = Object.entries(fields || {}).filter(([k, v]) => {
-                            const fn = String(k).toLowerCase().replace(/[^a-z0-9]/g, '');
-                            return fn !== 'modelfields' && v != null && String(v).trim() !== '';
+                  {hasInventory ? (
+                    <td style={{ border: '1px solid #ccc', padding: 8 }}>
+                      {match ? (
+                        (() => {
+                          const blocks = Object.entries(match.selections || {}).flatMap(([fam, fields]) => {
+                            const entries = Object.entries(fields || {}).filter(([k, v]) => {
+                              const fn = String(k).toLowerCase().replace(/[^a-z0-9]/g, '');
+                              return fn !== 'modelfields' && v != null && String(v).trim() !== '';
+                            });
+                            return entries.map(([k, v]) => ({ key: `${fam}:${k}`, label: `${k}:`, value: String(v) }));
                           });
-                          return entries.map(([k, v]) => ({ key: `${fam}:${k}`, label: `${k}:`, value: String(v) }));
-                        });
-                        return (
-                          <div style={{ border: '1px solid #e5e7eb', borderRadius: 6, padding: 6, background: '#f8fafc' }}>
-                            {blocks.length === 0 ? (
-                              <div style={{ fontSize: 12, color: '#64748b' }}>No attributes</div>
-                            ) : (
-                              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))', gap: 6 }}>
-                                {blocks.map((b) => (
-                                  <div key={b.key} style={{ fontSize: 12, color: '#334155' }}>
-                                    <span style={{ fontWeight: 600 }}>{b.label}</span> <span>{b.value}</span>
-                                  </div>
-                                ))}
+                          return (
+                            <div style={{ border: '1px solid #e5e7eb', borderRadius: 6, padding: 6, background: '#f8fafc' }}>
+                              {blocks.length === 0 ? (
+                                <div style={{ fontSize: 12, color: '#64748b' }}>No attributes</div>
+                              ) : (
+                                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))', gap: 6 }}>
+                                  {blocks.map((b) => (
+                                    <div key={b.key} style={{ fontSize: 12, color: '#334155' }}>
+                                      <span style={{ fontWeight: 600 }}>{b.label}</span> <span>{b.value}</span>
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })()
+                      ) : (
+                        <span style={{ color: '#94a3b8' }}>—</span>
+                      )}
+                    </td>
+                  ) : null}
+                  {!hasInventory ? (
+                    <td style={{ border: '1px solid #ccc', padding: 8, verticalAlign: 'top' }}>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                          {(Array.isArray(vendor?.rowImages?.[row.id]) ? vendor.rowImages[row.id] : []).map((src, i) => {
+                            const raw = String(src || '');
+                            const url = raw.startsWith('http') ? raw : `http://localhost:5000${raw}`;
+                            return (
+                              <div key={i} style={{ position: 'relative', width: 56 }}>
+                                <img src={url} alt={`img-${i}`} style={{ width: 56, height: 56, objectFit: 'cover', borderRadius: 6, border: '1px solid #eee' }} />
+                                <div style={{ position: 'absolute', right: 2, top: 2, display: 'flex', gap: 4 }}>
+                                  <button title="Replace" onClick={() => {
+                                    const input = document.createElement('input');
+                                    input.type = 'file'; input.accept = 'image/*';
+                                    input.onchange = async (e) => {
+                                      const file = (e.target.files || [])[0]; if (!file) return;
+                                      const form = new FormData(); form.append('image', file);
+                                      try {
+                                        const res = await axios.put(`http://localhost:5000/api/vendors/${vendorId}/rows/${row.id}/images/${i}`, form, { headers: { 'Content-Type': 'multipart/form-data' } });
+                                        const imgs = res.data?.images || [];
+                                        setVendor((prev) => ({ ...(prev||{}), rowImages: { ...((prev||{}).rowImages||{}), [row.id]: imgs } }));
+                                      } catch (err) { alert(err?.response?.data?.message || 'Replace failed'); }
+                                    };
+                                    input.click();
+                                  }} style={{ padding: 2, border: 'none', background: 'rgba(255,255,255,0.85)', borderRadius: 4, cursor: 'pointer' }}>✎</button>
+                                  <button title="Delete" onClick={async () => {
+                                    if (!window.confirm('Delete this image?')) return;
+                                    try {
+                                      const res = await axios.delete(`http://localhost:5000/api/vendors/${vendorId}/rows/${row.id}/images/${i}`);
+                                      const imgs = res.data?.images || [];
+                                      setVendor((prev) => ({ ...(prev||{}), rowImages: { ...((prev||{}).rowImages||{}), [row.id]: imgs } }));
+                                    } catch (err) { alert(err?.response?.data?.message || 'Delete failed'); }
+                                  }} style={{ padding: 2, border: 'none', background: 'rgba(255,255,255,0.85)', borderRadius: 4, cursor: 'pointer' }}>🗑️</button>
+                                </div>
                               </div>
-                            )}
-
-      {/* Per-row Price Override Edit Modal */}
-      {rowPriceEdit && (
-        <div style={{ position: 'fixed', inset: 0, background: 'transparent', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1100 }}>
-          <div style={{ background: '#fff', padding: 16, borderRadius: 10, minWidth: 320 }}>
-            <h3 style={{ marginTop: 0 }}>Edit Row Price</h3>
-            <div style={{ fontSize: 12, color: '#475569', marginBottom: 8 }}>
-              <div><b>Category:</b> {rowPriceEdit.labels?.category || ''}</div>
-            </div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-              <input type="number" placeholder="Price" value={rowPriceEdit.price} onChange={(e) => setRowPriceEdit((p) => ({ ...p, price: e.target.value }))} style={{ padding: 8, border: '1px solid #ddd', borderRadius: 6 }} />
-              <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 8 }}>
-                <button onClick={() => setRowPriceEdit(null)} style={{ padding: '6px 10px', borderRadius: 6, background: '#e5e7eb', border: 'none' }}>Cancel</button>
-                <button onClick={async () => {
-                  try {
-                    const key = rowPriceEdit.key;
-                    const rowKey = rowPriceEdit.rowKey;
-                    const priceVal = rowPriceEdit.price === '' ? null : Number(rowPriceEdit.price);
-                    const next = (Array.isArray(invItems) ? invItems : []).map((p) => {
-                      if ((p._id || p.at) !== key) return p;
-                      const updated = { ...p };
-                      const currentMap = (updated.pricesByRow && typeof updated.pricesByRow === 'object') ? { ...updated.pricesByRow } : {};
-                      currentMap[rowKey] = priceVal;
-                      updated.pricesByRow = currentMap;
-                      return updated;
-                    });
-                    setInvItems(next);
-                    if (vendorId && categoryId) {
-                      await axios.put(`http://localhost:5000/api/vendors/${vendorId}/inventory-selections`, { categoryId, items: next });
-                    }
-                    setRowPriceEdit(null);
-                  } catch (e) {
-                    alert(e?.response?.data?.message || 'Failed to update');
-                  }
-                }} style={{ padding: '6px 10px', borderRadius: 6, background: '#0ea5e9', color: '#fff', border: 'none' }}>Save</button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-                          </div>
-                        );
-                      })()
-                    ) : (
-                      <span style={{ color: '#94a3b8' }}>—</span>
-                    )}
-                  </td>
+                            );
+                          })}
+                        </div>
+                        <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                          <span style={{ fontSize: 12, color: '#475569' }}>Uploaded: {(Array.isArray(vendor?.rowImages?.[row.id]) ? vendor.rowImages[row.id].length : 0)}/5</span>
+                          <input type="file" accept="image/*" multiple onChange={(e) => {
+                            const existing = Array.isArray(vendor?.rowImages?.[row.id]) ? vendor.rowImages[row.id].length : 0;
+                            const remaining = Math.max(0, 5 - existing);
+                            const files = Array.from(e.target.files || []).slice(0, remaining);
+                            if (files.length === 0) return;
+                            const form = new FormData(); files.forEach((f) => form.append('images', f));
+                            (async () => {
+                              try {
+                                const res = await axios.post(`http://localhost:5000/api/vendors/${vendorId}/rows/${row.id}/images`, form, { headers: { 'Content-Type': 'multipart/form-data' } });
+                                const imgs = res.data?.images || [];
+                                setVendor((prev) => ({ ...(prev||{}), rowImages: { ...((prev||{}).rowImages||{}), [row.id]: imgs } }));
+                                e.target.value = '';
+                              } catch (err) { alert(err?.response?.data?.message || 'Upload failed'); }
+                            })();
+                          }} />
+                        </div>
+                      </div>
+                    </td>
+                  ) : null}
                   <td style={{ border: '1px solid #ccc', padding: 8 }}>
                     {(() => {
                       const rowKey = Array.isArray(row.levelIds) && row.levelIds.length ? row.levelIds.map(String).join('|') : String(row.id);
@@ -751,6 +783,49 @@ export default function VendorCategoriesDetailPage() {
                     }
                     await fetchCombos();
                     setVariantEdit(null);
+                  } catch (e) {
+                    alert(e?.response?.data?.message || 'Failed to update');
+                  }
+                }} style={{ padding: '6px 10px', borderRadius: 6, background: '#0ea5e9', color: '#fff', border: 'none' }}>Save</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Row Price Edit Modal (Inventory per-row override) */}
+      {rowPriceEdit && (
+        <div style={{ position: 'fixed', inset: 0, background: 'transparent', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1100 }}>
+          <div style={{ background: '#fff', padding: 16, borderRadius: 10, minWidth: 340 }}>
+            <h3 style={{ marginTop: 0 }}>Edit Row Price</h3>
+            <div style={{ fontSize: 12, color: '#475569', marginBottom: 8 }}>
+              <div><b>Category:</b> {rowPriceEdit.labels?.category}</div>
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <input type="number" placeholder="Price" value={rowPriceEdit.price}
+                     onChange={(e) => setRowPriceEdit((p) => ({ ...p, price: e.target.value }))}
+                     style={{ padding: 8, border: '1px solid #ddd', borderRadius: 6 }} />
+              <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 8 }}>
+                <button onClick={() => setRowPriceEdit(null)} style={{ padding: '6px 10px', borderRadius: 6, background: '#e5e7eb', border: 'none' }}>Cancel</button>
+                <button onClick={async () => {
+                  try {
+                    const key = rowPriceEdit.key;
+                    const rowKey = rowPriceEdit.rowKey;
+                    const priceVal = rowPriceEdit.price === '' ? null : Number(rowPriceEdit.price);
+                    const next = (Array.isArray(invItems) ? invItems : []).map((p) => {
+                      if ((p._id || p.at) !== key) return p;
+                      const updated = { ...p };
+                      const currentMap = (updated.pricesByRow && typeof updated.pricesByRow === 'object') ? { ...updated.pricesByRow } : {};
+                      currentMap[rowKey] = priceVal;
+                      updated.pricesByRow = currentMap;
+                      return updated;
+                    });
+                    setInvItems(next);
+                    if (vendorId && categoryId) {
+                      await axios.put(`http://localhost:5000/api/vendors/${vendorId}/inventory-selections`, { categoryId, items: next });
+                    }
+                    setRowPriceEdit(null);
+                    try { window.dispatchEvent(new CustomEvent('vendorPricingUpdated', { detail: { vendorId, categoryId } })); } catch {}
                   } catch (e) {
                     alert(e?.response?.data?.message || 'Failed to update');
                   }
@@ -1060,6 +1135,7 @@ export default function VendorCategoriesDetailPage() {
                   {heading}
                 </th>
               ))}
+              <th style={{ border: '1px solid #e2e8f0', padding: '10px 12px', textAlign: 'left', fontWeight: 600 }}>Images</th>
               <th style={{ border: '1px solid #e2e8f0', padding: '10px 12px', textAlign: 'left', fontWeight: 600 }}>Actions</th>
             </tr>
           </thead>
@@ -1087,6 +1163,64 @@ export default function VendorCategoriesDetailPage() {
                       {rowData.get(heading) || '—'}
                     </td>
                   ))}
+                  <td style={{ border: '1px solid #e2e8f0', padding: '10px 12px' }}>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                        {(Array.isArray(it.images) ? it.images : []).map((src, i) => {
+                          const raw = String(src || '');
+                          const url = raw.startsWith('http') ? raw : `http://localhost:5000${raw}`;
+                          return (
+                            <div key={i} style={{ position: 'relative', width: 56 }}>
+                              <img src={url} alt={`img-${i}`} style={{ width: 56, height: 56, objectFit: 'cover', borderRadius: 6, border: '1px solid #eee' }} />
+                              <div style={{ position: 'absolute', right: 2, top: 2, display: 'flex', gap: 4 }}>
+                                <button title="Replace" onClick={() => {
+                                  const input = document.createElement('input');
+                                  input.type = 'file'; input.accept = 'image/*';
+                                  input.onchange = async (e) => {
+                                    const file = (e.target.files || [])[0];
+                                    if (!file) return;
+                                    const form = new FormData(); form.append('image', file);
+                                    try {
+                                      const res = await axios.put(`http://localhost:5000/api/vendors/${vendorId}/inventory/${categoryId}/${it._id || it.at}/images/${i}`, form, { headers: { 'Content-Type': 'multipart/form-data' } });
+                                      const imgs = res.data?.images || [];
+                                      setInvItems((prev) => prev.map((p) => (p._id || p.at) === (it._id || it.at) ? { ...p, images: imgs } : p));
+                                    } catch (err) { alert(err?.response?.data?.message || 'Replace failed'); }
+                                  };
+                                  input.click();
+                                }} style={{ padding: 2, border: 'none', background: 'rgba(255,255,255,0.85)', borderRadius: 4, cursor: 'pointer' }}>✎</button>
+                                <button title="Delete" onClick={async () => {
+                                  if (!window.confirm('Delete this image?')) return;
+                                  try {
+                                    const res = await axios.delete(`http://localhost:5000/api/vendors/${vendorId}/inventory/${categoryId}/${it._id || it.at}/images/${i}`);
+                                    const imgs = res.data?.images || [];
+                                    setInvItems((prev) => prev.map((p) => (p._id || p.at) === (it._id || it.at) ? { ...p, images: imgs } : p));
+                                  } catch (err) { alert(err?.response?.data?.message || 'Delete failed'); }
+                                }} style={{ padding: 2, border: 'none', background: 'rgba(255,255,255,0.85)', borderRadius: 4, cursor: 'pointer' }}>🗑️</button>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                      <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                        <span style={{ fontSize: 12, color: '#475569' }}>Uploaded: {(Array.isArray(it.images) ? it.images.length : 0)}/5</span>
+                        <input type="file" accept="image/*" multiple onChange={(e) => {
+                          const existing = Array.isArray(it.images) ? it.images.length : 0;
+                          const remaining = Math.max(0, 5 - existing);
+                          const files = Array.from(e.target.files || []).slice(0, remaining);
+                          const form = new FormData(); files.forEach((f) => form.append('images', f));
+                          if (files.length === 0) return;
+                          (async () => {
+                            try {
+                              const res = await axios.post(`http://localhost:5000/api/vendors/${vendorId}/inventory/${categoryId}/${it._id || it.at}/images`, form, { headers: { 'Content-Type': 'multipart/form-data' } });
+                              const imgs = res.data?.images || [];
+                              setInvItems((prev) => prev.map((p) => (p._id || p.at) === (it._id || it.at) ? { ...p, images: imgs } : p));
+                              e.target.value = '';
+                            } catch (err) { alert(err?.response?.data?.message || 'Upload failed'); }
+                          })();
+                        }} />
+                      </div>
+                    </div>
+                  </td>
                   <td style={{ border: '1px solid #e2e8f0', padding: '10px 12px' }}>
                     <div style={{ display: 'flex', gap: 8 }}>
                       <button

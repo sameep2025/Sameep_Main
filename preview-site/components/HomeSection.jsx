@@ -1,7 +1,32 @@
 import { useRouter } from "next/router";
+import { useState, useMemo, useEffect } from "react";
 
-export default function HomeSection({ businessName }) {
+export default function HomeSection({ businessName, profilePictures = [] }) {
   const router = useRouter();
+  const [currentIdx, setCurrentIdx] = useState(0);
+
+  const normalizedPics = useMemo(() => {
+    return (Array.isArray(profilePictures) ? profilePictures : [])
+      .map((s) => {
+        const str = String(s || "");
+        if (!str) return null;
+        if (str.startsWith("http://") || str.startsWith("https://") || str.startsWith("data:")) return str;
+        if (str.startsWith("/")) return `http://localhost:5000${str}`;
+        return `http://localhost:5000/${str}`;
+      })
+      .filter(Boolean);
+  }, [profilePictures]);
+
+  // no-op if no images
+
+  useEffect(() => {
+    if (normalizedPics.length <= 1) return;
+    setCurrentIdx(0);
+    const id = setInterval(() => {
+      setCurrentIdx((i) => (i + 1) % normalizedPics.length);
+    }, 3000);
+    return () => clearInterval(id);
+  }, [normalizedPics.length]);
 
   return (
     <section
@@ -14,123 +39,172 @@ export default function HomeSection({ businessName }) {
         color: "white",
       }}
     >
-      {/* Centered container with limited width */}
       <div
         style={{
-          maxWidth: "1200px",   // 👈 set max page width
-          margin: "0 auto",     // 👈 center horizontally
-          paddingLeft: "40px",  // 👈 inner padding
+          maxWidth: "1200px",
+          margin: "0 auto",
+          paddingLeft: "40px",
           paddingRight: "40px",
+          display: "grid",
+          gridTemplateColumns: "1fr 520px",
+          gap: 24,
+          alignItems: "start",
         }}
       >
-        {/* Business Name */}
-        <h1
-          style={{
-            fontSize: "36px",
-            fontWeight: "bold",
-            marginBottom: "20px",
-          }}
-        >
-          {businessName}
-        </h1>
+        {/* Left: text */}
+        <div>
+          <h1
+            style={{
+              fontSize: "36px",
+              fontWeight: "bold",
+              marginBottom: "20px",
+            }}
+          >
+            {businessName}
+          </h1>
 
-        {/* Description Paragraph */}
-        <p
-          style={{
-            fontSize: "16px",
-            maxWidth: "700px",
-            marginBottom: "30px",
-          }}
-        >
-          Lorem ipsum dolor sit amet, consectetur adipiscing elit. Quisque
-          euismod est in sapien feugiat, nec ultrices nisl fermentum. Sed vel
-          sem in nulla suscipit finibus. Mauris vitae quam sit amet nulla
-          hendrerit varius.
-        </p>
+          <p
+            style={{
+              fontSize: "16px",
+              maxWidth: "700px",
+              marginBottom: "30px",
+            }}
+          >
+            Lorem ipsum dolor sit amet, consectetur adipiscing elit. Quisque
+            euismod est in sapien feugiat, nec ultrices nisl fermentum. Sed vel
+            sem in nulla suscipit finibus. Mauris vitae quam sit amet nulla
+            hendrerit varius.
+          </p>
 
-        {/* Stats Row */}
-        <div
-          style={{
-            display: "flex",
-            gap: "40px",
-            marginBottom: "30px",
-            flexWrap: "wrap",
-          }}
-        >
-          <div>
-            <div
-              style={{
-                fontSize: "24px",
-                fontWeight: "900",
-                color: "#FBBF24",
-              }}
-            >
-              15+
+          <div
+            style={{
+              display: "flex",
+              gap: "40px",
+              marginBottom: "30px",
+              flexWrap: "wrap",
+            }}
+          >
+            <div>
+              <div style={{ fontSize: "24px", fontWeight: "900", color: "#FBBF24" }}>15+</div>
+              <div>Years Experience</div>
             </div>
-            <div>Years Experience</div>
+            <div>
+              <div style={{ fontSize: "24px", fontWeight: "900", color: "#FBBF24" }}>1000+</div>
+              <div>Happy Customers</div>
+            </div>
+            <div>
+              <div style={{ fontSize: "24px", fontWeight: "900", color: "#FBBF24" }}>100%</div>
+              <div>Pure Organic</div>
+            </div>
           </div>
-          <div>
-            <div
+
+          <div style={{ display: "flex", gap: "20px", flexWrap: "wrap" }}>
+            <button
+              onClick={() => {
+                const el = document.getElementById("products");
+                if (el) el.scrollIntoView({ behavior: "smooth" });
+              }}
               style={{
-                fontSize: "24px",
-                fontWeight: "900",
-                color: "#FBBF24",
+                padding: "12px 24px",
+                backgroundColor: "#FBBF24",
+                color: "black",
+                border: "none",
+                borderRadius: "30px",
+                cursor: "pointer",
+                fontWeight: "bold",
+                fontSize: "16px",
               }}
             >
-              1000+
-            </div>
-            <div>Happy Customers</div>
-          </div>
-          <div>
-            <div
+              View Products
+            </button>
+
+            <button
+              onClick={() => alert("Order Now Clicked")}
               style={{
-                fontSize: "24px",
-                fontWeight: "900",
-                color: "#FBBF24",
+                padding: "12px 24px",
+                backgroundColor: "#058963",
+                color: "white",
+                border: "white 2px solid",
+                borderRadius: "30px",
+                cursor: "pointer",
+                fontWeight: "bold",
+                fontSize: "16px",
               }}
             >
-              100%
-            </div>
-            <div>Pure Organic</div>
+              Order Now
+            </button>
           </div>
         </div>
 
-        {/* Buttons */}
-        <div style={{ display: "flex", gap: "20px", flexWrap: "wrap" }}>
-          <button
-  onClick={() => {
-    const el = document.getElementById("products");
-    if (el) el.scrollIntoView({ behavior: "smooth" });
-  }}
-  style={{
-    padding: "12px 24px",
-    backgroundColor: "#FBBF24",
-    color: "black",
-    border: "none",
-    borderRadius: "30px",
-    cursor: "pointer",
-    fontWeight: "bold",
-    fontSize: "16px",
-  }}
->
-  View Products
-</button>
-
-          <button
-            onClick={() => alert("Order Now Clicked")}
-            style={{
-              padding: "12px 24px",
-              backgroundColor: "#058963",
-              color: "white",
-              border: "white 2px solid",
-              borderRadius: "30px",
-              cursor: "pointer",
-              fontWeight: "bold",
-              fontSize: "16px",
-            }}
-          >
-            Order Now
-          </button>
+        {/* Right: profile pictures slider */}
+        <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 10 }}>
+          {normalizedPics.length === 0 ? (
+            <div style={{ width: 500, height: 360, borderRadius: 14, background: "rgba(255,255,255,0.2)", display: "flex", alignItems: "center", justifyContent: "center" }}>No Image</div>
+          ) : (
+            <div style={{ width: 500, height: 360, borderRadius: 14, overflow: 'hidden', background: '#fff', position: 'relative' }}>
+              <div
+                style={{
+                  display: 'flex',
+                  width: `${normalizedPics.length * 100}%`,
+                  height: '100%',
+                  transform: `translateX(-${currentIdx * (100 / normalizedPics.length)}%)`,
+                  transition: 'transform 500ms ease',
+                }}
+              >
+                {normalizedPics.map((src, i) => (
+                  <div key={i} style={{ width: `${100 / normalizedPics.length}%`, height: '100%', flex: '0 0 auto' }}>
+                    <img src={src} alt={`Profile ${i + 1}`} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                  </div>
+                ))}
+              </div>
+              {normalizedPics.length > 1 ? (
+                <>
+                  <button
+                    aria-label="Previous"
+                    onClick={() => setCurrentIdx((i) => (i - 1 + normalizedPics.length) % normalizedPics.length)}
+                    style={{
+                      position: 'absolute', left: 6, top: '50%', transform: 'translateY(-50%)',
+                      width: 32, height: 32, borderRadius: '999px', border: 'none', cursor: 'pointer',
+                      background: 'rgba(0,0,0,0.45)', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center'
+                    }}
+                  >
+                    ‹
+                  </button>
+                  <button
+                    aria-label="Next"
+                    onClick={() => setCurrentIdx((i) => (i + 1) % normalizedPics.length)}
+                    style={{
+                      position: 'absolute', right: 6, top: '50%', transform: 'translateY(-50%)',
+                      width: 32, height: 32, borderRadius: '999px', border: 'none', cursor: 'pointer',
+                      background: 'rgba(0,0,0,0.45)', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center'
+                    }}
+                  >
+                    ›
+                  </button>
+                </>
+              ) : null}
+            </div>
+          )}
+          {normalizedPics.length > 1 ? (
+            <div style={{ display: 'flex', gap: 8, justifyContent: 'center', alignItems: 'center', marginTop: 6 }}>
+              {normalizedPics.map((_, i) => (
+                <button
+                  key={i}
+                  aria-label={`Go to slide ${i + 1}`}
+                  onClick={() => setCurrentIdx(i)}
+                  style={{
+                    width: i === currentIdx ? 10 : 8,
+                    height: i === currentIdx ? 10 : 8,
+                    borderRadius: '999px',
+                    border: 'none',
+                    background: i === currentIdx ? '#ffffff' : 'rgba(255,255,255,0.55)',
+                    cursor: 'pointer',
+                    transition: 'all 150ms ease',
+                  }}
+                />
+              ))}
+            </div>
+          ) : null}
         </div>
       </div>
     </section>

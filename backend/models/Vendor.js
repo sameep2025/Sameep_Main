@@ -32,6 +32,12 @@ const vendorSchema = new mongoose.Schema({
     },
   ],
 
+  // Profile pictures (up to 5 URLs)
+  profilePictures: { type: [String], default: [] },
+
+  // Non-inventory images keyed by leaf category node id: { [categoryNodeId]: string[] }
+  rowImages: { type: Object, default: {} },
+
   // Stores inventory selections keyed by categoryId
   // Shape: { [categoryId]: Array<{ at:number, categoryId:string, selections: { [family]: { [field]: string } } }> }
   inventorySelections: { type: Object, default: {} },

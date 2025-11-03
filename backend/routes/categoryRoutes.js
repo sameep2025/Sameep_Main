@@ -29,91 +29,89 @@ const updateFreeTextRecursive = async (categoryId, enabled) => {
   }
 };
 
-
+/* ---------------- CREATE CATEGORY ---------------- */
 /* ---------------- CREATE CATEGORY ---------------- */
 router.post("/", upload.single("image"), async (req, res) => {
   logApi(req, res, "create-category");
   try {
-    const { name, parentId, price, terms, visibleToUser, visibleToVendor, freeText, seoKeywords, categoryType, addToCart } = req.body;
+    const {
+      name,
+      parentId,
+      price,
+      terms,
+      visibleToUser,
+      visibleToVendor,
+      freeText,
+      seoKeywords,
+      categoryType,
+      addToCart
+    } = req.body;
 
-    if (!name || !name.trim()) return res.status(400).json({ message: "Name is required" });
+    if (!name || !name.trim()) {
+      return res.status(400).json({ message: "Name is required" });
+    }
 
-    const parent = parentId && parentId !== "" ? parentId : null;
+    // ✅ Handle parent correctly (supports parentId or parent)
+    const parentRaw = (typeof parentId !== 'undefined' ? parentId : req.body.parent);
+    const parent = parentRaw && parentRaw !== "" && parentRaw !== "null" ? parentRaw : null;
 
-    // Check duplicate
+    // ✅ Prevent duplicate under same parent
     const exists = await Category.findOne({ name, parent });
-    if (exists) return res.status(400).json({ message: "Category already exists under this parent" });
-
-    const parsedSequence = Number(req.body.sequence) || 0;
-    const parsedPrice = price ? Number(price) : null;
+    if (exists) {
+      return res.status(400).json({ message: "Category already exists under this parent" });
+    }
 
     const categoryData = {
       name,
       parent,
-      sequence: parsedSequence,
-      price: parent ? parsedPrice : undefined,
+      sequence: Number(req.body.sequence) || 0,
       terms: terms || "",
-
-      enableFreeText: req.body.enableFreeText !== undefined ? (req.body.enableFreeText === "true" || req.body.enableFreeText === true) : false,
-
+      price: parent ? (price ? Number(price) : null) : undefined,
       visibleToUser: visibleToUser === "true" || visibleToUser === true,
       visibleToVendor: visibleToVendor === "true" || visibleToVendor === true,
       categoryType: categoryType || "Products",
       availableForCart: req.body.availableForCart === "true" || req.body.availableForCart === "on" || req.body.availableForCart === true,
-
-
+      enableFreeText: req.body.enableFreeText === "true" || req.body.enableFreeText === true,
       freeText: parent ? freeText || "" : undefined,
       seoKeywords: parent ? undefined : seoKeywords || "",
-      postRequestsDeals: !parent ? req.body.postRequestsDeals === "true" : undefined,
-      loyaltyPoints: !parent ? req.body.loyaltyPoints === "true" : undefined,
-      linkAttributesPricing: !parent ? req.body.linkAttributesPricing === "true" : undefined,
-      freeTexts: !parent ? Array.from({ length: 10 }, (_, i) => req.body[`freeText${i}`] || "") : undefined,
-  // inventory label and linked attributes - accept for any category
-  inventoryLabelName: req.body.inventoryLabelName !== undefined ? req.body.inventoryLabelName : ( !parent ? (req.body.inventoryLabelName || "") : undefined ),
+      linkAttributesPricing: req.body.linkAttributesPricing === "true",
+      loyaltyPoints: req.body.loyaltyPoints === "true",
+      postRequestsDeals: req.body.postRequestsDeals === "true",
+      inventoryLabelName: req.body.inventoryLabelName || "",
       imageUrl: req.file ? `/uploads/${req.file.filename}` : undefined,
     };
 
-    // Attach dropdown fields if provided (parse as arrays)
-    [
-      "categoryVisibility",
-      "categoryModel",
-      "categoryPricing",
-      "socialHandle",
-      "displayType",
-    ].forEach((key) => {
-      if (req.body[key] !== undefined) {
+    // ✅ Normalize displayType to always be an array
+    if (req.body.displayType) {
+      try {
+        const parsed = JSON.parse(req.body.displayType);
+        categoryData.displayType = Array.isArray(parsed)
+          ? parsed
+          : [String(parsed)];
+      } catch {
+        categoryData.displayType = [String(req.body.displayType)];
+      }
+    } else {
+      categoryData.displayType = [];
+    }
+
+    // ✅ Parse optional dropdown fields (same logic)
+    ["categoryVisibility", "categoryModel", "categoryPricing", "socialHandle"].forEach((key) => {
+      if (req.body[key]) {
         try {
           const parsed = JSON.parse(req.body[key]);
-          categoryData[key] = Array.isArray(parsed)
-            ? parsed
-            : parsed != null
-            ? [String(parsed)]
-            : [];
-        } catch (e) {
-          categoryData[key] = req.body[key]
-            ? [String(req.body[key])]
-            : [];
+          categoryData[key] = Array.isArray(parsed) ? parsed : [String(parsed)];
+        } catch {
+          categoryData[key] = [String(req.body[key])];
         }
-
-    // Handle uiRules JSON (per-node UI flags)
-    if (req.body.uiRules !== undefined) {
-      try {
-        const parsed = JSON.parse(req.body.uiRules);
-        if (parsed && typeof parsed === 'object') {
-          categoryData.uiRules = parsed;
-        }
-      } catch (e) {
-        // ignore invalid payload
-      }
-    }
       }
     });
 
-    // Handle linkedAttributes JSON
+    // ✅ Handle linkedAttributes
     if (req.body.linkedAttributes) {
       try {
         const parsed = JSON.parse(req.body.linkedAttributes);
-        if (parsed && typeof parsed === 'object') {
+        if (parsed && typeof parsed === "object") {
           categoryData.linkedAttributes = parsed;
         }
       } catch (e) {
@@ -121,46 +119,26 @@ router.post("/", upload.single("image"), async (req, res) => {
       }
     }
 
-
-    // Handle color schemes (JSON array)
+    // ✅ Handle color schemes
     if (req.body.colorSchemes) {
       try {
         categoryData.colorSchemes = JSON.parse(req.body.colorSchemes);
-      } catch (e) {
-        console.warn("Invalid colorSchemes JSON:", e.message);
+      } catch {
         categoryData.colorSchemes = [];
-      }
-    }
-
-    // Handle signupLevels (JSON array)
-    if (req.body.signupLevels) {
-      try {
-        const parsed = JSON.parse(req.body.signupLevels);
-        if (Array.isArray(parsed)) {
-          categoryData.signupLevels = parsed
-            .filter((it) => it && it.levelName)
-            .map((it) => ({
-              levelName: String(it.levelName),
-              sequence: Number(it.sequence ?? 0),
-              businessField: Array.isArray(it.businessField)
-                ? it.businessField.map(String)
-                : (it.businessField ? [String(it.businessField)] : []),
-            }));
-        }
-      } catch (e) {
-        console.warn("Invalid signupLevels JSON:", e.message);
       }
     }
 
     const category = new Category(categoryData);
     const saved = await category.save();
+
+    // If parent enabled free text, sync with children
     if (parent === null && categoryData.enableFreeText) {
       await updateFreeTextRecursive(saved._id, true);
     }
 
     res.json(saved);
   } catch (err) {
-    console.error(" POST /api/categories error:", err.message);
+    console.error("POST /api/categories error:", err.message);
     res.status(500).json({ message: err.message || "Server error" });
   }
 });
@@ -169,7 +147,7 @@ router.post("/", upload.single("image"), async (req, res) => {
 router.get("/", async (req, res) => {
   logApi(req, res, "list-categories");
   try {
-    let { parentId } = req.query;
+    let parentId = (typeof req.query.parentId !== 'undefined' ? req.query.parentId : req.query.parent);
     parentId = parentId === "null" ? null : parentId;
     const categories = await Category.find({ parent: parentId }).sort({ sequence: 1, createdAt: -1 });
     res.json(categories);
@@ -183,7 +161,23 @@ router.get("/:id/tree", async (req, res) => {
   logApi(req, res, "get-category-tree");
   try {
     const { id } = req.params;
-    const all = await Category.find({}, { name: 1, parent: 1, price: 1, terms: 1, sequence: 1 }).sort({ sequence: 1, createdAt: -1 }).lean();
+    // Include fields used by preview UI (displayType, uiRules, images) so child nodes have their own config
+    const all = await Category.find(
+      {},
+      {
+        name: 1,
+        parent: 1,
+        price: 1,
+        terms: 1,
+        sequence: 1,
+        displayType: 1,
+        uiRules: 1,
+        imageUrl: 1,
+        iconUrl: 1,
+      }
+    )
+      .sort({ sequence: 1, createdAt: -1 })
+      .lean();
     const map = new Map();
     all.forEach((c) => map.set(String(c._id), { ...c, children: [] }));
     all.forEach((c) => {

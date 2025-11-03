@@ -165,6 +165,9 @@ export default function VendorStatusListPage() {
   const [selectedVendorForBusinessHours, setSelectedVendorForBusinessHours] =
     useState(null);
 
+  // Profile pictures upload state: { [vendorId]: File[] }
+  const [profilePicsToUpload, setProfilePicsToUpload] = useState({});
+
   // Combos (Packages) state for combo price table
   const [combos, setCombos] = useState([]);
   const [combosLoading, setCombosLoading] = useState(false);
@@ -425,6 +428,7 @@ export default function VendorStatusListPage() {
               <th style={{ border: '1px solid #ccc', padding: 8 }}>Business Name</th>
               <th style={{ border: '1px solid #ccc', padding: 8 }}>Home Location</th>
               <th style={{ border: '1px solid #ccc', padding: 8 }}>Business Location</th>
+              <th style={{ border: '1px solid #ccc', padding: 8 }}>Profile Pictures</th>
               <th style={{ border: '1px solid #ccc', padding: 8 }}>Actions</th>
             </tr>
           </thead>
@@ -439,6 +443,109 @@ export default function VendorStatusListPage() {
                 </td>
                 <td style={{ border: '1px solid #ccc', padding: 8 }}>
                   {v.location?.nearbyLocations?.filter(Boolean).join(', ') || 'Not Set'}
+                </td>
+                <td style={{ border: '1px solid #ccc', padding: 8, verticalAlign: 'top' }}>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                      <div style={{ fontSize: 12, color: '#475569' }}>Uploaded: {(v.profilePictures || []).length}/5</div>
+                    </div>
+                    <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+                      {(v.profilePictures || []).map((src, i) => {
+                        const raw = String(src || '');
+                        const url = raw.startsWith('http://') || raw.startsWith('https://') ? raw : `http://localhost:5000${raw}`;
+                        return (
+                          <div key={i} style={{ position: 'relative', width: 56 }}>
+                            <img src={url} alt={`pic-${i}`} style={{ width: 56, height: 56, objectFit: 'cover', borderRadius: 6, border: '1px solid #eee' }} />
+                            <div style={{ position: 'absolute', right: 2, top: 2, display: 'flex', gap: 4 }}>
+                              <button
+                                title="Replace"
+                                onClick={() => {
+                                  const input = document.createElement('input');
+                                  input.type = 'file';
+                                  input.accept = 'image/*';
+                                  input.onchange = async (e) => {
+                                    const file = (e.target.files || [])[0];
+                                    if (!file) return;
+                                    const form = new FormData();
+                                    form.append('image', file);
+                                    try {
+                                      const res = await axios.put(`http://localhost:5000/api/vendors/${v._id}/profile-pictures/${i}`, form, { headers: { 'Content-Type': 'multipart/form-data' } });
+                                      const pics = res.data?.profilePictures || [];
+                                      setVendors((prev) => prev.map((x) => x._id === v._id ? { ...x, profilePictures: pics } : x));
+                                      if (selectedVendor && selectedVendor._id === v._id) setSelectedVendor((s) => ({ ...s, profilePictures: pics }));
+                                    } catch (e2) {
+                                      alert(e2?.response?.data?.message || 'Replace failed');
+                                    }
+                                  };
+                                  input.click();
+                                }}
+                                style={{ padding: 2, border: 'none', background: 'rgba(255,255,255,0.8)', borderRadius: 4, cursor: 'pointer' }}
+                              >
+                                ✎
+                              </button>
+                              <button
+                                title="Delete"
+                                onClick={async () => {
+                                  if (!window.confirm('Delete this image?')) return;
+                                  try {
+                                    const res = await axios.delete(`http://localhost:5000/api/vendors/${v._id}/profile-pictures/${i}`);
+                                    const pics = res.data?.profilePictures || [];
+                                    setVendors((prev) => prev.map((x) => x._id === v._id ? { ...x, profilePictures: pics } : x));
+                                    if (selectedVendor && selectedVendor._id === v._id) setSelectedVendor((s) => ({ ...s, profilePictures: pics }));
+                                  } catch (e2) {
+                                    alert(e2?.response?.data?.message || 'Delete failed');
+                                  }
+                                }}
+                                style={{ padding: 2, border: 'none', background: 'rgba(255,255,255,0.8)', borderRadius: 4, cursor: 'pointer' }}
+                              >
+                                🗑️
+                              </button>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                    <input
+                      type="file"
+                      accept="image/*"
+                      multiple
+                      onChange={(e) => {
+                        const existingCount = (v.profilePictures || []).length;
+                        const remaining = Math.max(0, 5 - existingCount);
+                        if (remaining <= 0) {
+                          alert('Maximum 5 images allowed. Delete or replace to add more.');
+                          e.target.value = '';
+                          return;
+                        }
+                        const files = Array.from(e.target.files || []).slice(0, remaining);
+                        setProfilePicsToUpload((prev) => ({ ...prev, [v._id]: files }));
+                      }}
+                    />
+                    <button
+                      onClick={async () => {
+                        const files = profilePicsToUpload[v._id] || [];
+                        if (!files.length) return alert('Select images to upload');
+                        const existingCount = (v.profilePictures || []).length;
+                        if (existingCount >= 5) return alert('Maximum 5 images allowed.');
+                        const form = new FormData();
+                        const remaining = Math.max(0, 5 - existingCount);
+                        files.slice(0, remaining).forEach((f) => form.append('images', f));
+                        try {
+                          const res = await axios.post(`http://localhost:5000/api/vendors/${v._id}/profile-pictures`, form, { headers: { 'Content-Type': 'multipart/form-data' } });
+                          const pics = res.data?.profilePictures || [];
+                          setVendors((prev) => prev.map((x) => x._id === v._id ? { ...x, profilePictures: pics } : x));
+                          if (selectedVendor && selectedVendor._id === v._id) setSelectedVendor((s) => ({ ...s, profilePictures: pics }));
+                          setProfilePicsToUpload((prev) => ({ ...prev, [v._id]: [] }));
+                        } catch (e) {
+                          alert(e?.response?.data?.message || 'Upload failed');
+                        }
+                      }}
+                      style={{ padding: '4px 10px', borderRadius: 6, background: '#0ea5e9', color: '#fff', border: 'none', alignSelf: 'start' }}
+                    >
+                      Upload
+                    </button>
+                    <div style={{ fontSize: 11, color: '#64748b' }}>You can upload up to 5 images.</div>
+                  </div>
                 </td>
                 <td style={{ border: '1px solid #ccc', padding: 8 }}>
                   <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
