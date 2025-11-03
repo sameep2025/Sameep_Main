@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import DummyCategoryList from "./DummyCategoryList";
 import DummyManageCombosModal from "./DummyManageCombosModal";
+import API_BASE_URL from "../config";
 
 function DummyCategoryPage() {
   const { parentId } = useParams();
@@ -23,7 +24,7 @@ function DummyCategoryPage() {
     s = s.replace(/^\//, "");
     const upIdx = s.toLowerCase().indexOf("uploads/");
     if (upIdx >= 0) s = s.substring(upIdx + "uploads/".length);
-    return `http://localhost:5000/uploads/${s}`;
+    return `${API_BASE_URL}/uploads/${s}`;
   };
 
   const loadCombos = async () => {
@@ -31,18 +32,18 @@ function DummyCategoryPage() {
     setCombosLoading(true);
     setCombosError("");
     try {
-      let res = await fetch(`http://localhost:5000/api/dummy-combos/byParent/${parentId}`);
+      let res = await fetch(`${API_BASE_URL}/api/dummy-combos/byParent/${parentId}`);
       let data;
       if (res.ok) {
         data = await res.json();
       } else {
-        res = await fetch(`http://localhost:5000/api/dummy-combos?parentCategoryId=${parentId}`);
+        res = await fetch(`${API_BASE_URL}/api/dummy-combos?parentCategoryId=${parentId}`);
         data = await res.json();
       }
       let arr = Array.isArray(data) ? data : [];
       if (arr.length === 0) {
         try {
-          const allRes = await fetch(`http://localhost:5000/api/dummy-combos`);
+          const allRes = await fetch(`${API_BASE_URL}/api/dummy-combos`);
           const allData = await allRes.json();
           if (Array.isArray(allData)) {
             const norm = (v) => (typeof v === 'string' ? v : v?.$oid || v?._id || v);
@@ -70,7 +71,7 @@ function DummyCategoryPage() {
         return;
       }
       try {
-        const res = await fetch(`http://localhost:5000/api/dummy-categories/${parentId}`);
+        const res = await fetch(`${API_BASE_URL}/api/dummy-categories/${parentId}`);
         if (!res.ok) {
           setIsTopParentSubcategory(false);
           return;
@@ -300,7 +301,7 @@ function DummyCategoryPage() {
                           try {
                             const delId = c._id?.$oid || c._id || c.id;
                             const res = await fetch(
-                              `http://localhost:5000/api/dummy-combos/${delId}`,
+                              `${API_BASE_URL}/api/dummy-combos/${delId}`,
                               { method: "DELETE" }
                             );
                             if (!res.ok) throw new Error("Failed to delete");

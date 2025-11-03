@@ -1,3 +1,4 @@
+import API_BASE_URL from "../config";
 export default function ProductsSection({ categoryName, vendor }) {
   return (
     <section id="products" style={{ padding: "40px 20px", textAlign: "center", fontFamily: "Poppins, sans-serif" }}>
@@ -53,7 +54,7 @@ export default function ProductsSection({ categoryName, vendor }) {
             >
               {child.imageUrl && (
                 <img
-                  src={`http://localhost:5000${child.imageUrl}`}
+                  src={`${API_BASE_URL}${child.imageUrl}`}
                   alt={child.name}
                   style={{ width: "100%", height: "120px", objectFit: "cover", marginBottom: "8px", borderRadius: "6px" }}
                 />

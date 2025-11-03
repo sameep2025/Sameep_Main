@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import axios from "axios";
+import API_BASE_URL from "../config";
 
 function AddCustomerModal({ show, onClose, onAdded }) {
   const [step, setStep] = useState(1);
@@ -66,7 +67,7 @@ function AddCustomerModal({ show, onClose, onAdded }) {
 
     try {
       setLoading(true);
-      await axios.post("http://localhost:5000/api/customers/request-otp", {
+      await axios.post(`${API_BASE_URL}/api/customers/request-otp`, {
         countryCode,
         phone: phone.replace(/\D/g, ""),
       });
@@ -86,7 +87,7 @@ function AddCustomerModal({ show, onClose, onAdded }) {
 
     try {
       setLoading(true);
-      await axios.post("http://localhost:5000/api/customers/verify-otp", {
+      await axios.post(`${API_BASE_URL}/api/customers/verify-otp`, {
         countryCode,
         phone: phone.replace(/\D/g, ""),
         otp,

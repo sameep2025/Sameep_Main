@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import axios from "axios";
+import API_BASE_URL from "../config";
 
 // Card for each signup level
 function SignupLevelCard({ level, onEdit, onDelete }) {
@@ -125,7 +126,7 @@ export default function SignupLevelPage() {
 
   const fetchLevels = async () => {
     try {
-      const res = await axios.get("http://localhost:5000/api/masters", { params: { type: "signupLevel" } });
+      const res = await axios.get(`${API_BASE_URL}/api/masters`, { params: { type: "signupLevel" } });
       setLevels(res.data);
     } catch (err) {
       console.error(err);
@@ -140,9 +141,9 @@ export default function SignupLevelPage() {
   const handleSave = async (data) => {
     try {
       if (data._id) {
-        await axios.put(`http://localhost:5000/api/masters/${data._id}`, { name: data.name, sequence: 0 });
+        await axios.put(`${API_BASE_URL}/api/masters/${data._id}`, { name: data.name, sequence: 0 });
       } else {
-        await axios.post("http://localhost:5000/api/masters", { name: data.name, type: "signupLevel", sequence: 0 });
+        await axios.post(`${API_BASE_URL}/api/masters`, { name: data.name, type: "signupLevel", sequence: 0 });
       }
       fetchLevels();
       setEditing(null);
@@ -155,7 +156,7 @@ export default function SignupLevelPage() {
   const handleDelete = async (level) => {
     if (!window.confirm("Delete this level?")) return;
     try {
-      await axios.delete(`http://localhost:5000/api/masters/${level._id}`);
+      await axios.delete(`${API_BASE_URL}/api/masters/${level._id}`);
       fetchLevels();
     } catch (err) {
       console.error(err);

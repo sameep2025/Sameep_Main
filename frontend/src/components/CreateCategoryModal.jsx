@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo } from "react";
+import API_BASE_URL from "../config";
 function ChipSelect({ label, options = [], value = [], onChange, placeholder = "Select", multi = true, includeSelectAll = true }) {
   const [open, setOpen] = useState(false);
   const toggle = () => setOpen((o) => !o);
@@ -176,7 +177,7 @@ function CreateCategoryModal({
     const normalized = exact.toLowerCase();
     const category = familyToModelCategory[exact] || familyToModelCategory[normalized] || exact;
     try {
-      const url = `http://localhost:5000/api/models?category=${encodeURIComponent(category)}`;
+      const url = `${API_BASE_URL}/api/models?category=${encodeURIComponent(category)}`;
       const res = await fetch(url);
       if (!res.ok) {
         console.error('Failed to fetch models for', familyKey, res.status);
@@ -345,7 +346,7 @@ const updateColorScheme = (index, key, value) => {
   }, [show, initialData, parentId, parentCategoryType, parentEnableFreeText]);
   useEffect(() => {
     if (!show) return;
-    const base = "http://localhost:5000/api/masters";
+    const base = `${API_BASE_URL}/api/masters`;
     const datasets = [
       {
         setter: setVisibilityOptions,
@@ -648,7 +649,7 @@ const updateColorScheme = (index, key, value) => {
         setSubcategoryNameById((prev)=> ({ ...prev, ALL: 'All' }));
         setShowSubcatSelector(true);
         // fetch first-level subcategories for current category
-        const url = `http://localhost:5000/api/categories?parentId=${encodeURIComponent(initialData._id)}`;
+        const url = `${API_BASE_URL}/api/categories?parentId=${encodeURIComponent(initialData._id)}`;
         const res = await fetch(url);
         const data = res.ok ? await res.json() : [];
         const arr = Array.isArray(data) ? data : [];
@@ -672,7 +673,7 @@ const updateColorScheme = (index, key, value) => {
     const ok = window.confirm('Delete this subcategory?');
     if (!ok) return;
     try {
-      const res = await fetch(`http://localhost:5000/api/categories/${id}`, { method: 'DELETE' });
+      const res = await fetch(`${API_BASE_URL}/api/categories/${id}`, { method: 'DELETE' });
       if (res.ok) {
         setSubcategories((prev) => prev.filter((c) => String(c._id) !== String(id)));
         if (String(selectedSubcategoryId) === String(id)) setSelectedSubcategoryId("");
@@ -687,7 +688,7 @@ const updateColorScheme = (index, key, value) => {
       let currName = subcategoryNameById[String(id)];
       if (!currName) {
         try {
-          const r = await fetch(`http://localhost:5000/api/categories/${id}`);
+          const r = await fetch(`${API_BASE_URL}/api/categories/${id}`);
           const j = r.ok ? await r.json() : null;
           currName = j?.name || String(id);
         } catch {}
@@ -698,7 +699,7 @@ const updateColorScheme = (index, key, value) => {
       if (!trimmed) return;
       const payload = new FormData();
       payload.append('name', trimmed);
-      const res = await fetch(`http://localhost:5000/api/categories/${id}`, { method: 'PUT', body: payload });
+      const res = await fetch(`${API_BASE_URL}/api/categories/${id}`, { method: 'PUT', body: payload });
       if (res.ok) {
         // update local caches
         setSubcategoryNameById((prev)=> ({ ...prev, [String(id)]: trimmed }));
@@ -722,7 +723,7 @@ const updateColorScheme = (index, key, value) => {
       if (initialData && initialData._id) {
         const payload = new FormData();
         payload.append('linkedAttributes', JSON.stringify(next || {}));
-        await fetch(`http://localhost:5000/api/categories/${initialData._id}`, { method: 'PUT', body: payload });
+        await fetch(`${API_BASE_URL}/api/categories/${initialData._id}`, { method: 'PUT', body: payload });
       }
     } catch {}
   };
@@ -739,7 +740,7 @@ const updateColorScheme = (index, key, value) => {
       if (initialData && initialData._id) {
         const payload = new FormData();
         payload.append('linkedAttributes', JSON.stringify(next || {}));
-        await fetch(`http://localhost:5000/api/categories/${initialData._id}`, { method: 'PUT', body: payload });
+        await fetch(`${API_BASE_URL}/api/categories/${initialData._id}`, { method: 'PUT', body: payload });
       }
     } catch {}
     setShowSubcatSelector(false);
@@ -804,7 +805,7 @@ const updateColorScheme = (index, key, value) => {
         }));
         formData.append("signupLevels", JSON.stringify(levelsPayload));
       }
-      let url = "http://localhost:5000/api/categories";
+      let url = `${API_BASE_URL}/api/categories`;
       let method = "POST";
       if (initialData && initialData._id) {
         url += `/${initialData._id}`;
@@ -1250,7 +1251,7 @@ const updateColorScheme = (index, key, value) => {
                           const payload = new FormData();
                           payload.append('linkedAttributes', JSON.stringify({}));
                           payload.append('linkAttributesPricing', 'false');
-                          fetch(`http://localhost:5000/api/categories/${initialData._id}`, { method: 'PUT', body: payload });
+                          fetch(`${API_BASE_URL}/api/categories/${initialData._id}`, { method: 'PUT', body: payload });
                         }
                       } catch {}
                     }
@@ -1318,7 +1319,7 @@ const updateColorScheme = (index, key, value) => {
                 if (initialData && initialData._id) {
                   const payload = new FormData();
                   payload.append('linkedAttributes', JSON.stringify({}));
-                  await fetch(`http://localhost:5000/api/categories/${initialData._id}`, { method: 'PUT', body: payload });
+                  await fetch(`${API_BASE_URL}/api/categories/${initialData._id}`, { method: 'PUT', body: payload });
                 }
               } catch {}
             }}
@@ -1914,7 +1915,7 @@ const updateColorScheme = (index, key, value) => {
                 } catch {
                   payload.append("linkedAttributes", JSON.stringify({}));
                 }
-                const res = await fetch(`http://localhost:5000/api/categories/${initialData._id}`, {
+                const res = await fetch(`${API_BASE_URL}/api/categories/${initialData._id}`, {
                   method: "PUT",
                   body: payload,
                 });

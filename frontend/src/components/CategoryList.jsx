@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import axios from "axios";
 import CategoryCard from "./CategoryCard";
 import CreateCategoryModal from "./CreateCategoryModal";
- 
+import API_BASE_URL from "../config";
 
 function CategoryList({ parentId = null, onManageCombosClick, showManageCombosButton }) {
   const navigate = useNavigate();
@@ -28,7 +28,7 @@ function CategoryList({ parentId = null, onManageCombosClick, showManageCombosBu
 const fetchCategories = useCallback(async () => {
   try {
     const params = parentId !== null ? { parentId } : { parentId: null };
-    const res = await axios.get("http://localhost:5000/api/categories", { params });
+    const res = await axios.get(`${API_BASE_URL}/api/categories`, { params });
     setCategories(res.data);
 
     // breadcrumb
@@ -36,7 +36,7 @@ const fetchCategories = useCallback(async () => {
     let currentId = parentId;
     let first = true;
     while (currentId) {
-      const catRes = await axios.get(`http://localhost:5000/api/categories/${currentId}`);
+      const catRes = await axios.get(`${API_BASE_URL}/api/categories/${currentId}`);
       crumbs.unshift({ id: catRes.data._id, name: catRes.data.name });
       setParentEnableFreeText(catRes.data.enableFreeText); // ✅ important
       if (first) {
@@ -62,7 +62,7 @@ const fetchCategories = useCallback(async () => {
   let parentType = null;
   if (parentId) {
     try {
-      const res = await axios.get(`http://localhost:5000/api/categories/${parentId}`);
+      const res = await axios.get(`${API_BASE_URL}/api/categories/${parentId}`);
       parentType = res.data.categoryType;
       // ❌ wrong: parentEnableFreeText = res.data.enableFreeText;
       setParentEnableFreeText(res.data.enableFreeText); // ✅ correct
@@ -83,7 +83,7 @@ const fetchCategories = useCallback(async () => {
 
   if (category.parent) {
     try {
-      const res = await axios.get(`http://localhost:5000/api/categories/${category.parent}`);
+      const res = await axios.get(`${API_BASE_URL}/api/categories/${category.parent}`);
       parentType = res.data.categoryType;
       enableFreeText = res.data.enableFreeText;
     } catch (err) {
@@ -100,7 +100,7 @@ const fetchCategories = useCallback(async () => {
   const handleDelete = async (category) => {
     if (!window.confirm(`Delete "${category.name}" and its subcategories?`)) return;
     try {
-      await axios.delete(`http://localhost:5000/api/categories/${category._id}`);
+      await axios.delete(`${API_BASE_URL}/api/categories/${category._id}`);
       setRefresh((prev) => !prev);
     } catch (err) {
       console.error(err);

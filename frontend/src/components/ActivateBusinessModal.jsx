@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import axios from "axios";
+import API_BASE_URL from "../config";
 
 function ActivateBusinessModal({ show, onClose, customer, onActivated }) {
   const [businessName, setBusinessName] = useState("");
@@ -11,7 +12,7 @@ function ActivateBusinessModal({ show, onClose, customer, onActivated }) {
     if (!show) return;
     const fetchCategories = async () => {
       try {
-        const res = await axios.get("http://localhost:5000/api/categories");
+        const res = await axios.get(`${API_BASE_URL}/api/categories`);
         setCategories(res.data);
       } catch (err) {
         console.error(err);
@@ -30,9 +31,9 @@ function ActivateBusinessModal({ show, onClose, customer, onActivated }) {
     }
 
     try {
-      const res = await axios.post("http://localhost:5000/api/vendors", {
+      const res = await axios.post(`${API_BASE_URL}/api/vendors`, {
         customerId: customer._id,
-        phone: customer.phone || customer.fullNumber, // ✅ added phone
+        phone: customer.phone || customer.fullNumber, // 
         businessName,
         contactName,
         categoryId,

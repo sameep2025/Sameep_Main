@@ -488,7 +488,7 @@ export default function TopNavBar({
                   <div key={it.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "8px 0", borderBottom: "1px solid #e2e8f0" }}>
                     <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                       {it.imageUrl && (
-                        <img src={it.imageUrl.startsWith("http") ? it.imageUrl : `http://localhost:5000${it.imageUrl}`} alt={it.name} style={{ width: 48, height: 48, objectFit: "cover", borderRadius: 6 }} />
+                        <img src={it.imageUrl.startsWith("http") ? it.imageUrl : `${API_BASE_URL}${it.imageUrl}`} alt={it.name} style={{ width: 48, height: 48, objectFit: "cover", borderRadius: 6 }} />
                       )}
                       <div>
                         <div style={{ fontWeight: 600 }}>{it.name}</div>

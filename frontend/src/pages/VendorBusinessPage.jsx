@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { useParams } from "react-router-dom";
 import axios from "axios";
+import API_BASE_URL from "../config";
 
 // Modal for updating vendor price
 function UpdatePriceModal({ show, onClose, category, vendorId, onUpdated }) {
@@ -19,7 +20,7 @@ function UpdatePriceModal({ show, onClose, category, vendorId, onUpdated }) {
 
     try {
       await axios.put(
-        `http://localhost:5000/api/vendors/${vendorId}/prices`,
+        `${API_BASE_URL}/api/vendors/${vendorId}/prices`,
         { categoryId: category.id, price: newPrice }
       );
       onUpdated(category.id, newPrice);
@@ -85,7 +86,7 @@ export default function Step3Page() {
   const fetchTree = async () => {
     try {
       setLoading(true);
-      const res = await axios.get(`http://localhost:5000/api/vendors/${vendorId}/categories`);
+      const res = await axios.get(`${API_BASE_URL}/api/vendors/${vendorId}/categories`);
       setVendor(res.data.vendor);
 
       let categories = res.data.categories;
@@ -144,7 +145,7 @@ export default function Step3Page() {
                   <td key={idx} style={{ border: "1px solid #ccc", padding: "8px" }}>{row.levels[idx] ?? "-"}</td>
                 ))}
                 <td>{row.price}</td>
-                <td>{row.imageUrl ? <img src={`http://localhost:5000${row.imageUrl}`} alt={row.levels.slice(-1)[0]} style={{ width: 60, height: 40, objectFit: "cover", borderRadius: 4 }} /> : "-"}</td>
+                <td>{row.imageUrl ? <img src={`${API_BASE_URL}${row.imageUrl}`} alt={row.levels.slice(-1)[0]} style={{ width: 60, height: 40, objectFit: "cover", borderRadius: 4 }} /> : "-"}</td>
                 <td>
                   <button onClick={() => setModalCategory({ id: row.categoryId, name: row.levels.slice(-1)[0], vendorPrice: row.price })}
                     style={{ padding: "4px 8px", borderRadius: "4px", background: "#00AEEF", color: "#fff", border: "none" }}>Edit</button>

@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from "react";
 import axios from "axios";
 
+import API_BASE_URL from "../../config";
 export default function CarModelsPage() {
   const [models, setModels] = useState([]);
   const [brands, setBrands] = useState([]);
@@ -25,7 +26,7 @@ export default function CarModelsPage() {
   // ---------- FETCH MASTERS ----------
   const fetchMasters = async (type, setter) => {
     try {
-      const res = await axios.get("http://localhost:5000/api/masters", {
+      const res = await axios.get(`${API_BASE_URL}/api/masters`, {
         params: { type },
       });
       setter(res.data.map((item) => item.name));
@@ -37,7 +38,7 @@ export default function CarModelsPage() {
   // ---------- FETCH CAR MODELS ----------
   const fetchModels = async () => {
     try {
-      const res = await axios.get("http://localhost:5000/api/models", {
+      const res = await axios.get(`${API_BASE_URL}/api/models`, {
         params: { category: "car" },
       });
       setModels(res.data);
@@ -66,11 +67,11 @@ export default function CarModelsPage() {
       const payload = { ...form };
       if (editModel) {
         await axios.put(
-          `http://localhost:5000/api/models/${editModel._id}`,
+          `${API_BASE_URL}/api/models/${editModel._id}`,
           payload
         );
       } else {
-        await axios.post("http://localhost:5000/api/models", payload);
+        await axios.post(`${API_BASE_URL}/api/models`, payload);
       }
 
       setShowModal(false);
@@ -103,7 +104,7 @@ export default function CarModelsPage() {
   const handleDelete = async (id) => {
     if (!window.confirm("Are you sure you want to delete this model?")) return;
     try {
-      await axios.delete(`http://localhost:5000/api/models/${id}`);
+      await axios.delete(`${API_BASE_URL}/api/models/${id}`);
       fetchModels();
     } catch (err) {
       console.error("Failed to delete model:", err);

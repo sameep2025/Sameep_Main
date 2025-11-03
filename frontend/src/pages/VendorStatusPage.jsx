@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import axios from "axios";
-
+import API_BASE_URL from "../config";
 const STATUSES = [
   "Accepted",
   "Pending",
@@ -21,9 +21,9 @@ export default function VendorStatusPage() {
     try {
       setLoading(true);
       const [catRes, countsRes] = await Promise.all([
-        axios.get(`http://localhost:5000/api/categories/${categoryId}`),
+        axios.get(`${API_BASE_URL}/api/categories/${categoryId}`),
         axios.get(
-          `http://localhost:5000/api/vendors/categories/counts?categoryId=${categoryId}`
+          `${API_BASE_URL}/api/vendors/categories/counts?categoryId=${categoryId}`
         ),
       ]);
       setCategory(catRes.data);

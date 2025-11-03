@@ -1,5 +1,7 @@
 import { useState, useEffect } from "react";
 import axios from "axios";
+// import ModelModal from "./ModelModal";
+import API_BASE_URL from "../config";
 
 export default function TempoBusModelsPage() {
   const [models, setModels] = useState([]);
@@ -12,9 +14,9 @@ export default function TempoBusModelsPage() {
   const fetchData = async () => {
     try {
       const [modelsRes, brandsRes, bodyTypesRes] = await Promise.all([
-        axios.get("http://localhost:5000/api/models?category=tempoBus"),
-        axios.get("http://localhost:5000/api/masters", { params: { type: "tempoBusBrand" } }),
-        axios.get("http://localhost:5000/api/masters", { params: { type: "tempoBusBodyType" } }),
+        axios.get(`${API_BASE_URL}/api/models?category=tempoBus`),
+        axios.get(`${API_BASE_URL}/api/masters`, { params: { type: "tempoBusBrand" } }),
+        axios.get(`${API_BASE_URL}/api/masters`, { params: { type: "tempoBusBodyType" } }),
       ]);
       setModels(modelsRes.data);
       setBrands(brandsRes.data);
@@ -42,8 +44,8 @@ export default function TempoBusModelsPage() {
       seats: data.seats || 0,
     };
     try {
-      if (data._id) await axios.put(`http://localhost:5000/api/models/${data._id}`, payload);
-      else await axios.post("http://localhost:5000/api/models", payload);
+      if (data._id) await axios.put(`${API_BASE_URL}/api/models/${data._id}`, payload);
+      else await axios.post(`${API_BASE_URL}/api/models`, payload);
 
       fetchData();
       setShowModal(false);
@@ -58,7 +60,7 @@ export default function TempoBusModelsPage() {
   const handleDelete = async (model) => {
     if (!window.confirm("Delete this model?")) return;
     try {
-      await axios.delete(`http://localhost:5000/api/models/${model._id}`);
+      await axios.delete(`${API_BASE_URL}/api/models/${model._id}`);
       fetchData();
     } catch (err) {
       console.error(err);

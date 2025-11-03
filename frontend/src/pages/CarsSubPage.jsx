@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import axios from "axios";
 import { useParams } from "react-router-dom";
+import API_BASE_URL from "../config";
 
 export default function CarsSubPage() {
   const { type } = useParams(); // e.g., carBrand, fuelType
@@ -10,7 +11,7 @@ export default function CarsSubPage() {
 
   const fetchItems = async () => {
     try {
-      const res = await axios.get("http://localhost:5000/api/masters", { params: { type } });
+      const res = await axios.get(`${API_BASE_URL}/api/masters`, { params: { type } });
       setItems(res.data);
     } catch (err) { console.error(err); }
   };
@@ -19,8 +20,8 @@ export default function CarsSubPage() {
 
   const handleSave = async (data) => {
     try {
-      if (data._id) await axios.put(`http://localhost:5000/api/masters/${data._id}`, data);
-      else await axios.post("http://localhost:5000/api/masters", { ...data, type });
+      if (data._id) await axios.put(`${API_BASE_URL}/api/masters/${data._id}`, data);
+      else await axios.post(`${API_BASE_URL}/api/masters`, { ...data, type });
       fetchItems();
       setShowModal(false);
       setEditing(null);
@@ -29,7 +30,7 @@ export default function CarsSubPage() {
 
   const handleDelete = async (item) => {
     if (!window.confirm("Delete?")) return;
-    try { await axios.delete(`http://localhost:5000/api/masters/${item._id}`); fetchItems(); } 
+    try { await axios.delete(`${API_BASE_URL}/api/masters/${item._id}`); fetchItems(); } 
     catch (err) { console.error(err); }
   };
 

@@ -2,6 +2,7 @@
 import { Link, useParams } from "react-router-dom";
 import { useState, useEffect } from "react";
 import axios from "axios";
+import API_BASE_URL from "../config";
 
 function Breadcrumb() {
   const { parentId } = useParams(); // current category id
@@ -14,7 +15,7 @@ function Breadcrumb() {
         let currentId = parentId || null;
 
         while (currentId) {
-          const res = await axios.get(`http://localhost:5000/api/categories/${currentId}`);
+          const res = await axios.get(`${API_BASE_URL}/api/categories/${currentId}`);
           const category = res.data;
 
           trail.unshift({ name: category.name, id: category._id }); // insert at start

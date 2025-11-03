@@ -3,6 +3,8 @@ import React, { useState, useEffect } from "react";
 import { MapContainer, TileLayer, Marker, useMapEvents } from "react-leaflet";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
+import axios from "axios";
+import API_BASE_URL from "../config";
 
 // Fix default marker icon paths (Leaflet + CRA)
 delete L.Icon.Default.prototype._getIconUrl;
@@ -48,7 +50,7 @@ export default function LocationPickerModal({
   setIsSaving(true);
   try {
     const { lat, lng } = selectedLocation;
-    const res = await axios.put(`http://localhost:5000/api/vendors/${vendorId}/location`, { lat, lng });
+    const res = await axios.put(`${API_BASE_URL}/api/vendors/${vendorId}/location`, { lat, lng });
 
     // Send **backend returned location**, not just selectedLocation
     if (onLocationSave) {

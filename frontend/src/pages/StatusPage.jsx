@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import axios from "axios";
+import API_BASE_URL from "../config";
 
 // Status Card with edit/delete
 function StatusCard({ status, onEdit, onDelete }) {
@@ -117,7 +118,7 @@ export default function StatusPage() {
 
   const fetchStatuses = async () => {
     try {
-      const res = await axios.get("http://localhost:5000/api/masters", { params: { type: "status" } });
+      const res = await axios.get(`${API_BASE_URL}/api/masters`, { params: { type: "status" } });
       setStatuses(res.data);
     } catch (err) {
       console.error(err);
@@ -132,9 +133,9 @@ export default function StatusPage() {
   const handleSave = async (data) => {
     try {
       if (data._id) {
-        await axios.put(`http://localhost:5000/api/masters/${data._id}`, { name: data.name, sequence: 0 });
+        await axios.put(`${API_BASE_URL}/api/masters/${data._id}`, { name: data.name, sequence: 0 });
       } else {
-        await axios.post("http://localhost:5000/api/masters", { name: data.name, type: "status", sequence: 0 });
+        await axios.post(`${API_BASE_URL}/api/masters`, { name: data.name, type: "status", sequence: 0 });
       }
       fetchStatuses();
       setShowModal(false);
@@ -148,7 +149,7 @@ export default function StatusPage() {
   const handleDelete = async (status) => {
     if (!window.confirm("Delete this status?")) return;
     try {
-      await axios.delete(`http://localhost:5000/api/masters/${status._id}`);
+      await axios.delete(`${API_BASE_URL}/api/masters/${status._id}`);
       fetchStatuses();
     } catch (err) {
       console.error(err);

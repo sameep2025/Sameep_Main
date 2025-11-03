@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import axios from "axios";
 import BodyTypeModal from "./BodyTypeModal";
+import API_BASE_URL from "../config";
 
 export default function BikeBodyTypesPage() {
   const [bodyTypes, setBodyTypes] = useState([]);
@@ -9,7 +10,7 @@ export default function BikeBodyTypesPage() {
 
   const fetchBodyTypes = async () => {
     try {
-      const res = await axios.get("http://localhost:5000/api/masters", { params: { type: "bikeBodyType" } });
+      const res = await axios.get(`${API_BASE_URL}/api/masters`, { params: { type: "bikeBodyType" } });
       setBodyTypes(res.data);
     } catch (err) {
       console.error(err);
@@ -29,9 +30,9 @@ export default function BikeBodyTypesPage() {
       formData.append("type", "bikeBodyType");
 
       if (data._id) {
-        await axios.put(`http://localhost:5000/api/masters/${data._id}`, formData, { headers: { "Content-Type": "multipart/form-data" } });
+        await axios.put(`${API_BASE_URL}/api/masters/${data._id}`, formData, { headers: { "Content-Type": "multipart/form-data" } });
       } else {
-        await axios.post("http://localhost:5000/api/masters", formData, { headers: { "Content-Type": "multipart/form-data" } });
+        await axios.post(`${API_BASE_URL}/api/masters`, formData, { headers: { "Content-Type": "multipart/form-data" } });
       }
       fetchBodyTypes();
       setShowModal(false);
@@ -45,7 +46,7 @@ export default function BikeBodyTypesPage() {
   const handleDelete = async (bodyType) => {
     if (!window.confirm("Delete this body type?")) return;
     try {
-      await axios.delete(`http://localhost:5000/api/masters/${bodyType._id}`);
+      await axios.delete(`${API_BASE_URL}/api/masters/${bodyType._id}`);
       fetchBodyTypes();
     } catch (err) {
       console.error(err);
@@ -63,7 +64,7 @@ export default function BikeBodyTypesPage() {
             {/* {b.imageUrl && <img src={b.imageUrl} alt={b.name} style={{ width: "100%", height: 80, objectFit: "contain" }} />} */}
             {b.imageUrl && (
   <img 
-    src={`http://localhost:5000${b.imageUrl}`} 
+    src={`${API_BASE_URL}${b.imageUrl}`} 
     alt={b.name} 
     style={{ width: "100%", height: 80, objectFit: "contain" }} 
   />

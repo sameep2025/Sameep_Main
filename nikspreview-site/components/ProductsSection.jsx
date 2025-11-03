@@ -72,7 +72,7 @@ export default function ProductsSection({ categoryName, vendor }) {
             >
               {child.imageUrl && (
                 <img
-                  src={`http://localhost:5000${child.imageUrl}`}
+                  src={`${API_BASE_URL}${child.imageUrl}`}
                   alt={child.name}
                   style={{
                     width: "100%",

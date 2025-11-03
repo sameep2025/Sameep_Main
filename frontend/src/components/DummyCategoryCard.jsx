@@ -1,5 +1,6 @@
 import React from "react";
 import { useNavigate } from "react-router-dom";
+import API_BASE_URL from "../config";
 
 function DummyCategoryCard({ category, onEdit, onDelete }) {
   const navigate = useNavigate();
@@ -14,7 +15,7 @@ function DummyCategoryCard({ category, onEdit, onDelete }) {
 
   return (
     <div className="card" style={{ borderRadius: "8px", background: "#fff", color: "#333", padding: "10px", width: "220px", boxShadow: "0 4px 8px rgba(0,0,0,0.1)" }}>
-      <img src={`http://localhost:5000${category.imageUrl}`} alt={category.name} style={{ width: "100%", height: "140px", objectFit: "cover", borderRadius: "6px" }} />
+      <img src={`${API_BASE_URL}${category.imageUrl}`} alt={category.name} style={{ width: "100%", height: "140px", objectFit: "cover", borderRadius: "6px" }} />
 
       <h3 style={{ marginTop: "10px", color: "#00AEEF" }}>{category.name}</h3>
 

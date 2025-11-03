@@ -1,11 +1,12 @@
 import React, { useState, useEffect } from "react";
 import axios from "axios";
+import API_BASE_URL from "../../config";
 
 function FuelTypeCard({ item, onEdit, onDelete }) {
   const imageSrc = item.imageUrl
     ? item.imageUrl.startsWith("http")
       ? item.imageUrl
-      : `http://localhost:5000${item.imageUrl}`
+      : `${API_BASE_URL}${item.imageUrl}`
     : null;
 
   return (
@@ -64,7 +65,7 @@ export default function FuelTypePage() {
 
   const fetchItems = async () => {
     try {
-      const res = await axios.get(`http://localhost:5000/api/masters?type=${TYPE}`);
+      const res = await axios.get(`${API_BASE_URL}/api/masters?type=${TYPE}`);
       setItems(res.data);
     } catch (err) {
       console.error(err);
@@ -83,11 +84,11 @@ export default function FuelTypePage() {
 
     try {
       if (editItem) {
-        await axios.put(`http://localhost:5000/api/masters/${editItem._id}`, formData, {
+        await axios.put(`${API_BASE_URL}/api/masters/${editItem._id}`, formData, {
           headers: { "Content-Type": "multipart/form-data" },
         });
       } else {
-        await axios.post("http://localhost:5000/api/masters", formData, {
+        await axios.post(`${API_BASE_URL}/api/masters`, formData, {
           headers: { "Content-Type": "multipart/form-data" },
         });
       }
@@ -105,7 +106,7 @@ export default function FuelTypePage() {
     setForm({
       name: item.name,
       file: null,
-      preview: item.imageUrl ? (item.imageUrl.startsWith("http") ? item.imageUrl : `http://localhost:5000${item.imageUrl}`) : null,
+      preview: item.imageUrl ? (item.imageUrl.startsWith("http") ? item.imageUrl : `${API_BASE_URL}${item.imageUrl}`) : null,
     });
     setShowModal(true);
   };
@@ -113,7 +114,7 @@ export default function FuelTypePage() {
   const handleDelete = async (item) => {
     if (!window.confirm("Delete this fuel type?")) return;
     try {
-      await axios.delete(`http://localhost:5000/api/masters/${item._id}`);
+      await axios.delete(`${API_BASE_URL}/api/masters/${item._id}`);
       fetchItems();
     } catch (err) {
       console.error(err);

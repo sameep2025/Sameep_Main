@@ -1,6 +1,7 @@
 // BusinessHoursModal.jsx
 import React, { useState } from "react";
 import axios from "axios";
+import API_BASE_URL from "../config";
 
 const defaultHours = [
   { day: "Sunday", hours: "Closed" },
@@ -47,7 +48,7 @@ function BusinessHoursModal({ vendor, onClose, onUpdated }) {
   const handleSave = async () => {
     try {
       const res = await axios.put(
-        `http://localhost:5000/api/vendors/${vendor._id}/business-hours`,
+        `${API_BASE_URL}/api/vendors/${vendor._id}/business-hours`,
         { businessHours: hours }
       );
 

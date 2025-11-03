@@ -4,6 +4,9 @@ import axios from "axios";
 import { LocationPickerModal } from "../components/LocationPickerModal";
 import BusinessLocationModal from "../components/BusinessLocationModal";
 import BusinessHoursModal from "../components/BusinessHoursModal";
+// Use the same API_BASE_URL as in api.js
+import API_BASE_URL from "../config";
+
 
 // ---------------- Update Price Modal ----------------
 function UpdatePriceModal({ show, onClose, category, vendorId, onUpdated }) {
@@ -23,7 +26,7 @@ function UpdatePriceModal({ show, onClose, category, vendorId, onUpdated }) {
 
     try {
       await axios.put(
-        `http://localhost:5000/api/vendorPricing/${vendorId}/${
+        `${API_BASE_URL}/api/vendorPricing/${vendorId}/${
           category._id ?? category.id
         }`,
         { price: newPrice }
@@ -179,7 +182,7 @@ export default function VendorStatusListPage() {
     if (!id) return "";
     if (categoryNameCache[id]) return categoryNameCache[id];
     try {
-      const res = await axios.get(`http://localhost:5000/api/categories/${id}`);
+      const res = await axios.get(`${API_BASE_URL}/api/categories/${id}`);
       const name = res.data?.name || "";
       setCategoryNameCache((prev) => ({ ...prev, [id]: name }));
       return name;
@@ -193,7 +196,7 @@ export default function VendorStatusListPage() {
     setCombosLoading(true);
     setCombosError("");
     try {
-      const res = await axios.get(`http://localhost:5000/api/combos`, { params: { parentCategoryId: categoryId } });
+      const res = await axios.get(`${API_BASE_URL}/api/combos`, { params: { parentCategoryId: categoryId } });
       const list = Array.isArray(res.data) ? res.data : [];
       setCombos(list);
       // Prime names for category-kind items
@@ -217,7 +220,7 @@ export default function VendorStatusListPage() {
     setError("");
     try {
       const res = await axios.get(
-        `http://localhost:5000/api/vendors/byCategory/${categoryId}?status=${encodeURIComponent(
+        `${API_BASE_URL}/api/vendors/byCategory/${categoryId}?status=${encodeURIComponent(
           status
         )}`
       );
@@ -226,7 +229,7 @@ export default function VendorStatusListPage() {
         vendorsData.map(async (vendor) => {
           try {
             const locRes = await axios.get(
-              `http://localhost:5000/api/vendors/${vendor._id}/location`
+              `${API_BASE_URL}/api/vendors/${vendor._id}/location`
             );
 
             const locationData = locRes.data.location || {};
@@ -273,7 +276,7 @@ export default function VendorStatusListPage() {
     setCategoriesLoading(true); // show loading message
     try {
       const res = await axios.get(
-        `http://localhost:5000/api/vendors/${vendorId}/categories`
+        `${API_BASE_URL}/api/vendors/${vendorId}/categories`
       );
       let categories = res.data.categories;
       let treeData;
@@ -300,7 +303,7 @@ export default function VendorStatusListPage() {
       if (vendorCategoriesCache[v._id]) return;
 
       axios
-        .get(`http://localhost:5000/api/vendors/${v._id}/categories`)
+        .get(`${API_BASE_URL}/api/vendors/${v._id}/categories`)
         .then((res) => {
           let categories = res.data.categories;
           let treeData;
@@ -452,7 +455,7 @@ export default function VendorStatusListPage() {
                     <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
                       {(v.profilePictures || []).map((src, i) => {
                         const raw = String(src || '');
-                        const url = raw.startsWith('http://') || raw.startsWith('https://') ? raw : `http://localhost:5000${raw}`;
+                        const url = raw.startsWith('http://') || raw.startsWith('https://') ? raw : `${API_BASE_URL}${raw}`;
                         return (
                           <div key={i} style={{ position: 'relative', width: 56 }}>
                             <img src={url} alt={`pic-${i}`} style={{ width: 56, height: 56, objectFit: 'cover', borderRadius: 6, border: '1px solid #eee' }} />
@@ -469,7 +472,7 @@ export default function VendorStatusListPage() {
                                     const form = new FormData();
                                     form.append('image', file);
                                     try {
-                                      const res = await axios.put(`http://localhost:5000/api/vendors/${v._id}/profile-pictures/${i}`, form, { headers: { 'Content-Type': 'multipart/form-data' } });
+                                      const res = await axios.put(`${API_BASE_URL}/api/vendors/${v._id}/profile-pictures/${i}`, form, { headers: { 'Content-Type': 'multipart/form-data' } });
                                       const pics = res.data?.profilePictures || [];
                                       setVendors((prev) => prev.map((x) => x._id === v._id ? { ...x, profilePictures: pics } : x));
                                       if (selectedVendor && selectedVendor._id === v._id) setSelectedVendor((s) => ({ ...s, profilePictures: pics }));
@@ -488,7 +491,7 @@ export default function VendorStatusListPage() {
                                 onClick={async () => {
                                   if (!window.confirm('Delete this image?')) return;
                                   try {
-                                    const res = await axios.delete(`http://localhost:5000/api/vendors/${v._id}/profile-pictures/${i}`);
+                                    const res = await axios.delete(`${API_BASE_URL}/api/vendors/${v._id}/profile-pictures/${i}`);
                                     const pics = res.data?.profilePictures || [];
                                     setVendors((prev) => prev.map((x) => x._id === v._id ? { ...x, profilePictures: pics } : x));
                                     if (selectedVendor && selectedVendor._id === v._id) setSelectedVendor((s) => ({ ...s, profilePictures: pics }));
@@ -531,7 +534,7 @@ export default function VendorStatusListPage() {
                         const remaining = Math.max(0, 5 - existingCount);
                         files.slice(0, remaining).forEach((f) => form.append('images', f));
                         try {
-                          const res = await axios.post(`http://localhost:5000/api/vendors/${v._id}/profile-pictures`, form, { headers: { 'Content-Type': 'multipart/form-data' } });
+                          const res = await axios.post(`${API_BASE_URL}/api/vendors/${v._id}/profile-pictures`, form, { headers: { 'Content-Type': 'multipart/form-data' } });
                           const pics = res.data?.profilePictures || [];
                           setVendors((prev) => prev.map((x) => x._id === v._id ? { ...x, profilePictures: pics } : x));
                           if (selectedVendor && selectedVendor._id === v._id) setSelectedVendor((s) => ({ ...s, profilePictures: pics }));
@@ -625,9 +628,9 @@ export default function VendorStatusListPage() {
                     const { comboId, itemIndex, variantIndex, price, terms } = variantEdit;
                     const payload = { price: price === '' ? null : Number(price), terms };
                     if (variantIndex === null) {
-                      await axios.put(`http://localhost:5000/api/combos/${comboId}/item/${itemIndex}`, payload);
+                      await axios.put(`${API_BASE_URL}/api/combos/${comboId}/item/${itemIndex}`, payload);
                     } else {
-                      await axios.put(`http://localhost:5000/api/combos/${comboId}/item/${itemIndex}/variant/${variantIndex}`, payload);
+                      await axios.put(`${API_BASE_URL}/api/combos/${comboId}/item/${itemIndex}/variant/${variantIndex}`, payload);
                     }
                     await fetchCombos();
                     setVariantEdit(null);

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import API_BASE_URL from "../config";
 
 export default function ManageCombosModal({ show, onClose, subcategoryId, initialEditingCombo = null, onSaved = null }) {
   const [step, setStep] = useState(1);
@@ -40,7 +41,7 @@ export default function ManageCombosModal({ show, onClose, subcategoryId, initia
   const toAbs = (u) => {
     if (!u) return "";
     if (typeof u !== 'string') return "";
-    const host = 'http://localhost:5000';
+    const host = '${API_BASE_URL}';
     if (u.startsWith('http://') || u.startsWith('https://')) return u;
     if (u.startsWith('/uploads/')) return `${host}${u}`;
     if (u.startsWith('/')) return `${host}${u}`;
@@ -54,7 +55,7 @@ export default function ManageCombosModal({ show, onClose, subcategoryId, initia
     if (!show || !subcategoryId) return;
     (async () => {
       try {
-        const r = await fetch(`http://localhost:5000/api/categories/${subcategoryId}/leaf`);
+        const r = await fetch(`${API_BASE_URL}/api/categories/${subcategoryId}/leaf`);
         const j = await r.json();
         setLeaves(Array.isArray(j) ? j : []);
       } catch {
@@ -63,7 +64,7 @@ export default function ManageCombosModal({ show, onClose, subcategoryId, initia
     })();
     (async () => {
       try {
-        const r = await fetch(`http://localhost:5000/api/categories/${subcategoryId}/tree`);
+        const r = await fetch(`${API_BASE_URL}/api/categories/${subcategoryId}/tree`);
         const j = await r.json();
         setTreeRoot(j || null);
       } catch {
@@ -472,7 +473,7 @@ const onEdit = (combo) => {
       });
 
       const isEdit = Boolean(editingCombo?.id || editingCombo?._id);
-      const url = isEdit ? `http://localhost:5000/api/combos/${editingCombo.id || editingCombo._id}` : `http://localhost:5000/api/combos`;
+      const url = isEdit ? `${API_BASE_URL}/api/combos/${editingCombo.id || editingCombo._id}` : `${API_BASE_URL}/api/combos`;
       const method = isEdit ? "PUT" : "POST";
       const res = await fetch(url, { method, body: fd });
       if (!res.ok) {

@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import axios from "axios";
 import ModelModal from "./ModelModal";
+import API_BASE_URL from "../config";
 
 export default function BikeModelsPage() {
   const [models, setModels] = useState([]);
@@ -14,10 +15,10 @@ export default function BikeModelsPage() {
   const fetchData = async () => {
     try {
       const [modelsRes, brandsRes, bodyTypesRes, transmissionsRes] = await Promise.all([
-        axios.get("http://localhost:5000/api/models?category=bike"),
-        axios.get("http://localhost:5000/api/masters", { params: { type: "bikeBrand" } }),
-        axios.get("http://localhost:5000/api/masters", { params: { type: "bikeBodyType" } }),
-        axios.get("http://localhost:5000/api/masters", { params: { type: "bikeTransmission" } }),
+        axios.get(`${API_BASE_URL}/api/models?category=bike`),
+        axios.get(`${API_BASE_URL}/api/masters`, { params: { type: "bikeBrand" } }),
+        axios.get(`${API_BASE_URL}/api/masters`, { params: { type: "bikeBodyType" } }),
+        axios.get(`${API_BASE_URL}/api/masters`, { params: { type: "bikeTransmission" } }),
       ]);
 
       setModels(modelsRes.data);
@@ -53,9 +54,9 @@ export default function BikeModelsPage() {
 
     try {
       if (data._id) {
-        await axios.put(`http://localhost:5000/api/models/${data._id}`, payload);
+        await axios.put(`${API_BASE_URL}/api/models/${data._id}`, payload);
       } else {
-        await axios.post("http://localhost:5000/api/models", payload);
+        await axios.post(`${API_BASE_URL}/api/models`, payload);
       }
 
       fetchData();
@@ -71,7 +72,7 @@ export default function BikeModelsPage() {
   const handleDelete = async (model) => {
     if (!window.confirm("Delete this model?")) return;
     try {
-      await axios.delete(`http://localhost:5000/api/models/${model._id}`);
+      await axios.delete(`${API_BASE_URL}/api/models/${model._id}`);
       fetchData();
     } catch (err) {
       console.error(err);

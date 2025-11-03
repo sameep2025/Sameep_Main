@@ -1,5 +1,6 @@
 import React from "react";
 import { useNavigate } from "react-router-dom";
+import API_BASE_URL from "../config";
 
 function CategoryCard({ category, onEdit, onDelete }) {
   const navigate = useNavigate();
@@ -27,7 +28,7 @@ function CategoryCard({ category, onEdit, onDelete }) {
       }}
     >
       <img
-        src={`http://localhost:5000${category.imageUrl}`}
+        src={`${API_BASE_URL}${category.imageUrl}`}
         alt={category.name}
         style={{
           width: "100%",

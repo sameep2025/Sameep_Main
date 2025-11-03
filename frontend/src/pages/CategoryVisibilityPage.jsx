@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import axios from "axios";
+import API_BASE_URL from "../config";
 
 // Card component
 // Card component
@@ -142,7 +143,7 @@ export default function CategoryVisibilityPage() {
 
   const fetchItems = async () => {
     try {
-      const res = await axios.get("http://localhost:5000/api/masters", { params: { type: "categoryVisibility" } });
+      const res = await axios.get(`${API_BASE_URL}/api/masters`, { params: { type: "categoryVisibility" } });
       setItems(res.data);
     } catch (err) {
       console.error(err);
@@ -155,9 +156,9 @@ export default function CategoryVisibilityPage() {
   const handleSave = async (data) => {
     try {
       if (data._id) {
-        await axios.put(`http://localhost:5000/api/masters/${data._id}`, { name: data.name });
+        await axios.put(`${API_BASE_URL}/api/masters/${data._id}`, { name: data.name });
       } else {
-        await axios.post("http://localhost:5000/api/masters", { name: data.name, type: "categoryVisibility" });
+        await axios.post(`${API_BASE_URL}/api/masters`, { name: data.name, type: "categoryVisibility" });
       }
       fetchItems();
       setShowModal(false);
@@ -171,7 +172,7 @@ export default function CategoryVisibilityPage() {
   const handleDelete = async (item) => {
     if (!window.confirm("Delete this item?")) return;
     try {
-      await axios.delete(`http://localhost:5000/api/masters/${item._id}`);
+      await axios.delete(`${API_BASE_URL}/api/masters/${item._id}`);
       fetchItems();
     } catch (err) {
       console.error(err);

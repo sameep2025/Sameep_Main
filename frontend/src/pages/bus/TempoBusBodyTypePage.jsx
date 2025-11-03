@@ -1,11 +1,12 @@
 import React, { useState, useEffect } from "react";
 import axios from "axios";
+import API_BASE_URL from "../config";
 
 function BodyTypeCard({ item, onEdit, onDelete }) {
   const imageSrc = item.imageUrl
     ? item.imageUrl.startsWith("http")
       ? item.imageUrl
-      : `http://localhost:5000${item.imageUrl}`
+      : `${API_BASE_URL}${item.imageUrl}`
     : null;
 
   return (
@@ -46,7 +47,7 @@ export default function TempoBusBodyTypePage() {
 
   const fetchItems = async () => {
     try {
-      const res = await axios.get(`http://localhost:5000/api/masters?type=${TYPE}`);
+      const res = await axios.get(`${API_BASE_URL}/api/masters?type=${TYPE}`);
       setItems(res.data);
     } catch (err) { console.error(err); }
   };
@@ -61,8 +62,8 @@ export default function TempoBusBodyTypePage() {
     if (form.file) formData.append("image", form.file);
 
     try {
-      if (editItem) await axios.put(`http://localhost:5000/api/masters/${editItem._id}`, formData, { headers: { "Content-Type": "multipart/form-data" } });
-      else await axios.post("http://localhost:5000/api/masters", formData, { headers: { "Content-Type": "multipart/form-data" } });
+      if (editItem) await axios.put(`${API_BASE_URL}/api/masters/${editItem._id}`, formData, { headers: { "Content-Type": "multipart/form-data" } });
+      else await axios.post(`${API_BASE_URL}/api/masters`, formData, { headers: { "Content-Type": "multipart/form-data" } });
 
       setShowModal(false);
       setEditItem(null);
@@ -73,13 +74,13 @@ export default function TempoBusBodyTypePage() {
 
   const handleEdit = (item) => {
     setEditItem(item);
-    setForm({ name: item.name, file: null, preview: item.imageUrl ? (item.imageUrl.startsWith("http") ? item.imageUrl : `http://localhost:5000${item.imageUrl}`) : null });
+    setForm({ name: item.name, file: null, preview: item.imageUrl ? (item.imageUrl.startsWith("http") ? item.imageUrl : `${API_BASE_URL}${item.imageUrl}`) : null });
     setShowModal(true);
   };
 
   const handleDelete = async (item) => {
     if (!window.confirm("Delete this body type?")) return;
-    try { await axios.delete(`http://localhost:5000/api/masters/${item._id}`); fetchItems(); } catch (err) { console.error(err); }
+    try { await axios.delete(`${API_BASE_URL}/api/masters/${item._id}`); fetchItems(); } catch (err) { console.error(err); }
   };
 
   const handleFileChange = (e) => {

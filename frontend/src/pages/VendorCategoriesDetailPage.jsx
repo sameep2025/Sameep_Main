@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import axios from "axios";
+import API_BASE_URL from "../config";
 
 function flattenTree(node, rows = [], parentLevels = [], parentIds = []) {
   if (!node) return rows;
@@ -77,7 +78,7 @@ export default function VendorCategoriesDetailPage() {
       let models = [];
       for (const c of candidates) {
         try {
-          const res = await axios.get(`http://localhost:5000/api/models`, { params: { category: c } });
+          const res = await axios.get(`${API_BASE_URL}/api/models`, { params: { category: c } });
           const data = Array.isArray(res.data) ? res.data : [];
           if (data.length) {
             models = data.map((d) => ({ _id: d._id || d.id, name: d.name || d.model || '', raw: d }));
@@ -210,7 +211,7 @@ export default function VendorCategoriesDetailPage() {
     (async () => {
       try {
         if (vendorId) {
-          const vres = await axios.get(`http://localhost:5000/api/vendors/${vendorId}`);
+          const vres = await axios.get(`${API_BASE_URL}/api/vendors/${vendorId}`);
           const v = vres.data || {};
           setVendor(v);
           const map = v?.inventorySelections || {};
@@ -256,7 +257,7 @@ export default function VendorCategoriesDetailPage() {
     if (!id) return "";
     if (categoryNameCache[id]) return categoryNameCache[id];
     try {
-      const res = await axios.get(`http://localhost:5000/api/categories/${id}`);
+      const res = await axios.get(`${API_BASE_URL}/api/categories/${id}`);
       const name = res.data?.name || "";
       setCategoryNameCache((prev) => ({ ...prev, [id]: name }));
       return name;
@@ -269,11 +270,11 @@ export default function VendorCategoriesDetailPage() {
     if (!vendorId) return;
     setVendorLoading(true);
     try {
-      const res = await axios.get(`http://localhost:5000/api/vendors/${vendorId}`);
+      const res = await axios.get(`${API_BASE_URL}/api/vendors/${vendorId}`);
       const v = res.data || {};
       // fetch home location too (to show area/city and nearby)
       try {
-        const lr = await axios.get(`http://localhost:5000/api/vendors/${vendorId}/location`);
+        const lr = await axios.get(`${API_BASE_URL}/api/vendors/${vendorId}/location`);
         v.location = lr.data?.location || v.location || {};
         v.location.nearbyLocations = v.location.nearbyLocations || [];
       } catch {}
@@ -287,7 +288,7 @@ export default function VendorCategoriesDetailPage() {
     setCombosLoading(true);
     setCombosError("");
     try {
-      const res = await axios.get(`http://localhost:5000/api/combos`, { params: { parentCategoryId: categoryId } });
+      const res = await axios.get(`${API_BASE_URL}/api/combos`, { params: { parentCategoryId: categoryId } });
       const list = Array.isArray(res.data) ? res.data : [];
       setCombos(list);
       const ids = [];
@@ -306,7 +307,7 @@ export default function VendorCategoriesDetailPage() {
     setLoading(true);
     setError("");
     try {
-      const res = await axios.get(`http://localhost:5000/api/vendors/${vendorId}/categories`);
+      const res = await axios.get(`${API_BASE_URL}/api/vendors/${vendorId}/categories`);
       let categories = res.data.categories;
       let treeData;
       if (!categories) treeData = [];
@@ -328,7 +329,7 @@ export default function VendorCategoriesDetailPage() {
     (async () => {
       try {
         if (!categoryId) return;
-        const res = await axios.get(`http://localhost:5000/api/categories/${categoryId}`);
+        const res = await axios.get(`${API_BASE_URL}/api/categories/${categoryId}`);
         const c = res.data || {};
         const cname = String(c.name || '').toLowerCase();
         const isBikeCat = (cname === 'bike' || cname === 'bikes' || cname.includes('bike'));
@@ -356,7 +357,7 @@ export default function VendorCategoriesDetailPage() {
     // fetch all masters so we can show sub-attributes
     (async () => {
       try {
-        const res = await axios.get('http://localhost:5000/api/masters');
+        const res = await axios.get('${API_BASE_URL}/api/masters');
         setAllMasters(Array.isArray(res.data) ? res.data : []);
       } catch (e) { setAllMasters([]); }
     })();
@@ -368,7 +369,7 @@ export default function VendorCategoriesDetailPage() {
         if (!savedId) return;
         // If the saved category is the one we're viewing, refetch its metadata
         if (String(savedId) === String(categoryId)) {
-          const res = await axios.get(`http://localhost:5000/api/categories/${categoryId}`);
+          const res = await axios.get(`${API_BASE_URL}/api/categories/${categoryId}`);
           const c = res.data || {};
           setInventoryLabelName(c.inventoryLabelName || "");
           setLinkedAttributes(c.linkedAttributes || {});
@@ -669,7 +670,7 @@ export default function VendorCategoriesDetailPage() {
                         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                           {(Array.isArray(vendor?.rowImages?.[row.id]) ? vendor.rowImages[row.id] : []).map((src, i) => {
                             const raw = String(src || '');
-                            const url = raw.startsWith('http') ? raw : `http://localhost:5000${raw}`;
+                            const url = raw.startsWith('http') ? raw : `${API_BASE_URL}${raw}`;
                             return (
                               <div key={i} style={{ position: 'relative', width: 56 }}>
                                 <img src={url} alt={`img-${i}`} style={{ width: 56, height: 56, objectFit: 'cover', borderRadius: 6, border: '1px solid #eee' }} />
@@ -681,7 +682,7 @@ export default function VendorCategoriesDetailPage() {
                                       const file = (e.target.files || [])[0]; if (!file) return;
                                       const form = new FormData(); form.append('image', file);
                                       try {
-                                        const res = await axios.put(`http://localhost:5000/api/vendors/${vendorId}/rows/${row.id}/images/${i}`, form, { headers: { 'Content-Type': 'multipart/form-data' } });
+                                        const res = await axios.put(`${API_BASE_URL}/api/vendors/${vendorId}/rows/${row.id}/images/${i}`, form, { headers: { 'Content-Type': 'multipart/form-data' } });
                                         const imgs = res.data?.images || [];
                                         setVendor((prev) => ({ ...(prev||{}), rowImages: { ...((prev||{}).rowImages||{}), [row.id]: imgs } }));
                                       } catch (err) { alert(err?.response?.data?.message || 'Replace failed'); }
@@ -691,7 +692,7 @@ export default function VendorCategoriesDetailPage() {
                                   <button title="Delete" onClick={async () => {
                                     if (!window.confirm('Delete this image?')) return;
                                     try {
-                                      const res = await axios.delete(`http://localhost:5000/api/vendors/${vendorId}/rows/${row.id}/images/${i}`);
+                                      const res = await axios.delete(`${API_BASE_URL}/api/vendors/${vendorId}/rows/${row.id}/images/${i}`);
                                       const imgs = res.data?.images || [];
                                       setVendor((prev) => ({ ...(prev||{}), rowImages: { ...((prev||{}).rowImages||{}), [row.id]: imgs } }));
                                     } catch (err) { alert(err?.response?.data?.message || 'Delete failed'); }
@@ -711,7 +712,7 @@ export default function VendorCategoriesDetailPage() {
                             const form = new FormData(); files.forEach((f) => form.append('images', f));
                             (async () => {
                               try {
-                                const res = await axios.post(`http://localhost:5000/api/vendors/${vendorId}/rows/${row.id}/images`, form, { headers: { 'Content-Type': 'multipart/form-data' } });
+                                const res = await axios.post(`${API_BASE_URL}/api/vendors/${vendorId}/rows/${row.id}/images`, form, { headers: { 'Content-Type': 'multipart/form-data' } });
                                 const imgs = res.data?.images || [];
                                 setVendor((prev) => ({ ...(prev||{}), rowImages: { ...((prev||{}).rowImages||{}), [row.id]: imgs } }));
                                 e.target.value = '';
@@ -777,9 +778,9 @@ export default function VendorCategoriesDetailPage() {
                     const { comboId, itemIndex, variantIndex, price } = variantEdit;
                     const payload = { price: price === '' ? null : Number(price) };
                     if (variantIndex === null) {
-                      await axios.put(`http://localhost:5000/api/combos/${comboId}/item/${itemIndex}`, payload);
+                      await axios.put(`${API_BASE_URL}/api/combos/${comboId}/item/${itemIndex}`, payload);
                     } else {
-                      await axios.put(`http://localhost:5000/api/combos/${comboId}/item/${itemIndex}/variant/${variantIndex}`, payload);
+                      await axios.put(`${API_BASE_URL}/api/combos/${comboId}/item/${itemIndex}/variant/${variantIndex}`, payload);
                     }
                     await fetchCombos();
                     setVariantEdit(null);
@@ -822,7 +823,7 @@ export default function VendorCategoriesDetailPage() {
                     });
                     setInvItems(next);
                     if (vendorId && categoryId) {
-                      await axios.put(`http://localhost:5000/api/vendors/${vendorId}/inventory-selections`, { categoryId, items: next });
+                      await axios.put(`${API_BASE_URL}/api/vendors/${vendorId}/inventory-selections`, { categoryId, items: next });
                     }
                     setRowPriceEdit(null);
                     try { window.dispatchEvent(new CustomEvent('vendorPricingUpdated', { detail: { vendorId, categoryId } })); } catch {}
@@ -1168,7 +1169,7 @@ export default function VendorCategoriesDetailPage() {
                       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                         {(Array.isArray(it.images) ? it.images : []).map((src, i) => {
                           const raw = String(src || '');
-                          const url = raw.startsWith('http') ? raw : `http://localhost:5000${raw}`;
+                          const url = raw.startsWith('http') ? raw : `${API_BASE_URL}${raw}`;
                           return (
                             <div key={i} style={{ position: 'relative', width: 56 }}>
                               <img src={url} alt={`img-${i}`} style={{ width: 56, height: 56, objectFit: 'cover', borderRadius: 6, border: '1px solid #eee' }} />
@@ -1181,7 +1182,7 @@ export default function VendorCategoriesDetailPage() {
                                     if (!file) return;
                                     const form = new FormData(); form.append('image', file);
                                     try {
-                                      const res = await axios.put(`http://localhost:5000/api/vendors/${vendorId}/inventory/${categoryId}/${it._id || it.at}/images/${i}`, form, { headers: { 'Content-Type': 'multipart/form-data' } });
+                                      const res = await axios.put(`${API_BASE_URL}/api/vendors/${vendorId}/inventory/${categoryId}/${it._id || it.at}/images/${i}`, form, { headers: { 'Content-Type': 'multipart/form-data' } });
                                       const imgs = res.data?.images || [];
                                       setInvItems((prev) => prev.map((p) => (p._id || p.at) === (it._id || it.at) ? { ...p, images: imgs } : p));
                                     } catch (err) { alert(err?.response?.data?.message || 'Replace failed'); }
@@ -1191,7 +1192,7 @@ export default function VendorCategoriesDetailPage() {
                                 <button title="Delete" onClick={async () => {
                                   if (!window.confirm('Delete this image?')) return;
                                   try {
-                                    const res = await axios.delete(`http://localhost:5000/api/vendors/${vendorId}/inventory/${categoryId}/${it._id || it.at}/images/${i}`);
+                                    const res = await axios.delete(`${API_BASE_URL}/api/vendors/${vendorId}/inventory/${categoryId}/${it._id || it.at}/images/${i}`);
                                     const imgs = res.data?.images || [];
                                     setInvItems((prev) => prev.map((p) => (p._id || p.at) === (it._id || it.at) ? { ...p, images: imgs } : p));
                                   } catch (err) { alert(err?.response?.data?.message || 'Delete failed'); }
@@ -1211,7 +1212,7 @@ export default function VendorCategoriesDetailPage() {
                           if (files.length === 0) return;
                           (async () => {
                             try {
-                              const res = await axios.post(`http://localhost:5000/api/vendors/${vendorId}/inventory/${categoryId}/${it._id || it.at}/images`, form, { headers: { 'Content-Type': 'multipart/form-data' } });
+                              const res = await axios.post(`${API_BASE_URL}/api/vendors/${vendorId}/inventory/${categoryId}/${it._id || it.at}/images`, form, { headers: { 'Content-Type': 'multipart/form-data' } });
                               const imgs = res.data?.images || [];
                               setInvItems((prev) => prev.map((p) => (p._id || p.at) === (it._id || it.at) ? { ...p, images: imgs } : p));
                               e.target.value = '';
@@ -1258,7 +1259,7 @@ export default function VendorCategoriesDetailPage() {
                             setInvItems(next);
                             if (editingItemKey && (editingItemKey === (it._id || it.at))) setEditingItemKey(null);
                             if (vendorId && categoryId) {
-                              await axios.put(`http://localhost:5000/api/vendors/${vendorId}/inventory-selections`, { categoryId, items: next });
+                              await axios.put(`${API_BASE_URL}/api/vendors/${vendorId}/inventory-selections`, { categoryId, items: next });
                             }
                           } catch (e) { /* ignore */ }
                         }}
@@ -1321,7 +1322,7 @@ export default function VendorCategoriesDetailPage() {
                     setInvItems(nextItems);
                     // Auto-persist to vendor DB
                     if (vendorId && categoryId) {
-                      await axios.put(`http://localhost:5000/api/vendors/${vendorId}/inventory-selections`, { categoryId, items: nextItems });
+                      await axios.put(`${API_BASE_URL}/api/vendors/${vendorId}/inventory-selections`, { categoryId, items: nextItems });
                     }
                     // Clear the selected dropdowns so they disappear
                     if (usedKeys.length) {
@@ -1342,17 +1343,17 @@ export default function VendorCategoriesDetailPage() {
                   try {
                     setSavingLinked(true);
                     const payloadLinked = { ...(linkedAttributes||{}) };
-                    await axios.put(`http://localhost:5000/api/categories/${categoryId}`, { linkedAttributes: JSON.stringify(payloadLinked) });
+                    await axios.put(`${API_BASE_URL}/api/categories/${categoryId}`, { linkedAttributes: JSON.stringify(payloadLinked) });
                     // Save inventory items to vendor as well
                     if (vendorId) {
                       const items = Array.isArray(invItems) ? invItems : [];
-                      await axios.put(`http://localhost:5000/api/vendors/${vendorId}/inventory-selections`, { categoryId, items });
+                      await axios.put(`${API_BASE_URL}/api/vendors/${vendorId}/inventory-selections`, { categoryId, items });
                       try {
-                        const vres = await axios.get(`http://localhost:5000/api/vendors/${vendorId}`);
+                        const vres = await axios.get(`${API_BASE_URL}/api/vendors/${vendorId}`);
                         setVendor(vres.data || null);
                       } catch {}
                     }
-                    const res = await axios.get(`http://localhost:5000/api/categories/${categoryId}`);
+                    const res = await axios.get(`${API_BASE_URL}/api/categories/${categoryId}`);
                     const c = res.data || {};
                     setInventoryLabelName(c.inventoryLabelName || "");
                     setLinkedAttributes(c.linkedAttributes || {});
@@ -1381,7 +1382,7 @@ function CategoryPriceEditor({ vendorId, categoryId, initialPrice, onCancel, onS
   const save = async () => {
     const newPrice = parseFloat(price);
     if (isNaN(newPrice)) return alert('Enter a valid number');
-    await axios.put(`http://localhost:5000/api/vendorPricing/${vendorId}/${categoryId}`, { price: newPrice });
+    await axios.put(`${API_BASE_URL}/api/vendorPricing/${vendorId}/${categoryId}`, { price: newPrice });
 
 // notify other pages / tabs that pricing changed
 try {

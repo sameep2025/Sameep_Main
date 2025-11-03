@@ -3,6 +3,7 @@ import { useParams, useNavigate, Link } from "react-router-dom";
 
 import CategoryList from "./CategoryList";
 import ManageCombosModal from "../components/ManageCombosModal";
+import API_BASE_URL from "../config";
 
 function CategoryPage() {
   const { parentId } = useParams();
@@ -37,7 +38,7 @@ function CategoryPage() {
     const normalized = exact.toLowerCase();
     const category = familyToModelCategory[exact] || familyToModelCategory[normalized] || exact;
     try {
-      const url = `http://localhost:5000/api/models?category=${encodeURIComponent(category)}`;
+      const url = `${API_BASE_URL}/api/models?category=${encodeURIComponent(category)}`;
       const res = await fetch(url);
       if (!res.ok) return;
       const data = await res.json();
@@ -63,7 +64,7 @@ function CategoryPage() {
     const upIdx = s.toLowerCase().indexOf("uploads/");
     if (upIdx >= 0) s = s.substring(upIdx + "uploads/".length);
     // now compose absolute URL to backend uploads
-    return `http://localhost:5000/uploads/${s}`;
+    return `${API_BASE_URL}/uploads/${s}`;
   };
 
   const loadCombos = async () => {
@@ -71,18 +72,18 @@ function CategoryPage() {
     setCombosLoading(true);
     setCombosError("");
     try {
-      let res = await fetch(`http://localhost:5000/api/combos/byParent/${parentId}`);
+      let res = await fetch(`${API_BASE_URL}/api/combos/byParent/${parentId}`);
       let data;
       if (res.ok) {
         data = await res.json();
       } else {
-        res = await fetch(`http://localhost:5000/api/combos?parentCategoryId=${parentId}`);
+        res = await fetch(`${API_BASE_URL}/api/combos?parentCategoryId=${parentId}`);
         data = await res.json();
       }
       let arr = Array.isArray(data) ? data : [];
       if (arr.length === 0) {
         try {
-          const allRes = await fetch(`http://localhost:5000/api/combos`);
+          const allRes = await fetch(`${API_BASE_URL}/api/combos`);
           const allData = await allRes.json();
           if (Array.isArray(allData)) {
             const norm = (v) => (typeof v === 'string' ? v : v?.$oid || v?._id || v);
@@ -107,7 +108,7 @@ function CategoryPage() {
     const checkTop = async () => {
       if (!parentId) { setIsTopParentSubcategory(false); return; }
       try {
-        const res = await fetch(`http://localhost:5000/api/categories/${parentId}`);
+        const res = await fetch(`${API_BASE_URL}/api/categories/${parentId}`);
         if (!res.ok) { setIsTopParentSubcategory(false); return; }
         const data = await res.json();
         const hasParent = Boolean(data?.parent || data?.parentId);
@@ -126,7 +127,7 @@ function CategoryPage() {
     if (!showMasterSelector) return;
     (async () => {
       try {
-        const res = await fetch('http://localhost:5000/api/masters');
+        const res = await fetch('${API_BASE_URL}/api/masters');
         const data = await res.json();
         setAllMasters(Array.isArray(data) ? data : []);
       } catch { setAllMasters([]); }
@@ -211,7 +212,7 @@ function CategoryPage() {
                           if (!window.confirm("Delete this combo?")) return;
                           try {
                             const delId = c._id?.$oid || c._id || c.id;
-                            const res = await fetch(`http://localhost:5000/api/combos/${delId}`, { method: "DELETE" });
+                            const res = await fetch(`${API_BASE_URL}/api/combos/${delId}`, { method: "DELETE" });
                             if (!res.ok) throw new Error("Failed to delete");
                             loadCombos();
                           } catch (e) {
@@ -528,7 +529,7 @@ function CategoryPage() {
                   if (!parentId) return;
                   try {
                     setSavingLinked(true);
-                    await fetch(`http://localhost:5000/api/categories/${parentId}`, {
+                    await fetch(`${API_BASE_URL}/api/categories/${parentId}`, {
                       method: 'PUT',
                       headers: { 'Content-Type': 'application/json' },
                       body: JSON.stringify({ linkedAttributes: JSON.stringify(linkedAttributes), linkAttributesPricing: true })

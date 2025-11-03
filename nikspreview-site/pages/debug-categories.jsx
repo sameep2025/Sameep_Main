@@ -40,7 +40,7 @@ export default function DebugCategories() {
             <strong>Image Preview:</strong>
             <br />
             <img 
-              src={`http://localhost:5000${cat.imageUrl}`} 
+              src={`${API_BASE_URL}${cat.imageUrl}`} 
               alt={cat.name}
               style={{ maxWidth: 200, maxHeight: 150, objectFit: 'contain', border: '1px solid #ccc', marginTop: 5 }}
               onError={(e) => {

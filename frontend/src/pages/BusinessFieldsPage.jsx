@@ -1,5 +1,7 @@
 import { useState, useEffect } from "react";
 import axios from "axios";
+import API_BASE_URL from "../config";
+
 
 // Card component
 // Card component
@@ -244,7 +246,7 @@ export default function BusinessFieldsPage() {
   const fetchFields = async () => {
     try {
       const res = await axios.get(
-        "http://localhost:5000/api/masters",
+        `${API_BASE_URL}/api/masters`,
         { params: { type: "businessField" } }
       );
       setFields(res.data);
@@ -280,13 +282,13 @@ export default function BusinessFieldsPage() {
     if (data._id) {
       formData.append("value", ""); // empty string for now
       await axios.put(
-        `http://localhost:5000/api/masters/${data._id}`,
+        `${API_BASE_URL}/api/masters/${data._id}`,
         formData,
         { headers: { "Content-Type": "multipart/form-data" } }
       );
     } else {
       await axios.post(
-        "http://localhost:5000/api/masters",
+        `${API_BASE_URL}/api/masters`,
         formData,
         { headers: { "Content-Type": "multipart/form-data" } }
       );
@@ -305,7 +307,7 @@ export default function BusinessFieldsPage() {
   const handleDelete = async (field) => {
     if (!window.confirm("Delete this field?")) return;
     try {
-      await axios.delete(`http://localhost:5000/api/masters/${field._id}`);
+      await axios.delete(`${API_BASE_URL}/api/masters/${field._id}`);
       fetchFields();
     } catch (err) {
       console.error(err);

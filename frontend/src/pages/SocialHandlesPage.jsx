@@ -1,12 +1,13 @@
 import { useState, useEffect } from "react";
 import axios from "axios";
+import API_BASE_URL from "../config";
 
 // Card component
 function SocialHandleCard({ handle, onEdit, onDelete }) {
   const imageSrc = handle.imageUrl
     ? handle.imageUrl.startsWith("http")
       ? handle.imageUrl
-      : `http://localhost:5000${handle.imageUrl}`
+      : `${API_BASE_URL}${handle.imageUrl}`
     : null;
 
   return (
@@ -53,7 +54,7 @@ function SocialHandleModal({ show, onClose, onSave, initialData }) {
         initialData?.imageUrl
           ? initialData.imageUrl.startsWith("http")
             ? initialData.imageUrl
-            : `http://localhost:5000${initialData.imageUrl}`
+            : `${API_BASE_URL}${initialData.imageUrl}`
           : null
       );
     }
@@ -157,7 +158,7 @@ export default function SocialHandlesPage() {
 
   const fetchHandles = async () => {
     try {
-      const res = await axios.get("http://localhost:5000/api/masters", {
+      const res = await axios.get(`${API_BASE_URL}/api/masters`, {
         params: { type: "socialHandle" },
       });
       setHandles(res.data);
@@ -182,11 +183,11 @@ export default function SocialHandlesPage() {
       }
 
       if (data._id) {
-        await axios.put(`http://localhost:5000/api/masters/${data._id}`, formData, {
+        await axios.put(`${API_BASE_URL}/api/masters/${data._id}`, formData, {
           headers: { "Content-Type": "multipart/form-data" },
         });
       } else {
-        await axios.post("http://localhost:5000/api/masters", formData, {
+        await axios.post(`${API_BASE_URL}/api/masters`, formData, {
           headers: { "Content-Type": "multipart/form-data" },
         });
       }
@@ -203,7 +204,7 @@ export default function SocialHandlesPage() {
   const handleDelete = async (handle) => {
     if (!window.confirm("Delete this handle?")) return;
     try {
-      await axios.delete(`http://localhost:5000/api/masters/${handle._id}`);
+      await axios.delete(`${API_BASE_URL}/api/masters/${handle._id}`);
       fetchHandles();
     } catch (err) {
       console.error(err);

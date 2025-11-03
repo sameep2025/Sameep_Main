@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import axios from "axios";
 import DummyCreateCategoryModal from "./DummyCreateCategoryModal";
 import DummyCategoryCard from "./DummyCategoryCard";
+import API_BASE_URL from "../config";
 
 function DummyCategoryList({ parentId = null, onManageCombosClick, showManageCombosButton }) {
   const navigate = useNavigate();
@@ -23,7 +24,7 @@ function DummyCategoryList({ parentId = null, onManageCombosClick, showManageCom
   const fetchCategories = useCallback(async () => {
     try {
       const params = parentId !== null ? { parentId } : { parentId: null };
-      const res = await axios.get("http://localhost:5000/api/dummy-categories", { params });
+      const res = await axios.get(`${API_BASE_URL}/api/dummy-categories`, { params });
       setCategories(res.data);
 
       // Breadcrumb + parent logic
@@ -31,7 +32,7 @@ function DummyCategoryList({ parentId = null, onManageCombosClick, showManageCom
       let currentId = parentId;
       let first = true;
       while (currentId) {
-        const catRes = await axios.get(`http://localhost:5000/api/dummy-categories/${currentId}`);
+        const catRes = await axios.get(`${API_BASE_URL}/api/dummy-categories/${currentId}`);
         const cat = catRes.data;
         crumbs.unshift({ id: cat._id, name: cat.name });
         setParentEnableFreeText(cat.enableFreeText);
@@ -54,7 +55,7 @@ function DummyCategoryList({ parentId = null, onManageCombosClick, showManageCom
     let parentType = null;
     if (parentId) {
       try {
-        const res = await axios.get(`http://localhost:5000/api/dummy-categories/${parentId}`);
+        const res = await axios.get(`${API_BASE_URL}/api/dummy-categories/${parentId}`);
         parentType = res.data.categoryType;
         setParentEnableFreeText(res.data.enableFreeText);
       } catch (err) {
@@ -72,12 +73,12 @@ function DummyCategoryList({ parentId = null, onManageCombosClick, showManageCom
     let enableFreeText = false;
     try {
       // Always fetch the fresh subcategory document to avoid mixing parent fields
-      const current = await axios.get(`http://localhost:5000/api/dummy-categories/${category._id}`);
+      const current = await axios.get(`${API_BASE_URL}/api/dummy-categories/${category._id}`);
       const item = current.data || category;
 
       if (item.parent) {
         try {
-          const pres = await axios.get(`http://localhost:5000/api/dummy-categories/${item.parent}`);
+          const pres = await axios.get(`${API_BASE_URL}/api/dummy-categories/${item.parent}`);
           parentType = pres.data?.categoryType || null;
           enableFreeText = Boolean(pres.data?.enableFreeText);
         } catch (err) {
@@ -98,7 +99,7 @@ function DummyCategoryList({ parentId = null, onManageCombosClick, showManageCom
   const handleDelete = async (category) => {
     if (!window.confirm(`Delete "${category.name}" and its subcategories?`)) return;
     try {
-      await axios.delete(`http://localhost:5000/api/dummy-categories/${category._id}`);
+      await axios.delete(`${API_BASE_URL}/api/dummy-categories/${category._id}`);
       setRefresh((prev) => !prev);
     } catch (err) {
       console.error(err);

@@ -19,7 +19,7 @@ import categoryThemes from "../../../utils/categoryThemes";
 const resolveImageUrl = (url) => {
   if (!url) return null;
   if (url.startsWith("http")) return url;
-  return `http://localhost:5000${url}`;
+  return `${API_BASE_URL}${url}`;
 };
 
 const getNodeId = (n) => n?.id || n?._id || Math.random().toString(36).slice(2, 9);
@@ -727,7 +727,7 @@ function PreviewPage() {
 
   const fetchColorSchemes = async () => {
     try {
-      const res = await fetch("http://localhost:5000/api/categories/colors/parents");
+      const res = await fetch("${API_BASE_URL}/api/categories/colors/parents");
       const allCategories = await res.json();
 
       // Find matching category
@@ -774,7 +774,7 @@ function PreviewPage() {
   //       console.log("🎨 Fetching color schemes for category:", categoryTree.name);
         
   //       // Fetch all parent categories with color schemes
-  //       const response = await fetch("http://localhost:5000/api/categories/colors/parents");
+  //       const response = await fetch("${API_BASE_URL}/api/categories/colors/parents");
   //       const allCategories = await response.json();
         
   //       console.log("🎨 All categories from API:", allCategories);

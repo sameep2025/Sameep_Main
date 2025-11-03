@@ -18,7 +18,7 @@ function ComboDetailPage() {
     s = s.replace(/^\//, "");
     const upIdx = s.toLowerCase().indexOf("uploads/");
     if (upIdx >= 0) s = s.substring(upIdx + "uploads/".length);
-    return `http://localhost:5000/uploads/${s}`;
+    return `${API_BASE_URL}/uploads/${s}`;
   };
 
   useEffect(() => {
@@ -27,7 +27,7 @@ function ComboDetailPage() {
       setLoading(true);
       setError("");
       try {
-        const res = await fetch(`http://localhost:5000/api/combos/${comboId}`);
+        const res = await fetch(`${API_BASE_URL}/api/combos/${comboId}`);
         if (!res.ok) throw new Error("Failed to load combo");
         const data = await res.json();
         setCombo(data);
@@ -39,7 +39,7 @@ function ComboDetailPage() {
         if (ids.size) {
           const entries = await Promise.all(Array.from(ids).map(async (id) => {
             try {
-              const r = await fetch(`http://localhost:5000/api/categories/${id}`);
+              const r = await fetch(`${API_BASE_URL}/api/categories/${id}`);
               if (!r.ok) return [id, 'Service'];
               const j = await r.json();
               return [id, j?.name || 'Service'];
@@ -80,7 +80,7 @@ function ComboDetailPage() {
             if (firstCategoryItem) {
               try {
                 const categoryId = norm(firstCategoryItem.categoryId);
-                const res = await fetch(`http://localhost:5000/api/categories/${categoryId}`);
+                const res = await fetch(`${API_BASE_URL}/api/categories/${categoryId}`);
                 if (res.ok) {
                   const categoryData = await res.json();
                   pid = norm(categoryData.parentId) || norm(categoryData.parent);

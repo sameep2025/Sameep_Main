@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import axios from "axios";
+import API_BASE_URL from "../config";
 
 function ViewBusinessModal({ show, onClose, vendorId }) {
   const [vendor, setVendor] = useState(null);
@@ -12,15 +13,15 @@ function ViewBusinessModal({ show, onClose, vendorId }) {
       try {
         // Fetch vendor info
         const vendorRes = await axios.get(
-          `http://localhost:5000/api/vendors/${vendorId}`
+          `${API_BASE_URL}/api/vendors/${vendorId}`
         );
         setVendor(vendorRes.data);
 
         // Fetch category + subcategories
         const catRes = await axios.get(
-          `http://localhost:5000/api/categories/${vendorRes.data.categoryId._id}`
+          `${API_BASE_URL}/api/categories/${vendorRes.data.categoryId._id}`
         );
-        const subRes = await axios.get(`http://localhost:5000/api/categories`, {
+        const subRes = await axios.get(`${API_BASE_URL}/api/categories`, {
           params: { parentId: vendorRes.data.categoryId._id },
         });
 

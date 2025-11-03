@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import axios from "axios";
+import API_BASE_URL from "../config";
 
 function VendorPricingPage({ vendorId }) {
   const [pricing, setPricing] = useState([]);
@@ -9,7 +10,7 @@ function VendorPricingPage({ vendorId }) {
     if (!vendorId) return;
     const fetchPricing = async () => {
       try {
-        const res = await axios.get(`http://localhost:5000/api/vendorPricing/${vendorId}`);
+        const res = await axios.get(`${API_BASE_URL}/api/vendorPricing/${vendorId}`);
         const items = Array.isArray(res.data?.pricing) ? res.data.pricing : [];
         setPricing(items);
       } catch (err) {
@@ -24,7 +25,7 @@ function VendorPricingPage({ vendorId }) {
 
   const handleInlineSave = async (categoryId, price) => {
     try {
-      await axios.put(`http://localhost:5000/api/vendorPricing/${vendorId}/${categoryId}`, { price: Number(price) });
+      await axios.put(`${API_BASE_URL}/api/vendorPricing/${vendorId}/${categoryId}`, { price: Number(price) });
     } catch (err) {
       console.error(err);
       alert("Failed to save price");

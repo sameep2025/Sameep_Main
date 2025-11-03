@@ -8,6 +8,7 @@ import AboutSection from "../../../components/AboutSection";
 import ContactSection from "../../../components/ContactSection";
 import Footer from "../../../components/Footer";
 import FullPageShimmer from "../../../components/FullPageShimmer";
+import API_BASE_URL from "../../../config";
 
 export default function PreviewPage() {
   const router = useRouter();
@@ -321,7 +322,7 @@ export default function PreviewPage() {
           if (rows.length) { arr = rows.slice(0, 10); break; }
         }
         if (!arr.length && displayNode?.imageUrl) arr = [displayNode.imageUrl];
-        return arr.map((s) => String(s).startsWith('http') ? String(s) : `http://localhost:5000${String(s)}`);
+        return arr.map((s) => String(s).startsWith('http') ? String(s) : `${API_BASE_URL}${String(s)}`);
       } catch { return []; }
     })();
     useEffect(() => { setImgIdx(0); }, [displayNode?.id, selectedParent?.id, node?.id, imagesForCard.length]);
@@ -1029,7 +1030,7 @@ export default function PreviewPage() {
                     if (rows.length) images = rows.slice(0, 10);
                   }
                   if (!images.length && displayNode?.imageUrl) images = [displayNode.imageUrl];
-                  const normImgs = images.map((s) => String(s).startsWith('http') ? String(s) : `http://localhost:5000${String(s)}`);
+                  const normImgs = images.map((s) => String(s).startsWith('http') ? String(s) : `${API_BASE_URL}${String(s)}`);
                   if (!normImgs.length) return <div />;
                   const idx = Number(invImgIdx[targetId] || 0) % normImgs.length;
                   return (
@@ -1393,7 +1394,7 @@ export default function PreviewPage() {
                         if (rows.length) images = rows.slice(0, 10);
                       }
                       if (!images.length && displayNode?.imageUrl) images = [displayNode.imageUrl];
-                      const normImgs = images.map((s) => String(s).startsWith('http') ? String(s) : `http://localhost:5000${String(s)}`);
+                      const normImgs = images.map((s) => String(s).startsWith('http') ? String(s) : `${API_BASE_URL}${String(s)}`);
                       if (!normImgs.length) return <div />;
                       const idx = Number(invImgIdx[targetId] || 0) % normImgs.length;
                       return (
@@ -1724,8 +1725,8 @@ export default function PreviewPage() {
                   const s = String(child?.imageUrl || '');
                   if (!s) return null;
                   if (s.startsWith('http://') || s.startsWith('https://') || s.startsWith('data:')) return s;
-                  if (s.startsWith('/')) return `http://localhost:5000${s}`;
-                  return `http://localhost:5000/${s}`;
+                  if (s.startsWith('/')) return `${API_BASE_URL}${s}`;
+                  return `${API_BASE_URL}/${s}`;
                 })();
                 const termsRaw = child?.terms || '';
                 const termsArr = Array.isArray(termsRaw)
@@ -1845,8 +1846,8 @@ export default function PreviewPage() {
                 const s = String(enriched?.imageUrl || '');
                 if (!s) return null;
                 if (s.startsWith('http://') || s.startsWith('https://') || s.startsWith('data:')) return s;
-                if (s.startsWith('/')) return `http://localhost:5000${s}`;
-                return `http://localhost:5000/${s}`;
+                if (s.startsWith('/')) return `${API_BASE_URL}${s}`;
+                return `${API_BASE_URL}/${s}`;
               })();
               const termsRaw = enriched?.terms || '';
               const termsArr = Array.isArray(termsRaw) ? termsRaw : String(termsRaw || '')
@@ -1981,8 +1982,8 @@ export default function PreviewPage() {
                       if (!img) return null;
                       const s = String(img);
                       if (s.startsWith('http://') || s.startsWith('https://') || s.startsWith('data:')) return s;
-                      if (s.startsWith('/')) return `http://localhost:5000${s}`;
-                      return `http://localhost:5000/${s}`;
+                      if (s.startsWith('/')) return `${API_BASE_URL}${s}`;
+                      return `${API_BASE_URL}/${s}`;
                     })();
                     return (
                       <section key={`pkg-${idx}`} style={{ flex: '1 1 320px', minWidth: 300, marginBottom: 0 }}>

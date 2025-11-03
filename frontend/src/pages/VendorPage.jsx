@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import axios from "axios";
 import { useNavigate } from "react-router-dom";
+import API_BASE_URL from "../config";
 
 function VendorPage() {
   const [categories, setCategories] = useState([]);
@@ -11,7 +12,7 @@ function VendorPage() {
     try {
       setLoading(true);
       const res = await axios.get(
-        "http://localhost:5000/api/vendors/categories/counts"
+        `${API_BASE_URL}/api/vendors/categories/counts`
       );
       setCategories(res.data || []);
     } catch (err) {
@@ -56,7 +57,7 @@ function VendorPage() {
               }}
             >
               <img
-                src={c.imageUrl ? `http://localhost:5000${c.imageUrl}` : ""}
+                src={c.imageUrl ? `${API_BASE_URL}${c.imageUrl}` : ""}
                 alt={c.name}
                 style={{
                   width: "100%",

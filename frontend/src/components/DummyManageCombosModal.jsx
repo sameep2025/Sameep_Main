@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import API_BASE_URL from "../config";
 
 export default function DummyManageCombosModal({ show, onClose, subcategoryId, initialEditingCombo = null, onSaved = null }) {
   const [step, setStep] = useState(1);
@@ -32,7 +33,7 @@ export default function DummyManageCombosModal({ show, onClose, subcategoryId, i
   const toAbs = (u) => {
     if (!u) return "";
     if (typeof u !== 'string') return "";
-    const host = 'http://localhost:5000';
+    const host = '${API_BASE_URL}';
     if (u.startsWith('http://') || u.startsWith('https://')) return u;
     if (u.startsWith('/uploads/')) return `${host}${u}`;
     if (u.startsWith('/')) return `${host}${u}`;
@@ -46,10 +47,10 @@ export default function DummyManageCombosModal({ show, onClose, subcategoryId, i
     (async () => {
       try {
         // fetch parent category
-        const parentRes = await fetch(`http://localhost:5000/api/dummy-categories/${subcategoryId}`);
+        const parentRes = await fetch(`${API_BASE_URL}/api/dummy-categories/${subcategoryId}`);
         const parent = parentRes.ok ? await parentRes.json() : null;
         // fetch direct children as leaves
-        const leavesRes = await fetch(`http://localhost:5000/api/dummy-categories?parentId=${subcategoryId}`);
+        const leavesRes = await fetch(`${API_BASE_URL}/api/dummy-categories?parentId=${subcategoryId}`);
         const childArr = leavesRes.ok ? await leavesRes.json() : [];
         const children = Array.isArray(childArr) ? childArr.map((c) => ({ ...c, children: [] })) : [];
         setLeaves(childArr || []);
@@ -243,7 +244,7 @@ export default function DummyManageCombosModal({ show, onClose, subcategoryId, i
       });
 
       const isEdit = Boolean(editingCombo?.id || editingCombo?._id);
-      const url = isEdit ? `http://localhost:5000/api/dummy-combos/${editingCombo.id || editingCombo._id}` : `http://localhost:5000/api/dummy-combos`;
+      const url = isEdit ? `${API_BASE_URL}/api/dummy-combos/${editingCombo.id || editingCombo._id}` : `${API_BASE_URL}/api/dummy-combos`;
       const method = isEdit ? "PUT" : "POST";
       const res = await fetch(url, { method, body: fd });
       if (!res.ok) {

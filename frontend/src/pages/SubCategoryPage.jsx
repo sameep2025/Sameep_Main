@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { useParams, Link, useNavigate, useLocation } from "react-router-dom";
 import CategoryList from "../components/CategoryList";
 import ManageCombosModal from "../components/ManageCombosModal";
+import API_BASE_URL from "../config";
 
 function SubCategoryPage() {
   const { id } = useParams();
@@ -28,7 +29,7 @@ function SubCategoryPage() {
 
         // keep going up until no parent
         while (currentId) {
-          const res = await fetch(`http://localhost:5000/api/categories/${currentId}`);
+          const res = await fetch(`${API_BASE_URL}/api/categories/${currentId}`);
           if (!res.ok) break;
           const data = await res.json();
           chain.unshift(data); // add to front
@@ -56,27 +57,27 @@ function SubCategoryPage() {
   const toAbs = (u) => {
     if (!u) return "";
     if (u.startsWith("http://") || u.startsWith("https://")) return u;
-    return `http://localhost:5000/uploads/${u}`;
+    return `${API_BASE_URL}/uploads/${u}`;
   };
 
   const loadCombos = async () => {
     setCombosLoading(true);
     setCombosError("");
     try {
-      let res = await fetch(`http://localhost:5000/api/combos/byParent/${id}`);
+      let res = await fetch(`${API_BASE_URL}/api/combos/byParent/${id}`);
       let data;
       if (res.ok) {
         data = await res.json();
       } else {
         // fallback to query param endpoint
-        res = await fetch(`http://localhost:5000/api/combos?parentCategoryId=${id}`);
+        res = await fetch(`${API_BASE_URL}/api/combos?parentCategoryId=${id}`);
         data = await res.json();
       }
       let arr = Array.isArray(data) ? data : [];
       // final fallback: fetch all and filter client-side (handles Extended JSON $oid)
       if (arr.length === 0) {
         try {
-          const allRes = await fetch(`http://localhost:5000/api/combos`);
+          const allRes = await fetch(`${API_BASE_URL}/api/combos`);
           const allData = await allRes.json();
           if (Array.isArray(allData)) {
             const norm = (v) => (typeof v === 'string' ? v : v?.$oid || v?._id || v);
@@ -99,7 +100,7 @@ function SubCategoryPage() {
         const entries = await Promise.all(
           Array.from(ids).map(async (cid) => {
             try {
-              const r = await fetch(`http://localhost:5000/api/categories/${cid}`);
+              const r = await fetch(`${API_BASE_URL}/api/categories/${cid}`);
               if (!r.ok) return [cid, 'Service'];
               const j = await r.json();
               return [cid, j?.name || 'Service'];
@@ -332,7 +333,7 @@ function SubCategoryPage() {
                           if (!window.confirm("Delete this combo?")) return;
                           try {
                             const delId = c._id?.$oid || c._id || c.id;
-                            const res = await fetch(`http://localhost:5000/api/combos/${delId}`, { method: "DELETE" });
+                            const res = await fetch(`${API_BASE_URL}/api/combos/${delId}`, { method: "DELETE" });
                             if (!res.ok) throw new Error("Failed to delete");
                             loadCombos();
                           } catch (e) {

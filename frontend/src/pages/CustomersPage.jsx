@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import axios from "axios";
 import AddCustomerModal from "../components/AddCustomerModal";
 import ActivateBusinessModal from "../components/ActivateBusinessModal";
+import API_BASE_URL from "../config";
 
 function CustomersPage() {
   const [customers, setCustomers] = useState([]);
@@ -13,7 +14,7 @@ function CustomersPage() {
   const fetchCustomers = async () => {
     try {
       setLoading(true);
-      const res = await axios.get("http://localhost:5000/api/customers");
+      const res = await axios.get(`${API_BASE_URL}/api/customers`);
       setCustomers(res.data);
     } catch (err) {
       console.error(err);

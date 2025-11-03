@@ -3,6 +3,7 @@ import { MapContainer, TileLayer, Marker, useMapEvents } from "react-leaflet";
 import L from "leaflet";
 import axios from "axios";
 import "leaflet/dist/leaflet.css";
+import API_BASE_URL from "../config";
 
 // Fix leaflet's default icon path issue with webpack
 delete L.Icon.Default.prototype._getIconUrl;
@@ -109,7 +110,7 @@ export function LocationPickerModal({
 
     // Send areaCity along with lat/lng
     const res = await axios.put(
-      `http://localhost:5000/api/vendors/${vendorId}/location`,
+      `${API_BASE_URL}/api/vendors/${vendorId}/location`,
       { lat, lng, areaCity }
     );
 

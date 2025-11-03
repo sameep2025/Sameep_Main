@@ -1,11 +1,12 @@
 import React, { useState, useEffect } from "react";
 import axios from "axios";
+import API_BASE_URL from "../config";
 
 function BrandCard({ brand, onEdit, onDelete }) {
   const imageSrc = brand.imageUrl
     ? brand.imageUrl.startsWith("http")
       ? brand.imageUrl
-      : `http://localhost:5000${brand.imageUrl}`
+      : `${API_BASE_URL}${brand.imageUrl}`
     : null;
 
   return (
@@ -63,7 +64,7 @@ export default function TempoBusBrandPage() {
 
   const fetchBrands = async () => {
     try {
-      const res = await axios.get("http://localhost:5000/api/masters?type=tempoBusBrand");
+      const res = await axios.get(`${API_BASE_URL}/api/masters?type=tempoBusBrand`);
       setBrands(res.data);
     } catch (err) {
       console.error(err);
@@ -81,9 +82,9 @@ export default function TempoBusBrandPage() {
 
     try {
       if (editBrand) {
-        await axios.put(`http://localhost:5000/api/masters/${editBrand._id}`, formData, { headers: { "Content-Type": "multipart/form-data" } });
+        await axios.put(`${API_BASE_URL}/api/masters/${editBrand._id}`, formData, { headers: { "Content-Type": "multipart/form-data" } });
       } else {
-        await axios.post("http://localhost:5000/api/masters", formData, { headers: { "Content-Type": "multipart/form-data" } });
+        await axios.post(`${API_BASE_URL}/api/masters`, formData, { headers: { "Content-Type": "multipart/form-data" } });
       }
       setShowModal(false);
       setEditBrand(null);
@@ -97,7 +98,7 @@ export default function TempoBusBrandPage() {
     setForm({
       name: brand.name,
       file: null,
-      preview: brand.imageUrl ? (brand.imageUrl.startsWith("http") ? brand.imageUrl : `http://localhost:5000${brand.imageUrl}`) : null,
+      preview: brand.imageUrl ? (brand.imageUrl.startsWith("http") ? brand.imageUrl : `${API_BASE_URL}${brand.imageUrl}`) : null,
     });
     setShowModal(true);
   };
@@ -105,7 +106,7 @@ export default function TempoBusBrandPage() {
   const handleDelete = async (brand) => {
     if (!window.confirm("Delete this brand?")) return;
     try {
-      await axios.delete(`http://localhost:5000/api/masters/${brand._id}`);
+      await axios.delete(`${API_BASE_URL}/api/masters/${brand._id}`);
       fetchBrands();
     } catch (err) { console.error(err); }
   };

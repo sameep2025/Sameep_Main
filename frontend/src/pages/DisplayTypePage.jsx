@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import axios from "axios";
+import API_BASE_URL from "../config";
 
 // Card for each display type
 // Card for each display type
@@ -170,7 +171,7 @@ export default function DisplayTypePage() {
   // Fetch display types from backend
   const fetchDisplayTypes = async () => {
     try {
-      const res = await axios.get("http://localhost:5000/api/masters", {
+      const res = await axios.get(`${API_BASE_URL}/api/masters`, {
         params: { type: "displayType" },
       });
       setDisplayTypes(res.data);
@@ -189,12 +190,12 @@ export default function DisplayTypePage() {
       if (data._id) {
         // Update existing
         await axios.put(
-          `http://localhost:5000/api/masters/${data._id}`,
+          `${API_BASE_URL}/api/masters/${data._id}`,
           { name: data.name }
         );
       } else {
         // Add new
-        await axios.post("http://localhost:5000/api/masters", {
+        await axios.post(`${API_BASE_URL}/api/masters`, {
           name: data.name,
           type: "displayType",
         });
@@ -212,7 +213,7 @@ export default function DisplayTypePage() {
     if (!window.confirm("Delete this display type?")) return;
     try {
       await axios.delete(
-        `http://localhost:5000/api/masters/${displayType._id}`
+        `${API_BASE_URL}/api/masters/${displayType._id}`
       );
       fetchDisplayTypes();
     } catch (err) {

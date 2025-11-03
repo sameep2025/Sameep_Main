@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import API_BASE_URL from "../config";
 
 function ChipSelect({ label, options = [], value = [], onChange, placeholder = "Select", multi = true, includeSelectAll = true }) {
   const [open, setOpen] = useState(false);
@@ -273,7 +274,8 @@ const [selectedMasterIndex, setSelectedMasterIndex] = useState(0);
 
   useEffect(() => {
     if (!show) return;
-    const base = "http://localhost:5000/api/masters";
+    const base = `${API_BASE_URL}/api/masters`;
+
     const datasets = [
       {
         setter: setVisibilityOptions,
@@ -418,7 +420,7 @@ const [selectedMasterIndex, setSelectedMasterIndex] = useState(0);
         }));
         formData.append("signupLevels", JSON.stringify(levelsPayload));
       }
-      let url = "http://localhost:5000/api/dummy-categories";
+      let url = `${API_BASE_URL}/api/dummy-categories`;
       let method = "POST";
       if (initialData && initialData._id) {
         url += `/${initialData._id}`;

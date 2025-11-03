@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from "react";
 import axios from "axios";
+import API_BASE_URL from "../config";
 
 export default function BusinessLocationModal({ show, onClose, vendorId, onUpdate }) {
   const [nearbyLocations, setNearbyLocations] = useState(["", "", "", "", ""]);
@@ -10,7 +11,7 @@ export default function BusinessLocationModal({ show, onClose, vendorId, onUpdat
     if (show && vendorId) {
       setLoading(true);
       axios
-        .get(`http://localhost:5000/api/vendors/${vendorId}/location`)
+        .get(`${API_BASE_URL}/api/vendors/${vendorId}/location`)
         .then((res) => {
           const locs = res.data.location?.nearbyLocations || [];
           const filled = locs.slice(0, 5);
@@ -29,11 +30,11 @@ export default function BusinessLocationModal({ show, onClose, vendorId, onUpdat
     try {
       if (value === "") {
         await axios.delete(
-          `http://localhost:5000/api/vendors/vendor-locations/${vendorId}/nearby/${index}`
+          `${API_BASE_URL}/api/vendors/vendor-locations/${vendorId}/nearby/${index}`
         );
       } else {
         await axios.put(
-          `http://localhost:5000/api/vendors/vendor-locations/${vendorId}/nearby/${index}`,
+          `${API_BASE_URL}/api/vendors/vendor-locations/${vendorId}/nearby/${index}`,
           { location: value }
         );
       }
@@ -48,7 +49,7 @@ export default function BusinessLocationModal({ show, onClose, vendorId, onUpdat
   const handleDelete = async (index) => {
     try {
       await axios.delete(
-        `http://localhost:5000/api/vendors/vendor-locations/${vendorId}/nearby/${index}`
+        `${API_BASE_URL}/api/vendors/vendor-locations/${vendorId}/nearby/${index}`
       );
       const updated = [...nearbyLocations];
       updated[index] = "";
