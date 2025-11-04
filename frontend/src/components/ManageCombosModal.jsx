@@ -41,7 +41,7 @@ export default function ManageCombosModal({ show, onClose, subcategoryId, initia
   const toAbs = (u) => {
     if (!u) return "";
     if (typeof u !== 'string') return "";
-    const host = '${API_BASE_URL}';
+    const host = API_BASE_URL;
     if (u.startsWith('http://') || u.startsWith('https://')) return u;
     if (u.startsWith('/uploads/')) return `${host}${u}`;
     if (u.startsWith('/')) return `${host}${u}`;

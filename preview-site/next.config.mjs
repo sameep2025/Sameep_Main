@@ -3,7 +3,7 @@
 const API_BASE_URL =
   process.env.NODE_ENV === "development"
     ? "http://localhost:5000"
-    : "http://backend-env.eba-xuvepujy.ap-south-1.elasticbeanstalk.com";
+    : "https://newsameep-backend.go-kar.net";
 
 const nextConfig = {
   reactStrictMode: true,
