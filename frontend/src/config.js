@@ -11,7 +11,7 @@ const API_BASE_URL = (() => {
   }
   return process.env.NODE_ENV === "development"
     ? "http://localhost:5000"
-    : "http://backend-env.eba-xuvepujy.ap-south-1.elasticbeanstalk.com";
+    : "/api";
 })();
 
 export default API_BASE_URL;
