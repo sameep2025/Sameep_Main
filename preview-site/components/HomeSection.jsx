@@ -1,6 +1,6 @@
 import { useRouter } from "next/router";
 import { useState, useMemo, useEffect } from "react";
-import API_BASE_URL from "../config";
+import API_BASE_URL, { ASSET_BASE_URL } from "../config";
 
 export default function HomeSection({ businessName, profilePictures = [] }) {
   const router = useRouter();
@@ -12,8 +12,8 @@ export default function HomeSection({ businessName, profilePictures = [] }) {
         const str = String(s || "");
         if (!str) return null;
         if (str.startsWith("http://") || str.startsWith("https://") || str.startsWith("data:")) return str;
-        if (str.startsWith("/")) return `${API_BASE_URL}${str}`;
-        return `${API_BASE_URL}/${str}`;
+        if (str.startsWith("/")) return `${ASSET_BASE_URL}${str}`;
+        return `${ASSET_BASE_URL}/${str}`;
       })
       .filter(Boolean);
   }, [profilePictures]);
