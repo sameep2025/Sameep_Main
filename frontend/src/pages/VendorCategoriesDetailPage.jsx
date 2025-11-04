@@ -498,7 +498,7 @@ export default function VendorCategoriesDetailPage() {
           <button
             onClick={() => {
               const homeLocs = (vendor?.location?.nearbyLocations || []).filter(Boolean);
-              const url = `http://localhost:3001/preview/${vendorId}/${categoryId}?homeLocs=${encodeURIComponent(JSON.stringify(homeLocs))}&t=${Date.now()}`;
+              const url = `https://main.d35jvo0hsvn0k1.amplifyapp.com/preview/${vendorId}/${categoryId}?homeLocs=${encodeURIComponent(JSON.stringify(homeLocs))}&t=${Date.now()}`;
               window.open(url, '_blank');
             }}
             style={{ padding: '6px 12px', borderRadius: 8, border: 'none', background: '#059669', color: '#fff' }}
@@ -508,7 +508,7 @@ export default function VendorCategoriesDetailPage() {
           <button
             onClick={() => {
               const homeLocs = (vendor?.location?.nearbyLocations || []).filter(Boolean);
-              const url = `http://localhost:3000/preview/${vendorId}/${categoryId}?homeLocs=${encodeURIComponent(JSON.stringify(homeLocs))}&t=${Date.now()}`;
+              const url = `https://main.d35jvo0hsvn0k1.amplifyapp.com/preview/${vendorId}/${categoryId}?homeLocs=${encodeURIComponent(JSON.stringify(homeLocs))}&t=${Date.now()}`;
               window.open(url, '_blank');
             }}
             style={{ padding: '6px 12px', borderRadius: 8, border: 'none', background: '#0ea5e9', color: '#fff' }}
