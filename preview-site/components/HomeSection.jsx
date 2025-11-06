@@ -2,9 +2,10 @@ import { useRouter } from "next/router";
 import { useState, useMemo, useEffect } from "react";
 import API_BASE_URL, { ASSET_BASE_URL } from "../config";
 
-export default function HomeSection({ businessName, profilePictures = [] }) {
+export default function HomeSection({ businessName, profilePictures = [], heroTitle, heroDescription }) {
   const router = useRouter();
   const [currentIdx, setCurrentIdx] = useState(0);
+  const [vw, setVw] = useState(typeof window !== 'undefined' ? window.innerWidth : 1200);
 
   const normalizedPics = useMemo(() => {
     return (Array.isArray(profilePictures) ? profilePictures : [])
@@ -29,6 +30,18 @@ export default function HomeSection({ businessName, profilePictures = [] }) {
     return () => clearInterval(id);
   }, [normalizedPics.length]);
 
+  useEffect(() => {
+    const onResize = () => setVw(window.innerWidth);
+    if (typeof window !== 'undefined') {
+      window.addEventListener('resize', onResize);
+      setVw(window.innerWidth);
+      return () => window.removeEventListener('resize', onResize);
+    }
+  }, []);
+
+  const isMobile = vw <= 768;
+  const isTablet = vw > 768 && vw <= 1024;
+
   return (
     <section
       style={{
@@ -44,11 +57,11 @@ export default function HomeSection({ businessName, profilePictures = [] }) {
         style={{
           maxWidth: "1200px",
           margin: "0 auto",
-          paddingLeft: "40px",
-          paddingRight: "40px",
+          paddingLeft: isMobile ? "16px" : "40px",
+          paddingRight: isMobile ? "16px" : "40px",
           display: "grid",
-          gridTemplateColumns: "1fr 520px",
-          gap: 24,
+          gridTemplateColumns: isMobile ? "1fr" : "1fr 520px",
+          gap: isMobile ? 16 : 24,
           alignItems: "start",
         }}
       >
@@ -61,7 +74,7 @@ export default function HomeSection({ businessName, profilePictures = [] }) {
               marginBottom: "20px",
             }}
           >
-            {businessName}
+            {heroTitle || businessName}
           </h1>
 
           <p
@@ -71,10 +84,7 @@ export default function HomeSection({ businessName, profilePictures = [] }) {
               marginBottom: "30px",
             }}
           >
-            Lorem ipsum dolor sit amet, consectetur adipiscing elit. Quisque
-            euismod est in sapien feugiat, nec ultrices nisl fermentum. Sed vel
-            sem in nulla suscipit finibus. Mauris vitae quam sit amet nulla
-            hendrerit varius.
+            {heroDescription || "Lorem ipsum dolor sit amet, consectetur adipiscing elit. Quisque euismod est in sapien feugiat, nec ultrices nisl fermentum. Sed vel sem in nulla suscipit finibus. Mauris vitae quam sit amet nulla hendrerit varius."}
           </p>
 
           <div
@@ -140,9 +150,9 @@ export default function HomeSection({ businessName, profilePictures = [] }) {
         {/* Right: profile pictures slider */}
         <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 10 }}>
           {normalizedPics.length === 0 ? (
-            <div style={{ width: 500, height: 360, borderRadius: 14, background: "rgba(255,255,255,0.2)", display: "flex", alignItems: "center", justifyContent: "center" }}>No Image</div>
+            <div style={{ width: isMobile ? '100%' : 500, height: isMobile ? 240 : 360, borderRadius: 14, background: "rgba(255,255,255,0.2)", display: "flex", alignItems: "center", justifyContent: "center" }}>No Image</div>
           ) : (
-            <div style={{ width: 500, height: 360, borderRadius: 14, overflow: 'hidden', background: '#fff', position: 'relative' }}>
+            <div style={{ width: isMobile ? '100%' : 500, height: isMobile ? 240 : 360, borderRadius: 14, overflow: 'hidden', background: '#fff', position: 'relative' }}>
               <div
                 style={{
                   display: 'flex',

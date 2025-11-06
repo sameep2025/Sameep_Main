@@ -11,11 +11,25 @@ export default function BenefitsSection() {
     { title: "Special Offers", desc: "Exciting deals and discounts regularly." },
   ];
 
+  const [vw, setVw] = React.useState(typeof window !== 'undefined' ? window.innerWidth : 1200);
+  React.useEffect(() => {
+    const onResize = () => setVw(window.innerWidth);
+    if (typeof window !== 'undefined') {
+      window.addEventListener('resize', onResize);
+      setVw(window.innerWidth);
+      return () => window.removeEventListener('resize', onResize);
+    }
+  }, []);
+
+  const isMobile = vw <= 640;
+  const isTablet = vw > 640 && vw <= 1024;
+
   return (
     <section
       id="benefits"
       style={{
         padding: "50px 20px",
+        backgroundColor: "#F7FEE7",
         fontFamily: "Poppins, sans-serif",
         textAlign: "center",
       }}
@@ -50,17 +64,21 @@ export default function BenefitsSection() {
       <div
         style={{
           display: "grid",
-          gridTemplateColumns: "repeat(3, 1fr)",
-          gap: "20px",
+          gridTemplateColumns: isMobile ? "1fr" : isTablet ? "repeat(2, 1fr)" : "repeat(3, 1fr)",
+          gap: isMobile ? "12px" : "20px",
           maxWidth: "1000px",
           margin: "0 auto",
+          backgroundColor: "#F7FEE7",
+          padding: "12px",
+          borderRadius: "16px",
         }}
       >
         {benefitsData.map((item, idx) => (
           <div
             key={idx}
             style={{
-              background: "#F0FDF4",
+              background: "#F7FEE7",
+              border: "1px solid #e7f3d1",
               borderRadius: "12px",
               padding: "20px",
               display: "flex",

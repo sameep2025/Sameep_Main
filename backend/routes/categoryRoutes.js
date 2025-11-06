@@ -81,6 +81,17 @@ router.post("/", upload.single("image"), async (req, res) => {
       imageUrl: req.file ? `/uploads/${req.file.filename}` : undefined,
     };
 
+    // ✅ Persist 10 Free Text inputs for parent categories on create
+    if (parent === null) {
+      const freeTexts = [];
+      for (let i = 1; i <= 10; i++) {
+        const key = `freeText${i}`;
+        if (req.body[key] !== undefined) freeTexts.push(req.body[key]);
+        else freeTexts.push("");
+      }
+      categoryData.freeTexts = freeTexts;
+    }
+
     // ✅ Normalize displayType to always be an array
     if (req.body.displayType) {
       try {
@@ -257,7 +268,8 @@ router.put("/:id", upload.single("image"), async (req, res) => {
       category.postRequestsDeals = req.body.postRequestsDeals === "true";
       category.loyaltyPoints = req.body.loyaltyPoints === "true";
       category.linkAttributesPricing = req.body.linkAttributesPricing === "true";
-      category.freeTexts = Array.from({ length: 10 }, (_, i) => req.body[`freeText${i}`] || "");
+      // ✅ Correctly read freeText1..freeText10
+      category.freeTexts = Array.from({ length: 10 }, (_, idx) => req.body[`freeText${idx + 1}`] || "");
       if (req.body.inventoryLabelName !== undefined) category.inventoryLabelName = req.body.inventoryLabelName;
     }
 

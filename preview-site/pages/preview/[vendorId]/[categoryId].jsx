@@ -1,6 +1,8 @@
 // pages/preview/[vendorId]/[categoryId].jsx
 import React, { useState, useEffect, useCallback } from "react";
+
 import { useRouter } from "next/router";
+import Head from "next/head";
 import TopNavBar from "../../../components/TopNavBar";
 import HomeSection from "../../../components/HomeSection";
 import BenefitsSection from "../../../components/BenefitsSection";
@@ -32,6 +34,8 @@ export default function PreviewPage() {
   const [combos, setCombos] = useState([]);
   const [packageSelections, setPackageSelections] = useState({}); // { [idx]: { size: string|null } }
   const [invImgIdx, setInvImgIdx] = useState({}); // { [targetId]: number }
+  const [heroTitle, setHeroTitle] = useState(null);
+  const [heroDescription, setHeroDescription] = useState(null);
 
   const loading = loadingVendor || loadingCategories;
 
@@ -51,6 +55,7 @@ export default function PreviewPage() {
 
       const vendorData = await vendorRes.json();
       const categoryData = await categoryRes.json();
+
       const catMeta = await catMetaRes.json().catch(() => ({}));
       const serverTree = await serverTreeRes.json().catch(() => null);
       let locationData = null;
@@ -62,6 +67,7 @@ export default function PreviewPage() {
       }
 
       setVendor(vendorData);
+
       console.log("CategoryData from API:", categoryData);
 
       const linkedAttributes = (catMeta && catMeta.linkedAttributes) ? catMeta.linkedAttributes : {};
@@ -118,6 +124,65 @@ export default function PreviewPage() {
       } catch {}
 
       setCategoryTree(categoriesWithLinked);
+
+      // Derive hero title/description from query, vendor, and category metadata
+      try {
+        const trimOrNull = (v) => {
+          const s = (v == null) ? '' : String(v);
+          const t = s.trim();
+          return t ? t : null;
+        };
+        const firstNonEmpty = (arr) => Array.isArray(arr) ? arr.map(trimOrNull).find(Boolean) || null : null;
+
+        // Prefer Create Category Modal freeTexts[0] and [1].
+        // Also consider catMeta.freeTexts (from /api/categories/:id)
+        const rawCatFT = (categoriesWithLinked && categoriesWithLinked.freeTexts)
+          ? categoriesWithLinked.freeTexts
+          : (catMeta && Array.isArray(catMeta.freeTexts))
+          ? catMeta.freeTexts
+          : (categoryData && Array.isArray(categoryData.freeTexts))
+          ? categoryData.freeTexts
+          : [];
+        // Heuristic: legacy data could be shifted by one (index 0 empty, 1 has title, 2 has desc)
+        const catFT = (() => {
+          try {
+            const arr = Array.isArray(rawCatFT) ? rawCatFT : [];
+            if (
+              arr.length === 10 &&
+              (arr[0] == null || String(arr[0]).trim() === "") &&
+              (arr[1] != null && String(arr[1]).trim() !== "")
+            ) {
+              return [...arr.slice(1), ""];
+            }
+            return arr;
+          } catch { return Array.isArray(rawCatFT) ? rawCatFT : []; }
+        })();
+
+        const rawVenFT = vendorData?.freeTexts || [];
+        const venFT = Array.isArray(rawVenFT) ? rawVenFT : [];
+
+        const titleFromCategory = trimOrNull(catFT[0]) || firstNonEmpty(catFT);
+        const descFromCategory  = trimOrNull(catFT[1]) || firstNonEmpty(catFT);
+
+        const titleFromVendor = trimOrNull(venFT[0])
+          || trimOrNull(vendorData?.customFields?.freeText1)
+          || trimOrNull(vendorData?.ui?.heroTitle)
+          || firstNonEmpty(venFT);
+        const descFromVendor  = trimOrNull(venFT[1])
+          || trimOrNull(vendorData?.customFields?.freeText2)
+          || trimOrNull(vendorData?.ui?.heroDescription)
+          || firstNonEmpty(venFT);
+
+        const titleFromUi = trimOrNull(catMeta?.ui?.heroTitle) || trimOrNull(categoryData?.customFields?.freeText1) || trimOrNull(categoryData?.ui?.heroTitle);
+        const descFromUi  = trimOrNull(catMeta?.ui?.heroDescription) || trimOrNull(categoryData?.customFields?.freeText2) || trimOrNull(categoryData?.ui?.heroDescription);
+
+        const q = router?.query || {};
+        const title = trimOrNull(q.ft1) || titleFromCategory || titleFromVendor || titleFromUi || null;
+        const desc  = trimOrNull(q.ft2) || descFromCategory  || descFromVendor  || descFromUi  || null;
+
+        setHeroTitle(title);
+        setHeroDescription(desc);
+      } catch {}
 
       // Fetch packages/combos for this category
       try {
@@ -209,18 +274,16 @@ export default function PreviewPage() {
         const sel = (best.entry?.selections && fam && best.entry.selections[fam]) ? best.entry.selections[fam] : {};
 
         if (isTaxi) {
-          const body = fam === 'tempoMinibuses' ? (sel?.tempoBusBodyType ?? '') : (sel?.bodyType ?? '');
-          const seats = String(sel?.seats ?? '');
-          const fuel = sel?.fuelType != null ? String(sel.fuelType) : undefined;
+          const transmission = sel?.transmission != null ? String(sel.transmission) : undefined;
+          const bodyType = fam === 'tempoMinibuses' ? (sel?.tempoBusBodyType ?? '') : (sel?.bodyType ?? '');
           const model = String(sel?.model ?? '');
           const brand = fam === 'tempoMinibuses' ? String(sel?.tempoBusBrand ?? '') : String(sel?.brand ?? '');
-          const bodySeats = (body && seats) ? `${body}|${seats}` : undefined;
           setTaxiSelections((prev) => ({
             ...prev,
             [lvl1Id]: {
               ...(prev[lvl1Id] || {}),
-              bodySeats: bodySeats || prev[lvl1Id]?.bodySeats,
-              fuelType: fuel || prev[lvl1Id]?.fuelType,
+              transmission: transmission || prev[lvl1Id]?.transmission,
+              bodyType: bodyType || prev[lvl1Id]?.bodyType,
               modelBrand: (model && brand) ? `${model}|${brand}` : prev[lvl1Id]?.modelBrand,
             },
           }));
@@ -349,15 +412,16 @@ export default function PreviewPage() {
     }, [vendorId, displayNode?.id, selectedParent?.id, node?.id]);
 
     return (
-      <section style={{ marginBottom: 8 }}>
+      <section style={{ marginBottom: 16 }}>
         <div
           style={{
             border: "1px solid #e2e8f0",
             borderRadius: 16,
             padding: 20,
             background: "#fff",
-            width: 300,
+            width: '100%',
             minHeight: 400,
+            height: '100%',
             boxShadow: "0 1px 6px rgba(0,0,0,0.08)",
             display: "flex",
             flexDirection: "column",
@@ -368,7 +432,7 @@ export default function PreviewPage() {
           <h2 style={{ margin: "0 0 10px", fontSize: 16, fontWeight: 600 }}>{node.name}</h2>
 
           {imagesForCard.length > 0 ? (
-            <div style={{ width: 260, height: 160, borderRadius: 10, overflow: 'hidden', background: '#f8fafc', position: 'relative', marginBottom: 12 }}>
+            <div style={{ width: '100%', height: 160, borderRadius: 10, overflow: 'hidden', background: '#f8fafc', position: 'relative', marginBottom: 12 }}>
               <div style={{ display: 'flex', width: `${imagesForCard.length * 100}%`, height: '100%', transform: `translateX(-${imgIdx * (100 / imagesForCard.length)}%)`, transition: 'transform 400ms ease' }}>
                 {imagesForCard.map((src, i) => (
                   <div key={i} style={{ width: `${100 / imagesForCard.length}%`, height: '100%', flex: '0 0 auto' }}>
@@ -661,7 +725,7 @@ export default function PreviewPage() {
   }, {});
 
   const rootName = String(root?.name || '').toLowerCase();
-  if (rootName.includes('taxi')) {
+  if (false && rootName.includes('taxi')) {
     const carsList = invByFamily['cars'] || [];
     const tempoList = invByFamily['tempoMinibuses'] || [];
 
@@ -778,7 +842,7 @@ export default function PreviewPage() {
     };
 
     return (
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16 }}>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 30, alignItems: 'stretch' }}>
         {root.children.map((lvl1) => {
       const lvl2KidsRaw = Array.isArray(lvl1.children) ? lvl1.children : [];
       // Sort L2 by min subtree price
@@ -910,7 +974,7 @@ export default function PreviewPage() {
       return (
         <section key={lvl1.id} style={{ marginBottom: 16 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12 }}>
-            <h2 style={{ margin: 0, textTransform: 'uppercase', fontSize: 18, fontWeight: 600 }}>{lvl1.name}</h2>
+            <h2 style={{ margin: 0, textTransform: 'Capitalize', fontSize: 18, fontWeight: 600 }}>{lvl1.name}</h2>
             {lvl2Kids.length > 0 ? (
               <select
                 value={String(selectedLvl2?.id || '')}
@@ -999,6 +1063,7 @@ export default function PreviewPage() {
               background: '#fff',
               width: 300,
               minHeight: 400,
+              height: '100%',
               boxShadow: '0 1px 6px rgba(0,0,0,0.08)',
               display: 'flex',
               flexDirection: 'column',
@@ -1008,7 +1073,7 @@ export default function PreviewPage() {
           >
             <h3 style={{ margin: '0 0 10px', fontSize: 16, fontWeight: 600 }}>{displayNode?.name}</h3>
 
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 12, marginBottom: 12 }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 12 }}>
               {(() => {
                 try {
                   const targetId = String((selectedLvl3 || selectedLvl2 || lvl1)?.id || '');
@@ -1034,7 +1099,7 @@ export default function PreviewPage() {
                   if (!normImgs.length) return <div />;
                   const idx = Number(invImgIdx[targetId] || 0) % normImgs.length;
                   return (
-                    <div style={{ width: 200, height: 120, borderRadius: 10, overflow: 'hidden', background: '#f8fafc', position: 'relative' }}>
+                    <div style={{ width: '100%', height: 140, borderRadius: 10, overflow: 'hidden', background: '#f8fafc', position: 'relative' }}>
                       <div style={{ display: 'flex', width: `${normImgs.length * 100}%`, height: '100%', transform: `translateX(-${idx * (100 / normImgs.length)}%)`, transition: 'transform 400ms ease' }}>
                         {normImgs.map((src, i) => (
                           <div key={i} style={{ width: `${100 / normImgs.length}%`, height: '100%', flex: '0 0 auto' }}>
@@ -1204,7 +1269,7 @@ export default function PreviewPage() {
     );
 
     return (
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+      <div className="ds-tt-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: 16, alignItems: 'stretch', maxWidth: 1100, margin: '12px auto 0', padding: '0 12px' }}>
         {root.children.map((lvl1) => {
       const belongsToLvl1 = (entry) => {
         try {
@@ -1290,9 +1355,9 @@ export default function PreviewPage() {
           })();
 
           return (
-            <section key={lvl1.id} style={{ marginBottom: 16 }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12 }}>
-                <h2 style={{ margin: 0, textTransform: 'uppercase', fontSize: 18, fontWeight: 600 }}>{lvl1.name}</h2>
+            <section key={lvl1.id} style={{ marginBottom: 24, display: 'flex', flexDirection: 'column' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 14, justifyContent: 'space-between' }}>
+                <h2 style={{ margin: 0, fontSize: 18, fontWeight: 600 }}>{lvl1.name}</h2>
                 {lvl2Kids.length > 0 ? (
                   <select
                     value={String(selectedLvl2?.id || '')}
@@ -1355,23 +1420,26 @@ export default function PreviewPage() {
               </div>
 
               <div
+                className="ds-tt-card"
                 style={{
                   border: '1px solid #e2e8f0',
                   borderRadius: 16,
-                  padding: 20,
+                  padding: 22,
                   background: '#fff',
-                  width: 300,
-                  minHeight: 400,
+                  width: '100%',
+                  minHeight: 480,
+                  height: '100%',
                   boxShadow: '0 1px 6px rgba(0,0,0,0.08)',
                   display: 'flex',
                   flexDirection: 'column',
-                  justifyContent: 'space-between',
+                  gap: 12,
+                  justifyContent: 'flex-start',
                   fontFamily: 'Poppins, sans-serif',
                 }}
               >
-                <h3 style={{ margin: '0 0 10px', fontSize: 16, fontWeight: 600 }}>{displayNode?.name}</h3>
+                <h3 style={{ margin: '0 0 8px', fontSize: 16, fontWeight: 600 }}>{displayNode?.name}</h3>
 
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 12, marginBottom: 12 }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 12 }}>
                   {(() => {
                     try {
                       const targetId = String((selectedLvl3 || selectedLvl2 || lvl1)?.id || '');
@@ -1398,7 +1466,7 @@ export default function PreviewPage() {
                       if (!normImgs.length) return <div />;
                       const idx = Number(invImgIdx[targetId] || 0) % normImgs.length;
                       return (
-                        <div style={{ width: 200, height: 120, borderRadius: 10, overflow: 'hidden', background: '#f8fafc', position: 'relative' }}>
+                        <div style={{ width: '100%', height: 140, borderRadius: 10, overflow: 'hidden', background: '#f8fafc', position: 'relative' }}>
                           <div style={{ display: 'flex', width: `${normImgs.length * 100}%`, height: '100%', transform: `translateX(-${idx * (100 / normImgs.length)}%)`, transition: 'transform 400ms ease' }}>
                             {normImgs.map((src, i) => (
                               <div key={i} style={{ width: `${100 / normImgs.length}%`, height: '100%', flex: '0 0 auto' }}>
@@ -1440,7 +1508,7 @@ export default function PreviewPage() {
                       }));
                       setSelectedLeaf(next || selectedLvl2 || lvl1);
                     }}
-                    style={{ width: '100%', padding: '8px 10px', borderRadius: 8, border: '1px solid #d1d5db', background: '#fff', fontSize: 13 }}
+                    style={{ width: '100%', padding: '10px 12px', borderRadius: 8, border: '1px solid #d1d5db', background: '#fff', fontSize: 13 }}
                   >
                     {lvl3Kids.map((opt) => (
                       <option key={opt.id} value={opt.id}>{opt.name}</option>
@@ -1641,14 +1709,14 @@ export default function PreviewPage() {
         <h2
           style={{
             margin: "0 0 12px",
-            textTransform: "uppercase",
-            fontSize: 18,
+            textTransform: "Capitalize",
+            fontSize: "18px",
             fontWeight: 600,
           }}
         >
           {lvl1.name}
         </h2>
-        <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: "16px", alignItems: 'stretch' }}>
           {(() => {
             const mapModeToDt = (m) => {
               const x = String(m || '').toLowerCase();
@@ -1738,23 +1806,25 @@ export default function PreviewPage() {
                 const terms = termsArr.join(', ');
                 return (
                   <section key={child.id} style={{ flex: '1 1 320px', minWidth: 300 }}>
-                    <div style={{ border: '1px solid #e5e7eb', borderRadius: 12, padding: 12, background: '#fff', display: 'flex', flexDirection: 'column', gap: 10, width: 300, minHeight: 400, justifyContent: 'space-between' }}>
+                    <div style={{ border: '1px solid #e5e7eb', borderRadius: 12, padding: 12, background: '#fff', display: 'flex', flexDirection: 'column', gap: 10, width: '100%', minHeight: 400, justifyContent: 'flex-start', height: '100%' }}>
                       <h3 style={{ margin: 0 }}>{child.name}</h3>
                       {imgSrc ? (
                         <img src={imgSrc} alt={child.name} style={{ width: '100%', height: 160, objectFit: 'cover', borderRadius: 8 }} />
                       ) : null}
-                      {livePrice != null ? (
-                        <div style={{ fontSize: 18, fontWeight: 800, color: '#111827' }}>₹{Number(livePrice)}</div>
-                      ) : null}
-                      {terms ? (
-                        <div style={{ fontSize: 12, color: '#6b7280' }}>{terms}</div>
-                      ) : null}
-                      <button
-                        onClick={() => alert(`Booking ${child?.name}`)}
-                        style={{ marginTop: 'auto', width: '100%', padding: '10px 14px', borderRadius: 28, border: 'none', background: 'rgb(245 158 11)', color: '#111827', fontWeight: 600, cursor: 'pointer' }}
-                      >
-                        Book Now
-                      </button>
+                      <div style={{ marginTop: 'auto', display: 'flex', flexDirection: 'column', gap: 8 }}>
+                        {livePrice != null ? (
+                          <div style={{ fontSize: 18, fontWeight: 800, color: '#059669' }}>₹{Number(livePrice)}</div>
+                        ) : null}
+                        {terms ? (
+                          <div style={{ fontSize: 12, color: '#6b7280' }}>{terms}</div>
+                        ) : null}
+                        <button
+                          onClick={() => alert(`Booking ${child?.name}`)}
+                          style={{ width: '100%', padding: '10px 14px', borderRadius: 28, border: 'none', background: 'rgb(245 158 11)', color: '#111827', fontWeight: 600, cursor: 'pointer' }}
+                        >
+                          Book Now
+                        </button>
+                      </div>
                     </div>
                   </section>
                 );
@@ -1765,7 +1835,7 @@ export default function PreviewPage() {
 
               if (dt === 'buttons' || dt === 'button') {
                 return (
-                  <div key={child.id} style={{ display: 'flex', flexDirection: 'column', gap: 8, minWidth: 260 }}>
+                  <div key={child.id} style={{ display: 'flex', flexDirection: 'column', gap: 16, minWidth: 260 }}>
                     <div style={{ fontWeight: 600 }}>{child.name}</div>
                     <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
                       {kids.map((opt) => (
@@ -1798,7 +1868,7 @@ export default function PreviewPage() {
 
               if (dt === 'dropdown' || dt === 'select') {
                 return (
-                  <div key={child.id} style={{ display: 'flex', flexDirection: 'column', gap: 8, minWidth: 260 }}>
+                  <div key={child.id} style={{ display: 'flex', flexDirection: 'column', gap: 16, minWidth: 260 }}>
                     <div style={{ fontWeight: 600 }}>{child.name}</div>
                     <select
                       value={String(selected?.id || '')}
@@ -1856,23 +1926,25 @@ export default function PreviewPage() {
               return [
                 (
                   <section key={enriched.id} style={{ flex: '1 1 320px', minWidth: 300 }}>
-                    <div style={{ border: '1px solid #e5e7eb', borderRadius: 12, padding: 12, background: '#fff', display: 'flex', flexDirection: 'column', gap: 10, width: 300, minHeight: 400, justifyContent: 'space-between' }}>
+                    <div style={{ border: '1px solid #e5e7eb', borderRadius: 12, padding: 12, background: '#fff', display: 'flex', flexDirection: 'column', gap: 10, width: '100%', minHeight: 400, justifyContent: 'flex-start', height: '100%' }}>
                       <h3 style={{ margin: 0 }}>{enriched.name}</h3>
                       {imgSrc ? (
                         <img src={imgSrc} alt={enriched.name} style={{ width: '100%', height: 160, objectFit: 'cover', borderRadius: 8 }} />
                       ) : null}
-                      {livePrice != null ? (
-                        <div style={{ fontSize: 18, fontWeight: 800, color: '#111827' }}>₹{Number(livePrice)}</div>
-                      ) : null}
-                      {terms ? (
-                        <div style={{ fontSize: 12, color: '#6b7280' }}>{terms}</div>
-                      ) : null}
-                      <button
-                        onClick={() => alert(`Booking ${enriched?.name}`)}
-                        style={{ marginTop: 'auto', width: '100%', padding: '10px 14px', borderRadius: 28, border: 'none', background: 'rgb(245 158 11)', color: '#111827', fontWeight: 600, cursor: 'pointer' }}
-                      >
-                        Book Now
-                      </button>
+                      <div style={{ marginTop: 'auto', display: 'flex', flexDirection: 'column', gap: 8 }}>
+                        {livePrice != null ? (
+                          <div style={{ fontSize: 18, fontWeight: 800, color: '#059669', margin: 0 }}>₹{Number(livePrice)}</div>
+                        ) : null}
+                        {terms ? (
+                          <div style={{ fontSize: 12, color: '#6b7280' }}>{terms}</div>
+                        ) : null}
+                        <button
+                          onClick={() => alert(`Booking ${enriched?.name}`)}
+                          style={{ width: '100%', padding: '10px 14px', borderRadius: 28, border: 'none', background: 'rgb(245 158 11)', color: '#111827', fontWeight: 600, cursor: 'pointer' }}
+                        >
+                          Book Now
+                        </button>
+                      </div>
                     </div>
                   </section>
                 )
@@ -1898,18 +1970,27 @@ export default function PreviewPage() {
 
 
   return (
-    <div style={{ padding: 0, background: "#F0FDF4" }}>
+    <div id="preview-page" style={{ padding: 0, background: "#F0FDF4" }}>
+      <Head>
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <link rel="stylesheet" href="/redesignr.css?v=23" />
+      </Head>
       {loading ? (
         <FullPageShimmer />
       ) : (
         <>
           <TopNavBar businessName={vendor?.businessName || "Loading..."} categoryTree={categoryTree} selectedLeaf={selectedLeaf} onLeafSelect={setSelectedLeaf} />
-          <HomeSection businessName={vendor?.businessName || "Loading..."} profilePictures={vendor?.profilePictures || []} />
+          <HomeSection
+            businessName={vendor?.businessName || "Loading..."}
+            profilePictures={vendor?.profilePictures || []}
+            heroTitle={heroTitle || router?.query?.ft1 || vendor?.freeTexts?.[0] || vendor?.customFields?.freeText1 || vendor?.ui?.heroTitle}
+            heroDescription={heroDescription || router?.query?.ft2 || vendor?.freeTexts?.[1] || vendor?.customFields?.freeText2 || vendor?.ui?.heroDescription}
+          />
           <main id="products" style={{ padding: "20px", marginTop: "10px" }}>
             {Array.isArray(combos) && combos.length > 0 ? (
               <section style={{ marginBottom: 8 }}>
                 <h2 style={{ margin: '0 0 10px 0' }}>Packages</h2>
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 0 }}>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: "16px", alignItems: 'stretch' }}>
                   {combos.map((combo, idx) => {
                     const name = combo?.name || 'Package';
                     const img = combo?.imageUrl || combo?.image || null;
@@ -1968,7 +2049,7 @@ export default function PreviewPage() {
                     const bestVar = variantPrices.length ? Math.min(...variantPrices) : null;
                     const price = (priceBySize != null ? priceBySize : (bestVar != null ? bestVar : base));
                     const priceNode = (price != null && !Number.isNaN(price)) ? (
-                      <div style={{ fontSize: 18, fontWeight: 800, color: '#111827' }}>₹{price}</div>
+                      <div className="text-4xl font-extrabold text-emerald-600" style={{ marginBottom: "mb-4" }}>₹{price}</div>
                     ) : null;
                     const termsRaw = combo?.terms || combo?.term || '';
                     const termsArr = Array.isArray(termsRaw)
@@ -1987,7 +2068,7 @@ export default function PreviewPage() {
                     })();
                     return (
                       <section key={`pkg-${idx}`} style={{ flex: '1 1 320px', minWidth: 300, marginBottom: 0 }}>
-                        <div style={{ border: '1px solid #e5e7eb', borderRadius: 12, padding: 12, background: '#fff', display: 'flex', flexDirection: 'column', gap: 10, width: 300, minHeight: 400, justifyContent: 'space-between' }}>
+                        <div style={{ border: '1px solid #e5e7eb', borderRadius: 12, padding: 12, background: '#fff', display: 'flex', flexDirection: 'column', gap: 10, width: '100%', minHeight: 400, height: '100%', justifyContent: 'space-between' }}>
                           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                             {imgSrc ? (
                               <img src={imgSrc} alt={name} style={{ width: 40, height: 40, objectFit: 'cover', borderRadius: 8 }} />

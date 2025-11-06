@@ -306,6 +306,18 @@ const updateColorScheme = (index, key, value) => {
           ? initialData.freeTexts
           : Array(10).fill("")
       );
+      // Fix legacy off-by-one (previous backend saved freeText1..10 into indices 1..10, leaving index 0 empty)
+      try {
+        const arr = Array.isArray(initialData.freeTexts) ? initialData.freeTexts : [];
+        if (
+          Array.isArray(arr) && arr.length === 10 &&
+          (arr[0] == null || arr[0] === "") &&
+          (arr[1] != null && String(arr[1]).trim() !== "")
+        ) {
+          const shifted = [...arr.slice(1), ""];
+          setFreeTexts(shifted);
+        }
+      } catch {}
       setInventoryLabelName(initialData.inventoryLabelName || "");
       setLinkedAttributes(
         initialData.linkedAttributes && typeof initialData.linkedAttributes === 'object'

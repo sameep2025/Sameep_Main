@@ -9,7 +9,7 @@ export default function AboutSection() {
         gap: "40px",
         padding: "50px 20px",
         alignItems: "center",
-        backgroundColor: "#F0FDF4",
+        backgroundColor: "#F7FEE7",
         fontFamily: "Poppins, sans-serif",
         flexWrap: "wrap",
       }}
