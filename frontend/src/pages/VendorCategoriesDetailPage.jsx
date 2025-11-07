@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import axios from "axios";
-import API_BASE_URL from "../config";
+import API_BASE_URL, { PREVIEW_BASE_URL } from "../config";
 
 function flattenTree(node, rows = [], parentLevels = [], parentIds = []) {
   if (!node) return rows;
@@ -498,8 +498,8 @@ export default function VendorCategoriesDetailPage() {
           <button
             onClick={() => {
               const homeLocs = (vendor?.location?.nearbyLocations || []).filter(Boolean);
-              const origin = window.location.origin;
-              const url = `${origin}/preview/${vendorId}/${categoryId}?homeLocs=${encodeURIComponent(JSON.stringify(homeLocs))}&t=${Date.now()}`;
+              const base = PREVIEW_BASE_URL || (typeof window !== 'undefined' ? window.location.origin : '');
+              const url = `${base}/preview/${vendorId}/${categoryId}?homeLocs=${encodeURIComponent(JSON.stringify(homeLocs))}&t=${Date.now()}`;
               window.open(url, '_blank');
             }}
             style={{ padding: '6px 12px', borderRadius: 8, border: 'none', background: '#059669', color: '#fff' }}
@@ -509,8 +509,8 @@ export default function VendorCategoriesDetailPage() {
           <button
             onClick={() => {
               const homeLocs = (vendor?.location?.nearbyLocations || []).filter(Boolean);
-              const origin = window.location.origin;
-              const url = `${origin}/preview/${vendorId}/${categoryId}?homeLocs=${encodeURIComponent(JSON.stringify(homeLocs))}&t=${Date.now()}`;
+              const base = PREVIEW_BASE_URL || (typeof window !== 'undefined' ? window.location.origin : '');
+              const url = `${base}/preview/${vendorId}/${categoryId}?homeLocs=${encodeURIComponent(JSON.stringify(homeLocs))}&t=${Date.now()}`;
               window.open(url, '_blank');
             }}
             style={{ padding: '6px 12px', borderRadius: 8, border: 'none', background: '#0ea5e9', color: '#fff' }}

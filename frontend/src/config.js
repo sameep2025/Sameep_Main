@@ -15,3 +15,17 @@ const API_BASE_URL = (() => {
 })();
 
 export default API_BASE_URL;
+export const PREVIEW_BASE_URL = (() => {
+  const ENV_PREVIEW =
+    process.env.REACT_APP_PREVIEW_BASE_URL ||
+    process.env.VITE_PREVIEW_BASE_URL ||
+    process.env.NEXT_PUBLIC_PREVIEW_BASE_URL ||
+    "";
+  if (ENV_PREVIEW && typeof ENV_PREVIEW === "string" && ENV_PREVIEW.trim()) {
+    return ENV_PREVIEW.trim().replace(/\/$/, "");
+  }
+  if (typeof window !== "undefined" && window.location && window.location.origin) {
+    return window.location.origin;
+  }
+  return "";
+})();

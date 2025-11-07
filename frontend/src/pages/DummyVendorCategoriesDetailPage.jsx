@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useParams } from "react-router-dom";
 import axios from "axios";
-import API_BASE_URL from "../config";
+import API_BASE_URL, { PREVIEW_BASE_URL } from "../config";
 
 function flattenTree(node, rows = [], parentLevels = [], parentIds = []) {
   if (!node) return rows;
@@ -336,8 +336,8 @@ export default function DummyVendorCategoriesDetailPage() {
         <button
           onClick={() => {
             if (!previewCategoryId) return;
-            const origin = window.location.origin;
-            const url = `${origin}/preview/${vendorId}/${previewCategoryId}`;
+            const base = PREVIEW_BASE_URL || (typeof window !== 'undefined' ? window.location.origin : '');
+            const url = `${base}/preview/${vendorId}/${previewCategoryId}`;
             window.open(url, '_blank');
           }}
           disabled={!previewCategoryId}
