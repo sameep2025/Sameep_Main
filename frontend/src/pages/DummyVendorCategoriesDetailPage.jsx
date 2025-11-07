@@ -333,14 +333,18 @@ export default function DummyVendorCategoriesDetailPage() {
     <div>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
         <h1 style={{ margin: 0 }}>Dummy Vendor Categories</h1>
-        <a
-          href={previewCategoryId ? `http://localhost:3000/preview/${vendorId}/${previewCategoryId}` : undefined}
-          target={previewCategoryId ? "_blank" : undefined}
-          rel={previewCategoryId ? "noreferrer" : undefined}
-          style={{ padding: "8px 12px", borderRadius: 8, background: "#2563eb", color: "#fff", textDecoration: "none", opacity: previewCategoryId ? 1 : 0.6, pointerEvents: previewCategoryId ? "auto" : "none" }}
+        <button
+          onClick={() => {
+            if (!previewCategoryId) return;
+            const origin = window.location.origin;
+            const url = `${origin}/preview/${vendorId}/${previewCategoryId}`;
+            window.open(url, '_blank');
+          }}
+          disabled={!previewCategoryId}
+          style={{ padding: "8px 12px", borderRadius: 8, background: "#2563eb", color: "#fff", textDecoration: "none", opacity: previewCategoryId ? 1 : 0.6, pointerEvents: previewCategoryId ? "auto" : "none", border: 'none' }}
         >
           Preview
-        </a>
+        </button>
       </div>
       <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginBottom: 12 }}>
         {(() => {
