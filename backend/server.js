@@ -15,6 +15,7 @@ const customerRoutes = require('./routes/customerRoutes');
 const vendorPricingRoutes = require('./routes/vendorPricing');
 const modelRoutes = require('./routes/modelRoutes');
 const dummyCategoryRoutes = require('./routes/dummyCategoryRoutes');
+const dummyVendorRoutes = require('./routes/dummyVendorRoutes');
 
 const app = express();
 
@@ -79,6 +80,7 @@ app.use('/api/customers', customerRoutes);
 app.use('/api/vendorPricing', vendorPricingRoutes);
 app.use('/api/models', modelRoutes);
 app.use('/api/dummy-categories', dummyCategoryRoutes);
+app.use('/api/dummy-vendors', dummyVendorRoutes);
 
 // Debug: DB connection info
 app.get('/api/_debug/db', (req, res) => {

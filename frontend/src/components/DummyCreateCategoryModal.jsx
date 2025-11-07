@@ -163,7 +163,7 @@ function DummyCreateCategoryModal({
   const [allMasters, setAllMasters] = useState([]);
   const [linkedAttributes, setLinkedAttributes] = useState({});
   const [inventoryLabelName, setInventoryLabelName] = useState("");
-  const [showInventoryLabelPopup, setShowInventoryLabelPopup] = useState(false);
+  const [showInventoryLabelSection, setShowInventoryLabelSection] = useState(false);
   const [visibilityOptions, setVisibilityOptions] = useState([]);
   const [modelOptions, setModelOptions] = useState([]);
   const [pricingOptions, setPricingOptions] = useState([]);
@@ -175,6 +175,52 @@ function DummyCreateCategoryModal({
   const [signupLevelDetails, setSignupLevelDetails] = useState({});
   const [showMasterSelector, setShowMasterSelector] = useState(false);
 const [selectedMasterIndex, setSelectedMasterIndex] = useState(0);
+// Subcategory linking modal state (dummy)
+const [showSubcatSelector, setShowSubcatSelector] = useState(false);
+const [subcatKey, setSubcatKey] = useState("");
+const [subcategories, setSubcategories] = useState([]);
+const [selectedSubcategoryId, setSelectedSubcategoryId] = useState("");
+const [subcategoryNameById, setSubcategoryNameById] = useState({});
+
+  // Models cache and helpers for vehicle families (Cars/Bikes/Tempo...)
+  const [modelsByFamily, setModelsByFamily] = useState({});
+  const familyToModelCategory = {
+    cars: 'car',
+    car: 'car',
+    bikes: 'bike',
+    bike: 'bike',
+    tempobus: 'tempoBus',
+    tempoBus: 'tempoBus',
+    tempoMinibuses: 'tempoBus',
+    'tempo minibuses': 'tempoBus',
+  };
+  const fetchModelsForFamily = async (familyKey) => {
+    try {
+      const exact = String(familyKey || '').trim();
+      if (!exact) return [];
+      if (modelsByFamily[exact]) return modelsByFamily[exact];
+      const normalized = exact.toLowerCase();
+      const category = familyToModelCategory[exact] || familyToModelCategory[normalized] || exact;
+      const url = `${API_BASE_URL}/api/models?category=${encodeURIComponent(category)}`;
+      const res = await fetch(url);
+      const data = res.ok ? await res.json() : [];
+      const models = Array.isArray(data) ? data.map((d) => ({
+        name: d?.name || d?.model || d?.title || '',
+        raw: d,
+      })) : [];
+      setModelsByFamily((prev) => ({ ...prev, [exact]: models }));
+      return models;
+    } catch {
+      return [];
+    }
+  };
+  const getSelectedModelFields = (fam) => {
+    const famKey = String(fam || '');
+    const perFam = linkedAttributes?.[`${famKey}:modelFields`];
+    if (Array.isArray(perFam)) return perFam;
+    const global = linkedAttributes?.['model'];
+    return Array.isArray(global) ? global : [];
+  };
 
   useEffect(() => {
     if (!show) return;
@@ -365,6 +411,116 @@ const [selectedMasterIndex, setSelectedMasterIndex] = useState(0);
       }
     })();
   }, [show]);
+
+  // When the master selector is opened or the selection changes, prefetch models for families
+  useEffect(() => {
+    if (!showMasterSelector) return;
+    const masters = Array.isArray(allMasters) ? allMasters : [];
+    // rebuild same left list used in render
+    const byFamily = new Map();
+    masters.forEach((m) => {
+      const fam = (m.type || '').toString().trim();
+      const ft = (m.fieldType || '').toString().trim();
+      if (fam && ft) {
+        if (!byFamily.has(fam)) byFamily.set(fam, new Set());
+        byFamily.get(fam).add(ft);
+      }
+    });
+    const familyItems = Array.from(byFamily.keys()).map((fam) => ({ _id: `family:${fam}`, __mode: 'family', key: fam }));
+    const familyKeys = new Set(byFamily.keys());
+    const basicTypes = new Set();
+    masters.forEach((m) => {
+      const t = (m.type || '').toString().trim();
+      const ft = (m.fieldType || '').toString().trim();
+      if (t && !ft && !familyKeys.has(t)) basicTypes.add(t);
+    });
+    const otherTypeItems = Array.from(basicTypes).map((t) => ({ _id: `type:${t}`, __mode: 'type', key: t }));
+    const list = [...familyItems, ...otherTypeItems];
+    const sel = list[selectedMasterIndex];
+    if (sel && sel.__mode === 'family') {
+      try { fetchModelsForFamily(sel.key); } catch {}
+    }
+  }, [showMasterSelector, selectedMasterIndex, allMasters]);
+
+  // Handle 'Link with subcategories' button clicks (dummy)
+  useEffect(() => {
+    const handler = async (e) => {
+      try {
+        const key = e?.detail?.key || "";
+        if (!key) return;
+        if (!(initialData && initialData._id)) return;
+        setSubcatKey(String(key));
+        const lk = `${String(key)}:linkedSubcategory`;
+        const curr = Array.isArray(linkedAttributes?.[lk]) ? String(linkedAttributes[lk][0] || '') : '';
+        setSelectedSubcategoryId(curr || 'ALL');
+        setSubcategoryNameById((prev)=> ({ ...prev, ALL: 'All' }));
+        setShowSubcatSelector(true);
+        const url = `${API_BASE_URL}/api/dummy-categories?parentId=${encodeURIComponent(initialData._id)}`;
+        const res = await fetch(url);
+        const data = res.ok ? await res.json() : [];
+        const arr = Array.isArray(data) ? data : [];
+        setSubcategories(arr);
+        setSubcategoryNameById((prev)=>{
+          const next={...prev};
+          arr.forEach((c)=>{ if (c && c._id) next[String(c._id)] = c.name || String(c._id); });
+          return next;
+        });
+      } catch {
+        setSubcategories([]);
+      }
+    };
+    window.addEventListener('linkWithSubcategories', handler);
+    return () => window.removeEventListener('linkWithSubcategories', handler);
+  }, [initialData, linkedAttributes]);
+
+  const handleUnlinkSubcategory = async (contextKey) => {
+    const lk = `${String(contextKey)}:linkedSubcategory`;
+    const next = { ...linkedAttributes };
+    delete next[lk];
+    setLinkedAttributes(next);
+    try {
+      if (initialData && initialData._id) {
+        const payload = new FormData();
+        payload.append('linkedAttributes', JSON.stringify(next || {}));
+        await fetch(`${API_BASE_URL}/api/dummy-categories/${initialData._id}`, { method: 'PUT', body: payload });
+      }
+    } catch {}
+  };
+
+  const handleSaveSubcategoryLink = async () => {
+    const id = String(selectedSubcategoryId || '').trim();
+    if (!id) return;
+    const key = `${subcatKey}:linkedSubcategory`;
+    const next = { ...linkedAttributes, [key]: [id] };
+    setLinkedAttributes(next);
+    setSubcategoryNameById((prev)=> ({ ...prev, [id]: prev[id] || (subcategories.find((s)=>String(s._id)===id)?.name || id) }));
+    try {
+      if (initialData && initialData._id) {
+        const payload = new FormData();
+        payload.append('linkedAttributes', JSON.stringify(next || {}));
+        await fetch(`${API_BASE_URL}/api/dummy-categories/${initialData._id}`, { method: 'PUT', body: payload });
+      }
+    } catch {}
+    setShowSubcatSelector(false);
+  };
+
+  const handleSaveLinkedAttributes = async () => {
+    try {
+      if (initialData && initialData._id) {
+        const payload = new FormData();
+        try {
+          payload.append('linkedAttributes', JSON.stringify(linkedAttributes || {}));
+        } catch (e) {
+          payload.append('linkedAttributes', JSON.stringify({}));
+        }
+        await fetch(`${API_BASE_URL}/api/dummy-categories/${initialData._id}`, { method: 'PUT', body: payload });
+      }
+    } catch (e) {
+      // no-op
+    } finally {
+      setShowMasterSelector(false);
+    }
+  };
 
   if (!show) return null;
 
@@ -588,9 +744,7 @@ const [selectedMasterIndex, setSelectedMasterIndex] = useState(0);
                   const arr = Array.isArray(vals) ? vals : [];
                   setCategoryModel(arr);
                   const hasInventory = arr.includes("Inventory");
-                  if (hasInventory && !inventoryLabelName) {
-                    setShowInventoryLabelPopup(true);
-                  }
+
                 }}
                 placeholder="Select"
                 multi
@@ -917,72 +1071,7 @@ const [selectedMasterIndex, setSelectedMasterIndex] = useState(0);
         </form>
       </div>
 
-      {/* Inventory Label Popup */}
-      {showInventoryLabelPopup && (
-        <div
-          style={{
-            position: "fixed",
-            inset: 0,
-            zIndex: 4000,
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            backgroundColor: "rgba(0,0,0,0.45)",
-          }}
-        >
-          <div
-            style={{
-              background: "#fff",
-              padding: 20,
-              borderRadius: 12,
-              width: 360,
-            }}
-          >
-            <h3 style={{ marginTop: 0, color: "#0078d7" }}>
-              Inventory Label Name
-            </h3>
-            <input
-              type="text"
-              placeholder="Enter Inventory Label Name"
-              value={inventoryLabelName}
-              onChange={(e) => setInventoryLabelName(e.target.value)}
-              style={{ ...inputStyle, marginBottom: 12 }}
-            />
-            <div style={{ display: "flex", gap: 8 }}>
-              <button
-                type="button"
-                onClick={() => {
-                  if (!inventoryLabelName.trim()) {
-                    alert(
-                      "Please enter a label or press Cancel to deselect Inventory Model."
-                    );
-                    return;
-                  }
-                  setShowInventoryLabelPopup(false);
-                }}
-                style={{ ...submitBtnStyle, flex: 1 }}
-              >
-                Save
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setCategoryModel((prev) =>
-                    Array.isArray(prev)
-                      ? prev.filter((p) => p !== "Inventory Model")
-                      : []
-                  );
-                  setInventoryLabelName("");
-                  setShowInventoryLabelPopup(false);
-                }}
-                style={{ ...cancelBtnStyle, flex: 1 }}
-              >
-                Cancel
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+
 
       {showMasterSelector && (
         <div
@@ -1062,6 +1151,7 @@ const [selectedMasterIndex, setSelectedMasterIndex] = useState(0);
                       .split(" ")
                       .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
                       .join(" ");
+                  // Build families from entries that have fieldType
                   const byFamily = new Map();
                   masters.forEach((m) => {
                     const fam = (m.type || "").toString().trim();
@@ -1078,75 +1168,484 @@ const [selectedMasterIndex, setSelectedMasterIndex] = useState(0);
                     __mode: "family",
                     key: fam,
                   }));
-                  const typesWithFieldTypes = new Set(byFamily.keys());
-                  const otherTypesSet = new Set();
+                  // Types with no fieldType (basic types)
+                  const familyKeys = new Set(byFamily.keys());
+                  const basicTypes = new Set();
                   masters.forEach((m) => {
                     const t = (m.type || "").toString().trim();
                     const ft = (m.fieldType || "").toString().trim();
-                    if (t && !ft && !typesWithFieldTypes.has(t)) otherTypesSet.add(t);
+                    if (!t) return;
+                    if (!ft && !familyKeys.has(t)) basicTypes.add(t);
                   });
-                  const otherItems = Array.from(otherTypesSet).map((t) => ({
+                  const otherTypeItems = Array.from(basicTypes).map((t) => ({
                     _id: `type:${t}`,
                     name: titleCase(t),
                     __mode: "type",
                     key: t,
                   }));
-                  const items = [...familyItems, ...otherItems];
-                  if (items.length === 0)
+                  const list = [...familyItems, ...otherTypeItems];
+                  if (list.length === 0) {
                     return (
-                      <div style={{ padding: 10, color: "#64748b" }}>
-                        No data found.
-                      </div>
+                      <div style={{ padding: 10, color: "#64748b" }}>No data found.</div>
                     );
-                  return items.map((m, idx) => (
+                  }
+                  return list.map((it, idx) => {
+                    const isSaved = initialData && initialData.linkedAttributes && initialData.linkedAttributes[it.key];
+                    return (
                     <div
-                      key={m._id}
-                      onClick={() => {
-                        setSelectedMasterIndex(idx);
-                      }}
+                      key={it._id}
+                      onClick={() => { setSelectedMasterIndex(idx); if (it.__mode === 'family') { try { fetchModelsForFamily(it.key); } catch {} } }}
                       style={{
                         padding: 10,
                         cursor: "pointer",
-                        background:
-                          selectedMasterIndex === idx ? "#e8f2ff" : "#fff",
-                        color:
-                          selectedMasterIndex === idx ? "#0f69c9" : "#333",
+                        background: selectedMasterIndex === idx ? "#e8f2ff" : "#fff",
+                        color: selectedMasterIndex === idx ? "#0f69c9" : "#333",
                         borderBottom: "1px solid #f3f4f6",
+                        fontWeight: selectedMasterIndex === idx ? 700 : 500,
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 8,
                       }}
                     >
-                      {m.name}
+                      <span style={{ flex: 1 }}>{it.name}</span>
+                      {isSaved && (
+                        <span style={{ fontSize: 11, padding: '2px 6px', borderRadius: 10, background: '#ecfdf5', color: '#047857', border: '1px solid #a7f3d0' }}>Saved</span>
+                      )}
                     </div>
-                  ));
+                  )});
                 })()}
               </div>
 
               {/* Right panel: Items and linked attributes */}
               <div style={{ overflowY: "auto", padding: 10 }}>
-                {/* The detailed attribute UI would be here, omitted for brevity */}
-                {/* You can replicate the logic from CreateCategoryModal's master selector */}
-                <div>Configure linked attributes here...</div>
+                {(() => {
+                  const masters = Array.isArray(allMasters) ? allMasters : [];
+                  const titleCase = (key) => key
+                    .replace(/([A-Z])/g, ' $1')
+                    .replace(/[-_]/g, ' ')
+                    .replace(/^\s+|\s+$/g, '')
+                    .split(' ')
+                    .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+                    .join(' ');
+
+                  // Rebuild the same left list here to derive current selection
+                  const byFamily = new Map();
+                  masters.forEach((m) => {
+                    const fam = (m.type || '').toString().trim();
+                    const ft = (m.fieldType || '').toString().trim();
+                    if (!fam) return;
+                    if (ft) {
+                      if (!byFamily.has(fam)) byFamily.set(fam, new Set());
+                      byFamily.get(fam).add(ft);
+                    }
+                  });
+                  const familyItems = Array.from(byFamily.keys()).map((fam) => ({
+                    _id: `family:${fam}`,
+                    name: titleCase(fam),
+                    __mode: 'family',
+                    key: fam,
+                  }));
+                  const familyKeys = new Set(byFamily.keys());
+                  const basicTypes = new Set();
+                  masters.forEach((m) => {
+                    const t = (m.type || '').toString().trim();
+                    const ft = (m.fieldType || '').toString().trim();
+                    if (!t) return;
+                    if (!ft && !familyKeys.has(t)) basicTypes.add(t);
+                  });
+                  const otherTypeItems = Array.from(basicTypes).map((t) => ({
+                    _id: `type:${t}`,
+                    name: titleCase(t),
+                    __mode: 'type',
+                    key: t,
+                  }));
+                  const list = [...familyItems, ...otherTypeItems];
+
+                  const sel = list[selectedMasterIndex];
+                  if (!sel) return <div style={{ color: '#64748b' }}>Select a master type from the left.</div>;
+
+                  if (sel.__mode === 'family') {
+                    const familyKey = sel.key;
+                    const ftSet = new Set(byFamily.get(familyKey) || []);
+                    const models = modelsByFamily[familyKey] || [];
+                    const famLc = String(familyKey || '').toLowerCase();
+                    // Always show Model for vehicle families; fetch adds subfields when available
+                    if (['cars','car','bikes','bike','tempo bus','tempobus','tempominibuses','tempo minibuses','tempominibuses','tempominibuses'].includes(famLc)) {
+                      ftSet.add('model');
+                    }
+                    if (Array.isArray(models) && models.length > 0) ftSet.add('model');
+                    const fieldTypes = Array.from(ftSet);
+                    const selectedHeadings = Array.isArray(linkedAttributes[familyKey]) ? linkedAttributes[familyKey] : [];
+
+                    // Special-case: Business Field should show its items (data) instead of field type headings
+                    if (familyKey === 'businessField') {
+                      const items = masters.filter((m) => (m.type || '').toString().trim() === 'businessField');
+                      const selectedForType = Array.isArray(linkedAttributes['businessField']) ? linkedAttributes['businessField'] : [];
+                      return (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                          {items.sort((a, b) => (a.sequence || 0) - (b.sequence || 0)).map((c) => {
+                            const isChecked = selectedForType.includes(c.name);
+                            return (
+                              <label key={String(c._id) || c.name} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 4px', borderBottom: '1px dashed #f1f5f9' }}>
+                                <input
+                                  type="checkbox"
+                                  checked={isChecked}
+                                  onChange={(e) => {
+                                    const on = e.target.checked;
+                                    setLinkedAttributes((prev) => {
+                                      const prevArr = Array.isArray(prev['businessField']) ? prev['businessField'] : [];
+                                      const nextArr = on ? Array.from(new Set([...prevArr, c.name])) : prevArr.filter((x) => x !== c.name);
+                                      const next = { ...prev };
+                                      if (nextArr.length === 0) delete next['businessField']; else next['businessField'] = nextArr;
+                                      return next;
+                                    });
+                                  }}
+                                />
+                                <span>{c.name}</span>
+                              </label>
+                            );
+                          })}
+                          <div style={{ marginTop: 12, paddingTop: 10, borderTop: '1px solid #f1f5f9' }}>
+                            {(() => {
+                              const key = `businessField:inventoryLabels`;
+                              const labels = Array.isArray(linkedAttributes[key]) ? linkedAttributes[key] : [];
+                              const current = labels[0] || '';
+                              const editing = false;
+                              return (
+                                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
+                                  <div style={{ fontWeight: 700, fontSize: 14 }}>Inventory Label</div>
+                                  <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                                    {current ? (
+                                      <>
+                                        <span style={{ padding: '6px 10px', border: '1px solid #dbeafe', background: '#f1f5ff', borderRadius: 16 }}>{current}</span>
+                                        <button type="button" onClick={() => { setLinkedAttributes((prev)=>{ const next={...prev}; delete next[key]; return next; }); }} style={{ padding: '6px 8px', borderRadius: 8, border: '1px solid #fecaca', background: '#fee2e2', color: '#ef4444' }}>×</button>
+                                      </>
+                                    ) : (
+                                      <>
+                                        <input type="text" value={inventoryLabelName} onChange={(e)=> setInventoryLabelName(e.target.value)} placeholder="Add Inventory Label Name" style={{ padding: '8px 10px', border: '1px solid #cbd5e1', background: '#f8fafc', borderRadius: 8 }} />
+                                        <button type="button" onClick={() => { const v=String(inventoryLabelName||'').trim(); if(!v) return; setLinkedAttributes((prev)=> ({ ...prev, [key]: [v] })); }} style={{ padding: '8px 12px', borderRadius: 8, border: 'none', background: '#0ea5e9', color: '#fff', fontSize: 12, fontWeight: 600 }}>Add</button>
+                                      </>
+                                    )}
+                                  </div>
+                                </div>
+                              );
+                            })()}
+                            <div style={{ marginTop: 6 }}>
+                              <button type="button" onClick={() => { const k = `businessField:inventoryLabels`; window.dispatchEvent(new CustomEvent('linkWithSubcategories', { detail: { key: k } })); }} style={{ padding: '8px 12px', borderRadius: 8, border: '1px solid #e2e8f0', background: '#fff', fontWeight: 600 }}>Link with subcategories</button>
+                              {(() => {
+                                const lk = `businessField:inventoryLabels:linkedSubcategory`;
+                                const id = Array.isArray(linkedAttributes[lk]) ? linkedAttributes[lk][0] : '';
+                                if (!id) return null;
+                                const nm = subcategoryNameById[String(id)] || String(id);
+                                return (
+                                  <div style={{ marginTop: 8, display: 'flex', alignItems: 'center', gap: 8 }}>
+                                    <span style={{ padding: '4px 8px', borderRadius: 14, background: '#eef6ff', border: '1px solid #cce4ff', color: '#0f69c9' }}>{nm}</span>
+                                    <button type="button" onClick={() => handleUnlinkSubcategory(`businessField:inventoryLabels`)} style={{ padding: '4px 8px', borderRadius: 6, border: '1px solid #fecaca', background: '#fee2e2', color: '#ef4444' }}>🗑</button>
+                                  </div>
+                                );
+                              })()}
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    }
+                    return (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                        <div style={{ fontWeight: 600, marginBottom: 6 }}>Attributes</div>
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12 }}>
+                          {fieldTypes.length === 0 && (
+                            <div style={{ color: '#64748b' }}>No attributes found for this family.</div>
+                          )}
+                          {fieldTypes.map((h) => {
+                            const checked = selectedHeadings.includes(h);
+                            // derive model subfields from fetched models when heading is 'model'
+                            let modelSubfields = [];
+                            if (String(h).toLowerCase() === 'model') {
+                              const canonicalModels = modelsByFamily[familyKey] || [];
+                              if (canonicalModels.length > 0) {
+                                const exclude = new Set(['_id','id','__v','createdAt','updatedAt','category']);
+                                const keys = new Set();
+                                canonicalModels.forEach((m) => {
+                                  const raw = m.raw || m;
+                                  Object.keys(raw || {}).forEach((k) => {
+                                    const key = String(k || '').trim();
+                                    if (!key || exclude.has(key) || key.startsWith('_')) return;
+                                    const v = raw[key];
+                                    if (v == null) return;
+                                    const t = typeof v;
+                                    if (t === 'string' || t === 'number' || t === 'boolean') keys.add(key);
+                                  });
+                                });
+                                modelSubfields = Array.from(keys);
+                              }
+                              // Fallback common fields for vehicle families
+                              if (!modelSubfields.length) {
+                                const famLc2 = String(familyKey || '').toLowerCase();
+                                const VEHICLE_FIELDS = ['brand','model','variant','transmission','fuelType','bodyType','seats'];
+                                if (['cars','car','bikes','bike','tempo bus','tempobus','tempo minibuses','tempominibuses','tempobus'].includes(famLc2)) {
+                                  modelSubfields = VEHICLE_FIELDS;
+                                }
+                              }
+                            }
+                            const selectedModelFields = getSelectedModelFields(familyKey);
+                            return (
+                              <div key={h} style={{ display: 'flex', flexDirection: 'column', minWidth: 220, gap: 6 }}>
+                                <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                  <input
+                                    type="checkbox"
+                                    checked={checked}
+                                    onChange={(e) => {
+                                      const on = e.target.checked;
+                                      if (on && String(h).toLowerCase() === 'model') {
+                                        try { fetchModelsForFamily(familyKey); } catch {}
+                                      }
+                                      setLinkedAttributes((prev) => {
+                                        const prevArr = Array.isArray(prev[familyKey]) ? prev[familyKey] : [];
+                                        const nextArr = on ? Array.from(new Set([...prevArr, h])) : prevArr.filter((x) => x !== h);
+                                        const next = { ...prev };
+                                        if (nextArr.length === 0) delete next[familyKey]; else next[familyKey] = nextArr;
+                                        return next;
+                                      });
+                                    }}
+                                  />
+                                  <span>{titleCase(h)}</span>
+                                </label>
+                                {String(h).toLowerCase() === 'model' && checked && modelSubfields.length > 0 ? (
+                                  <div style={{ marginLeft: 22, display: 'flex', flexDirection: 'column', gap: 4 }}>
+                                    {modelSubfields.map((sf) => {
+                                      const sfChecked = selectedModelFields.includes(sf);
+                                      return (
+                                        <label key={`model-field-${sf}`} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                          <input
+                                            type="checkbox"
+                                            checked={sfChecked}
+                                            onChange={(e) => {
+                                              const on = e.target.checked;
+                                              setLinkedAttributes((prev) => {
+                                                const key = `${familyKey}:modelFields`;
+                                                const prevArr = Array.isArray(prev[key]) ? prev[key] : [];
+                                                const nextArr = on ? Array.from(new Set([...prevArr, sf])) : prevArr.filter((x) => x !== sf);
+                                                const next = { ...prev };
+                                                if (nextArr.length === 0) delete next[key]; else next[key] = nextArr;
+                                                return next;
+                                              });
+                                            }}
+                                          />
+                                          <span>{titleCase(sf)}</span>
+                                        </label>
+                                      );
+                                    })}
+                                  </div>
+                                ) : (String(h).toLowerCase() === 'model' && checked ? (
+                                  <div style={{ marginLeft: 22, color: '#64748b', fontSize: 12 }}>Loading model fields or none available.</div>
+                                ) : null)}
+                              </div>
+                            );
+                          })}
+                        </div>
+                        <div style={{ marginTop: 12, paddingTop: 10, borderTop: '1px solid #f1f5f9' }}>
+                          {(() => {
+                            const key = `${familyKey}:inventoryLabels`;
+                            const labels = Array.isArray(linkedAttributes[key]) ? linkedAttributes[key] : [];
+                            const current = labels[0] || '';
+                            const editing = false;
+                            return (
+                              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
+                                <div style={{ fontWeight: 700, fontSize: 14 }}>Inventory Label</div>
+                                <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                                  {current ? (
+                                    <>
+                                      <span style={{ padding: '6px 10px', border: '1px solid #dbeafe', background: '#f1f5ff', borderRadius: 16 }}>{current}</span>
+                                      <button type="button" onClick={() => { setLinkedAttributes((prev)=>{ const next={...prev}; delete next[key]; return next; }); }} style={{ padding: '6px 8px', borderRadius: 8, border: '1px solid #fecaca', background: '#fee2e2', color: '#ef4444' }}>×</button>
+                                    </>
+                                  ) : (
+                                    <>
+                                      <input type="text" value={inventoryLabelName} onChange={(e)=> setInventoryLabelName(e.target.value)} placeholder="Add Inventory Label Name" style={{ padding: '8px 10px', border: '1px solid #cbd5e1', background: '#f8fafc', borderRadius: 8 }} />
+                                      <button type="button" onClick={() => { const v=String(inventoryLabelName||'').trim(); if(!v) return; setLinkedAttributes((prev)=> ({ ...prev, [key]: [v] })); }} style={{ padding: '8px 12px', borderRadius: 8, border: 'none', background: '#0ea5e9', color: '#fff', fontSize: 12, fontWeight: 600 }}>Add</button>
+                                    </>
+                                  )}
+                                </div>
+                              </div>
+                            );
+                          })()}
+                          <div style={{ marginTop: 6 }}>
+                            <button type="button" onClick={() => { const k = `${familyKey}:inventoryLabels`; window.dispatchEvent(new CustomEvent('linkWithSubcategories', { detail: { key: k } })); }} style={{ padding: '8px 12px', borderRadius: 8, border: '1px solid #e2e8f0', background: '#fff', fontWeight: 600 }}>Link with subcategories</button>
+                            {(() => {
+                              const lk = `${familyKey}:inventoryLabels:linkedSubcategory`;
+                              const id = Array.isArray(linkedAttributes[lk]) ? linkedAttributes[lk][0] : '';
+                              if (!id) return null;
+                              const nm = subcategoryNameById[String(id)] || String(id);
+                              return (
+                                <div style={{ marginTop: 8, display: 'flex', alignItems: 'center', gap: 8 }}>
+                                  <span style={{ padding: '4px 8px', borderRadius: 14, background: '#eef6ff', border: '1px solid #cce4ff', color: '#0f69c9' }}>{nm}</span>
+                                  <button type="button" onClick={() => handleUnlinkSubcategory(`${familyKey}:inventoryLabels`)} style={{ padding: '4px 8px', borderRadius: 6, border: '1px solid #fecaca', background: '#fee2e2', color: '#ef4444' }}>🗑</button>
+                                </div>
+                              );
+                            })()}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  }
+
+                  // Non-family type: list items and options
+                  const children = masters.filter((c) => (c.type || '').toString().trim() === (sel.key || '').toString().trim() && !((c.fieldType || '').toString().trim()));
+                  const selected = linkedAttributes[sel.key] || [];
+                  return (
+                    <div>
+                      <div style={{ marginBottom: 8, color: '#475569' }}>Select one or more items under {titleCase(sel.key)}</div>
+                      <div>
+                        {children
+                          .sort((a, b) => (a.sequence || 0) - (b.sequence || 0))
+                          .map((c) => {
+                            const isChecked = selected.includes(c.name);
+                            const optKey = `${sel.key}:${c.name}`;
+                            const selectedOpts = Array.isArray(linkedAttributes[optKey]) ? linkedAttributes[optKey] : [];
+                            return (
+                              <div key={String(c._id) || c.name} style={{ padding: '6px 4px', borderBottom: '1px dashed #f1f5f9', display: 'flex', flexDirection: 'column', gap: 6 }}>
+                                <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                  <input
+                                    type="checkbox"
+                                    checked={isChecked}
+                                    onChange={(e) => {
+                                      const on = e.target.checked;
+                                      setLinkedAttributes((prev) => {
+                                        const prevArr = Array.isArray(prev[sel.key]) ? prev[sel.key] : [];
+                                        const nextArr = on ? Array.from(new Set([...prevArr, c.name])) : prevArr.filter((x) => x !== c.name);
+                                        const next = { ...prev };
+                                        if (nextArr.length === 0) delete next[sel.key]; else next[sel.key] = nextArr;
+                                        return next;
+                                      });
+                                    }}
+                                  />
+                                  <span>{c.name}</span>
+                                </label>
+                                {Array.isArray(c.options) && c.options.length > 0 && (
+                                  <div style={{ marginLeft: 22, display: 'flex', flexDirection: 'column', gap: 4 }}>
+                                    {c.options.map((opt) => {
+                                      const oc = selectedOpts.includes(opt);
+                                      return (
+                                        <label key={`${optKey}:${opt}`} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                          <input
+                                            type="checkbox"
+                                            checked={oc}
+                                            onChange={(e) => {
+                                              const on = e.target.checked;
+                                              setLinkedAttributes((prev) => {
+                                                const prevArr = Array.isArray(prev[optKey]) ? prev[optKey] : [];
+                                                const nextArr = on ? Array.from(new Set([...prevArr, opt])) : prevArr.filter((x) => x !== opt);
+                                                const next = { ...prev };
+                                                if (nextArr.length === 0) delete next[optKey]; else next[optKey] = nextArr;
+                                                return next;
+                                              });
+                                            }}
+                                          />
+                                          <span>{opt}</span>
+                                        </label>
+                                      );
+                                    })}
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })}
+                      </div>
+                      <div style={{ marginTop: 12, paddingTop: 10, borderTop: '1px solid #f1f5f9' }}>
+                        {(() => {
+                          const key = `${sel.key}:inventoryLabels`;
+                          const labels = Array.isArray(linkedAttributes[key]) ? linkedAttributes[key] : [];
+                          const current = labels[0] || '';
+                          const editing = false;
+                          return (
+                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
+                              <div style={{ fontWeight: 700, fontSize: 14 }}>Inventory Label</div>
+                              <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                                {current ? (
+                                  <>
+                                    <span style={{ padding: '6px 10px', border: '1px solid #dbeafe', background: '#f1f5ff', borderRadius: 16 }}>{current}</span>
+                                    <button type="button" onClick={() => { setLinkedAttributes((prev)=>{ const next={...prev}; delete next[key]; return next; }); }} style={{ padding: '6px 8px', borderRadius: 8, border: '1px solid #fecaca', background: '#fee2e2', color: '#ef4444' }}>×</button>
+                                  </>
+                                ) : (
+                                  <>
+                                    <input type="text" value={inventoryLabelName} onChange={(e)=> setInventoryLabelName(e.target.value)} placeholder="Add Inventory Label Name" style={{ padding: '8px 10px', border: '1px solid #cbd5e1', background: '#f8fafc', borderRadius: 8 }} />
+                                    <button type="button" onClick={() => { const v=String(inventoryLabelName||'').trim(); if(!v) return; setLinkedAttributes((prev)=> ({ ...prev, [key]: [v] })); }} style={{ padding: '8px 12px', borderRadius: 8, border: 'none', background: '#0ea5e9', color: '#fff', fontSize: 12, fontWeight: 600 }}>Add</button>
+                                  </>
+                                )}
+                              </div>
+                            </div>
+                          );
+                        })()}
+                        <div style={{ marginTop: 6 }}>
+                          <button type="button" onClick={() => { const k = `${sel.key}:inventoryLabels`; window.dispatchEvent(new CustomEvent('linkWithSubcategories', { detail: { key: k } })); }} style={{ padding: '8px 12px', borderRadius: 8, border: '1px solid #e2e8f0', background: '#fff', fontWeight: 600 }}>Link with subcategories</button>
+                          {(() => {
+                            const lk = `${sel.key}:inventoryLabels:linkedSubcategory`;
+                            const id = Array.isArray(linkedAttributes[lk]) ? linkedAttributes[lk][0] : '';
+                            if (!id) return null;
+                            const nm = subcategoryNameById[String(id)] || String(id);
+                            return (
+                              <div style={{ marginTop: 8, display: 'flex', alignItems: 'center', gap: 8 }}>
+                                <span style={{ padding: '4px 8px', borderRadius: 14, background: '#eef6ff', border: '1px solid #cce4ff', color: '#0f69c9' }}>{nm}</span>
+                                <button type="button" onClick={() => handleUnlinkSubcategory(`${sel.key}:inventoryLabels`)} style={{ padding: '4px 8px', borderRadius: 6, border: '1px solid #fecaca', background: '#fee2e2', color: '#ef4444' }}>🗑</button>
+                              </div>
+                            );
+                          })()}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })()}
               </div>
-            </div>
-            <div
-              style={{
-                padding: 12,
-                borderTop: "1px solid #eee",
-                display: "flex",
-                gap: 10,
-                justifyContent: "flex-end",
-              }}
-            >
-              <button
-                type="button"
-                onClick={() => setShowMasterSelector(false)}
-                style={submitBtnStyle}
-              >
-                Save
-              </button>
+              <div style={{ padding: 12, borderTop: '1px solid #eee', display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+                <button type="button" onClick={() => setShowMasterSelector(false)} style={{ padding: '8px 12px', borderRadius: 8, border: '1px solid #e2e8f0', background: '#fff' }}>Close</button>
+                <button type="button" onClick={handleSaveLinkedAttributes} style={{ padding: '8px 12px', borderRadius: 8, border: 'none', background: '#0078d7', color: '#fff', fontWeight: 700 }}>Save</button>
+              </div>
             </div>
           </div>
         </div>
       )}
+
+      {showSubcatSelector ? (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', zIndex: 4000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <div style={{ background: '#fff', borderRadius: 12, width: 420, maxHeight: '70vh', overflow: 'hidden', boxShadow: '0 10px 30px rgba(0,0,0,0.2)' }}>
+            <div style={{ padding: 12, borderBottom: '1px solid #eee', fontWeight: 700, color: '#0f172a' }}>Link with subcategories</div>
+            <div style={{ padding: 12, maxHeight: '50vh', overflowY: 'auto' }}>
+              <div key="__all__" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 4px', borderBottom: '1px dashed #f1f5f9' }}>
+                <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <input
+                    type="radio"
+                    name="subcatChoice"
+                    checked={String(selectedSubcategoryId) === 'ALL'}
+                    onChange={() => setSelectedSubcategoryId('ALL')}
+                  />
+                  <span>All</span>
+                </label>
+              </div>
+              {Array.isArray(subcategories) && subcategories.length > 0 ? (
+                subcategories.map((c) => (
+                  <div key={String(c._id)} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 4px', borderBottom: '1px dashed #f1f5f9' }}>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <input
+                        type="radio"
+                        name="subcatChoice"
+                        checked={String(selectedSubcategoryId) === String(c._id)}
+                        onChange={() => setSelectedSubcategoryId(String(c._id))}
+                      />
+                      <span>{c.name}</span>
+                    </label>
+                  </div>
+                ))
+              ) : (
+                <div style={{ color: '#64748b' }}>No subcategories found. Create a subcategory first.</div>
+              )}
+            </div>
+            <div style={{ padding: 12, borderTop: '1px solid #eee', display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+              <button type="button" onClick={() => setShowSubcatSelector(false)} style={{ padding: '8px 12px', borderRadius: 8, border: '1px solid #e2e8f0', background: '#fff' }}>Cancel</button>
+              <button type="button" onClick={handleSaveSubcategoryLink} style={{ padding: '8px 12px', borderRadius: 8, border: 'none', background: '#0078d7', color: '#fff', fontWeight: 700 }}>Save</button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
     </div>
   );
 }

@@ -45,159 +45,109 @@ export default function PreviewPage() {
     setLoadingVendor(true);
     setLoadingCategories(true);
     try {
-      const [vendorRes, categoryRes, locationRes, catMetaRes, serverTreeRes] = await Promise.all([
-        fetch(`/api/vendors/${vendorId}`, { cache: "no-store" }),
-        fetch(`/api/vendors/${vendorId}/preview/${categoryId}`, { cache: "no-store" }),
-        fetch(`/api/vendors/${vendorId}/location`, { cache: "no-store" }),
-        fetch(`/api/categories/${categoryId}`, { cache: "no-store" }),
-        fetch(`/api/categories/${categoryId}/tree`, { cache: "no-store" }),
-      ]);
-
-      const vendorData = await vendorRes.json();
-      const categoryData = await categoryRes.json();
-
-      const catMeta = await catMetaRes.json().catch(() => ({}));
-      const serverTree = await serverTreeRes.json().catch(() => null);
-      let locationData = null;
-
-      try {
-        locationData = await locationRes.json();
-      } catch (err) {
-        locationData = null;
+      // Step 1: Try real vendor flow
+      const vendorRes = await fetch(`${API_BASE_URL}/api/vendors/${vendorId}`, { cache: 'no-store' });
+      let isDummy = false;
+      let vendorData = {};
+      try { vendorData = await vendorRes.json(); } catch { vendorData = {}; }
+      if (!vendorRes.ok || vendorData?.message) {
+        isDummy = true;
       }
 
-      setVendor(vendorData);
+      if (isDummy) {
+        // Dummy vendor flow
+        try {
+          const dvRes = await fetch(`${API_BASE_URL}/api/dummy-vendors/${vendorId}/categories`, { cache: 'no-store' });
+          const dv = await dvRes.json();
+          const dvVendor = dv?.vendor || {};
+          setVendor(dvVendor);
 
-      console.log("CategoryData from API:", categoryData);
+          // Optional: meta for dummy category (name, linked attrs not present here)
+          let categoriesWithLinked = dv?.categories || null;
+          setCategoryTree(categoriesWithLinked);
 
-      const linkedAttributes = (catMeta && catMeta.linkedAttributes) ? catMeta.linkedAttributes : {};
-      let categoriesWithLinked = categoryData?.categories ? { ...categoryData.categories, linkedAttributes } : null;
-
-      // Overlay per-node config (displayType, uiRules, images) from server tree onto vendor preview tree
-      try {
-        if (categoriesWithLinked && serverTree && (serverTree._id || serverTree.id)) {
-          const pickId = (n) => String(n?.id || n?._id || "");
-          const buildIndex = (root) => {
-            const idx = new Map();
-            const visit = (n) => {
-              if (!n) return;
-              const k = pickId(n);
-              if (k) idx.set(k, n);
-              (Array.isArray(n.children) ? n.children : []).forEach(visit);
-            };
-            visit(root);
-            return idx;
-          };
-          const serverIdx = buildIndex(serverTree);
-          // Build children index by parent id for name-based fallback
-          const serverChildrenByParent = new Map();
-          const collectChildren = (n) => {
-            if (!n) return;
-            const pid = String(n._id || n.id || "");
-            if (Array.isArray(n.children)) serverChildrenByParent.set(pid, n.children);
-            (n.children || []).forEach(collectChildren);
-          };
-          collectChildren(serverTree);
-          const mergeFields = (dst, src) => {
-            if (!dst || !src) return;
-            if (Array.isArray(src.displayType)) dst.displayType = src.displayType;
-            if (src.uiRules && typeof src.uiRules === 'object') dst.uiRules = src.uiRules;
-            if (typeof src.imageUrl === 'string') dst.imageUrl = src.imageUrl;
-            if (typeof src.iconUrl === 'string') dst.iconUrl = src.iconUrl;
-          };
-          const overlay = (node, srcParent) => {
-            if (!node) return;
-            const k = pickId(node);
-            let src = k ? serverIdx.get(k) : null;
-            if (!src && srcParent) {
-              // Fallback: match by name under same parent
-              const sibs = serverChildrenByParent.get(String(srcParent._id || srcParent.id || "")) || [];
-              const byName = sibs.find((c) => String(c?.name || '').toLowerCase() === String(node?.name || '').toLowerCase());
-              if (byName) src = byName;
-            }
-            if (src) mergeFields(node, src);
-            const nextSrcParent = src || srcParent;
-            (Array.isArray(node.children) ? node.children : []).forEach((ch) => overlay(ch, nextSrcParent));
-          };
-          overlay(categoriesWithLinked, serverTree);
+          // Set location from dummy vendor document
+          if (dvVendor?.location) setLocation(dvVendor.location);
+        } catch (e) {
+          setError(e?.message || 'Failed to load dummy vendor preview');
+          setCategoryTree(null);
         }
-      } catch {}
+      } else {
+        // Real vendor flow
+        setVendor(vendorData);
 
-      setCategoryTree(categoriesWithLinked);
+        const [categoryRes, locationRes, catMetaRes, serverTreeRes] = await Promise.all([
+          fetch(`${API_BASE_URL}/api/vendors/${vendorId}/preview/${categoryId}`, { cache: 'no-store' }),
+          fetch(`${API_BASE_URL}/api/vendors/${vendorId}/location`, { cache: 'no-store' }),
+          fetch(`${API_BASE_URL}/api/categories/${categoryId}`, { cache: 'no-store' }),
+          fetch(`${API_BASE_URL}/api/categories/${categoryId}/tree`, { cache: 'no-store' }),
+        ]);
 
-      // Derive hero title/description from query, vendor, and category metadata
-      try {
-        const trimOrNull = (v) => {
-          const s = (v == null) ? '' : String(v);
-          const t = s.trim();
-          return t ? t : null;
-        };
-        const firstNonEmpty = (arr) => Array.isArray(arr) ? arr.map(trimOrNull).find(Boolean) || null : null;
+        const categoryData = await categoryRes.json().catch(() => ({}));
+        const catMeta = await catMetaRes.json().catch(() => ({}));
+        const serverTree = await serverTreeRes.json().catch(() => null);
+        let locationData = null;
+        try { locationData = await locationRes.json(); } catch { locationData = null; }
 
-        // Prefer Create Category Modal freeTexts[0] and [1].
-        // Also consider catMeta.freeTexts (from /api/categories/:id)
-        const rawCatFT = (categoriesWithLinked && categoriesWithLinked.freeTexts)
-          ? categoriesWithLinked.freeTexts
-          : (catMeta && Array.isArray(catMeta.freeTexts))
-          ? catMeta.freeTexts
-          : (categoryData && Array.isArray(categoryData.freeTexts))
-          ? categoryData.freeTexts
-          : [];
-        // Heuristic: legacy data could be shifted by one (index 0 empty, 1 has title, 2 has desc)
-        const catFT = (() => {
-          try {
-            const arr = Array.isArray(rawCatFT) ? rawCatFT : [];
-            if (
-              arr.length === 10 &&
-              (arr[0] == null || String(arr[0]).trim() === "") &&
-              (arr[1] != null && String(arr[1]).trim() !== "")
-            ) {
-              return [...arr.slice(1), ""];
-            }
-            return arr;
-          } catch { return Array.isArray(rawCatFT) ? rawCatFT : []; }
-        })();
+        console.log('CategoryData from API:', categoryData);
 
-        const rawVenFT = vendorData?.freeTexts || [];
-        const venFT = Array.isArray(rawVenFT) ? rawVenFT : [];
+        const linkedAttributes = (catMeta && catMeta.linkedAttributes) ? catMeta.linkedAttributes : {};
+        let categoriesWithLinked = categoryData?.categories ? { ...categoryData.categories, linkedAttributes } : null;
+        if (!categoriesWithLinked && serverTree && (serverTree._id || serverTree.id)) {
+          categoriesWithLinked = { ...serverTree, linkedAttributes };
+        }
 
-        const titleFromCategory = trimOrNull(catFT[0]) || firstNonEmpty(catFT);
-        const descFromCategory  = trimOrNull(catFT[1]) || firstNonEmpty(catFT);
+        // Overlay per-node config (displayType, uiRules, images)
+        try {
+          if (categoriesWithLinked && serverTree && (serverTree._id || serverTree.id)) {
+            const pickId = (n) => String(n?.id || n?._id || '');
+            const buildIndex = (root) => {
+              const idx = new Map();
+              const visit = (n) => { if (!n) return; const k = pickId(n); if (k) idx.set(k, n); (Array.isArray(n.children) ? n.children : []).forEach(visit); };
+              visit(serverTree); return idx; };
+            const serverIdx = buildIndex(serverTree);
+            const serverChildrenByParent = new Map();
+            const collectChildren = (n) => { if (!n) return; const pid = String(n._id || n.id || ''); if (Array.isArray(n.children)) serverChildrenByParent.set(pid, n.children); (n.children || []).forEach(collectChildren); };
+            collectChildren(serverTree);
+            const mergeFields = (dst, src) => { if (!dst || !src) return; if (Array.isArray(src.displayType)) dst.displayType = src.displayType; if (src.uiRules && typeof src.uiRules === 'object') dst.uiRules = src.uiRules; if (typeof src.imageUrl === 'string') dst.imageUrl = src.imageUrl; if (typeof src.iconUrl === 'string') dst.iconUrl = src.iconUrl; };
+            const overlay = (node, srcParent) => { if (!node) return; const k = pickId(node); let src = k ? serverIdx.get(k) : null; if (!src && srcParent) { const sibs = serverChildrenByParent.get(String(srcParent._id || srcParent.id || '')) || []; const byName = sibs.find((c) => String(c?.name || '').toLowerCase() === String(node?.name || '').toLowerCase()); if (byName) src = byName; } if (src) mergeFields(node, src); const nextSrcParent = src || srcParent; (Array.isArray(node.children) ? node.children : []).forEach((ch) => overlay(ch, nextSrcParent)); };
+            overlay(categoriesWithLinked, serverTree);
+          }
+        } catch {}
 
-        const titleFromVendor = trimOrNull(venFT[0])
-          || trimOrNull(vendorData?.customFields?.freeText1)
-          || trimOrNull(vendorData?.ui?.heroTitle)
-          || firstNonEmpty(venFT);
-        const descFromVendor  = trimOrNull(venFT[1])
-          || trimOrNull(vendorData?.customFields?.freeText2)
-          || trimOrNull(vendorData?.ui?.heroDescription)
-          || firstNonEmpty(venFT);
+        setCategoryTree(categoriesWithLinked);
 
-        const titleFromUi = trimOrNull(catMeta?.ui?.heroTitle) || trimOrNull(categoryData?.customFields?.freeText1) || trimOrNull(categoryData?.ui?.heroTitle);
-        const descFromUi  = trimOrNull(catMeta?.ui?.heroDescription) || trimOrNull(categoryData?.customFields?.freeText2) || trimOrNull(categoryData?.ui?.heroDescription);
+        // Derive hero title/description
+        try {
+          const trimOrNull = (v) => { const s = (v == null) ? '' : String(v); const t = s.trim(); return t ? t : null; };
+          const firstNonEmpty = (arr) => Array.isArray(arr) ? arr.map(trimOrNull).find(Boolean) || null : null;
+          const rawCatFT = (categoriesWithLinked && categoriesWithLinked.freeTexts) ? categoriesWithLinked.freeTexts : (catMeta && Array.isArray(catMeta.freeTexts)) ? catMeta.freeTexts : (categoryData && Array.isArray(categoryData.freeTexts)) ? categoryData.freeTexts : [];
+          const catFT = (() => { try { const arr = Array.isArray(rawCatFT) ? rawCatFT : []; if (arr.length === 10 && (arr[0] == null || String(arr[0]).trim() === '') && (arr[1] != null && String(arr[1]).trim() !== '')) { return [...arr.slice(1), '']; } return arr; } catch { return Array.isArray(rawCatFT) ? rawCatFT : []; } })();
+          const rawVenFT = vendorData?.freeTexts || []; const venFT = Array.isArray(rawVenFT) ? rawVenFT : [];
+          const titleFromCategory = trimOrNull(catFT[0]) || firstNonEmpty(catFT);
+          const descFromCategory = trimOrNull(catFT[1]) || firstNonEmpty(catFT);
+          const titleFromVendor = trimOrNull(venFT[0]) || trimOrNull(vendorData?.customFields?.freeText1) || trimOrNull(vendorData?.ui?.heroTitle) || firstNonEmpty(venFT);
+          const descFromVendor = trimOrNull(venFT[1]) || trimOrNull(vendorData?.customFields?.freeText2) || trimOrNull(vendorData?.ui?.heroDescription) || firstNonEmpty(venFT);
+          const titleFromUi = trimOrNull(catMeta?.ui?.heroTitle) || trimOrNull(categoryData?.customFields?.freeText1) || trimOrNull(categoryData?.ui?.heroTitle);
+          const descFromUi = trimOrNull(catMeta?.ui?.heroDescription) || trimOrNull(categoryData?.customFields?.freeText2) || trimOrNull(categoryData?.ui?.heroDescription);
+          const q = router?.query || {};
+          const title = trimOrNull(q.ft1) || titleFromCategory || titleFromVendor || titleFromUi || null;
+          const desc = trimOrNull(q.ft2) || descFromCategory || descFromVendor || descFromUi || null;
+          setHeroTitle(title); setHeroDescription(desc);
+        } catch {}
 
-        const q = router?.query || {};
-        const title = trimOrNull(q.ft1) || titleFromCategory || titleFromVendor || titleFromUi || null;
-        const desc  = trimOrNull(q.ft2) || descFromCategory  || descFromVendor  || descFromUi  || null;
+        // Packages/combos
+        try {
+          const combosRes = await fetch(`${API_BASE_URL}/api/combos?parentCategoryId=${categoryId}`, { cache: 'no-store' });
+          const combosData = await combosRes.json().catch(() => []);
+          setCombos(Array.isArray(combosData) ? combosData : []);
+        } catch { setCombos([]); }
 
-        setHeroTitle(title);
-        setHeroDescription(desc);
-      } catch {}
-
-      // Fetch packages/combos for this category
-      try {
-        const combosRes = await fetch(`/api/combos?parentCategoryId=${categoryId}`, { cache: 'no-store' });
-        const combosData = await combosRes.json().catch(() => []);
-        setCombos(Array.isArray(combosData) ? combosData : []);
-      } catch { setCombos([]); }
-
-      if (locationData?.success) {
-        setLocation(locationData.location);
-      } else if (vendorData.location) {
-        setLocation(vendorData.location);
+        if (locationData?.success) setLocation(locationData.location);
+        else if (vendorData.location) setLocation(vendorData.location);
       }
     } catch (err) {
-      setError(err.message || "Something went wrong");
+      setError(err.message || 'Something went wrong');
     } finally {
       setLoadingVendor(false);
       setLoadingCategories(false);
@@ -400,7 +350,7 @@ export default function PreviewPage() {
             const hasLocal = Array.isArray(vendor?.rowImages?.[id]) && vendor.rowImages[id].length > 0;
             const hasExtra = Array.isArray(extraRowImages?.[id]) && extraRowImages[id].length > 0;
             if (hasLocal || hasExtra) continue;
-            const res = await fetch(`/api/vendors/${vendorId}/rows/${id}/images`, { cache: 'no-store' });
+            const res = await fetch(`${API_BASE_URL}/api/vendors/${vendorId}/rows/${id}/images`, { cache: 'no-store' });
             if (!res.ok) continue;
             const data = await res.json().catch(() => null);
             const imgs = Array.isArray(data?.images) ? data.images : [];
@@ -1716,7 +1666,7 @@ export default function PreviewPage() {
         >
           {lvl1.name}
         </h2>
-        <div style={{ display: "flex", flexWrap: "wrap", gap: "16px", alignItems: 'stretch' }}>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: "16px", alignItems: 'stretch', justifyContent: 'center' }}>
           {(() => {
             const mapModeToDt = (m) => {
               const x = String(m || '').toLowerCase();
@@ -1950,6 +1900,41 @@ export default function PreviewPage() {
                 )
               ];
             }
+            // If ALL children are leaves, render a single parent card with inline buttons (sizes)
+            const allKidsAreLeaves = kidsTop.length > 0 && kidsTop.every((k) => !Array.isArray(k.children) || k.children.length === 0);
+            if (allKidsAreLeaves) {
+              let livePrice = null;
+              try {
+                const priceRows = vendor?.inventorySelections?.[categoryId] || [];
+                for (const entry of priceRows) {
+                  const pbr = (entry && entry.pricesByRow && typeof entry.pricesByRow === 'object') ? entry.pricesByRow : null;
+                  if (!pbr) continue;
+                  for (const [key, value] of Object.entries(pbr)) {
+                    const ids = String(key).split('|');
+                    if (ids.some((id) => String(id) === String(enriched.id))) { livePrice = Number(value); break; }
+                  }
+                  if (livePrice != null) break;
+                }
+              } catch {}
+              if (livePrice == null) {
+                livePrice = vendor?.pricing?.[enriched.id] ?? vendor?.pricing?.[root?.id] ?? enriched.vendorPrice ?? enriched.price ?? null;
+              }
+              const nodeWithLivePrice = { ...enriched, vendorPrice: livePrice, price: livePrice };
+              return (
+                <ParentWithSizesCard
+                  key={`parent-${enriched.id}`}
+                  node={nodeWithLivePrice}
+                  selection={cardSelections[enriched.id]}
+                  onSelectionChange={(parent, leaf) =>
+                    setCardSelections((prev) => ({ ...prev, [enriched.id]: { parent, child: leaf } }))
+                  }
+                  onLeafSelect={(leaf) => setSelectedLeaf(leaf)}
+                  mode={'buttons'}
+                  includeLeafChildren={true}
+                />
+              );
+            }
+
             // Sort children by minimum price in their subtree
             const sortedKids = [...kidsTop].sort((a, b) => {
               const pa = minPriceInSubtree(a);
@@ -1990,7 +1975,7 @@ export default function PreviewPage() {
             {Array.isArray(combos) && combos.length > 0 ? (
               <section style={{ marginBottom: 8 }}>
                 <h2 style={{ margin: '0 0 10px 0' }}>Packages</h2>
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: "16px", alignItems: 'stretch' }}>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: "16px", alignItems: 'stretch', justifyContent: 'center' }}>
                   {combos.map((combo, idx) => {
                     const name = combo?.name || 'Package';
                     const img = combo?.imageUrl || combo?.image || null;

@@ -43,6 +43,10 @@ import VendorStatusPage from "./pages/VendorStatusPage"; // Step 2
 import VendorStatusListPage from "./pages/VendorStatusListPage"; // Step 2 detail
 import VendorBusinessPage from "./pages/VendorBusinessPage"; // Step 3
 import VendorCategoriesDetailPage from "./pages/VendorCategoriesDetailPage";
+import DummyVendorPage from "./pages/DummyVendorPage";
+import DummyVendorStatusPage from "./pages/DummyVendorStatusPage";
+import DummyVendorStatusListPage from "./pages/DummyVendorStatusListPage";
+import DummyVendorCategoriesDetailPage from "./pages/DummyVendorCategoriesDetailPage";
 
 
 function App() {
@@ -96,6 +100,13 @@ function App() {
             /> {/* Step 2 detail */}
             <Route path="/vendors/:vendorId" element={<VendorBusinessPage />} /> {/* Step 3 */}
             <Route path="/vendors/:vendorId/categories/:categoryId" element={<VendorCategoriesDetailPage />} />
+
+            {/* Dummy Vendor Flow entry -> navigates to Dummy Categories */}
+            <Route path="/dummy-vendors" element={<DummyVendorPage />} />
+            <Route path="/dummy-vendors/status/:categoryId" element={<DummyVendorStatusPage />} />
+            <Route path="/dummy-vendors/status/:categoryId/:status" element={<DummyVendorStatusListPage />} />
+            <Route path="/dummy-vendors/:vendorId" element={<DummyVendorCategoriesDetailPage />} />
+            <Route path="/dummy-vendors/:vendorId/categories/:categoryId" element={<DummyVendorCategoriesDetailPage />} />
 
             {/* Categories */}
             <Route path="/categories" element={<CategoryPage />} />

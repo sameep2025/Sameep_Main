@@ -52,7 +52,7 @@ function Sidebar() {
       <NavLink to="/dummy-categories" end style={linkStyle}>
         🧪 Dummy Categories
       </NavLink>
-      <NavLink to="/dummy-vendor" style={linkStyle}>
+      <NavLink to="/dummy-vendors" style={linkStyle}>
         🧑‍🔧 Dummy Vendor
       </NavLink>
     </div>

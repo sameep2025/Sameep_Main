@@ -28,12 +28,15 @@ export default function DummyManageCombosModal({ show, onClose, subcategoryId, i
   const [comboSizes, setComboSizes] = useState([]);
   const [comboVariantOverrides, setComboVariantOverrides] = useState({});
 
+  // UI state
+  const [cardCollapsed, setCardCollapsed] = useState({});
   const [branchFilter, setBranchFilter] = useState("all");
+  const [collapsedBranches, setCollapsedBranches] = useState({});
 
   const toAbs = (u) => {
     if (!u) return "";
     if (typeof u !== 'string') return "";
-    const host = '${API_BASE_URL}';
+    const host = API_BASE_URL;
     if (u.startsWith('http://') || u.startsWith('https://')) return u;
     if (u.startsWith('/uploads/')) return `${host}${u}`;
     if (u.startsWith('/')) return `${host}${u}`;
@@ -41,23 +44,53 @@ export default function DummyManageCombosModal({ show, onClose, subcategoryId, i
     return `${host}/${p}`;
   };
 
-  // Build simple two-level tree from dummy categories
+  // Build full subtree from dummy categories by recursively fetching children
   useEffect(() => {
     if (!show || !subcategoryId) return;
+    const fetchChildren = async (pid) => {
+      try {
+        const res = await fetch(`${API_BASE_URL}/api/dummy-categories?parentId=${pid}`);
+        if (!res.ok) return [];
+        const arr = await res.json();
+        return Array.isArray(arr) ? arr : [];
+      } catch {
+        return [];
+      }
+    };
+    const buildTree = async (id) => {
+      try {
+        const pr = await fetch(`${API_BASE_URL}/api/dummy-categories/${id}`);
+        const node = pr.ok ? await pr.json() : { _id: id, name: "" };
+        const children = await fetchChildren(id);
+        const builtChildren = [];
+        for (const ch of children) {
+          const sub = await buildTree(ch._id || ch.id);
+          builtChildren.push(sub);
+        }
+        return { ...node, children: builtChildren };
+      } catch {
+        return { _id: id, name: "", children: [] };
+      }
+    };
+    const collectLeaves = (root) => {
+      const out = [];
+      const st = [root];
+      while (st.length) {
+        const n = st.pop();
+        if (!n) continue;
+        if (Array.isArray(n.children) && n.children.length === 0) out.push(n);
+        else (n.children || []).forEach((c) => st.push(c));
+      }
+      return out;
+    };
     (async () => {
       try {
-        // fetch parent category
-        const parentRes = await fetch(`${API_BASE_URL}/api/dummy-categories/${subcategoryId}`);
-        const parent = parentRes.ok ? await parentRes.json() : null;
-        // fetch direct children as leaves
-        const leavesRes = await fetch(`${API_BASE_URL}/api/dummy-categories?parentId=${subcategoryId}`);
-        const childArr = leavesRes.ok ? await leavesRes.json() : [];
-        const children = Array.isArray(childArr) ? childArr.map((c) => ({ ...c, children: [] })) : [];
-        setLeaves(childArr || []);
-        setTreeRoot(parent ? { ...parent, children } : { _id: subcategoryId, name: parent?.name || "", children });
+        const tree = await buildTree(subcategoryId);
+        setTreeRoot(tree);
+        setLeaves(collectLeaves(tree));
       } catch {
-        setLeaves([]);
         setTreeRoot(null);
+        setLeaves([]);
       }
     })();
   }, [show, subcategoryId]);
@@ -110,6 +143,66 @@ export default function DummyManageCombosModal({ show, onClose, subcategoryId, i
   }, [treeRoot]);
   const getPathNamesById = (id) => pathMap.get(String(id)) || [];
 
+  // parent map for orphan detection
+  const parentMap = useMemo(() => {
+    const p = new Map();
+    const dfs = (n, pid) => {
+      if (!n) return;
+      const id = String(n._id || "root");
+      p.set(id, pid);
+      (n.children || []).forEach((c) => dfs(c, id));
+    };
+    if (treeRoot) dfs(treeRoot, null);
+    return p;
+  }, [treeRoot]);
+  const getTopBranchNameById = (id) => {
+    const p = getPathNamesById(id);
+    // Use the top-most ancestor name for grouping (avoids repeating the same name as the card title)
+    return p[0] || "";
+  };
+
+  // collect orphan leaves: leaves whose direct parent is not a last-level parent
+  const getOrphanLeavesByBranch = (rootNode, lastLevelParentIds) => {
+    if (!rootNode) return new Map();
+    const orphans = [];
+    const st = [rootNode];
+    while (st.length) {
+      const n = st.pop();
+      if (!n) continue;
+      if (isLeafNode(n)) {
+        const id = String(n._id);
+        const pid = parentMap.get(id);
+        if (!lastLevelParentIds.has(String(pid))) {
+          orphans.push(n);
+        }
+      } else {
+        nodeChildren(n).forEach((c) => st.push(c));
+      }
+    }
+    const groups = new Map();
+    orphans.forEach((leaf) => {
+      const b = getTopBranchNameById(leaf._id) || "Other";
+      if (!groups.has(b)) groups.set(b, []);
+      groups.get(b).push(leaf);
+    });
+    return groups; // Map<branch, leafNode[]>
+  };
+
+const getLastLevelParents = (node) => {
+const out = [];
+const st = [node];
+while (st.length) {
+const n = st.pop();
+if (!n) continue;
+const ch = nodeChildren(n);
+if (ch.length === 0) continue;
+const allLeaves = ch.every((c) => isLeafNode(c));
+if (allLeaves) out.push(n);
+else ch.forEach((c) => st.push(c));
+}
+return out;
+};
+
   const nodeChildren = (node) => node?.children || [];
   const isLeafNode = (node) => Array.isArray(node?.children) && node.children.length === 0;
   const getLeafIdsUnder = (node) => {
@@ -123,6 +216,47 @@ export default function DummyManageCombosModal({ show, onClose, subcategoryId, i
     }
     return acc;
   };
+
+  // When editing and tree is available, expand saved category parent selections to leaf IDs
+  // and prefill per-item sizes for category items from existing variants
+  useEffect(() => {
+    if (!show || !editingCombo || !treeRoot) return;
+    try {
+      const catItems = (editingCombo.items || []).filter((it) => it.kind === 'category' && it.categoryId);
+      if (catItems.length === 0) return;
+
+      // Build a set of selected leaf IDs under each saved parent category
+      const targetParentIds = new Set(catItems.map((it) => String(it.categoryId)));
+      const selectedLeafSet = new Set();
+      const st = [treeRoot];
+      while (st.length) {
+        const n = st.pop();
+        if (!n) continue;
+        const id = String(n._id || '');
+        if (targetParentIds.has(id)) {
+          const leavesUnder = getLeafIdsUnder(n);
+          leavesUnder.forEach((lid) => selectedLeafSet.add(String(lid)));
+          // no need to traverse deeper for this branch
+          continue;
+        }
+        (n.children || []).forEach((c) => st.push(c));
+      }
+      if (selectedLeafSet.size > 0) {
+        setSelectedLeafIds(Array.from(selectedLeafSet));
+      }
+
+      // Prefill sizes for category items from their variants
+      const nextItemSizes = {};
+      catItems.forEach((it) => {
+        const key = `category:${String(it.categoryId)}`;
+        const sizes = Array.from(new Set((Array.isArray(it.variants) ? it.variants : []).map((v) => String(v.size || '').trim()).filter(Boolean)));
+        if (sizes.length) nextItemSizes[key] = sizes;
+      });
+      if (Object.keys(nextItemSizes).length) {
+        setItemSizesOverride((prev) => ({ ...prev, ...nextItemSizes }));
+      }
+    } catch {}
+  }, [show, editingCombo, treeRoot]);
 
   const getCheckedState = (node) => {
     if (isLeafNode(node)) {
@@ -167,6 +301,29 @@ export default function DummyManageCombosModal({ show, onClose, subcategoryId, i
     setCustomItems(customs);
     setStep(1);
   };
+
+  const includedItemsPreview = useMemo(() => {
+    const names = [];
+    const selectedSet = new Set(selectedLeafIds.map(String));
+    const covered = new Set();
+    if (treeRoot) {
+      const parents = getLastLevelParents(treeRoot);
+      parents.forEach((p) => {
+        const leavesUnder = getLeafIdsUnder(p);
+        if (leavesUnder.length && leavesUnder.every((id) => selectedSet.has(String(id)))) {
+          names.push(p.name || "");
+          leavesUnder.forEach((id) => covered.add(String(id)));
+        }
+      });
+    }
+    selectedSet.forEach((lid) => {
+      if (covered.has(lid)) return;
+      const l = leafMap.get(String(lid));
+      if (l?.name) names.push(l.name);
+    });
+    customItems.forEach((ci) => { if ((ci.name||'').trim()) names.push(ci.name.trim()); });
+    return names.join(", ");
+  }, [selectedLeafIds, customItems, leafMap, treeRoot]);
 
   const submit = async () => {
     setLoading(true);
@@ -280,9 +437,18 @@ export default function DummyManageCombosModal({ show, onClose, subcategoryId, i
     }
   };
 
+  function updateCustomItem(idx, key, value) {
+    setCustomItems((prev) => {
+      const next = [...prev];
+      if (key === 'sizeOptions' && typeof value === 'string') next[idx].sizeOptions = value.split(',').map((s) => s.trim()).filter(Boolean);
+      else if (key === 'price') next[idx].price = value;
+      else next[idx][key] = value;
+      return next;
+    });
+  }
+
   if (!show) return null;
 
-  // Simplified UI based on ManageCombosModal core pieces
   return (
     <div style={overlayStyle}>
       <div style={modalStyle}>
@@ -292,6 +458,13 @@ export default function DummyManageCombosModal({ show, onClose, subcategoryId, i
         </div>
         {error && <div style={errorBox}>{error}</div>}
         <div>
+          <div style={{ display: 'flex', gap: 6, marginBottom: 12 }}>
+            {[1, 2, 3, 4].map((s) => (
+              <div key={s} style={{ padding: '6px 10px', borderRadius: 999, fontSize: 12, cursor: 'pointer', background: step === s ? '#0ea5e9' : '#e5e7eb', color: step === s ? '#fff' : '#111827' }} onClick={() => setStep(s)}>
+                Step {s}
+              </div>
+            ))}
+          </div>
           {step === 1 && (
             <div>
               <label style={label}>Combo Name</label>
@@ -335,73 +508,285 @@ export default function DummyManageCombosModal({ show, onClose, subcategoryId, i
             </div>
           )}
 
-          {step === 2 && (
+          {step === 2 ? (
             <div>
+              <div style={{ border: '1px solid #eee', borderRadius: 8, padding: 8, marginBottom: 10, background: '#fafafa' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+                  <div style={{ fontWeight: 700, minWidth: 160 }}>Combo: {name || '(no name)'}</div>
+                  {iconFile || iconUrl ? (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <span style={{ fontSize: 12, color: '#475569' }}>Icon</span>
+                      <img src={iconFile ? URL.createObjectURL(iconFile) : toAbs(iconUrl)} alt="Icon" style={{ width: 32, height: 32, objectFit: 'cover', borderRadius: 6, border: '1px solid #ddd' }} />
+                    </div>
+                  ) : null}
+                  {imageFile || imageUrl ? (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <span style={{ fontSize: 12, color: '#475569' }}>Image</span>
+                      <img src={imageFile ? URL.createObjectURL(imageFile) : toAbs(imageUrl)} alt="Image" style={{ width: 56, height: 56, objectFit: 'cover', borderRadius: 6, border: '1px solid #ddd' }} />
+                    </div>
+                  ) : null}
+                  <div style={{ fontSize: 12, color: '#111827' }}>Type: <b>{type}</b></div>
+                </div>
+              </div>
+              <div style={{ fontWeight: 600, marginBottom: 6 }}>Select Services / Products</div>
               <div style={{ border: '1px solid #eee', borderRadius: 8, padding: 8, maxHeight: 420, overflowY: 'auto' }}>
                 {!treeRoot ? (
                   <div style={{ color: '#666' }}>No categories found</div>
                 ) : (
-                  <div>
-                    <div style={{ fontWeight: 700, margin: '4px 0 8px' }}>{treeRoot.name || 'Category'}</div>
-                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 8 }}>
-                      {(treeRoot.children || []).map((lf) => {
-                        const lid = String(lf._id);
-                        const checked = selectedLeafIds.includes(lid);
-                        return (
-                          <div key={lid} style={{ padding: 8, borderRadius: 8, background: '#fff', border: '1px solid #e5e7eb' }}>
-                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
-                              <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                                <input type="checkbox" checked={checked} onChange={() => toggleLeaf(lid)} />
-                                <span>{lf.name}</span>
-                              </label>
-                              <div style={{ fontSize: 12, color: '#444' }}>{typeof lf?.price === 'number' ? `₹${lf.price}` : '-'}</div>
+                  (() => {
+                    const parents = getLastLevelParents(treeRoot);
+                    if (parents.length === 0) return <div style={{ color: '#666' }}>No last-level parents</div>;
+                    const withBranch = parents.map((p) => ({ p, branch: getTopBranchNameById(p._id) || 'Other' }));
+                    const lastParentIds = new Set(withBranch.map(({ p }) => String(p._id)));
+                    const orphanGroups = getOrphanLeavesByBranch(treeRoot, lastParentIds);
+                    const branches = Array.from(new Set(withBranch.map((x) => x.branch)));
+                    orphanGroups.forEach((_, b) => { if (!branches.includes(b)) branches.push(b); });
+                    const active = branchFilter === 'all' ? branches : branches.filter((b) => b.toLowerCase() === branchFilter.toLowerCase());
+                    return (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                        {active.map((b) => {
+                          const items = withBranch.filter((x) => x.branch === b).map((x) => x.p);
+                          return (
+                            <div key={b}>
+                              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', margin: '4px 0 8px' }}>
+                                <div style={{ fontWeight: 700 }}>{b}</div>
+                              </div>
+                              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 8 }}>
+                                {items.map((p) => {
+                                  const pid = String(p._id);
+                                  const pState = getCheckedState(p);
+                                  const pathNames = getPathNamesById(pid);
+                                  const chip = pathNames.slice(0, Math.max(0, pathNames.length - 1)).join(' › ');
+                                  const leafCard = isLeafNode(p);
+                                  return (
+                                    <div key={pid} style={{ border: '1px solid #ddd', borderRadius: 8, padding: 8, background: '#fafafa' }}>
+                                      <div style={{ fontSize: 11, color: '#475569', marginBottom: 4, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={chip}>{chip}</div>
+                                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                          <input
+                                            type="checkbox"
+                                            ref={(el) => { if (el) el.indeterminate = !leafCard && pState.some; }}
+                                            checked={pState.all}
+                                            onChange={(e) => {
+                                              if (leafCard) toggleLeaf(pid);
+                                              else toggleNode(p, e.target.checked);
+                                            }}
+                                          />
+                                          <div style={{ fontWeight: 600 }}>{p.name}</div>
+                                        </div>
+                                        {leafCard ? (
+                                          <div style={{ fontSize: 12, color: '#444' }}>{typeof p?.price === 'number' ? `₹${p.price}` : '-'}</div>
+                                        ) : null}
+                                      </div>
+                                      {/* Do not render leaf nodes under last-level parent */}
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                              {orphanGroups.get(b)?.length ? (
+                                <div style={{ marginTop: 10 }}>
+                                  <div style={{ fontSize: 12, color: '#475569', marginBottom: 6 }}>Leaf Items</div>
+                                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 8 }}>
+                                    {orphanGroups.get(b).map((lf) => {
+                                      const lid = String(lf._id);
+                                      const l = leafMap.get(lid);
+                                      const st = getCheckedState(lf);
+                                      return (
+                                        <div key={lid} style={{ padding: 8, borderRadius: 8, background: '#fff', border: '1px solid #e5e7eb' }}>
+                                          <div style={{ fontSize: 11, color: '#475569', marginBottom: 4, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={(getPathNamesById(lid) || []).join(' › ')}>
+                                            {(getPathNamesById(lid) || []).join(' › ')}
+                                          </div>
+                                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+                                            <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                              <input type="checkbox" checked={st.all} onChange={() => toggleLeaf(lid)} />
+                                              <span>{lf.name}</span>
+                                            </label>
+                                            <div style={{ fontSize: 12, color: '#444' }}>{typeof l?.price === 'number' ? `₹${l.price}` : '-'}</div>
+                                          </div>
+                                        </div>
+                                      );
+                                    })}
+                                  </div>
+                                </div>
+                              ) : null}
                             </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </div>
+                          );
+                        })}
+                      </div>
+                    );
+                  })()
                 )}
               </div>
-            </div>
-          )}
+
+              <div style={{ marginTop: 12, fontWeight: 700 }}>Custom Products / Services</div>
+                      {(customItems || []).map((ci, idx) => (
+                        <div key={idx} style={{ border: '1px solid #eee', borderRadius: 8, padding: 8, marginTop: 8 }}>
+                          <input value={ci.name} onChange={(e) => updateCustomItem(idx, 'name', e.target.value)} placeholder="Custom item name" style={input} />
+                        </div>
+                      ))}
+                      <button type="button" onClick={() => setCustomItems((p) => [...p, { name: '' }])} style={{ ...btnPrimary, marginTop: 8 }}>+ Add Custom Item</button>
+                    </div>
+                  ) : null}
+        
+                  {(step === 1 || step === 2) ? (
+                    <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
+                      {step > 1 && <button onClick={() => setStep(step - 1)} style={btnSecondary}>Back</button>}
+                      <button onClick={() => setStep(step + 1)} style={btnPrimary}>Next</button>
+                    </div>
+                  ) : null}
 
           {step === 3 && (
             <div>
-              <div style={{ fontWeight: 600, marginBottom: 8 }}>Custom Products / Services</div>
-              {(customItems || []).map((ci, idx) => (
-                <div key={idx} style={{ border: '1px solid #eee', borderRadius: 8, padding: 8, marginTop: 8 }}>
-                  <input value={ci.name} onChange={(e) => {
-                    const arr = [...customItems];
-                    arr[idx] = { ...arr[idx], name: e.target.value };
-                    setCustomItems(arr);
-                  }} placeholder="Custom item name" style={input} />
+              <div style={{ border: '1px solid #eee', borderRadius: 8, padding: 8, marginBottom: 10, background: '#fafafa' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+                  <div style={{ fontWeight: 700, minWidth: 160 }}>Combo: {name || '(no name)'}</div>
+                  {iconFile || iconUrl ? (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <span style={{ fontSize: 12, color: '#475569' }}>Icon</span>
+                      <img src={iconFile ? URL.createObjectURL(iconFile) : toAbs(iconUrl)} alt="Icon" style={{ width: 32, height: 32, objectFit: 'cover', borderRadius: 6, border: '1px solid #ddd' }} />
+                    </div>
+                  ) : null}
+                  {imageFile || imageUrl ? (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <span style={{ fontSize: 12, color: '#475569' }}>Image</span>
+                      <img src={imageFile ? URL.createObjectURL(imageFile) : toAbs(imageUrl)} alt="Image" style={{ width: 56, height: 56, objectFit: 'cover', borderRadius: 6, border: '1px solid #ddd' }} />
+                    </div>
+                  ) : null}
+                  <div style={{ fontSize: 12, color: '#111827' }}>Type: <b>{type}</b></div>
+                  <div style={{ fontSize: 12, color: '#111827' }}>Includes: <b>{includedItemsPreview || '(none)'}</b></div>
                 </div>
-              ))}
-              <button type="button" onClick={() => setCustomItems((p) => [...p, { name: '' }])} style={{ ...btnPrimary, marginTop: 8 }}>+ Add Custom Item</button>
+              </div>
+
+              <label style={label}>Base Price</label>
+              <input type="number" value={basePrice} onChange={(e) => setBasePrice(e.target.value)} placeholder="e.g., 799" style={input} />
+              <label style={label}>Terms</label>
+              <textarea value={terms} onChange={(e) => setTerms(e.target.value)} placeholder="Terms..." style={textarea} />
+              <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
+                <button onClick={() => setStep(2)} style={btnSecondary}>Back</button>
+                <button onClick={() => setStep(4)} style={btnPrimary}>Next</button>
+              </div>
             </div>
           )}
 
           {step === 4 && (
             <div>
-              <div style={{ fontWeight: 600, marginBottom: 6 }}>Review & Save</div>
-              <button disabled={loading} onClick={submit} style={btnPrimary}>{loading ? 'Saving...' : 'Save Combo'}</button>
+              <div style={{ border: '1px solid #eee', borderRadius: 8, padding: 8, marginBottom: 10, background: '#fafafa' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+                  <div style={{ fontWeight: 700, minWidth: 160 }}>Combo: {name || '(no name)'}</div>
+                  {iconFile || iconUrl ? (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <span style={{ fontSize: 12, color: '#475569' }}>Icon</span>
+                      <img src={iconFile ? URL.createObjectURL(iconFile) : toAbs(iconUrl)} alt="Icon" style={{ width: 32, height: 32, objectFit: 'cover', borderRadius: 6, border: '1px solid #ddd' }} />
+                    </div>
+                  ) : null}
+                  {imageFile || imageUrl ? (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <span style={{ fontSize: 12, color: '#475569' }}>Image</span>
+                      <img src={imageFile ? URL.createObjectURL(imageFile) : toAbs(imageUrl)} alt="Image" style={{ width: 56, height: 56, objectFit: 'cover', borderRadius: 6, border: '1px solid #ddd' }} />
+                    </div>
+                  ) : null}
+                  <div style={{ fontSize: 12, color: '#111827' }}>Type: <b>{type}</b></div>
+                  <div style={{ fontSize: 12, color: '#111827' }}>Base: <b>{basePrice || '-'}</b></div>
+                  <div style={{ fontSize: 12, color: '#111827' }}>Terms: <b>{(terms || '-').slice(0, 40)}{(terms||'').length>40?'...':''}</b></div>
+                  <div style={{ fontSize: 12, color: '#111827' }}>Includes: <b>{includedItemsPreview || '(none)'}</b></div>
+                </div>
+              </div>
+
+              <label style={{ display: 'inline-flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                <input type="checkbox" checked={enableComboTypes} onChange={(e) => setEnableComboTypes(e.target.checked)} />
+                <span style={{ fontWeight: 600 }}>Combo Types</span>
+              </label>
+
+              {enableComboTypes && (
+                <div style={{ marginTop: 8 }}>
+                  <div style={{ fontWeight: 700, marginBottom: 6 }}>Per-size price, terms, and image </div>
+                  <div style={{ marginBottom: 8 }}>
+                    <SizeAdder
+                      current={comboSizes}
+                      onAdd={(sz) => {
+                        const v = String(sz).trim();
+                        if (!v) return;
+                        setComboSizes((prev) => {
+                          const exists = prev.some((p) => String(p).toLowerCase() === v.toLowerCase());
+                          if (exists) { alert('This combo type already exists.'); return prev; }
+                          return [...prev, v];
+                        });
+                      }}
+                    />
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 6 }}>
+                      {comboSizes.map((sz) => (
+                        <span key={sz} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, border: '1px solid #e5e7eb', background: '#f8fafc', color: '#0f172a', borderRadius: 999, padding: '4px 8px' }}>
+                          {sz}
+                          <button type="button" onClick={() => setComboSizes((prev) => prev.filter((s) => s !== sz))} style={{ border: 'none', background: 'transparent', cursor: 'pointer', color: '#ef4444' }}>×</button>
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: 8 }}>
+                    {(comboSizes.length ? comboSizes : [null]).map((sz, j) => {
+                      const ovKey = `combo:${j}`;
+                      const ov = comboVariantOverrides[ovKey] || {};
+                      return (
+                        <div key={ovKey} style={{ border: '1px solid #e2e8f0', borderRadius: 8, padding: 8, background: '#fff' }}>
+                          <div style={{ fontWeight: 600, marginBottom: 6 }}>{sz || 'Default'}</div>
+                          <div style={{ display: 'flex', gap: 8 }}>
+                            <input type="number" placeholder="Price" value={ov.price ?? ''} onChange={(e) => setComboVariantOverrides((prev) => ({ ...prev, [ovKey]: { ...prev[ovKey], price: e.target.value } }))} style={{ ...input, flex: 1 }} />
+                            <input placeholder="Terms" value={ov.terms ?? ''} onChange={(e) => setComboVariantOverrides((prev) => ({ ...prev, [ovKey]: { ...prev[ovKey], terms: e.target.value } }))} style={{ ...input, flex: 2 }} />
+                          </div>
+                          <div style={{ marginTop: 6 }}>
+                            <input id={`file_${ovKey}`} type="file" accept="image/*" onChange={(e) => {
+                              const file = e.target.files?.[0] || null;
+                              setComboVariantOverrides((prev) => ({ ...prev, [ovKey]: { ...prev[ovKey], file } }));
+                            }} style={{ display: 'none' }} />
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                              <label htmlFor={`file_${ovKey}`} style={btnSecondary}>Choose File</label>
+                              <span style={{ fontSize: 12, color: '#475569' }}>{ov.file?.name || (ov.imageUrl ? 'Existing image selected' : 'No file selected')}</span>
+                            </div>
+                          </div>
+                          <div style={{ marginTop: 6 }}>
+                            {(ov.file || ov.imageUrl) ? (
+                              <img src={ov.file ? URL.createObjectURL(ov.file) : toAbs(ov.imageUrl)} alt="Variant" style={{ width: 120, height: 120, objectFit: 'cover', borderRadius: 8, border: '1px solid #ddd' }} />
+                            ) : null}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
+                <button onClick={() => setStep(3)} style={btnSecondary}>Back</button>
+                <button onClick={submit} disabled={loading || !name.trim()} style={btnPrimary}>{editingCombo ? 'Save Changes' : 'Create Combo'}</button>
+              </div>
             </div>
           )}
 
-          <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 12 }}>
-            <div style={{ display: 'flex', gap: 8 }}>
-              {[1,2,3,4].map((s) => (
-                <button key={s} type="button" onClick={() => setStep(s)} style={{ ...stepPill, background: step === s ? '#0ea5e9' : '#e5e7eb', color: step === s ? '#fff' : '#111827' }}>Step {s}</button>
-              ))}
-            </div>
-            <div style={{ display: 'flex', gap: 8 }}>
-              {step > 1 && <button type="button" onClick={() => setStep((p) => p - 1)} style={btnSecondary}>Back</button>}
-              {step < 4 && <button type="button" onClick={() => setStep((p) => p + 1)} style={btnPrimary}>Next</button>}
-            </div>
-          </div>
+          
         </div>
       </div>
+    </div>
+  );
+}
+
+function SizeAdder({ current = [], onAdd }) {
+  const [val, setVal] = useState("");
+  return (
+    <div style={{ display: 'flex', gap: 8, width: '100%' }}>
+      <input
+        placeholder="Type a size (e.g., Small)"
+        value={val}
+        onChange={(e) => setVal(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') {
+            const v = String(val).trim();
+            if (v) onAdd?.(v);
+            setVal("");
+          }
+        }}
+        style={{ ...input, flex: 1 }}
+      />
+      <button type="button" onClick={() => { const v = String(val).trim(); if (v) onAdd?.(v); setVal(""); }} style={btnPrimary}>Add</button>
     </div>
   );
 }
@@ -413,6 +798,7 @@ const errorBox = { background: '#fee2e2', color: '#991b1b', border: '1px solid #
 const sectionTitle = { fontWeight: 700, margin: '6px 0' };
 const label = { display: 'block', marginTop: 8, fontWeight: 600, color: '#111827' };
 const input = { width: '100%', border: '1px solid #e5e7eb', borderRadius: 8, padding: 8, outline: 'none' };
+const textarea = { width: '100%', minHeight: 80, border: '1px solid #ddd', borderRadius: 8, padding: 8 };
 const btnPrimary = { background: '#0ea5e9', color: '#fff', border: 'none', borderRadius: 8, padding: '8px 12px', cursor: 'pointer', fontWeight: 700 };
 const btnSecondary = { background: '#fff', color: '#111827', border: '1px solid #e5e7eb', borderRadius: 8, padding: '8px 12px', cursor: 'pointer', fontWeight: 600 };
 const stepPill = { border: 'none', borderRadius: 999, padding: '6px 10px', cursor: 'pointer', fontWeight: 700 };

@@ -23,18 +23,7 @@ function DummyCategoryCard({ category, onEdit, onDelete }) {
         <p style={{ color: "#555", margin: "4px 0" }}>Price: ₹{category.price}</p>
       )}
 
-      <p>
-        Visible to User:{" "}
-        <span style={{ color: category.visibleToUser ? "#28a745" : "#dc3545", fontWeight: "bold" }}>
-          {category.visibleToUser ? "Yes" : "No"}
-        </span>
-      </p>
-       <p>
-        Visible to Vendor:{" "}
-        <span style={{ color: category.visibleToVendor ? "#28a745" : "#dc3545", fontWeight: "bold" }}>
-          {category.visibleToVendor ? "Yes" : "No"}
-        </span>
-      </p>
+
 
       {termsList && (
         <div style={{ color: "#555", margin: "4px 0" }}>

@@ -44,8 +44,8 @@ function ActivateBusinessModal({ show, onClose, customer, onActivated }) {
       setContactName("");
       setCategoryId("");
 
-      // Send new vendor ID back to parent
-      onActivated?.(res.data._id);
+      // Send new vendor ID and chosen category back to parent
+      onActivated?.(res.data._id, categoryId);
 
       onClose();
     } catch (err) {

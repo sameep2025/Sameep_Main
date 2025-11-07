@@ -116,10 +116,11 @@ const ImgBox = ({ src, alt }) => {
 };
 
 /* Category Card */
-const CategoryCard = ({ node, onClick, themeColor, cardBg, accentColor, isHighlighted }) => {
+const CategoryCard = ({ node, onClick, onLeafClick, themeColor, cardBg, accentColor, isHighlighted }) => {
   const lowestPrice = findLowestPrice(node);
   const hasSubcategories = node.children && node.children.length > 0;
   const hasImage = node.imageUrl && resolveImageUrl(node.imageUrl);
+  const childrenAreLeaves = hasSubcategories && node.children.every((c) => !c.children || c.children.length === 0);
   
   return (
     <div
@@ -190,6 +191,41 @@ const CategoryCard = ({ node, onClick, themeColor, cardBg, accentColor, isHighli
         </div>
       ) : (
         <p style={{ color: "#64748b", fontSize: 13, marginTop: 6 }}>No pricing yet</p>
+      )}
+
+      {childrenAreLeaves && (
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 10, justifyContent: "center", width: "100%" }}>
+          {node.children.map((child) => (
+            <button
+              key={getNodeId(child)}
+              onClick={(e) => {
+                e.stopPropagation();
+                if (onLeafClick) onLeafClick(child);
+              }}
+              style={{
+                padding: "6px 10px",
+                borderRadius: 8,
+                border: `1px solid ${themeColor}`,
+                background: `${themeColor}12`,
+                color: themeColor,
+                fontWeight: 600,
+                fontSize: 12,
+                cursor: "pointer",
+                transition: "background 0.2s ease, color 0.2s ease",
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.background = `${accentColor}25`;
+                e.currentTarget.style.color = "#0f172a";
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.background = `${themeColor}12`;
+                e.currentTarget.style.color = themeColor;
+              }}
+            >
+              {child.name}
+            </button>
+          ))}
+        </div>
       )}
     </div>
   );
@@ -464,8 +500,16 @@ const OverlayModal = ({
                       onClick={(category) => {
                         console.log("🔍 Overlay CategoryCard clicked:", category.name);
                         console.log("🔍 Has children?", category.children?.length);
-                        
-                        if (category.children && category.children.length > 0) {
+
+                        const hasChildren = category.children && category.children.length > 0;
+                        const childrenAreLeaves = hasChildren && category.children.every((c) => !c.children || c.children.length === 0);
+
+                        if (hasChildren && childrenAreLeaves) {
+                          // Inline buttons will handle selection; avoid pushing deeper
+                          return;
+                        }
+
+                        if (hasChildren) {
                           console.log("✅ Pushing to stack to show subcategories");
                           push(category); // Navigate deeper into subcategories
                           setSelectedCategoryId(null); // Reset highlight
@@ -473,6 +517,13 @@ const OverlayModal = ({
                           console.log("✅ Just highlighting leaf category");
                           setSelectedCategoryId(category._id || category.id);
                         }
+                      }}
+                      onLeafClick={(leaf) => {
+                        console.log("✅ Overlay inline leaf selected:", leaf.name);
+                        setSelectedCategoryId(leaf._id || leaf.id);
+                        setStack([]); // close overlay
+                        const mainEl = document.getElementById("our-services");
+                        if (mainEl) mainEl.scrollIntoView({ behavior: "smooth", block: "start" });
                       }}
                       themeColor={themeColor}
                       cardBg={cardBg}
@@ -938,30 +989,8 @@ function PreviewPage() {
 
     let children = categoryTree.children;
 
-    // If the current category is configured as Products in DB,
-    // show only product leaves across the entire subtree
-    if (isProducts) {
-      const allProducts = collectAllProducts(categoryTree);
-      const inv = vendor?.inventorySelections?.[categoryId] || [];
-      const invLeaves = Array.isArray(inv)
-        ? inv.map((entry, idx) => {
-            const fam = entry?.scopeFamily;
-            const sel = entry?.selections?.[fam] || {};
-            const parts = Object.values(sel).filter((v) => v != null && String(v).trim() !== "");
-            const name = parts.join(" ") || "Item";
-            return { id: `inv-${idx}-${entry?.at || idx}`, name, children: [] };
-          })
-        : [];
-      return [...allProducts, ...invLeaves];
-    }
-
-    // If root is a Service but has Products nested, we still want to show Products
-    if (categoryTree.categoryType === "Services") {
-      const allProducts = collectAllProducts(categoryTree);
-      if (allProducts.length > 0) {
-        children = [...children, ...allProducts];
-      }
-    }
+    // Do NOT flatten nested product leaves into the root grid.
+    // We will keep parent categories so their last-level children can render as inline buttons.
 
     // Append inventory selections as additional leaf nodes
     let combined = children;
@@ -1237,8 +1266,16 @@ function PreviewPage() {
                   onClick={(category) => {
                     console.log("🔍 CategoryCard clicked:", category.name);
                     console.log("🔍 Has children?", category.children?.length);
-                    
-                    if (category.children && category.children.length > 0) {
+
+                    const hasChildren = category.children && category.children.length > 0;
+                    const childrenAreLeaves = hasChildren && category.children.every((c) => !c.children || c.children.length === 0);
+
+                    if (hasChildren && childrenAreLeaves) {
+                      // Inline buttons will handle leaf selection; avoid opening overlay
+                      return;
+                    }
+
+                    if (hasChildren) {
                       console.log("✅ Opening overlay with children:", category.children);
                       setStack([category]);
                       setHighlightedCategory(null);
@@ -1248,6 +1285,13 @@ function PreviewPage() {
                       setSelectedLeafCategory(category);
                       setHighlightedCategory(category._id || category.id);
                     }
+                  }}
+                  onLeafClick={(leaf) => {
+                    console.log("✅ Inline leaf selected:", leaf.name);
+                    setSelectedLeafCategory(leaf);
+                    setHighlightedCategory(leaf._id || leaf.id);
+                    const mainEl = document.getElementById("our-services");
+                    if (mainEl) mainEl.scrollIntoView({ behavior: "smooth", block: "start" });
                   }}
                   themeColor={primary}
                   cardBg={cardBg}

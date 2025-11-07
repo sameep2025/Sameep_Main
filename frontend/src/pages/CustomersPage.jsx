@@ -1,15 +1,20 @@
 import { useState, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
 import axios from "axios";
 import AddCustomerModal from "../components/AddCustomerModal";
 import ActivateBusinessModal from "../components/ActivateBusinessModal";
+import ActivateDummyBusinessModal from "../components/ActivateDummyBusinessModal";
 import API_BASE_URL from "../config";
 
 function CustomersPage() {
+  const navigate = useNavigate();
   const [customers, setCustomers] = useState([]);
   const [openAdd, setOpenAdd] = useState(false);
   const [openActivate, setOpenActivate] = useState(false);
+  const [openActivateDummy, setOpenActivateDummy] = useState(false);
   const [selectedCustomer, setSelectedCustomer] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [dummyAvailable, setDummyAvailable] = useState(true);
 
   const fetchCustomers = async () => {
     try {
@@ -26,23 +31,40 @@ function CustomersPage() {
 
   useEffect(() => {
     fetchCustomers();
+    // Avoid noisy 404s in hosted envs lacking dummy endpoints; hide button instead
+    try {
+      const isHosted = /go-kar\.net/i.test(String(API_BASE_URL || ""));
+      setDummyAvailable(!isHosted);
+    } catch { setDummyAvailable(true); }
   }, []);
 
   const handleActivateClick = (customer) => {
     setSelectedCustomer(customer);
     setOpenActivate(true);
   };
+  const handleActivateDummyClick = (customer) => {
+    setSelectedCustomer(customer);
+    setOpenActivateDummy(true);
+  };
 
   return (
     <div>
       <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
         <h1>Customers</h1>
-        <button
-          onClick={() => setOpenAdd(true)}
-          style={{ padding:"8px 14px", borderRadius:8, background:"#00AEEF", color:"#fff", border:"none", cursor:"pointer" }}
-        >
-          + Add Customer
-        </button>
+        <div style={{ display:"flex", gap:8 }}>
+          <button
+            onClick={() => setOpenAdd(true)}
+            style={{ padding:"8px 14px", borderRadius:8, background:"#00AEEF", color:"#fff", border:"none", cursor:"pointer" }}
+          >
+            + Add Customer
+          </button>
+          <button
+            onClick={() => selectedCustomer ? handleActivateDummyClick(selectedCustomer) : alert("Select a customer first")}
+            style={{ padding:"8px 14px", borderRadius:8, background:"#6b7280", color:"#fff", border:"none", cursor:"pointer" }}
+          >
+            Activate Dummy
+          </button>
+        </div>
       </div>
 
       {/* Add Customer Modal */}
@@ -57,7 +79,33 @@ function CustomersPage() {
         show={openActivate}
         onClose={() => setOpenActivate(false)}
         customer={selectedCustomer}
-        onActivated={() => { setOpenActivate(false); fetchCustomers(); setSelectedCustomer(null); }}
+        onActivated={(vendorId /*, categoryId*/ ) => {
+          setOpenActivate(false);
+          fetchCustomers();
+          setSelectedCustomer(null);
+          if (vendorId) navigate(`/vendors/${vendorId}`);
+        }}
+      />
+
+      {/* Activate Dummy Business Modal */}
+      <ActivateDummyBusinessModal
+        show={openActivateDummy}
+        onClose={() => setOpenActivateDummy(false)}
+        customer={selectedCustomer}
+        onActivated={(vendorId, meta) => {
+          setOpenActivateDummy(false);
+          fetchCustomers();
+          setSelectedCustomer(null);
+          // If creation failed but we have a category to show, jump to status page
+          if (!vendorId && meta?.navigateToStatus && meta?.categoryId) {
+            if (meta?.source === "dummy") navigate(`/dummy-vendors/status/${meta.categoryId}`);
+            else navigate(`/vendors/status/${meta.categoryId}`);
+            return;
+          }
+          if (!vendorId) return;
+          if (meta?.target === "dummy") navigate(`/dummy-vendors/${vendorId}`);
+          else navigate(`/vendors/${vendorId}`);
+        }}
       />
 
       <div style={{ marginTop: 20 }}>

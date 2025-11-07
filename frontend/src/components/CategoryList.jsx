@@ -223,8 +223,12 @@ const fetchCategories = useCallback(async () => {
         style={{
           display: "grid",
           gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))",
-          gap: "16px",
+          gap: "30px",
           marginTop: "20px",
+          borderRadius: "8px",
+          // background: "#f9f9f9",
+          // padding: "20px",
+          // boxShadow: "0 4px 8px rgba(0,0,0,0.1)",
         }}
       >
         {categories.map((cat) => (
