@@ -475,10 +475,6 @@ export default function PreviewPage() {
             }
           } catch {}
         }
-        // Fallback to vendor profile pictures if still empty
-        if (!arr.length && Array.isArray(vendor?.profilePictures) && vendor.profilePictures.length) {
-          arr = vendor.profilePictures.slice(0, 10);
-        }
         // If still empty and in dummy mode, try fetching dummy category's image/icon
         if (!arr.length && String(mode || '').toLowerCase() === 'dummy') {
           try {
@@ -1449,9 +1445,6 @@ export default function PreviewPage() {
                       }
                     } catch {}
                   }
-                  if (!images.length && Array.isArray(vendor?.profilePictures) && vendor.profilePictures.length) {
-                    images = images.concat(vendor.profilePictures.slice(0, 10));
-                  }
                   const normImgs = images.map((s) => {
                     const str = String(s);
                     if (str.startsWith('http://') || str.startsWith('https://') || str.startsWith('data:')) return str;
@@ -1823,9 +1816,6 @@ export default function PreviewPage() {
                         if (rows.length) images = rows.slice(0, 10);
                       }
                       if (!images.length && displayNode?.imageUrl) images = [displayNode.imageUrl];
-                      if (!images.length && Array.isArray(vendor?.profilePictures) && vendor.profilePictures.length) {
-                        images = vendor.profilePictures.slice(0, 10);
-                      }
                       const normImgs = images.map((s) => {
                         const str = String(s);
                         if (str.startsWith('http://') || str.startsWith('https://') || str.startsWith('data:')) return str;
