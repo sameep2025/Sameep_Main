@@ -47,8 +47,24 @@ mongoose.connection.once('open', async () => {
 });
 
 // Middleware
-app.use(cors());
-app.use(express.json());
+// CORS: allow cross-origin from dev (localhost) and production domains; also handle preflight
+app.use(cors({
+  origin: true, // reflect request origin
+  methods: ['GET','HEAD','PUT','PATCH','POST','DELETE','OPTIONS'],
+  allowedHeaders: ['Content-Type','Authorization','Accept','Origin','X-Requested-With'],
+  credentials: false,
+  optionsSuccessStatus: 200,
+}));
+app.options('*', cors({
+  origin: true,
+  methods: ['GET','HEAD','PUT','PATCH','POST','DELETE','OPTIONS'],
+  allowedHeaders: ['Content-Type','Authorization','Accept','Origin','X-Requested-With'],
+  credentials: false,
+  optionsSuccessStatus: 200,
+}));
+// Increase body size limits to handle base64 data URLs for images in dummy vendor profilePictures
+app.use(express.json({ limit: '8mb' }));
+app.use(express.urlencoded({ limit: '8mb', extended: true }));
 
 
 // Simple request logger

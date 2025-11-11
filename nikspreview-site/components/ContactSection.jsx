@@ -93,16 +93,19 @@ export default function ContactSection({
     return { open: false, closes: "", nextOpen: start };
   };
 
+  // Helper: check coords
+  const hasCoords = !!(location && Number.isFinite(location.lat) && Number.isFinite(location.lng));
+
   // Sync area/city from location
   useEffect(() => {
-    if (!location) return setAreaCity("");
+    if (!location || !hasCoords) return setAreaCity("");
 
     if (location.areaCity) {
       setAreaCity(location.areaCity);
       return;
     }
 
-    if (location.lat && location.lng) {
+    if (hasCoords) {
       const fetchAreaCity = async () => {
         try {
           const res = await fetch(
@@ -195,7 +198,7 @@ export default function ContactSection({
             onClick={() => setModalOpen(true)}
           >
             <h4 style={{ marginBottom: "10px", fontWeight: "bold", color: theme.primary }}>Location</h4>
-            {location ? (
+            {hasCoords ? (
               <>
                 {areaCity && <p>{areaCity}</p>}
                 <iframe
@@ -316,7 +319,7 @@ export default function ContactSection({
         show={modalOpen}
         onClose={() => setModalOpen(false)}
         onSave={handleSaveLocation}
-        initialPosition={location ? [location.lat, location.lng] : null}
+        initialPosition={hasCoords ? [location.lat, location.lng] : null}
         title="Select Location"
       />
     </section>

@@ -13,6 +13,18 @@ export default function DummyVendorStatusListPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const isHosted = /go-kar\.net/i.test(String(API_BASE_URL || ""));
+  const devProxy = (() => {
+    try {
+      const loc = window.location;
+      const isLocal = loc && (loc.hostname === 'localhost' || loc.hostname === '127.0.0.1');
+      if (isLocal && String(loc.port) === '3001') return 'http://localhost:3000';
+    } catch {}
+    return '';
+  })();
+  // Prefer Next proxy on :3000 when running the React app on :3001, otherwise:
+  // - When hosted (go-kar.net), use same-origin '' (Next/site proxy handles /api)
+  // - Else use API_BASE_URL directly (e.g., http://localhost:5000 or http://localhost:3000)
+  const API_PREFIX = devProxy || (isHosted ? '' : API_BASE_URL);
   const [activeVendor, setActiveVendor] = useState(null);
   const [showPicker, setShowPicker] = useState(false);
   const [showNearby, setShowNearby] = useState(false);
@@ -30,7 +42,7 @@ export default function DummyVendorStatusListPage() {
   const refreshVendor = async (vendorId) => {
     try {
       // refetch the one vendor via byCategory filter to update row
-      const res = await axios.get(`${API_BASE_URL}/api/dummy-vendors/byCategory/${categoryId}`, { params: { status } });
+      const res = await axios.get(`${API_PREFIX}/api/dummy-vendors/byCategory/${categoryId}`, { params: { status } });
       const list = Array.isArray(res.data) ? res.data : [];
       setVendors(list);
     } catch {}
@@ -48,15 +60,36 @@ export default function DummyVendorStatusListPage() {
       reader.readAsDataURL(file);
     });
 
+  const resizeImageFile = async (file, maxDim = 1280, quality = 0.75) => {
+    try {
+      const dataUrl = await readFileAsDataURL(file);
+      const img = document.createElement('img');
+      const loaded = await new Promise((res, rej) => { img.onload = () => res(true); img.onerror = rej; img.src = dataUrl; });
+      if (!loaded) return dataUrl;
+      const { width, height } = img;
+      const scale = Math.min(1, maxDim / Math.max(width, height));
+      if (scale >= 1) return dataUrl; // no need to resize
+      const canvas = document.createElement('canvas');
+      canvas.width = Math.round(width * scale);
+      canvas.height = Math.round(height * scale);
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+      // Use JPEG to reduce size; fallback to original if canvas fails
+      return canvas.toDataURL('image/jpeg', quality);
+    } catch {
+      return await readFileAsDataURL(file);
+    }
+  };
+
   const onUploadFiles = async (v) => {
     v = await resolveVendor(v); if (!v) return;
     const files = uploads[v._id] || [];
     if (!files.length) { alert('Please choose images'); return; }
     try {
       const existing = Array.isArray(v.profilePictures) ? v.profilePictures.slice() : [];
-      const dataUrls = await Promise.all(files.map(readFileAsDataURL));
+      const dataUrls = await Promise.all(files.map((f) => resizeImageFile(f, 1280, 0.75)));
       const next = existing.concat(dataUrls).slice(0, 5);
-      await axios.put(`${API_BASE_URL}/api/dummy-vendors/${v._id}/profile-pictures`, { profilePictures: next });
+      await axios.put(`${API_PREFIX}/api/dummy-vendors/${v._id}/profile-pictures`, { profilePictures: next });
       setUploads((u) => ({ ...u, [v._id]: [] }));
       await refreshVendor(v._id);
     } catch (e) { alert(e?.response?.data?.message || 'Failed to upload images'); }
@@ -65,7 +98,7 @@ export default function DummyVendorStatusListPage() {
   const onDeleteThumb = async (v, idx) => {
     v = await resolveVendor(v); if (!v) return;
     try {
-      await axios.delete(`${API_BASE_URL}/api/dummy-vendors/${v._id}/profile-pictures/${idx}`);
+      await axios.delete(`${API_PREFIX}/api/dummy-vendors/${v._id}/profile-pictures/${idx}`);
       await refreshVendor(v._id);
     } catch (e) { alert(e?.response?.data?.message || 'Failed to delete image'); }
   };
@@ -122,7 +155,7 @@ export default function DummyVendorStatusListPage() {
     try {
       const list = Array.isArray(v.profilePictures) ? v.profilePictures.slice() : [];
       list.push(url);
-      await axios.put(`${API_BASE_URL}/api/dummy-vendors/${v._id}/profile-pictures`, { profilePictures: list });
+      await axios.put(`${API_PREFIX}/api/dummy-vendors/${v._id}/profile-pictures`, { profilePictures: list });
       await refreshVendor(v._id);
     } catch (e) { alert(e?.response?.data?.message || 'Failed to add picture'); }
   };
@@ -136,7 +169,7 @@ export default function DummyVendorStatusListPage() {
     const url = window.prompt('Enter new picture URL:');
     if (!url) return;
     try {
-      await axios.put(`${API_BASE_URL}/api/dummy-vendors/${v._id}/profile-pictures/${idx}`, { url });
+      await axios.put(`${API_PREFIX}/api/dummy-vendors/${v._id}/profile-pictures/${idx}`, { url });
       await refreshVendor(v._id);
     } catch (e) { alert(e?.response?.data?.message || 'Failed to replace picture'); }
   };
@@ -159,7 +192,7 @@ export default function DummyVendorStatusListPage() {
     setError("");
     try {
       const res = await axios.get(
-        `${API_BASE_URL}/api/dummy-vendors/byCategory/${categoryId}?status=${encodeURIComponent(status)}`
+        `${API_PREFIX}/api/dummy-vendors/byCategory/${categoryId}?status=${encodeURIComponent(status)}`
       );
       const vendorsData = Array.isArray(res.data) ? res.data : [];
       if (vendorsData.length === 0) {

@@ -225,55 +225,22 @@ function DummyCategoryPage() {
                       overflow: "hidden",
                       cursor: "pointer",
                     }}
-                    onClick={() => navigate(`/dummy-combos/${cid}`)}
+                    onClick={() => navigate(`/combos/${cid}`)}
                   >
-                    <div
-                      style={{
-                        position: "relative",
-                        width: "100%",
-                        height: 160,
-                        background: "#f1f5f9",
-                      }}
-                    >
+                    <div style={{ position: "relative", width: "100%", height: 120 }}>
                       {c.iconUrl || c.imageUrl ? (
                         <img
                           src={toAbs(c.iconUrl || c.imageUrl)}
                           alt={c.name}
-                          style={{
-                            position: "absolute",
-                            inset: 0,
-                            width: "100%",
-                            height: "100%",
-                            objectFit: "cover",
-                          }}
+                          style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover" }}
                         />
                       ) : null}
-                      <div
-                        style={{
-                          position: "absolute",
-                          left: 10,
-                          bottom: 10,
-                          color: "#fff",
-                          textShadow: "0 1px 2px rgba(0,0,0,0.6)",
-                        }}
-                      >
-                        <div style={{ fontWeight: 700, fontSize: 18 }}>
-                          {c.name}
-                        </div>
-                        <div style={{ fontWeight: 500, opacity: 0.95 }}>
-                          {typeof c.basePrice === "number" ? `₹${c.basePrice} onWards` : ""}
-                        </div>
+                      <div style={{ position: "absolute", left: 10, bottom: 10, color: "#fff", textShadow: "0 1px 2px rgba(0,0,0,0.6)" }}>
+                        <div style={{ fontWeight: 700, fontSize: 18 }}>{c.name}</div>
+                        <div style={{ fontWeight: 500, opacity: 0.95 }}>{typeof c.basePrice === "number" ? `₹${c.basePrice} onWards` : ""}</div>
                       </div>
                     </div>
-                    <div
-                      style={{
-                        borderTop: "1px solid #e2e8f0",
-                        padding: "8px 12px",
-                        display: "flex",
-                        justifyContent: "flex-end",
-                        gap: 8,
-                      }}
-                    >
+                    <div style={{ borderTop: "1px solid #e2e8f0", padding: "8px 12px", display: "flex", justifyContent: "flex-end", gap: 8 }}>
                       <button
                         title="Edit"
                         onClick={(e) => {
@@ -281,15 +248,7 @@ function DummyCategoryPage() {
                           setEditingCombo(c);
                           setShowCombos(true);
                         }}
-                        style={{
-                          border: "1px solid #e2e8f0",
-                          borderRadius: 8,
-                          padding: 6,
-                          background: "#fff",
-                          color: "#0ea5e9",
-                          cursor: "pointer",
-                          fontWeight: 600,
-                        }}
+                        style={{ border: "1px solid #e2e8f0", borderRadius: 8, padding: 6, background: "#fff", color: "#0ea5e9", cursor: "pointer", fontWeight: 600 }}
                       >
                         ✏️
                       </button>
@@ -300,25 +259,14 @@ function DummyCategoryPage() {
                           if (!window.confirm("Delete this combo?")) return;
                           try {
                             const delId = c._id?.$oid || c._id || c.id;
-                            const res = await fetch(
-                              `${API_BASE_URL}/api/dummy-combos/${delId}`,
-                              { method: "DELETE" }
-                            );
+                            const res = await fetch(`${API_BASE_URL}/api/dummy-combos/${delId}`, { method: "DELETE" });
                             if (!res.ok) throw new Error("Failed to delete");
                             loadCombos();
                           } catch (e) {
                             alert(e.message || "Failed to delete");
                           }
                         }}
-                        style={{
-                          border: "1px solid #fee2e2",
-                          borderRadius: 8,
-                          padding: 6,
-                          background: "#fff",
-                          color: "#ef4444",
-                          cursor: "pointer",
-                          fontWeight: 600,
-                        }}
+                        style={{ border: "1px solid #fee2e2", borderRadius: 8, padding: 6, background: "#fff", color: "#ef4444", cursor: "pointer", fontWeight: 600 }}
                       >
                         🗑️
                       </button>

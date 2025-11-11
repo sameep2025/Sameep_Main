@@ -17,7 +17,6 @@ const DummySubcategorySchema = new mongoose.Schema({
   createdAt: { type: Date, default: Date.now },
 });
 
-DummySubcategorySchema.index({ name: 1, category: 1, parentSubcategory: 1 }, { unique: true });
 DummySubcategorySchema.index({ category: 1, parentSubcategory: 1, sequence: 1 });
 
 module.exports = mongoose.model('DummySubcategory', DummySubcategorySchema, 'dummysubcategories');

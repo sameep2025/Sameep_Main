@@ -8,7 +8,8 @@ function ComboDetailPage() {
   const [combo, setCombo] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
-  const [catNameMap, setCatNameMap] = useState({}); // id -> name
+  const [catInfoMap, setCatInfoMap] = useState({}); // id -> { name, parentId, parentName }
+  const [isDummy, setIsDummy] = useState(false);
 
   const toAbs = (u) => {
     if (!u) return "";
@@ -28,11 +29,24 @@ function ComboDetailPage() {
       setLoading(true);
       setError("");
       try {
-        const res = await fetch(`${API_BASE_URL}/api/combos/${comboId}`);
-        if (!res.ok) throw new Error("Failed to load combo");
-        const data = await res.json();
+        // Try dummy combos first
+        let data = null;
+        try {
+          const rDummy = await fetch(`${API_BASE_URL}/api/dummy-combos/${comboId}`);
+          if (rDummy.ok) {
+            data = await rDummy.json();
+            setIsDummy(true);
+          }
+        } catch {}
+        if (!data) {
+          const r = await fetch(`${API_BASE_URL}/api/combos/${comboId}`);
+          if (!r.ok) throw new Error("Failed to load combo");
+          data = await r.json();
+          setIsDummy(false);
+        }
         setCombo(data);
-        // fetch names for category items
+
+        // fetch names for category items (and their parents)
         const ids = new Set();
         (data.items || []).forEach((it) => {
           if (it.kind === 'category' && it.categoryId) ids.add(String(it.categoryId));
@@ -40,15 +54,27 @@ function ComboDetailPage() {
         if (ids.size) {
           const entries = await Promise.all(Array.from(ids).map(async (id) => {
             try {
-              const r = await fetch(`${API_BASE_URL}/api/categories/${id}`);
-              if (!r.ok) return [id, 'Service'];
+              const url = isDummy ? `${API_BASE_URL}/api/dummy-categories/${id}` : `${API_BASE_URL}/api/categories/${id}`;
+              const r = await fetch(url);
+              if (!r.ok) return [id, { name: 'Service' }];
               const j = await r.json();
-              return [id, j?.name || 'Service'];
-            } catch { return [id, 'Service']; }
+              const parentId = j?.parentId || j?.parent || null;
+              let parentName = '';
+              if (parentId) {
+                try {
+                  const pr = await fetch(isDummy ? `${API_BASE_URL}/api/dummy-categories/${parentId}` : `${API_BASE_URL}/api/categories/${parentId}`);
+                  if (pr.ok) {
+                    const pj = await pr.json();
+                    parentName = pj?.name || '';
+                  }
+                } catch {}
+              }
+              return [id, { name: j?.name || 'Service', parentId: parentId || null, parentName }];
+            } catch { return [id, { name: 'Service' }]; }
           }));
-          setCatNameMap(Object.fromEntries(entries));
+          setCatInfoMap(Object.fromEntries(entries));
         } else {
-          setCatNameMap({});
+          setCatInfoMap({});
         }
       } catch (e) {
         setError(e.message || "Failed to load combo");
@@ -57,7 +83,7 @@ function ComboDetailPage() {
         setLoading(false);
       }
     })();
-  }, [comboId]);
+  }, [comboId, isDummy]);
   
   if (loading) return <div>Loading...</div>;
   if (error) return <div style={{ color: '#991b1b', background: '#fee2e2', border: '1px solid #fecaca', padding: 10, borderRadius: 8 }}>{error}</div>;
@@ -81,7 +107,7 @@ function ComboDetailPage() {
             if (firstCategoryItem) {
               try {
                 const categoryId = norm(firstCategoryItem.categoryId);
-                const res = await fetch(`${API_BASE_URL}/api/categories/${categoryId}`);
+                const res = await fetch(isDummy ? `${API_BASE_URL}/api/dummy-categories/${categoryId}` : `${API_BASE_URL}/api/categories/${categoryId}`);
                 if (res.ok) {
                   const categoryData = await res.json();
                   pid = norm(categoryData.parentId) || norm(categoryData.parent);
@@ -93,7 +119,7 @@ function ComboDetailPage() {
           }
 
           if (pid) {
-            navigate(`/categories/${pid}?view=packages`, { replace: true });
+            navigate(`${isDummy ? '/dummy-categories' : '/categories'}/${pid}?view=packages`, { replace: true });
           } else {
             navigate(-1);
           }
@@ -115,7 +141,23 @@ function ComboDetailPage() {
 
           return sizes.map((sz, idx) => {
             const title = `${combo.name}${sz ? ` ~ ${sz}` : ''}`;
-            const services = items.map((it) => (it.kind === 'custom' ? (it.name || 'Custom Item') : (catNameMap[String(it.categoryId)] || 'Service'))).filter(Boolean);
+            // Build display services: parent category names (selected in step 2) or fallback to leaf/custom name
+            const services = (() => {
+              const seen = new Set();
+              const names = [];
+              items.forEach((it) => {
+                let nm = '';
+                if (it.kind === 'custom') nm = it.name || 'Custom Item';
+                else {
+                  const info = catInfoMap[String(it.categoryId)] || {};
+                  nm = info.parentName || info.name || 'Service';
+                }
+                nm = String(nm || '').trim();
+                const key = nm.toLowerCase();
+                if (nm && !seen.has(key)) { seen.add(key); names.push(nm); }
+              });
+              return names;
+            })();
             // representative per-size variant: first item with matching size
             const rep = (() => {
               for (const it of items) {

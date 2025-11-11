@@ -16,6 +16,7 @@ import categoryThemes from "../../../utils/categoryThemes";
 
 
 /* Helper Functions */
+const API_BASE_URL = (typeof process !== 'undefined' && (process.env.NEXT_PUBLIC_API_BASE_URL || process.env.REACT_APP_API_BASE_URL)) || "";
 const resolveImageUrl = (url) => {
   if (!url) return null;
   if (url.startsWith("http")) return url;
@@ -225,6 +226,22 @@ const CategoryCard = ({ node, onClick, onLeafClick, themeColor, cardBg, accentCo
               {child.name}
             </button>
           ))}
+        </div>
+      )}
+
+      {/* Render attributes for inventory leaves if selections are present */}
+      {node.selections && typeof node.selections === 'object' && (
+        <div style={{ width: '100%', background: '#F8FAFC', border: `1px solid ${themeColor}22`, borderRadius: 10, padding: 10, marginTop: 8 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(120px, 1fr))', gap: 8 }}>
+            {Object.entries(node.selections).flatMap(([fam, fields]) => {
+              const entries = Object.entries(fields || {}).filter(([k, v]) => v != null && String(v).trim() !== '');
+              return entries.map(([k, v]) => (
+                <div key={`${fam}:${k}`} style={{ fontSize: 12, color: '#334155' }}>
+                  <span style={{ fontWeight: 600 }}>{k}:</span> <span>{String(v)}</span>
+                </div>
+              ));
+            })}
+          </div>
         </div>
       )}
     </div>
@@ -912,15 +929,110 @@ function PreviewPage() {
 
     const fetchData = async () => {
       try {
-        // Fetch from preview API which returns both vendor and categories
-        const response = await fetch(`/api/vendors/${vendorId}/preview/${categoryId}`);
-        const data = await response.json();
-        
-        console.log("📦 Preview API Response:", data);
-        
-        // Set vendor data from preview API
-        setVendor(data.vendor || {});
-        setCategoryTree(data.categories || { name: "Root", children: [] });
+        // Helper to safely fetch JSON
+        const safeJson = async (res) => {
+          try { return await res.json(); } catch { return null; }
+        };
+
+        const forceDummy = String(router.query?.mode || '').toLowerCase() === 'dummy';
+
+        // Try main preview API (skip if forced dummy)
+        let vendorResp = null;
+        let categoriesResp = null;
+
+        if (!forceDummy) {
+          try {
+            const response = await fetch(`/api/vendors/${vendorId}/preview/${categoryId}`);
+            const data = await safeJson(response);
+            console.log("📦 Preview API Response:", data);
+            if (data && (data.vendor || data.categories)) {
+              vendorResp = data.vendor || null;
+              categoriesResp = data.categories || null;
+            }
+          } catch (e) {
+            // swallow and try fallback
+          }
+        }
+
+        // Fallback: standard vendor endpoints
+        if (!forceDummy && !vendorResp) {
+          try {
+            const vRes = await fetch(`/api/vendors/${vendorId}`);
+            const v = await safeJson(vRes);
+            if (v && typeof v === 'object') vendorResp = v;
+          } catch {}
+        }
+        if (!forceDummy && !categoriesResp) {
+          try {
+            const cRes = await fetch(`/api/vendors/${vendorId}/categories`);
+            const c = await safeJson(cRes);
+            let categories = c?.categories;
+            if (!categories) {
+              // sometimes API may return a single tree object
+              if (c && typeof c === 'object' && c.name) {
+                categoriesResp = { ...c, children: c.children || [] };
+              }
+            } else if (Array.isArray(categories)) {
+              categoriesResp = { name: "Root", children: categories };
+            } else {
+              categoriesResp = { ...categories, children: categories.children || [] };
+            }
+          } catch {}
+        }
+
+        // Fallback: dummy vendor endpoints
+        if (!vendorResp || !categoriesResp) {
+          try {
+            const vRes = await fetch(`/api/dummy-vendors/${vendorId}`);
+            const v = await safeJson(vRes);
+            vendorResp = v || {};
+          } catch {}
+          try {
+            const cRes = await fetch(`/api/dummy-vendors/${vendorId}/categories`);
+            const c = await safeJson(cRes);
+            // normalize format similar to vendor preview API
+            let categories = c?.categories;
+            if (!categories) {
+              categoriesResp = { name: "Root", children: [] };
+            } else if (Array.isArray(categories)) {
+              categoriesResp = { name: "Root", children: categories };
+            } else {
+              categoriesResp = { ...categories, children: categories.children || [] };
+            }
+          } catch {}
+          // As last resort, attempt single dummy category by id
+          if (!categoriesResp && categoryId) {
+            try {
+              const oneRes = await fetch(`/api/dummy-categories/${categoryId}`);
+              const one = await safeJson(oneRes);
+              const c = one || {};
+              categoriesResp = { name: c.name || "Root", imageUrl: c.imageUrl, categoryType: c.categoryType, children: c.children || [] };
+            } catch {}
+          }
+        }
+
+        // Apply homeLocs query param if present
+        try {
+          const hl = router.query?.homeLocs ? JSON.parse(router.query.homeLocs) : [];
+          if (Array.isArray(hl) && hl.length) {
+            const loc = vendorResp?.location || {};
+            vendorResp = { ...(vendorResp || {}), location: { ...loc, nearbyLocations: hl } };
+          }
+        } catch {}
+
+        // Ensure inventorySelections present: merge from dummy vendor if missing
+        try {
+          if (!vendorResp || !vendorResp.inventorySelections) {
+            const dvRes = await fetch(`/api/dummy-vendors/${vendorId}`);
+            const dv = await (async (r)=>{ try { return await r.json(); } catch { return null; } })(dvRes);
+            if (dv && typeof dv === 'object') {
+              vendorResp = { ...(vendorResp || {}), inventorySelections: dv.inventorySelections || {}, rowImages: dv.rowImages || {}, businessHours: dv.businessHours || [], contactName: vendorResp?.contactName || dv.contactName, businessName: vendorResp?.businessName || dv.businessName, phone: vendorResp?.phone || dv.phone };
+            }
+          }
+        } catch {}
+
+        setVendor(vendorResp || {});
+        setCategoryTree(categoriesResp || { name: "Root", children: [] });
       } catch (err) {
         console.error("Error fetching data:", err);
       } finally {
@@ -928,7 +1040,7 @@ function PreviewPage() {
       }
     };
     fetchData();
-  }, [router.isReady, vendorId, categoryId]);
+  }, [router.isReady, vendorId, categoryId, router.query]);
 
   // Handle color scheme selection
   const handleColorSchemeSelect = (scheme) => {
@@ -1001,7 +1113,15 @@ function PreviewPage() {
           const sel = entry?.selections?.[fam] || {};
           const parts = Object.values(sel).filter((v) => v != null && String(v).trim() !== "");
           const name = parts.join(" ") || "Item";
-          return { id: `inv-${idx}-${entry?.at || idx}`, name, children: [] };
+          // Keep selections on node so UI can render attribute chips
+          return {
+            id: `inv-${idx}-${entry?.at || idx}`,
+            name,
+            selections: entry?.selections || { [fam || '']: sel },
+            price: entry?.price ?? null,
+            imageUrl: (Array.isArray(entry?.images) && entry.images[0]) || null,
+            children: [],
+          };
         })
       : [];
     combined = [...combined, ...invLeaves];

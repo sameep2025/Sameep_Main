@@ -299,6 +299,41 @@ return out;
       .filter((it) => it.kind === "custom")
       .map((it) => ({ name: it.name || "", sizeOptions: it.sizeOptions || [], price: it.price ?? "", terms: it.terms || "" }));
     setCustomItems(customs);
+    // Prefill Step 4 (types, sizes, and per-size overrides) from saved combo
+    try {
+      const items = Array.isArray(combo?.items) ? combo.items : [];
+      const sizeSet = new Set();
+      items.forEach((it) => {
+        const vs = Array.isArray(it.variants) ? it.variants : [];
+        vs.forEach((v) => { sizeSet.add(v?.size || null); });
+      });
+      const sizes = Array.from(sizeSet).filter((s) => s != null && s !== "");
+      if (sizes.length > 0) {
+        setEnableComboTypes(true);
+        setComboSizes(sizes);
+        const ov = {};
+        sizes.forEach((sz, j) => {
+          // pick a representative variant override for this size from first matching item
+          let rep = null;
+          for (const it of items) {
+            const vs = Array.isArray(it.variants) ? it.variants : [];
+            const found = vs.find((vv) => String(vv?.size || '') === String(sz));
+            if (found) { rep = found; break; }
+          }
+          const key = `combo:${j}`;
+          ov[key] = {
+            price: (rep && rep.price != null && rep.price !== '') ? String(rep.price) : '',
+            terms: rep?.terms || '',
+            imageUrl: rep?.imageUrl || ''
+          };
+        });
+        setComboVariantOverrides(ov);
+      } else {
+        setEnableComboTypes(false);
+        setComboSizes([]);
+        setComboVariantOverrides({});
+      }
+    } catch {}
     setStep(1);
   };
 

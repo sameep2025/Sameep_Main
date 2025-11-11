@@ -15,9 +15,18 @@ export const API_BASE_URL = (() => {
   return isDev ? "http://localhost:5000" : "https://newsameep-backend.go-kar.net";
 })();
 
-// For static assets (images) that are served directly by the backend, not under /api
-export const ASSET_BASE_URL = isDev
-  ? "http://localhost:5000"
-  : "https://newsameep-backend.go-kar.net";
+// For static assets (images) served directly by the backend (outside /api)
+// If a custom API_BASE_URL is provided, align ASSET_BASE_URL to the same origin.
+export const ASSET_BASE_URL = (() => {
+  const env =
+    process.env.NEXT_PUBLIC_API_BASE_URL ||
+    process.env.REACT_APP_API_BASE_URL ||
+    process.env.VITE_API_URL ||
+    "";
+  if (env && typeof env === "string" && env.trim()) {
+    return env.trim().replace(/\/$/, "");
+  }
+  return isDev ? "http://localhost:5000" : "https://newsameep-backend.go-kar.net";
+})();
 
 export default API_BASE_URL;

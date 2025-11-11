@@ -26,6 +26,7 @@ export default function DummyVendorCategoriesDetailPage() {
   const [tree, setTree] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [vendor, setVendor] = useState(null);
   const [editingId, setEditingId] = useState(null); // category or subcategory id being edited
   const [editingPrice, setEditingPrice] = useState("");
   const [saving, setSaving] = useState(false);
@@ -38,6 +39,11 @@ export default function DummyVendorCategoriesDetailPage() {
   const [showLinkedModal, setShowLinkedModal] = useState(false);
   const [draftSelections, setDraftSelections] = useState({}); // { [familyKey]: { field: value } }
   const [rowPriceEdit, setRowPriceEdit] = useState(null); // { key, rowKey, price, labels }
+  const [editingItemKey, setEditingItemKey] = useState(null); // currently edited selection row key
+  const [combos, setCombos] = useState([]);
+  const [combosLoading, setCombosLoading] = useState(false);
+  const [combosError, setCombosError] = useState("");
+  const [categoryInfoCache, setCategoryInfoCache] = useState({}); // id -> { name, parentId, parentName }
 
   const fetchTree = async () => {
     try {
@@ -107,6 +113,67 @@ export default function DummyVendorCategoriesDetailPage() {
 
   useEffect(() => { fetchTree(); }, [vendorId, categoryId]);
 
+  // Fetch Dummy Combos for this category to show "Packages" table
+  useEffect(() => {
+    (async () => {
+      if (!categoryId) { setCombos([]); return; }
+      setCombosLoading(true); setCombosError("");
+      try {
+        let res = await axios.get(`${API_BASE_URL}/api/dummy-combos`, { params: { parentCategoryId: categoryId } });
+        let arr = Array.isArray(res.data) ? res.data : [];
+        if (arr.length === 0) {
+          try {
+            const r2 = await axios.get(`${API_BASE_URL}/api/dummy-combos/byParent/${categoryId}`);
+            arr = Array.isArray(r2.data) ? r2.data : [];
+          } catch {}
+        }
+        setCombos(arr);
+        // prefetch category names and parent names for items (to display selected services from step 2)
+        const ids = [];
+        arr.forEach((c) => (c.items||[]).forEach((it) => { if (it.kind === 'category' && it.categoryId) ids.push(String(it.categoryId)); }));
+        const uniq = Array.from(new Set(ids));
+        await Promise.all(uniq.map(async (id) => {
+          if (categoryInfoCache[id]) return;
+          try {
+            const r = await axios.get(`${API_BASE_URL}/api/dummy-categories/${id}`);
+            const cat = r.data || {};
+            const parentId = cat?.parentId || cat?.parent || null;
+            let parentName = '';
+            if (parentId) {
+              try {
+                const pr = await axios.get(`${API_BASE_URL}/api/dummy-categories/${parentId}`);
+                parentName = pr.data?.name || '';
+              } catch {}
+            }
+            setCategoryInfoCache((prev) => ({ ...prev, [id]: { name: cat?.name || '', parentId: parentId || null, parentName } }));
+          } catch {}
+        }));
+      } catch (e) {
+        setCombos([]); setCombosError(e?.response?.data?.message || 'Failed to load packages');
+      } finally { setCombosLoading(false); }
+    })();
+  }, [categoryId]);
+
+  // Fetch dummy vendor for preview params (nearbyLocations, etc.)
+  useEffect(() => {
+    (async () => {
+      if (!vendorId) { setVendor(null); return; }
+      try {
+        const res = await axios.get(`${API_BASE_URL}/api/dummy-vendors/${vendorId}`);
+        const v = res.data || {};
+        try {
+          // try to hydrate location details if endpoint exists; ignore failures
+          const lr = await axios.get(`${API_BASE_URL}/api/dummy-vendors/${vendorId}/location`);
+          v.location = lr.data?.location || v.location || {};
+          v.location.nearbyLocations = v.location.nearbyLocations || [];
+        } catch {}
+        setVendor(v);
+      } catch {
+        setVendor(null);
+      }
+    })();
+  }, [vendorId]);
+
   // Fetch dummy category meta for showing inventory label buttons
   useEffect(() => {
     (async () => {
@@ -136,18 +203,25 @@ export default function DummyVendorCategoriesDetailPage() {
   useEffect(() => {
     (async () => {
       try {
-        if (!vendorId || !categoryId) return;
-        const items = await loadDummyInventorySelections(vendorId, categoryId);
+        if (!vendorId) return;
+        const topCatId = (vendor && (vendor.categoryId || vendor.category?._id)) || categoryId;
+        if (!topCatId) return;
+        const items = await loadDummyInventorySelections(vendorId, topCatId);
         setInvItems(items);
       } catch { setInvItems([]); }
     })();
-  }, [vendorId, categoryId]);
+  }, [vendorId, categoryId, vendor]);
 
   // Helper: try multiple endpoints to load selections
   const loadDummyInventorySelections = async (vid, cid) => {
-    // Backend read endpoints for dummy inventory selections are not available yet.
-    // Avoid 404s by returning empty list (UI will still allow creating/saving selections).
-    return [];
+    try {
+      const res = await axios.get(`${API_BASE_URL}/api/dummy-vendors/${vid}`);
+      const map = (res.data && typeof res.data.inventorySelections === 'object') ? res.data.inventorySelections : {};
+      const items = Array.isArray(map?.[cid]) ? map[cid] : [];
+      return items;
+    } catch {
+      return [];
+    }
   };
 
   // Helper: try multiple endpoints to save selections
@@ -156,6 +230,21 @@ export default function DummyVendorCategoriesDetailPage() {
     const payload = { inventorySelections: { [cid]: items } };
     await axios.put(url, payload);
     return true;
+  };
+
+  // Ensure preview knows where to place items: default to ALL if no link is set for this scope
+  const ensureLinkedSubcategoryForScope = async (cid, fam, label) => {
+    try {
+      const keySpecific = `${fam}:${label}:linkedSubcategory`;
+      const keyGeneric = `${fam}:inventoryLabels:linkedSubcategory`;
+      const la = linkedAttributes || {};
+      const hasSpecific = Array.isArray(la[keySpecific]) && la[keySpecific].length > 0;
+      const hasGeneric = Array.isArray(la[keyGeneric]) && la[keyGeneric].length > 0;
+      if (hasSpecific || hasGeneric) return;
+      const next = { ...la, [keySpecific]: ['ALL'] };
+      await axios.put(`${API_BASE_URL}/api/dummy-categories/${cid}`, { linkedAttributes: next });
+      setLinkedAttributes(next);
+    } catch { /* ignore */ }
   };
 
   const norm = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
@@ -198,53 +287,96 @@ export default function DummyVendorCategoriesDetailPage() {
       for (const k of keys) { const m = modelsByFamily[k]; if (Array.isArray(m) && m.length) { models = m; break; } }
     }
     let selectedFields = Array.isArray(linkedAttributes[familyKey]) ? linkedAttributes[familyKey] : [];
+    const famLower = String(familyKey || '').toLowerCase();
+    const brandFieldForFamily = (famLower === 'bikes') ? 'bikeBrand' : 'brand';
     const modelFieldsKey = `${familyKey}:modelFields`;
     const modelFields = Array.isArray(linkedAttributes[modelFieldsKey]) ? linkedAttributes[modelFieldsKey] : [];
     if (modelFields.length) {
       const canon = (s) => String(s).trim();
       const set = new Set((selectedFields || []).map((f) => canon(f)));
-      modelFields.forEach((mf) => { const c = canon(mf); if (c.toLowerCase() !== 'model' && c && !set.has(c)) { set.add(c); selectedFields.push(c); } });
+      modelFields.forEach((mf) => { const c = canon(mf); if (c && !set.has(c)) { set.add(c); selectedFields.push(c); } });
     }
-    try {
-      const mfLower = modelFields.map((x) => String(x).toLowerCase());
-      if (!mfLower.includes('model')) selectedFields = (selectedFields || []).filter((f) => String(f).toLowerCase() !== 'model');
-    } catch {}
+    const keysInFirst = models.length ? Object.keys(models[0].raw || models[0]) : [];
     if (!selectedFields || selectedFields.length === 0) {
-      const keys = models.length ? Object.keys(models[0].raw || models[0]) : [];
-      const candidates = ['brand','variant','transmission','fuelType','bodyType'];
-      selectedFields = candidates.filter((k) => keys.includes(k));
-      if (selectedFields.length === 0 && keys.includes('brand')) selectedFields = ['brand'];
+      const candidates = ['brand','model','variant','transmission','fuelType','bodyType','seats'];
+      selectedFields = candidates.filter((k) => keysInFirst.includes(k));
+      if (!selectedFields.includes(brandFieldForFamily) && (keysInFirst.includes('brand') || keysInFirst.includes('bikeBrand'))) selectedFields.unshift(brandFieldForFamily);
+      if (!selectedFields.includes('model') && (keysInFirst.includes('model') || keysInFirst.includes('modelName'))) selectedFields.splice(1, 0, 'model');
+    } else {
+      const low = selectedFields.map((s)=>String(s).toLowerCase());
+      if (!low.includes(String(brandFieldForFamily).toLowerCase())) selectedFields.unshift(brandFieldForFamily);
+      if (!low.includes('model')) selectedFields.splice(1, 0, 'model');
     }
+
+    const curr = draftSelections[familyKey] || {};
+    const pickFirst = (obj, arr) => {
+      for (const k of arr) { if (obj && obj[k] != null && String(obj[k]).trim() !== '') return String(obj[k]); }
+      return '';
+    };
+    const selectedBrand = pickFirst(curr, famLower === 'bikes' ? ['bikeBrand','brand','Brand','make','Make'] : ['brand','Brand','make','Make']);
+    const selectedModel = pickFirst(curr, ['model','Model','modelName','model_name','name']);
+
     const listsByField = {};
+    // Bikes: if both brand and bikeBrand present, drop brand
+    if (famLower === 'bikes') {
+      const lowSet = new Set((selectedFields || []).map((s) => String(s).toLowerCase()));
+      if (lowSet.has('bikebrand') && lowSet.has('brand')) {
+        selectedFields = selectedFields.filter((s) => String(s).toLowerCase() !== 'brand');
+      }
+    }
     const fields = selectedFields
       .filter(Boolean)
       .sort((a,b) => {
-        const pa = ['brand','model'].indexOf(String(a).toLowerCase());
-        const pb = ['brand','model'].indexOf(String(b).toLowerCase());
+        const order = ['brand','model'];
+        const pa = order.indexOf(String(a).toLowerCase());
+        const pb = order.indexOf(String(b).toLowerCase());
         if (pa !== -1 || pb !== -1) return (pa === -1 ? 99 : pa) - (pb === -1 ? 99 : pb);
         return 0;
       });
-    fields.forEach((field) => {
-      const set = new Set();
-      const fieldLower = String(field).toLowerCase();
+
+    const buildValues = (field) => {
+      const fieldNorm = String(field).toLowerCase().replace(/[^a-z0-9]/g,'');
+      const canonicalJsKey = (
+        fieldNorm.endsWith('bodytype') ? 'bodyType' :
+        fieldNorm.endsWith('fueltype') ? 'fuelType' :
+        fieldNorm.endsWith('seats') ? 'seats' :
+        // Normalize any '*transmission' (e.g., 'biketransmission') to canonical 'transmission'
+        fieldNorm.endsWith('transmission') ? 'transmission' :
+        fieldNorm
+      );
+      const keyCandidates = (() => {
+        const f = canonicalJsKey;
+        if (f === 'brand' || (famLower === 'bikes' && f === 'bikebrand')) return ['brand','bikeBrand','make','Brand','Make'];
+        if (f === 'model') return ['model','modelName','Model','model_name','name'];
+        if (f === 'variant') return ['variant','Variant','trim','Trim'];
+        if (f === 'transmission') return ['transmission','Transmission','gearbox','gear_type','gearType'];
+        if (f === 'bodyType') return ['bodyType','BodyType','body_type','type'];
+        if (f === 'fuelType') return ['fuelType','FuelType','fueltype','Fuel','fuel_type'];
+        if (f === 'seats') return ['seats','Seats','seatCapacity','SeatCapacity','seatingCapacity','SeatingCapacity'];
+        return [field];
+      })();
+      const vals = new Set();
       models.forEach((m) => {
         const raw = m.raw || m;
-        const ok = Object.entries({}).every(() => true);
-        if (!ok) return;
-        const v = raw?.[field];
-        if (v !== undefined && v !== null && String(v).trim() !== '') set.add(String(v));
-      });
-      let arr = Array.from(set);
-      if (String(field).toLowerCase() !== 'model') {
-        const preKey = `${familyKey}:model:${field}`;
-        const pre = linkedAttributes[preKey];
-        if (Array.isArray(pre) && pre.length > 0) {
-          const allow = pre.map(String);
-          const intersected = arr.filter((x) => allow.includes(String(x)));
-          if (intersected.length > 0) arr = intersected;
+        const nselBrand = norm(selectedBrand);
+        const nrawBrand = norm(raw?.brand || raw?.bikeBrand || raw?.make || raw?.Brand || raw?.Make || '');
+        if (selectedBrand && nrawBrand !== nselBrand) return;
+        if (canonicalJsKey !== 'brand' && !(famLower === 'bikes' && canonicalJsKey === 'bikebrand')) {
+          const nselModel = norm(selectedModel);
+          const nrawModel = norm(raw?.model || raw?.modelName || raw?.Model || raw?.model_name || raw?.name || '');
+          if (canonicalJsKey !== 'model' && selectedModel && nrawModel !== nselModel) return;
         }
-      }
-      listsByField[field] = arr;
+        let v;
+        for (const k of keyCandidates) { if (raw && raw[k] !== undefined && raw[k] !== null) { v = raw[k]; break; } }
+        if (v !== undefined && v !== null && String(v).trim() !== '') vals.add(String(v));
+      });
+      const arr = Array.from(vals);
+      if (canonicalJsKey === 'model' && !selectedBrand) return [];
+      return arr;
+    };
+
+    fields.forEach((field) => {
+      listsByField[field] = buildValues(field);
     });
     return { fields, listsByField };
   };
@@ -268,11 +400,11 @@ export default function DummyVendorCategoriesDetailPage() {
           if (Array.isArray(arr) && arr.length) { linked = arr; break; }
         }
         const val = Array.isArray(linked) && linked.length ? String(linked[0]) : '';
+        if (val === 'ALL') return true;
         const lvlIds = Array.isArray(row.levelIds) ? row.levelIds.map((x) => String(x)) : [];
         const firstIdx = (lvlIds[0] === 'root') ? 2 : 1;
         const firstSubcatId = lvlIds.length > firstIdx ? lvlIds[firstIdx] : null;
         if (!firstSubcatId) return false;
-        if (val === 'ALL') return true;
         return String(firstSubcatId) === val;
       });
       map[row.id] = matches;
@@ -289,6 +421,42 @@ export default function DummyVendorCategoriesDetailPage() {
     });
     return out;
   }, [rows, rowMatches]);
+
+  const packageRows = useMemo(() => {
+    try {
+      const rows = [];
+      const list = Array.isArray(combos) ? combos : [];
+      list.forEach((c) => {
+        const name = c?.name || 'Package';
+        const items = Array.isArray(c?.items) ? c.items : [];
+        // collect sizes across all items' variants (null allowed)
+        const sizeSet = new Set();
+        items.forEach((it) => {
+          const vs = Array.isArray(it?.variants) ? it.variants : [];
+          if (vs.length === 0) sizeSet.add(null);
+          vs.forEach((v) => sizeSet.add(v?.size ?? null));
+        });
+        const sizes = sizeSet.size ? Array.from(sizeSet) : [null];
+        sizes.forEach((sz) => {
+          // representative variant for price/terms: first item that has this size
+          let rep = null;
+          for (const it of items) {
+            const vs = Array.isArray(it?.variants) ? it.variants : [];
+            const v = vs.find((vv) => (vv?.size ?? null) === (sz ?? null));
+            if (v) { rep = v; break; }
+          }
+          const price = (rep && rep.price != null && rep.price !== '') ? Number(rep.price) : (c && c.basePrice != null && c.basePrice !== '' ? Number(c.basePrice) : null);
+          const services = items.map((it) => {
+            if (it.kind === 'custom') return it.name || 'Custom Item';
+            // category items will be resolved by preview/labels; here show generic 'Service'
+            return 'Service';
+          }).filter(Boolean).join(' • ');
+          rows.push({ key: `${c._id || name}-${String(sz||'default')}`, name, size: sz || 'Default', price, services, terms: (rep && rep.terms) ? rep.terms : (c?.terms || '') });
+        });
+      });
+      return rows;
+    } catch { return []; }
+  }, [combos]);
 
   const hasInventory = useMemo(() => {
     try {
@@ -327,52 +495,161 @@ export default function DummyVendorCategoriesDetailPage() {
     }
   };
 
-  const previewCategoryId = categoryId || (rows[0]?.categoryId);
+  const previewCategoryId = (vendor && (vendor.categoryId || vendor.category?._id)) || categoryId || (rows[0]?.categoryId);
 
   return (
     <div>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
         <h1 style={{ margin: 0 }}>Dummy Vendor Categories</h1>
-        <button
-          onClick={() => {
-            if (!previewCategoryId) return;
-            const base = PREVIEW_BASE_URL || (typeof window !== 'undefined' ? window.location.origin : '');
-            const url = `${base}/preview/${vendorId}/${previewCategoryId}`;
-            window.open(url, '_blank');
-          }}
-          disabled={!previewCategoryId}
-          style={{ padding: "8px 12px", borderRadius: 8, background: "#2563eb", color: "#fff", textDecoration: "none", opacity: previewCategoryId ? 1 : 0.6, pointerEvents: previewCategoryId ? "auto" : "none", border: 'none' }}
-        >
-          Preview
-        </button>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+          {(() => {
+            try {
+              const entries = Object.entries(linkedAttributes || {}).filter(([k, v]) => k.endsWith(':inventoryLabels') && Array.isArray(v));
+              const labels = entries.flatMap(([k, arr]) => (arr || []).map((name) => ({ family: String(k).split(':')[0], name: String(name) })));
+              const unique = [];
+              const seen = new Set();
+              labels.forEach((it) => {
+                const key = `${it.family}|${it.name}`;
+                if (!seen.has(key)) { seen.add(key); unique.push(it); }
+              });
+              if (unique.length === 0 && inventoryLabelName) {
+                unique.push({ family: 'inventory', name: inventoryLabelName });
+              }
+              return unique.map((it, idx) => (
+                <button
+                  key={`${it.family}:${it.name}:${idx}`}
+                  onClick={() => { setActiveInvScope({ family: it.family, label: it.name }); setShowLinkedModal(true); fetchModelsForFamily(it.family); }}
+                  style={{ padding: '6px 10px', borderRadius: 12, border: 'none', background: '#16a34a', color: '#fff' }}
+                  title={`${it.family}: ${it.name}`}
+                >
+                  {it.name}
+                </button>
+              ));
+            } catch { return null; }
+          })()}
+          <button
+            onClick={() => {
+              if (!previewCategoryId) return;
+              const homeLocs = (vendor?.location?.nearbyLocations || []).filter(Boolean);
+              const base = PREVIEW_BASE_URL || (typeof window !== 'undefined' ? window.location.origin : '');
+              const url = `${base}/preview/${vendorId}/${previewCategoryId}?mode=dummy&homeLocs=${encodeURIComponent(JSON.stringify(homeLocs))}&t=${Date.now()}`;
+              window.open(url, '_blank');
+            }}
+            disabled={!previewCategoryId}
+            style={{ padding: "8px 12px", borderRadius: 8, background: "#2563eb", color: "#fff", textDecoration: "none", opacity: previewCategoryId ? 1 : 0.6, pointerEvents: previewCategoryId ? "auto" : "none", border: 'none' }}
+          >
+            Preview
+          </button>
+        </div>
       </div>
-      <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginBottom: 12 }}>
-        {(() => {
-          try {
-            const entries = Object.entries(linkedAttributes || {}).filter(([k, v]) => k.endsWith(':inventoryLabels') && Array.isArray(v));
-            const labels = entries.flatMap(([k, arr]) => (arr || []).map((name) => ({ family: String(k).split(':')[0], name: String(name) })));
-            const unique = [];
-            const seen = new Set();
-            labels.forEach((it) => {
-              const key = `${it.family}|${it.name}`;
-              if (!seen.has(key)) { seen.add(key); unique.push(it); }
-            });
-            if (unique.length === 0 && inventoryLabelName) {
-              unique.push({ family: 'inventory', name: inventoryLabelName });
-            }
-            return unique.map((it, idx) => (
-              <button
-                key={`${it.family}:${it.name}:${idx}`}
-                onClick={() => { setActiveInvScope({ family: it.family, label: it.name }); setShowLinkedModal(true); fetchModelsForFamily(it.family); }}
-                style={{ padding: '6px 12px', borderRadius: 8, border: 'none', background: '#16a34a', color: '#fff' }}
-                title={`${it.family}: ${it.name}`}
-              >
-                {it.name}
-              </button>
-            ));
-          } catch { return null; }
-        })()}
-      </div>
+      <div style={{ height: 4 }} />
+      {/* Packages Table (Dummy combos) */}
+      {combosLoading ? (
+        <div style={{ marginTop: 20 }}><p>Loading combos...</p></div>
+      ) : combosError ? (
+        <div style={{ marginTop: 20 }}><p style={{ color: 'red' }}>{combosError}</p></div>
+      ) : (combos && combos.length > 0) ? (
+        <div style={{ marginTop: 20, marginBottom: 30 }}>
+          <h2 style={{ marginBottom: 8 }}>Packages</h2>
+          <table style={{ borderCollapse: 'collapse', width: '100%' }}>
+            <thead>
+              <tr>
+                <th style={{ border: '1px solid #ccc', padding: 8 }}>Combo Name</th>
+                <th style={{ border: '1px solid #ccc', padding: 8 }}>Combo Includes</th>
+                <th style={{ border: '1px solid #ccc', padding: 8 }}>Size</th>
+                <th style={{ border: '1px solid #ccc', padding: 8 }}>Price</th>
+                <th style={{ border: '1px solid #ccc', padding: 8 }}>Action</th>
+              </tr>
+            </thead>
+            <tbody>
+              {combos.flatMap((combo) => {
+                const comboName = combo.name || 'Combo';
+                const items = Array.isArray(combo.items) ? combo.items : [];
+                const sizeSet = new Set();
+                items.forEach((it) => {
+                  const vs = Array.isArray(it.variants) ? it.variants : [];
+                  if (vs.length === 0) sizeSet.add(null);
+                  vs.forEach((v) => sizeSet.add(v.size || null));
+                });
+                const sizes = sizeSet.size ? Array.from(sizeSet) : [null];
+                const allItemsLabel = (() => {
+                  const seen = new Set();
+                  const names = [];
+                  items.forEach((it) => {
+                    let nm = '';
+                    if (it.kind === 'custom') nm = it.name || 'Custom';
+                    else {
+                      const info = categoryInfoCache[String(it.categoryId)] || {};
+                      nm = info.parentName || info.name || 'Service';
+                    }
+                    nm = String(nm || '').trim();
+                    const key = nm.toLowerCase();
+                    if (nm && !seen.has(key)) { seen.add(key); names.push(nm); }
+                  });
+                  return names.join(', ');
+                })();
+                return sizes.map((sz, idx) => {
+                  let rep = null;
+                  for (const it of items) {
+                    const vs = Array.isArray(it.variants) ? it.variants : [];
+                    const v = vs.find((vv) => (vv.size || null) === (sz || null));
+                    if (v) { rep = v; break; }
+                  }
+                  const repPrice = (rep && rep.price != null && rep.price !== '') ? Number(rep.price) : null;
+                  const base = (combo && combo.basePrice != null && combo.basePrice !== '') ? Number(combo.basePrice) : null;
+                  const priceValue = (repPrice != null && !Number.isNaN(repPrice)) ? repPrice : (base != null && !Number.isNaN(base) ? base : null);
+                  const priceText = (priceValue != null) ? `₹${priceValue}` : '—';
+                  return (
+                    <tr key={`${(combo._id?.$oid || combo._id || combo.id || comboName)}-${idx}`}>
+                      <td style={{ border: '1px solid #ccc', padding: 8 }}>{comboName}</td>
+                      <td style={{ border: '1px solid #ccc', padding: 8 }}>{allItemsLabel}</td>
+                      <td style={{ border: '1px solid #ccc', padding: 8 }}>{sz || '—'}</td>
+                      <td style={{ border: '1px solid #ccc', padding: 8 }}>{priceText}</td>
+                      <td style={{ border: '1px solid #ccc', padding: 8 }}>
+                        <button
+                          onClick={async () => {
+                            try {
+                              const input = window.prompt('Enter price', priceValue != null ? String(priceValue) : '');
+                              if (input == null) return;
+                              const val = input === '' ? null : Number(input);
+                              if (input !== '' && Number.isNaN(val)) { alert('Invalid price'); return; }
+                              const id = combo._id?.$oid || combo._id || combo.id;
+                              const updated = { ...combo };
+                              if (sz == null) {
+                                // update base price if no specific size variant found
+                                updated.basePrice = val;
+                              }
+                              // update matching size variant across items
+                              updated.items = (Array.isArray(combo.items) ? combo.items : []).map((it) => {
+                                const next = { ...it };
+                                const vs = Array.isArray(it.variants) ? it.variants : [];
+                                next.variants = vs.map((vv) => {
+                                  const match = (vv.size || null) === (sz || null);
+                                  return match ? { ...vv, price: val } : vv;
+                                });
+                                return next;
+                              });
+                              await axios.put(`${API_BASE_URL}/api/dummy-combos/${id}`, updated, { headers: { 'Content-Type': 'application/json' } });
+                              // refresh
+                              const res = await axios.get(`${API_BASE_URL}/api/dummy-combos`, { params: { parentCategoryId: categoryId } });
+                              setCombos(Array.isArray(res.data) ? res.data : []);
+                            } catch (e) {
+                              alert(e?.response?.data?.message || 'Failed to save');
+                            }
+                          }}
+                          style={{ padding: '4px 8px', borderRadius: 4, background: '#0ea5e9', color: '#fff', border: 'none' }}
+                        >Edit</button>
+                      </td>
+                    </tr>
+                  );
+                });
+              })}
+            </tbody>
+          </table>
+        </div>
+      ) : null}
+       <div style={{ marginTop: 30 }}>
+        <h2 style={{ marginBottom: 8 }}>Categories</h2>
       {loading ? (
         <div>Loading...</div>
       ) : error ? (
@@ -389,6 +666,9 @@ export default function DummyVendorCategoriesDetailPage() {
               {hasInventory ? (
                 <th style={{ border: '1px solid #ccc', padding: 8 }}>Attributes</th>
               ) : null}
+              {!hasInventory ? (
+                <th style={{ border: '1px solid #ccc', padding: 8 }}>Images</th>
+              ) : null}
               <th style={{ border: "1px solid #ccc", padding: "8px" }}>Price</th>
               <th style={{ border: "1px solid #ccc", padding: "8px" }}>Action</th>
             </tr>
@@ -404,11 +684,17 @@ export default function DummyVendorCategoriesDetailPage() {
                     {match ? (
                       (() => {
                         const blocks = Object.entries(match.selections || {}).flatMap(([fam, fields]) => {
-                          const entries = Object.entries(fields || {}).filter(([k, v]) => {
+                          const famLower = String(fam || '').toLowerCase();
+                          let pairsAll = Object.entries(fields || {}).filter(([k, v]) => {
                             const fn = String(k).toLowerCase().replace(/[^a-z0-9]/g, '');
                             return fn !== 'modelfields' && v != null && String(v).trim() !== '';
                           });
-                          return entries.map(([k, v]) => ({ key: `${fam}:${k}`, label: `${k}:`, value: String(v) }));
+                          // Bikes: if both bikeBrand and brand present, drop brand
+                          if (famLower === 'bikes') {
+                            const hasBikeBrand = pairsAll.some(([k]) => String(k).toLowerCase() === 'bikebrand');
+                            if (hasBikeBrand) pairsAll = pairsAll.filter(([k]) => String(k).toLowerCase() !== 'brand');
+                          }
+                          return pairsAll.map(([k, v]) => ({ key: `${fam}:${k}`, label: `${k}:`, value: String(v) }));
                         });
                         return (
                           <div style={{ border: '1px solid #e5e7eb', borderRadius: 6, padding: 6, background: '#f8fafc' }}>
@@ -431,11 +717,80 @@ export default function DummyVendorCategoriesDetailPage() {
                     )}
                   </td>
                 ) : null}
+                {!hasInventory ? (
+                  <td style={{ border: '1px solid #ccc', padding: 8, verticalAlign: 'top' }}>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                        {(Array.isArray(vendor?.rowImages?.[row.id]) ? vendor.rowImages[row.id] : []).map((src, i) => {
+                          const raw = String(src || '');
+                          const url = raw.startsWith('http') ? raw : `${API_BASE_URL}${raw}`;
+                          return (
+                            <div key={i} style={{ position: 'relative', width: 56 }}>
+                              <img src={url} alt={`img-${i}`} style={{ width: 56, height: 56, objectFit: 'cover', borderRadius: 6, border: '1px solid #eee' }} />
+                              <div style={{ position: 'absolute', right: 2, top: 2, display: 'flex', gap: 4 }}>
+                                <button title="Replace" onClick={() => {
+                                  const input = document.createElement('input');
+                                  input.type = 'file'; input.accept = 'image/*';
+                                  input.onchange = async (e) => {
+                                    const file = (e.target.files || [])[0]; if (!file) return;
+                                    const form = new FormData(); form.append('image', file);
+                                    try {
+                                      const res = await axios.put(`${API_BASE_URL}/api/dummy-vendors/${vendorId}/rows/${row.id}/images/${i}`, form, { headers: { 'Content-Type': 'multipart/form-data' } });
+                                      const imgs = res.data?.images || [];
+                                      // update vendor.state rowImages
+                                      setVendor((prev) => ({ ...(prev || {}), rowImages: { ...((prev||{}).rowImages || {}), [row.id]: imgs } }));
+                                    } catch {}
+                                  };
+                                  input.click();
+                                }} style={{ padding: 2, border: 'none', background: 'rgba(255,255,255,0.85)', borderRadius: 4, cursor: 'pointer' }}>✎</button>
+                                <button title="Delete" onClick={async () => {
+                                  try {
+                                    const res = await axios.delete(`${API_BASE_URL}/api/dummy-vendors/${vendorId}/rows/${row.id}/images/${i}`);
+                                    const imgs = res.data?.images || [];
+                                    setVendor((prev) => ({ ...(prev || {}), rowImages: { ...((prev||{}).rowImages || {}), [row.id]: imgs } }));
+                                  } catch {}
+                                }} style={{ padding: 2, border: 'none', background: 'rgba(255,255,255,0.85)', borderRadius: 4, cursor: 'pointer' }}>🗑️</button>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                      <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                        <span style={{ fontSize: 12, color: '#475569' }}>Uploaded: {(Array.isArray(vendor?.rowImages?.[row.id]) ? vendor.rowImages[row.id].length : 0)}/5</span>
+                        <input type="file" accept="image/*" multiple onChange={async (e) => {
+                          const existing = Array.isArray(vendor?.rowImages?.[row.id]) ? vendor.rowImages[row.id].length : 0;
+                          const remaining = Math.max(0, 5 - existing);
+                          const files = Array.from(e.target.files || []).slice(0, remaining);
+                          if (files.length === 0) return;
+                          const form = new FormData();
+                          files.forEach((f) => form.append('images', f));
+                          try {
+                            const res = await axios.post(`${API_BASE_URL}/api/dummy-vendors/${vendorId}/rows/${row.id}/images`, form, { headers: { 'Content-Type': 'multipart/form-data' } });
+                            const imgs = res.data?.images || [];
+                            setVendor((prev) => ({ ...(prev || {}), rowImages: { ...((prev||{}).rowImages || {}), [row.id]: imgs } }));
+                          } catch {}
+                          e.target.value = '';
+                        }} />
+                      </div>
+                    </div>
+                  </td>
+                ) : null}
                 <td style={{ border: '1px solid #ccc', padding: 8 }}>
-                  {editingId === row.categoryId ? (
-                    <input type="number" value={editingPrice} onChange={(e) => setEditingPrice(e.target.value)} style={{ width: 100, padding: 6 }} placeholder="Price" />
+                  {match ? (
+                    (() => {
+                      try {
+                        const rowKey = Array.isArray(row.levelIds) && row.levelIds.length ? row.levelIds.map(String).join('|') : String(row.id);
+                        const pbr = match && match.pricesByRow && typeof match.pricesByRow === 'object' ? match.pricesByRow : null;
+                        const rowPrice = pbr && (pbr[rowKey] !== undefined && pbr[rowKey] !== null) ? pbr[rowKey] : (match.price ?? null);
+                        return <span>{rowPrice === undefined || rowPrice === null || rowPrice === '-' ? '-' : rowPrice}</span>;
+                      } catch { return <span>-</span>; }
+                    })()
                   ) : (
-                    <span>{row.price === undefined || row.price === null || row.price === '-' ? '-' : row.price}</span>
+                    editingId === row.categoryId ? (
+                      <input type="number" value={editingPrice} onChange={(e) => setEditingPrice(e.target.value)} style={{ width: 100, padding: 6 }} placeholder="Price" />
+                    ) : (
+                      <span>{row.price === undefined || row.price === null || row.price === '-' ? '-' : row.price}</span>
+                    )
                   )}
                 </td>
                 <td style={{ border: '1px solid #ccc', padding: 8 }}>
@@ -469,6 +824,7 @@ export default function DummyVendorCategoriesDetailPage() {
           </tbody>
         </table>
       )}
+      </div>
 
       {showLinkedModal && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1200 }}>
@@ -487,15 +843,45 @@ export default function DummyVendorCategoriesDetailPage() {
                       {fields.map((heading) => {
                         const values = Array.isArray(listsByField[heading]) ? listsByField[heading] : [];
                         const val = curr[heading] || '';
+                        const hLower = String(heading).toLowerCase().replace(/[^a-z0-9]/g,'');
+                        const isBrand = hLower.endsWith('brand');
+                        const isModel = hLower.endsWith('model');
+                        const brandSelected = Boolean(curr.bikeBrand || curr.brand || curr.Brand || curr.make || curr.Make);
+                        const isDisabled = (isModel && !brandSelected) ? true : false;
                         return (
                           <label key={`${familyKey}:${heading}`} style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                             <span style={{ fontSize: 12, color: '#475569' }}>{heading}</span>
-                            <select value={val} onChange={(e) => {
-                              setDraftSelections((prev) => ({
-                                ...prev,
-                                [familyKey]: { ...(prev[familyKey] || {}), [heading]: e.target.value }
-                              }));
-                            }} style={{ padding: 8, border: '1px solid #ddd', borderRadius: 6 }}>
+                            <select
+                              value={val}
+                              disabled={isDisabled}
+                              onChange={(e) => {
+                                const v = e.target.value;
+                                setDraftSelections((prev) => {
+                                  const nextFam = { ...(prev[familyKey] || {}), [heading]: v };
+                                  // On brand change, clear downstream fields
+                                  if (isBrand) {
+                                    delete nextFam.model; delete nextFam.Model; delete nextFam.modelName; delete nextFam.model_name; delete nextFam.name;
+                                    delete nextFam.variant; delete nextFam.Variant; delete nextFam.trim; delete nextFam.Trim;
+                                    delete nextFam.transmission; delete nextFam.Transmission; delete nextFam.gearbox; delete nextFam.gear_type; delete nextFam.gearType;
+                                    delete nextFam.fuelType; delete nextFam.FuelType; delete nextFam.fueltype; delete nextFam.Fuel; delete nextFam.fuel_type;
+                                    delete nextFam.bodyType; delete nextFam.BodyType; delete nextFam.body_type; delete nextFam.type;
+                                    delete nextFam.seats; delete nextFam.Seats; delete nextFam.seatCapacity; delete nextFam.SeatCapacity; delete nextFam.seatingCapacity; delete nextFam.SeatingCapacity;
+                                  } else if (isModel) {
+                                    // On model change, clear fields that depend on model
+                                    delete nextFam.variant; delete nextFam.Variant; delete nextFam.trim; delete nextFam.Trim;
+                                    delete nextFam.transmission; delete nextFam.Transmission; delete nextFam.gearbox; delete nextFam.gear_type; delete nextFam.gearType;
+                                    delete nextFam.fuelType; delete nextFam.FuelType; delete nextFam.fueltype; delete nextFam.Fuel; delete nextFam.fuel_type;
+                                    delete nextFam.bodyType; delete nextFam.BodyType; delete nextFam.body_type; delete nextFam.type;
+                                    delete nextFam.seats; delete nextFam.Seats; delete nextFam.seatCapacity; delete nextFam.SeatCapacity; delete nextFam.seatingCapacity; delete nextFam.SeatingCapacity;
+                                  }
+                                  return { ...prev, [familyKey]: nextFam };
+                                });
+                                if (isBrand) {
+                                  try { fetchModelsForFamily(familyKey); } catch {}
+                                }
+                              }}
+                              style={{ padding: 8, border: '1px solid #ddd', borderRadius: 6 }}
+                            >
                               <option value="">Select</option>
                               {values.map((v) => (
                                 <option key={`${familyKey}:${heading}:${v}`} value={v}>{v}</option>
@@ -509,11 +895,239 @@ export default function DummyVendorCategoriesDetailPage() {
                 );
               })()}
             </div>
+            {/* Selected Data (with Images column) */}
+            <div style={{ marginTop: 12 }}>
+              <div style={{ fontWeight: 700, marginBottom: 6 }}>Selected Data</div>
+              {(() => {
+                const list = Array.isArray(invItems) ? invItems : [];
+                const filtered = activeInvScope
+                  ? list.filter((it) => String(it.scopeFamily) === String(activeInvScope.family) && String(it.scopeLabel) === String(activeInvScope.label))
+                  : list;
+
+                // Build dynamic headings from current selections
+                const allKeys = new Set();
+                filtered.forEach(item => {
+                  Object.values(item.selections || {}).forEach(fields => {
+                    Object.keys(fields || {}).forEach(key => {
+                      const fn = String(key).toLowerCase().replace(/[^a-z0-9]/g, '');
+                      if (fn !== 'modelfields') allKeys.add(key);
+                    });
+                  });
+                });
+                let dynamicHeadings = Array.from(allKeys);
+                // If Bikes scope and both brand and bikeBrand present, hide brand
+                if (activeInvScope && String(activeInvScope.family).toLowerCase() === 'bikes') {
+                  const hasBikeBrand = dynamicHeadings.some((h) => String(h).toLowerCase() === 'bikebrand');
+                  if (hasBikeBrand) dynamicHeadings = dynamicHeadings.filter((h) => String(h).toLowerCase() !== 'brand');
+                }
+
+                if (filtered.length === 0) {
+                  return (
+                    <div style={{ fontSize: 13, color: '#64748b', padding: '20px', textAlign: 'center', background: '#f8fafc', borderRadius: 8 }}>
+                      No items added yet. Use the selectors above and click Save to add.
+                    </div>
+                  );
+                }
+
+                return (
+                  <div style={{ overflowX: 'auto' }}>
+                    <table style={{ borderCollapse: 'collapse', width: '100%', minWidth: '720px' }}>
+                      <thead>
+                        <tr style={{ background: '#f1f5f9' }}>
+                          <th style={{ border: '1px solid #e2e8f0', padding: '10px 12px', textAlign: 'left', fontWeight: 600 }}>No</th>
+                          <th style={{ border: '1px solid #e2e8f0', padding: '10px 12px', textAlign: 'left', fontWeight: 600 }}>Scope</th>
+                          {dynamicHeadings.map(heading => (
+                            <th key={heading} style={{ border: '1px solid #e2e8f0', padding: '10px 12px', textAlign: 'left', fontWeight: 600 }}>
+                              {heading}
+                            </th>
+                          ))}
+                          <th style={{ border: '1px solid #e2e8f0', padding: '10px 12px', textAlign: 'left', fontWeight: 600 }}>Images</th>
+                          <th style={{ border: '1px solid #e2e8f0', padding: '10px 12px', textAlign: 'left', fontWeight: 600 }}>Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {filtered.map((it, idx) => {
+                          const key = it._id || it.at || idx;
+                          const scopeText = `${it.scopeFamily || '-'}`;
+
+                          const rowData = new Map();
+                          Object.values(it.selections || {}).forEach(fields => {
+                            dynamicHeadings.forEach(heading => {
+                              if (fields && fields[heading] != null) {
+                                rowData.set(heading, String(fields[heading]));
+                              }
+                            });
+                          });
+
+                          return (
+                            <tr key={key} style={{ borderBottom: '1px solid #e2e8f0' }}>
+                              <td style={{ border: '1px solid #e2e8f0', padding: '10px 12px' }}>{idx + 1}</td>
+                              <td style={{ border: '1px solid #e2e8f0', padding: '10px 12px' }}>{scopeText}</td>
+                              {dynamicHeadings.map(heading => (
+                                <td key={heading} style={{ border: '1px solid #e2e8f0', padding: '10px 12px' }}>
+                                  {rowData.get(heading) || '—'}
+                                </td>
+                              ))}
+                              <td style={{ border: '1px solid #e2e8f0', padding: '10px 12px' }}>
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                                  <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                                    {(Array.isArray(it.images) ? it.images : []).map((src, i) => {
+                                      const raw = String(src || '');
+                                      const url = raw.startsWith('http') ? raw : `${API_BASE_URL}${raw}`;
+                                      return (
+                                        <div key={i} style={{ position: 'relative', width: 56 }}>
+                                          <img src={url} alt={`img-${i}`} style={{ width: 56, height: 56, objectFit: 'cover', borderRadius: 6, border: '1px solid #eee' }} />
+                                          <div style={{ position: 'absolute', right: 2, top: 2, display: 'flex', gap: 4 }}>
+                                            <button title="Replace" onClick={() => {
+                                              const input = document.createElement('input');
+                                              input.type = 'file'; input.accept = 'image/*';
+                                              input.onchange = async (e) => {
+                                                try {
+                                                  const file = (e.target.files || [])[0]; if (!file) return;
+                                                  const form = new FormData(); form.append('image', file);
+                                                  const key = String(it._id || it.at);
+                                                  const res = await axios.put(`${API_BASE_URL}/api/dummy-vendors/${vendorId}/inventory/${previewCategoryId}/${key}/images/${i}`, form, { headers: { 'Content-Type': 'multipart/form-data' } });
+                                                  const imgs = res.data?.images || [];
+                                                  setInvItems((prev) => prev.map((p) => ((String(p._id || p.at) === key) ? { ...p, images: imgs } : p)));
+                                                } catch {}
+                                              };
+                                              input.click();
+                                            }} style={{ padding: 2, border: 'none', background: 'rgba(255,255,255,0.85)', borderRadius: 4, cursor: 'pointer' }}>✎</button>
+                                            <button title="Delete" onClick={async () => {
+                                              try {
+                                                const key = String(it._id || it.at);
+                                                const res = await axios.delete(`${API_BASE_URL}/api/dummy-vendors/${vendorId}/inventory/${previewCategoryId}/${key}/images/${i}`);
+                                                const imgs = res.data?.images || [];
+                                                setInvItems((prev) => prev.map((p) => ((String(p._id || p.at) === key) ? { ...p, images: imgs } : p)));
+                                              } catch {}
+                                            }} style={{ padding: 2, border: 'none', background: 'rgba(255,255,255,0.85)', borderRadius: 4, cursor: 'pointer' }}>🗑️</button>
+                                          </div>
+                                        </div>
+                                      );
+                                    })}
+                                  </div>
+                                  <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                                    <span style={{ fontSize: 12, color: '#475569' }}>Uploaded: {(Array.isArray(it.images) ? it.images.length : 0)}/5</span>
+                                    <input type="file" accept="image/*" multiple onChange={async (e) => {
+                                      try {
+                                        const existing = Array.isArray(it.images) ? it.images.length : 0;
+                                        const remaining = Math.max(0, 5 - existing);
+                                        const files = Array.from(e.target.files || []).slice(0, remaining);
+                                        if (files.length === 0) return;
+                                        const form = new FormData();
+                                        files.forEach((f) => form.append('images', f));
+                                        const key = String(it._id || it.at);
+                                        const res = await axios.post(`${API_BASE_URL}/api/dummy-vendors/${vendorId}/inventory/${previewCategoryId}/${key}/images`, form, { headers: { 'Content-Type': 'multipart/form-data' } });
+                                        const imgs = res.data?.images || [];
+                                        setInvItems((prev) => prev.map((p) => ((String(p._id || p.at) === key) ? { ...p, images: imgs } : p)));
+                                      } catch {}
+                                      e.target.value = '';
+                                    }} />
+                                  </div>
+                                </div>
+                              </td>
+                              <td style={{ border: '1px solid #e2e8f0', padding: '10px 12px' }}>
+                                <div style={{ display: 'flex', gap: 8 }}>
+                                  <button
+                                    type="button"
+                                    title="Edit"
+                                    onClick={() => {
+                                      try {
+                                        const scope = it.scopeFamily && it.scopeLabel ? { family: it.scopeFamily, label: it.scopeLabel } : null;
+                                        const famPrefix = scope ? `${scope.family}:${scope.label}:` : null;
+                                        setEditingItemKey(it._id || it.at || null);
+                                        setLinkedAttributes((prev) => {
+                                          const next = { ...prev };
+                                          if (famPrefix) {
+                                            Object.keys(next).forEach((k) => { if (k.startsWith(famPrefix)) delete next[k]; });
+                                          }
+                                          Object.entries(it.selections || {}).forEach(([fam, fields]) => {
+                                            Object.entries(fields || {}).forEach(([field, val]) => {
+                                              if (val == null || String(val).trim() === '') return;
+                                              const storeKey = famPrefix ? `${famPrefix}${field}` : `${fam}:${field}`;
+                                              next[storeKey] = [String(val)];
+                                            });
+                                          });
+                                          return next;
+                                        });
+                                      } catch {}
+                                    }}
+                                    style={{ padding: '6px 8px', borderRadius: 6, border: '1px solid #e2e8f0', background: '#fff' }}
+                                  >✎</button>
+                                  <button
+                                    type="button"
+                                    title="Delete"
+                                    onClick={async () => {
+                                      try {
+                                        const next = (Array.isArray(invItems) ? invItems : []).filter((p) => (p._id || p.at) !== (it._id || it.at));
+                                        setInvItems(next);
+                                        if (editingItemKey && (editingItemKey === (it._id || it.at))) setEditingItemKey(null);
+                                        if (vendorId && previewCategoryId) {
+                                          await saveDummyInventorySelections(vendorId, previewCategoryId, next);
+                                        }
+                                      } catch (e) { /* ignore */ }
+                                    }}
+                                    style={{ padding: '6px 8px', borderRadius: 6, border: '1px solid #fecaca', background: '#fee2e2', color: '#ef4444' }}
+                                  >🗑️</button>
+                                </div>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                );
+              })()}
+            </div>
             <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 12 }}>
+              <button onClick={async () => {
+                try {
+                  const scope = activeInvScope || null;
+                  if (!scope) return alert('Please click a label button (scope) first.');
+                  const fam = String(scope.family);
+                  const sel = draftSelections[fam] || {};
+                  const hasAny = Object.values(sel).some((v) => v != null && String(v).trim() !== '');
+                  if (!hasAny) return alert('Please select some values before adding.');
+                  const keyNow = editingItemKey || Date.now();
+                  // Normalize bikes fields: map brand -> bikeBrand and remove brand
+                  const famLower = String(fam).toLowerCase();
+                  let selNorm = { ...sel };
+                  if (famLower === 'bikes') {
+                    if (selNorm.brand && !selNorm.bikeBrand) {
+                      selNorm = { ...selNorm, bikeBrand: selNorm.brand };
+                    }
+                    if (selNorm.brand) { const { brand, ...rest } = selNorm; selNorm = rest; }
+                  }
+                  const snapshot = {
+                    at: keyNow,
+                    categoryId,
+                    selections: { [fam]: selNorm },
+                    scopeFamily: scope.family,
+                    scopeLabel: scope.label,
+                  };
+                  let nextItems;
+                  if (editingItemKey) {
+                    nextItems = (Array.isArray(invItems) ? invItems : []).map((p) => ((p._id || p.at) === editingItemKey ? { ...snapshot, _id: p._id } : p));
+                  } else {
+                    nextItems = [...(Array.isArray(invItems) ? invItems : []), snapshot];
+                  }
+                  setInvItems(nextItems);
+                  if (vendorId && previewCategoryId) {
+                    await saveDummyInventorySelections(vendorId, previewCategoryId, nextItems);
+                    await ensureLinkedSubcategoryForScope(previewCategoryId, scope.family, scope.label);
+                  }
+                  // clear draft selections for this family so inputs reset
+                  setDraftSelections((prev) => ({ ...prev, [fam]: {} }));
+                  setEditingItemKey(null);
+                } catch (e) {
+                  alert('Failed to add data');
+                }
+              }} style={{ padding: '6px 10px', borderRadius: 6, background: '#16a34a', color: '#fff', border: 'none' }}>Add Data</button>
               <button onClick={() => { setShowLinkedModal(false); setDraftSelections({}); }} style={{ padding: '6px 10px', borderRadius: 6, background: '#e5e7eb', border: 'none' }}>Close</button>
               <button onClick={async () => {
                 try {
-                  if (!vendorId || !categoryId || !activeInvScope) return;
+                  if (!vendorId || !previewCategoryId || !activeInvScope) return;
                   const fam = String(activeInvScope.family);
                   const label = String(activeInvScope.label);
                   const sel = draftSelections[fam] || {};
@@ -525,7 +1139,8 @@ export default function DummyVendorCategoriesDetailPage() {
                   };
                   const next = [...(Array.isArray(invItems) ? invItems : []), item];
                   setInvItems(next);
-                  await saveDummyInventorySelections(vendorId, categoryId, next);
+                  await saveDummyInventorySelections(vendorId, previewCategoryId, next);
+                  await ensureLinkedSubcategoryForScope(previewCategoryId, fam, label);
                   setShowLinkedModal(false);
                   setDraftSelections({});
                 } catch (e) {
@@ -564,7 +1179,7 @@ export default function DummyVendorCategoriesDetailPage() {
                       return updated;
                     });
                     setInvItems(next);
-                    if (vendorId && categoryId) { await saveDummyInventorySelections(vendorId, categoryId, next); }
+                    if (vendorId && previewCategoryId) { await saveDummyInventorySelections(vendorId, previewCategoryId, next); }
                     setRowPriceEdit(null);
                   } catch (e) {
                     alert(e?.response?.data?.message || 'Failed to update');

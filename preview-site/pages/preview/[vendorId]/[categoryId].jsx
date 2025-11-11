@@ -14,7 +14,7 @@ import API_BASE_URL, { ASSET_BASE_URL } from "../../../config";
 
 export default function PreviewPage() {
   const router = useRouter();
-  const { vendorId, categoryId, lat, lng, homeLocs } = router.query;
+  const { vendorId, categoryId, lat, lng, homeLocs, mode } = router.query;
 
   const parsedHomeLocations = homeLocs ? JSON.parse(homeLocs) : [];
 
@@ -45,106 +45,235 @@ export default function PreviewPage() {
     setLoadingVendor(true);
     setLoadingCategories(true);
     try {
-      // Step 1: Try real vendor flow
-      const vendorRes = await fetch(`${API_BASE_URL}/api/vendors/${vendorId}`, { cache: 'no-store' });
-      let isDummy = false;
-      let vendorData = {};
-      try { vendorData = await vendorRes.json(); } catch { vendorData = {}; }
-      if (!vendorRes.ok || vendorData?.message) {
-        isDummy = true;
-      }
-
-      if (isDummy) {
-        // Dummy vendor flow
+      const forceDummy = String(mode || '').toLowerCase() === 'dummy';
+      if (forceDummy) {
+        // Dummy vendor flow (forced by query)
         try {
-          const dvRes = await fetch(`${API_BASE_URL}/api/dummy-vendors/${vendorId}/categories`, { cache: 'no-store' });
+          const dvRes = await fetch(`/api/dummy-vendors/${vendorId}/categories`, { cache: 'no-store' });
           const dv = await dvRes.json();
-          const dvVendor = dv?.vendor || {};
+          // Fetch full dummy vendor document to hydrate inventorySelections/rowImages
+          let dvDoc = {};
+          try {
+            const vRes = await fetch(`/api/dummy-vendors/${vendorId}`, { cache: 'no-store' });
+            dvDoc = await vRes.json().catch(() => ({}));
+          } catch { dvDoc = {}; }
+          let dvVendor = { ...(dv?.vendor || {}), ...(dvDoc || {}) };
+          try {
+            const pics = Array.isArray(dvVendor?.profilePictures) ? dvVendor.profilePictures : [];
+            if (pics.length === 0) {
+              const pRes = await fetch(`/api/dummy-vendors/${vendorId}/profile-pictures`, { cache: 'no-store' });
+              if (pRes.ok) {
+                const pj = await pRes.json().catch(() => null);
+                const list = Array.isArray(pj?.profilePictures) ? pj.profilePictures : [];
+                if (list.length) dvVendor = { ...dvVendor, profilePictures: list };
+              }
+            }
+          } catch {}
           setVendor(dvVendor);
-
-          // Optional: meta for dummy category (name, linked attrs not present here)
-          let categoriesWithLinked = dv?.categories || null;
+          const categoriesWithLinked = dv?.categories || null;
           setCategoryTree(categoriesWithLinked);
-
-          // Set location from dummy vendor document
           if (dvVendor?.location) setLocation(dvVendor.location);
+          // Compute hero title/description from dummy category/vendor freeTexts
+          try {
+            const trimOrNull = (v) => { const s = (v == null) ? '' : String(v); const t = s.trim(); return t ? t : null; };
+            const firstNonEmpty = (arr) => Array.isArray(arr) ? arr.map(trimOrNull).find(Boolean) || null : null;
+            // Try to fetch the exact dummy category to read its freeTexts if tree doesn't have it
+            let dummyCat = null;
+            try {
+              const r = await fetch(`/api/dummy-categories/${categoryId}`, { cache: 'no-store' });
+              if (r.ok) dummyCat = await r.json();
+            } catch {}
+            const rawCatFT = (categoriesWithLinked && categoriesWithLinked.freeTexts)
+              ? categoriesWithLinked.freeTexts
+              : (Array.isArray(dummyCat?.freeTexts) ? dummyCat.freeTexts : []);
+            const catFT = (() => { try { const arr = Array.isArray(rawCatFT) ? rawCatFT : []; if (arr.length === 10 && (arr[0] == null || String(arr[0]).trim() === '') && (arr[1] != null && String(arr[1]).trim() !== '')) { return [...arr.slice(1), '']; } return arr; } catch { return Array.isArray(rawCatFT) ? rawCatFT : []; } })();
+            const rawVenFT = dvVendor?.freeTexts || []; const venFT = Array.isArray(rawVenFT) ? rawVenFT : [];
+            const titleFromCategory = trimOrNull(catFT[0]) || firstNonEmpty(catFT);
+            const descFromCategory = trimOrNull(catFT[1]) || firstNonEmpty(catFT);
+            const titleFromVendor = trimOrNull(venFT[0]) || trimOrNull(dvVendor?.customFields?.freeText1) || trimOrNull(dvVendor?.ui?.heroTitle) || firstNonEmpty(venFT);
+            const descFromVendor = trimOrNull(venFT[1]) || trimOrNull(dvVendor?.customFields?.freeText2) || trimOrNull(dvVendor?.ui?.heroDescription) || firstNonEmpty(venFT);
+            const q = router?.query || {};
+            const title = trimOrNull(q.ft1) || titleFromCategory || titleFromVendor || null;
+            const desc = trimOrNull(q.ft2) || descFromCategory || descFromVendor || null;
+            setHeroTitle(title); setHeroDescription(desc);
+          } catch {}
+          // Fetch dummy combos for this category
+          try {
+            const c1 = await fetch(`/api/dummy-combos?parentCategoryId=${categoryId}`, { cache: 'no-store' });
+            let list = await c1.json().catch(() => []);
+            if (!Array.isArray(list) || list.length === 0) {
+              try {
+                const c2 = await fetch(`/api/dummy-combos/byParent/${categoryId}`, { cache: 'no-store' });
+                list = await c2.json().catch(() => []);
+              } catch {}
+            }
+            setCombos(Array.isArray(list) ? list : []);
+          } catch { setCombos([]); }
         } catch (e) {
           setError(e?.message || 'Failed to load dummy vendor preview');
           setCategoryTree(null);
         }
       } else {
-        // Real vendor flow
-        setVendor(vendorData);
-
-        const [categoryRes, locationRes, catMetaRes, serverTreeRes] = await Promise.all([
-          fetch(`${API_BASE_URL}/api/vendors/${vendorId}/preview/${categoryId}`, { cache: 'no-store' }),
-          fetch(`${API_BASE_URL}/api/vendors/${vendorId}/location`, { cache: 'no-store' }),
-          fetch(`${API_BASE_URL}/api/categories/${categoryId}`, { cache: 'no-store' }),
-          fetch(`${API_BASE_URL}/api/categories/${categoryId}/tree`, { cache: 'no-store' }),
-        ]);
-
-        const categoryData = await categoryRes.json().catch(() => ({}));
-        const catMeta = await catMetaRes.json().catch(() => ({}));
-        const serverTree = await serverTreeRes.json().catch(() => null);
-        let locationData = null;
-        try { locationData = await locationRes.json(); } catch { locationData = null; }
-
-        console.log('CategoryData from API:', categoryData);
-
-        const linkedAttributes = (catMeta && catMeta.linkedAttributes) ? catMeta.linkedAttributes : {};
-        let categoriesWithLinked = categoryData?.categories ? { ...categoryData.categories, linkedAttributes } : null;
-        if (!categoriesWithLinked && serverTree && (serverTree._id || serverTree.id)) {
-          categoriesWithLinked = { ...serverTree, linkedAttributes };
-        }
-
-        // Overlay per-node config (displayType, uiRules, images)
-        try {
-          if (categoriesWithLinked && serverTree && (serverTree._id || serverTree.id)) {
-            const pickId = (n) => String(n?.id || n?._id || '');
-            const buildIndex = (root) => {
-              const idx = new Map();
-              const visit = (n) => { if (!n) return; const k = pickId(n); if (k) idx.set(k, n); (Array.isArray(n.children) ? n.children : []).forEach(visit); };
-              visit(serverTree); return idx; };
-            const serverIdx = buildIndex(serverTree);
-            const serverChildrenByParent = new Map();
-            const collectChildren = (n) => { if (!n) return; const pid = String(n._id || n.id || ''); if (Array.isArray(n.children)) serverChildrenByParent.set(pid, n.children); (n.children || []).forEach(collectChildren); };
-            collectChildren(serverTree);
-            const mergeFields = (dst, src) => { if (!dst || !src) return; if (Array.isArray(src.displayType)) dst.displayType = src.displayType; if (src.uiRules && typeof src.uiRules === 'object') dst.uiRules = src.uiRules; if (typeof src.imageUrl === 'string') dst.imageUrl = src.imageUrl; if (typeof src.iconUrl === 'string') dst.iconUrl = src.iconUrl; };
-            const overlay = (node, srcParent) => { if (!node) return; const k = pickId(node); let src = k ? serverIdx.get(k) : null; if (!src && srcParent) { const sibs = serverChildrenByParent.get(String(srcParent._id || srcParent.id || '')) || []; const byName = sibs.find((c) => String(c?.name || '').toLowerCase() === String(node?.name || '').toLowerCase()); if (byName) src = byName; } if (src) mergeFields(node, src); const nextSrcParent = src || srcParent; (Array.isArray(node.children) ? node.children : []).forEach((ch) => overlay(ch, nextSrcParent)); };
-            overlay(categoriesWithLinked, serverTree);
+        // Try real vendor flow
+        const vendorRes = await fetch(`/api/vendors/${vendorId}`, { cache: 'no-store' });
+        let vendorData = {};
+        try { vendorData = await vendorRes.json(); } catch { vendorData = {}; }
+        const isDummy = (!vendorRes.ok || vendorData?.message);
+        if (isDummy) {
+          // Fallback to dummy
+          try {
+            const dvRes = await fetch(`/api/dummy-vendors/${vendorId}/categories`, { cache: 'no-store' });
+            const dv = await dvRes.json();
+            // Hydrate with full dummy vendor
+            let dvDoc = {};
+            try {
+              const vRes = await fetch(`/api/dummy-vendors/${vendorId}`, { cache: 'no-store' });
+              dvDoc = await vRes.json().catch(() => ({}));
+            } catch { dvDoc = {}; }
+            let dvVendor = { ...(dv?.vendor || {}), ...(dvDoc || {}) };
+            try {
+              const pics = Array.isArray(dvVendor?.profilePictures) ? dvVendor.profilePictures : [];
+              if (pics.length === 0) {
+                const pRes = await fetch(`/api/dummy-vendors/${vendorId}/profile-pictures`, { cache: 'no-store' });
+                if (pRes.ok) {
+                  const pj = await pRes.json().catch(() => null);
+                  const list = Array.isArray(pj?.profilePictures) ? pj.profilePictures : [];
+                  if (list.length) dvVendor = { ...dvVendor, profilePictures: list };
+                }
+              }
+            } catch {}
+            setVendor(dvVendor);
+            const categoriesWithLinked = dv?.categories || null;
+            setCategoryTree(categoriesWithLinked);
+            if (dvVendor?.location) setLocation(dvVendor.location);
+            // Compute hero title/description for fallback dummy as well
+            try {
+              const trimOrNull = (v) => { const s = (v == null) ? '' : String(v); const t = s.trim(); return t ? t : null; };
+              const firstNonEmpty = (arr) => Array.isArray(arr) ? arr.map(trimOrNull).find(Boolean) || null : null;
+              // Try to fetch the exact dummy category to read its freeTexts if tree doesn't have it
+              let dummyCat = null;
+              try {
+                const r = await fetch(`/api/dummy-categories/${categoryId}`, { cache: 'no-store' });
+                if (r.ok) dummyCat = await r.json();
+              } catch {}
+              const rawCatFT = (categoriesWithLinked && categoriesWithLinked.freeTexts)
+                ? categoriesWithLinked.freeTexts
+                : (Array.isArray(dummyCat?.freeTexts) ? dummyCat.freeTexts : []);
+              const catFT = (() => { try { const arr = Array.isArray(rawCatFT) ? rawCatFT : []; if (arr.length === 10 && (arr[0] == null || String(arr[0]).trim() === '') && (arr[1] != null && String(arr[1]).trim() !== '')) { return [...arr.slice(1), '']; } return arr; } catch { return Array.isArray(rawCatFT) ? rawCatFT : []; } })();
+              const rawVenFT = dvVendor?.freeTexts || []; const venFT = Array.isArray(rawVenFT) ? rawVenFT : [];
+              const titleFromCategory = trimOrNull(catFT[0]) || firstNonEmpty(catFT);
+              const descFromCategory = trimOrNull(catFT[1]) || firstNonEmpty(catFT);
+              const titleFromVendor = trimOrNull(venFT[0]) || trimOrNull(dvVendor?.customFields?.freeText1) || trimOrNull(dvVendor?.ui?.heroTitle) || firstNonEmpty(venFT);
+              const descFromVendor = trimOrNull(venFT[1]) || trimOrNull(dvVendor?.customFields?.freeText2) || trimOrNull(dvVendor?.ui?.heroDescription) || firstNonEmpty(venFT);
+              const q = router?.query || {};
+              const title = trimOrNull(q.ft1) || titleFromCategory || titleFromVendor || null;
+              const desc = trimOrNull(q.ft2) || descFromCategory || descFromVendor || null;
+              setHeroTitle(title); setHeroDescription(desc);
+            } catch {}
+            // Fetch dummy combos for this category (fallback path)
+            try {
+              const c1 = await fetch(`/api/dummy-combos?parentCategoryId=${categoryId}`, { cache: 'no-store' });
+              let list = await c1.json().catch(() => []);
+              if (!Array.isArray(list) || list.length === 0) {
+                try {
+                  const c2 = await fetch(`/api/dummy-combos/byParent/${categoryId}`, { cache: 'no-store' });
+                  list = await c2.json().catch(() => []);
+                } catch {}
+              }
+              setCombos(Array.isArray(list) ? list : []);
+            } catch { setCombos([]); }
+          } catch (e) {
+            setError(e?.message || 'Failed to load dummy vendor preview');
+            setCategoryTree(null);
           }
-        } catch {}
+        } else {
+          // Real vendor: load preview tree and meta
+          setVendor(vendorData);
+          const [categoryRes, locationRes, catMetaRes, serverTreeRes] = await Promise.all([
+            fetch(`/api/vendors/${vendorId}/preview/${categoryId}`, { cache: 'no-store' }),
+            fetch(`/api/vendors/${vendorId}/location`, { cache: 'no-store' }),
+            fetch(`/api/categories/${categoryId}`, { cache: 'no-store' }),
+            fetch(`/api/categories/${categoryId}/tree`, { cache: 'no-store' }),
+          ]);
 
-        setCategoryTree(categoriesWithLinked);
+          const categoryData = await categoryRes.json().catch(() => ({}));
+          const catMeta = await catMetaRes.json().catch(() => ({}));
+          const serverTree = await serverTreeRes.json().catch(() => null);
+          let locationData = null;
+          try { locationData = await locationRes.json(); } catch { locationData = null; }
 
-        // Derive hero title/description
-        try {
-          const trimOrNull = (v) => { const s = (v == null) ? '' : String(v); const t = s.trim(); return t ? t : null; };
-          const firstNonEmpty = (arr) => Array.isArray(arr) ? arr.map(trimOrNull).find(Boolean) || null : null;
-          const rawCatFT = (categoriesWithLinked && categoriesWithLinked.freeTexts) ? categoriesWithLinked.freeTexts : (catMeta && Array.isArray(catMeta.freeTexts)) ? catMeta.freeTexts : (categoryData && Array.isArray(categoryData.freeTexts)) ? categoryData.freeTexts : [];
-          const catFT = (() => { try { const arr = Array.isArray(rawCatFT) ? rawCatFT : []; if (arr.length === 10 && (arr[0] == null || String(arr[0]).trim() === '') && (arr[1] != null && String(arr[1]).trim() !== '')) { return [...arr.slice(1), '']; } return arr; } catch { return Array.isArray(rawCatFT) ? rawCatFT : []; } })();
-          const rawVenFT = vendorData?.freeTexts || []; const venFT = Array.isArray(rawVenFT) ? rawVenFT : [];
-          const titleFromCategory = trimOrNull(catFT[0]) || firstNonEmpty(catFT);
-          const descFromCategory = trimOrNull(catFT[1]) || firstNonEmpty(catFT);
-          const titleFromVendor = trimOrNull(venFT[0]) || trimOrNull(vendorData?.customFields?.freeText1) || trimOrNull(vendorData?.ui?.heroTitle) || firstNonEmpty(venFT);
-          const descFromVendor = trimOrNull(venFT[1]) || trimOrNull(vendorData?.customFields?.freeText2) || trimOrNull(vendorData?.ui?.heroDescription) || firstNonEmpty(venFT);
-          const titleFromUi = trimOrNull(catMeta?.ui?.heroTitle) || trimOrNull(categoryData?.customFields?.freeText1) || trimOrNull(categoryData?.ui?.heroTitle);
-          const descFromUi = trimOrNull(catMeta?.ui?.heroDescription) || trimOrNull(categoryData?.customFields?.freeText2) || trimOrNull(categoryData?.ui?.heroDescription);
-          const q = router?.query || {};
-          const title = trimOrNull(q.ft1) || titleFromCategory || titleFromVendor || titleFromUi || null;
-          const desc = trimOrNull(q.ft2) || descFromCategory || descFromVendor || descFromUi || null;
-          setHeroTitle(title); setHeroDescription(desc);
-        } catch {}
+          const linkedAttributes = (catMeta && catMeta.linkedAttributes) ? catMeta.linkedAttributes : {};
+          let categoriesWithLinked = categoryData?.categories ? { ...categoryData.categories, linkedAttributes } : null;
+          if (!categoriesWithLinked && serverTree && (serverTree._id || serverTree.id)) {
+            categoriesWithLinked = { ...serverTree, linkedAttributes };
+          }
 
-        // Packages/combos
-        try {
-          const combosRes = await fetch(`${API_BASE_URL}/api/combos?parentCategoryId=${categoryId}`, { cache: 'no-store' });
-          const combosData = await combosRes.json().catch(() => []);
-          setCombos(Array.isArray(combosData) ? combosData : []);
-        } catch { setCombos([]); }
+          try {
+            if (categoriesWithLinked && serverTree && (serverTree._id || serverTree.id)) {
+              const pickId = (n) => String(n?.id || n?._id || '');
+              const buildIndex = (root) => {
+                const idx = new Map();
+                const visit = (n) => { if (!n) return; const k = pickId(n); if (k) idx.set(k, n); (Array.isArray(n.children) ? n.children : []).forEach(visit); };
+                visit(serverTree); return idx; };
+              const serverIdx = buildIndex(serverTree);
+              const serverChildrenByParent = new Map();
+              const collectChildren = (n) => { if (!n) return; const pid = String(n._id || n.id || ''); if (Array.isArray(n.children)) serverChildrenByParent.set(pid, n.children); (n.children || []).forEach(collectChildren); };
+              collectChildren(serverTree);
+              const mergeFields = (dst, src) => { if (!dst || !src) return; if (Array.isArray(src.displayType)) dst.displayType = src.displayType; if (src.uiRules && typeof src.uiRules === 'object') dst.uiRules = src.uiRules; if (typeof src.imageUrl === 'string') dst.imageUrl = src.imageUrl; if (typeof src.iconUrl === 'string') dst.iconUrl = src.iconUrl; };
+              const overlay = (node, srcParent) => { if (!node) return; const k = pickId(node); let src = k ? serverIdx.get(k) : null; if (!src && srcParent) { const sibs = serverChildrenByParent.get(String(srcParent._id || srcParent.id || '')) || []; const byName = sibs.find((c) => String(c?.name || '').toLowerCase() === String(node?.name || '').toLowerCase()); if (byName) src = byName; } if (src) mergeFields(node, src); const nextSrcParent = src || srcParent; (Array.isArray(node.children) ? node.children : []).forEach((ch) => overlay(ch, nextSrcParent)); };
+              overlay(categoriesWithLinked, serverTree);
+            }
+          } catch {}
 
-        if (locationData?.success) setLocation(locationData.location);
-        else if (vendorData.location) setLocation(vendorData.location);
+          setCategoryTree(categoriesWithLinked);
+
+          try {
+            const trimOrNull = (v) => { const s = (v == null) ? '' : String(v); const t = s.trim(); return t ? t : null; };
+            const firstNonEmpty = (arr) => Array.isArray(arr) ? arr.map(trimOrNull).find(Boolean) || null : null;
+            const rawCatFT = (categoriesWithLinked && categoriesWithLinked.freeTexts) ? categoriesWithLinked.freeTexts : (catMeta && Array.isArray(catMeta.freeTexts)) ? catMeta.freeTexts : (categoryData && Array.isArray(categoryData.freeTexts)) ? categoryData.freeTexts : [];
+            const catFT = (() => { try { const arr = Array.isArray(rawCatFT) ? rawCatFT : []; if (arr.length === 10 && (arr[0] == null || String(arr[0]).trim() === '') && (arr[1] != null && String(arr[1]).trim() !== '')) { return [...arr.slice(1), '']; } return arr; } catch { return Array.isArray(rawCatFT) ? rawCatFT : []; } })();
+            const rawVenFT = vendorData?.freeTexts || []; const venFT = Array.isArray(rawVenFT) ? rawVenFT : [];
+            const titleFromCategory = trimOrNull(catFT[0]) || firstNonEmpty(catFT);
+            const descFromCategory = trimOrNull(catFT[1]) || firstNonEmpty(catFT);
+            const titleFromVendor = trimOrNull(venFT[0]) || trimOrNull(vendorData?.customFields?.freeText1) || trimOrNull(vendorData?.ui?.heroTitle) || firstNonEmpty(venFT);
+            const descFromVendor = trimOrNull(venFT[1]) || trimOrNull(vendorData?.customFields?.freeText2) || trimOrNull(vendorData?.ui?.heroDescription) || firstNonEmpty(venFT);
+            const titleFromUi =
+              trimOrNull(catMeta?.ui?.heroTitle) ||
+              trimOrNull(categoryData?.customFields?.freeText1) ||
+              trimOrNull(categoryData?.freeText1) ||
+              trimOrNull(categoryData?.ui?.heroTitle);
+            const descFromUi =
+              trimOrNull(catMeta?.ui?.heroDescription) ||
+              trimOrNull(categoryData?.customFields?.freeText2) ||
+              trimOrNull(categoryData?.freeText2) ||
+              trimOrNull(categoryData?.ui?.heroDescription);
+            const q = router?.query || {};
+            const title = trimOrNull(q.ft1) || titleFromCategory || titleFromVendor || titleFromUi || 'Welcome';
+            const desc = trimOrNull(q.ft2) || descFromCategory || descFromVendor || descFromUi || 'Discover our offerings';
+            setHeroTitle(title); setHeroDescription(desc);
+          } catch {}
+
+          try {
+            const combosRes = await fetch(`/api/combos?parentCategoryId=${categoryId}`, { cache: 'no-store' });
+            let combosData = await combosRes.json().catch(() => []);
+            if (!Array.isArray(combosData) || combosData.length === 0) {
+              // Fallback to dummy combos if real combos are empty
+              try {
+                const c1 = await fetch(`/api/dummy-combos?parentCategoryId=${categoryId}`, { cache: 'no-store' });
+                let list = await c1.json().catch(() => []);
+                if (!Array.isArray(list) || list.length === 0) {
+                  const c2 = await fetch(`/api/dummy-combos/byParent/${categoryId}`, { cache: 'no-store' });
+                  list = await c2.json().catch(() => []);
+                }
+                combosData = Array.isArray(list) ? list : [];
+              } catch {}
+            }
+            setCombos(Array.isArray(combosData) ? combosData : []);
+          } catch { setCombos([]); }
+
+          if (locationData?.success) setLocation(locationData.location);
+          else if (vendorData.location) setLocation(vendorData.location);
+        }
       }
     } catch (err) {
       setError(err.message || 'Something went wrong');
@@ -152,7 +281,7 @@ export default function PreviewPage() {
       setLoadingVendor(false);
       setLoadingCategories(false);
     }
-  }, [router.isReady, vendorId, categoryId]);
+  }, [router.isReady, vendorId, categoryId, mode]);
 
   useEffect(() => {
     fetchData();
@@ -325,6 +454,7 @@ export default function PreviewPage() {
     const [imgIdx, setImgIdx] = useState(0);
     const [extraRowImages, setExtraRowImages] = useState({}); // { [id]: string[] }
     // Build images for this card
+    const ASSET_PREFIX = (ASSET_BASE_URL && String(ASSET_BASE_URL)) || (API_BASE_URL && String(API_BASE_URL)) || '';
     const imagesForCard = (() => {
       try {
         const ids = [displayNode?.id, selectedParent?.id, node?.id].map((x) => String(x || ''));
@@ -335,12 +465,57 @@ export default function PreviewPage() {
           if (rows.length) { arr = rows.slice(0, 10); break; }
         }
         if (!arr.length && displayNode?.imageUrl) arr = [displayNode.imageUrl];
-        return arr.map((s) => String(s).startsWith('http') ? String(s) : `${ASSET_BASE_URL}${String(s)}`);
+        // If still empty, try any available vendor.rowImages across ids
+        if (!arr.length) {
+          try {
+            const all = vendor?.rowImages || {};
+            for (const k in all) {
+              const list = Array.isArray(all[k]) ? all[k] : [];
+              if (list.length) { arr = list.slice(0, 10); break; }
+            }
+          } catch {}
+        }
+        // Fallback to vendor profile pictures if still empty
+        if (!arr.length && Array.isArray(vendor?.profilePictures) && vendor.profilePictures.length) {
+          arr = vendor.profilePictures.slice(0, 10);
+        }
+        // If still empty and in dummy mode, try fetching dummy category's image/icon
+        if (!arr.length && String(mode || '').toLowerCase() === 'dummy') {
+          try {
+            const did = String(displayNode?.id || '');
+            if (did) {
+              // Synchronous fetch disabled inside IIFE; we cannot await here.
+              // Instead, enqueue an async fetch to populate extraRowImages so subsequent renders have data.
+              (async () => {
+                try {
+                  const r = await fetch(`/api/dummy-categories/${did}`, { cache: 'no-store' });
+                  if (r.ok) {
+                    const j = await r.json();
+                    const candidates = [];
+                    if (j?.imageUrl) candidates.push(j.imageUrl);
+                    if (j?.iconUrl) candidates.push(j.iconUrl);
+                    if (candidates.length) {
+                      setExtraRowImages((prev) => ({ ...(prev || {}), [did]: candidates }));
+                    }
+                  }
+                } catch {}
+              })();
+            }
+          } catch {}
+        }
+        return arr.map((s) => {
+          const str = String(s);
+          if (str.startsWith('http://') || str.startsWith('https://') || str.startsWith('data:')) return str;
+          return `${ASSET_PREFIX}${str}`;
+        });
       } catch { return []; }
     })();
     useEffect(() => { setImgIdx(0); }, [displayNode?.id, selectedParent?.id, node?.id, imagesForCard.length]);
 
-    // Lazy fetch row images if not present in vendor.rowImages
+    // Lazy fetch row images if not present in vendor.rowImages.
+    // We still attempt per-id fetches when vendor.rowImages/extraRowImages are empty,
+    // even if imagesForCard already has generic images (e.g., profilePictures),
+    // so row-specific images can replace generic ones.
     useEffect(() => {
       (async () => {
         try {
@@ -350,11 +525,21 @@ export default function PreviewPage() {
             const hasLocal = Array.isArray(vendor?.rowImages?.[id]) && vendor.rowImages[id].length > 0;
             const hasExtra = Array.isArray(extraRowImages?.[id]) && extraRowImages[id].length > 0;
             if (hasLocal || hasExtra) continue;
-            const res = await fetch(`${API_BASE_URL}/api/vendors/${vendorId}/rows/${id}/images`, { cache: 'no-store' });
-            if (!res.ok) continue;
-            const data = await res.json().catch(() => null);
+            const preferred = String(mode || '').toLowerCase() === 'dummy' ? ['dummy-vendors','vendors'] : ['vendors','dummy-vendors'];
+            let data = null;
+            for (const bp of preferred) {
+              try {
+                const res = await fetch(`${API_BASE_URL}/api/${bp}/${vendorId}/rows/${id}/images`, { cache: 'no-store' });
+                if (!res.ok) continue;
+                data = await res.json().catch(() => null);
+                break;
+              } catch {}
+            }
+            if (!data) continue;
             const imgs = Array.isArray(data?.images) ? data.images : [];
-            if (imgs.length) setExtraRowImages((prev) => ({ ...(prev||{}), [id]: imgs }));
+            if (imgs.length) {
+              setExtraRowImages((prev) => ({ ...(prev || {}), [id]: imgs }));
+            }
           }
         } catch {}
       })();
@@ -416,14 +601,37 @@ export default function PreviewPage() {
           {displayNode && (
             <div style={{ marginBottom: 12 }}>
               {(() => {
-                const resolvedPrice =
-                  (displayNode.vendorPrice ?? displayNode.price) ??
-                  (selectedParent?.vendorPrice ?? selectedParent?.price) ??
-                  (node.vendorPrice ?? node.price) ?? null;
-                if (resolvedPrice == null) return null;
-                return (
-                  <p style={{ color: "#059669", fontWeight: 600, margin: 0 }}>₹ {resolvedPrice}</p>
-                );
+                try {
+                  // Prefer inventory-based row price if available for current display target
+                  const catKey = String(categoryId || '');
+                  const inv = Array.isArray(vendor?.inventorySelections?.[catKey]) ? vendor.inventorySelections[catKey] : [];
+                  const ids = [displayNode?.id, selectedParent?.id, node?.id].map((x) => String(x || ''));
+                  let invPrice = null;
+                  inv.forEach((entry) => {
+                    if (invPrice != null) return;
+                    const pbr = (entry && entry.pricesByRow && typeof entry.pricesByRow === 'object') ? entry.pricesByRow : null;
+                    if (!pbr) return;
+                    // Strict preference: displayNode id > selectedParent id > node id
+                    for (const target of ids) {
+                      if (!target) continue;
+                      for (const [rk, val] of Object.entries(pbr)) {
+                        const parts = String(rk).split('|');
+                        if (parts.some((id) => String(id) === target)) {
+                          const num = Number(val);
+                          if (!Number.isNaN(num)) { invPrice = num; break; }
+                        }
+                      }
+                      if (invPrice != null) break;
+                    }
+                  });
+                  const nodePrice =
+                    (displayNode.vendorPrice ?? displayNode.price) ??
+                    (selectedParent?.vendorPrice ?? selectedParent?.price) ??
+                    (node.vendorPrice ?? node.price) ?? null;
+                  const resolvedPrice = (invPrice != null) ? invPrice : nodePrice;
+                  if (resolvedPrice == null) return null;
+                  return (<p style={{ color: "#059669", fontWeight: 600, margin: 0 }}>₹ {resolvedPrice}</p>);
+                } catch { return null; }
               })()}
               {(() => {
                 const resolvedTerms = displayNode.terms || selectedParent?.terms || node.terms || "";
@@ -437,6 +645,149 @@ export default function PreviewPage() {
                     ))}
                   </ul>
                 );
+              })()}
+              {(() => {
+                try {
+                  const linked = (categoryTree && categoryTree.linkedAttributes && typeof categoryTree.linkedAttributes === 'object') ? categoryTree.linkedAttributes : {};
+                  // Build case-insensitive index of families from linkedAttributes
+                  const famIndex = new Map(); // famLower -> { base, fields, modelFields, linkedSub, specificSubs: Set }
+                  Object.keys(linked).forEach((k) => {
+                    const parts = String(k).split(':');
+                    const fam = parts[0] || '';
+                    const lower = String(fam || '').toLowerCase();
+                    const curr = famIndex.get(lower) || { base: fam, fields: [], modelFields: [], linkedSub: null, specificSubs: new Set() };
+                    const last = parts[parts.length - 1];
+                    if (parts.length === 1) {
+                      // e.g., 'cars' -> fields list
+                      curr.fields = Array.isArray(linked[k]) ? linked[k].map(String) : curr.fields;
+                    } else if (parts.length === 2 && parts[1] === 'modelFields') {
+                      curr.modelFields = Array.isArray(linked[k]) ? linked[k].map(String) : curr.modelFields;
+                    } else if (last === 'linkedSubcategory') {
+                      const raw = linked[k];
+                      const vals = Array.isArray(raw) ? raw.map((v) => String(v || '')) : [String(raw || '')];
+                      if (parts.length === 2) {
+                        // fam:linkedSubcategory -> family-level
+                        curr.linkedSub = vals[0] || '';
+                      } else {
+                        // fam:<something>:linkedSubcategory -> specific mapping for labels/inventory
+                        vals.forEach((v) => { if (v) curr.specificSubs.add(v); });
+                      }
+                    }
+                    famIndex.set(lower, curr);
+                  });
+                  // Families allowed to render with precedence: specific match > family-level match; treat 'ALL' as global only if no specific mappings exist
+                  const targetIds = [displayNode?.id, selectedParent?.id, node?.id].map((x) => String(x || ''));
+                  const familiesAllLower = new Set(
+                    Array.from(famIndex.entries())
+                      .filter(([, v]) => {
+                        // Specific mappings take precedence
+                        const hasSpecific = v.specificSubs && v.specificSubs.size > 0;
+                        if (hasSpecific) {
+                          return targetIds.some((tid) => tid && v.specificSubs.has(String(tid)));
+                        }
+                        // Then check family-level
+                        const ls = v.linkedSub;
+                        if (!ls) return false; // require explicit mapping
+                        if (ls === 'ALL') return true;
+                        return targetIds.some((tid) => tid && String(ls) === String(tid));
+                      })
+                      .map(([k]) => k)
+                  );
+                  const catKey = String(categoryId || '');
+                  const inv = Array.isArray(vendor?.inventorySelections?.[catKey]) ? vendor.inventorySelections[catKey] : [];
+                  // Do NOT auto-allow families not configured; they will render only if an explicit mapping exists
+                  // Now enforce subcategory mapping per entry using preferred order: fam:label:linkedSubcategory > fam:inventoryLabels:linkedSubcategory > fam:linkedSubcategory
+                  const entriesAll = inv.filter((e) => {
+                    const famLower = String(e?.scopeFamily || '').toLowerCase();
+                    if (!familiesAllLower.has(famLower)) return false;
+                    const fam = String(e?.scopeFamily || '');
+                    const label = String(e?.scopeLabel || '');
+                    const specificKey = `${fam}:${label}:linkedSubcategory`;
+                    const genericLabelKey = `${fam}:inventoryLabels:linkedSubcategory`;
+                    const familyKey = `${fam}:linkedSubcategory`;
+                    let mapped = undefined;
+                    if (Array.isArray(linked[specificKey]) && linked[specificKey].length) mapped = String(linked[specificKey][0] || '');
+                    else if (Array.isArray(linked[genericLabelKey]) && linked[genericLabelKey].length) mapped = String(linked[genericLabelKey][0] || '');
+                    else if (Array.isArray(linked[familyKey]) && linked[familyKey].length) mapped = String(linked[familyKey][0] || '');
+                    if (mapped === 'ALL') return true;
+                    if (!mapped) return false; // require explicit mapping to show
+                    return targetIds.some((tid) => tid && String(mapped) === String(tid));
+                  });
+                  // Prefer entries that have a pricesByRow targeting this card's node ids
+                  const entriesMatched = entriesAll.filter((entry) => {
+                    try {
+                      const pbr = entry && entry.pricesByRow && typeof entry.pricesByRow === 'object' ? entry.pricesByRow : null;
+                      if (!pbr) return false;
+                      for (const [rk] of Object.entries(pbr)) {
+                        const parts = String(rk).split('|');
+                        if (targetIds.some((tid) => tid && parts.some((id) => String(id) === tid))) return true;
+                      }
+                      return false;
+                    } catch { return false; }
+                  });
+                  const entries = entriesMatched.length > 0 ? entriesMatched : entriesAll;
+                  let blocks = entries.map((entry, idx) => {
+                    const fam = String(entry?.scopeFamily || '');
+                    const famLower = fam.toLowerCase();
+                    let sel = {};
+                    try {
+                      const sels = entry?.selections || {};
+                      if (sels && typeof sels === 'object') {
+                        if (sels[fam]) sel = sels[fam];
+                        else {
+                          const key = Object.keys(sels).find((k) => String(k).toLowerCase() === famLower);
+                          if (key) sel = sels[key];
+                        }
+                      }
+                    } catch { sel = {}; }
+                    // Normalize known alias keys per family
+                    if (famLower === 'bikes') {
+                      try {
+                        if (sel && sel.brand && !sel.bikeBrand) sel = { ...sel, bikeBrand: sel.brand };
+                      } catch {}
+                    }
+                    const conf = famIndex.get(famLower) || { fields: [], modelFields: [] };
+                    const allowed = new Set([...(conf.fields || []), ...(conf.modelFields || [])].map(String));
+                    let pairs = Object.entries(sel).filter(([k, v]) => {
+                      if (v == null || String(v).trim() === '') return false;
+                      return (allowed.size === 0 || allowed.has(String(k)));
+                    });
+                    // If nothing passed the allowed filter, fall back to all non-empty keys
+                    if (pairs.length === 0) {
+                      pairs = Object.entries(sel).filter(([k, v]) => v != null && String(v).trim() !== '');
+                    }
+                    return { key: entry._id || entry.at || idx, pairs };
+                  }).filter((b) => b.pairs.length > 0);
+                  // Fallback: if nothing matched, render first inventory selection raw pairs
+                  if (blocks.length === 0 && entriesAll.length > 0) {
+                    const first = entriesAll[0];
+                    const fam = String(first?.scopeFamily || '');
+                    const famLower = fam.toLowerCase();
+                    const sels = first?.selections || {};
+                    let sel = {};
+                    if (sels[fam]) sel = sels[fam];
+                    else {
+                      const key = Object.keys(sels).find((k) => String(k).toLowerCase() === famLower);
+                      if (key) sel = sels[key];
+                    }
+                    const pairs = Object.entries(sel).filter(([k, v]) => v != null && String(v).trim() !== '');
+                    if (pairs.length > 0) blocks = [{ key: first._id || first.at || 'first', pairs }];
+                  }
+                  if (blocks.length === 0) return null;
+                  return (
+                    <div style={{ border: '1px solid #e5e7eb', borderRadius: 10, padding: 10, background: '#f8fafc', marginTop: 8 }}>
+                      {blocks.map((b) => (
+                        <div key={b.key} style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))', gap: 6, marginBottom: 6 }}>
+                          {b.pairs.map(([k, v]) => (
+                            <div key={k} style={{ fontSize: 12, color: '#334155' }}>
+                              <span style={{ fontWeight: 600 }}>{String(k)}:</span> <span>{String(v)}</span>
+                            </div>
+                          ))}
+                        </div>
+                      ))}
+                    </div>
+                  );
+                } catch { return null; }
               })()}
             </div>
           )}
@@ -580,12 +931,24 @@ export default function PreviewPage() {
 
     // ... rest of the code remains the same ...
   const familiesByTarget = new Map();
+  // First pass: detect families that have any specific mappings (fam:*:linkedSubcategory)
+  const famHasSpecific = new Map(); // fam -> boolean
   Object.keys(linked).forEach((k) => {
     if (!k.endsWith(":linkedSubcategory")) return;
-    const fam = k.split(":")[0] || "";
+    const parts = String(k).split(":");
+    const fam = parts[0] || "";
+    if (parts.length > 2) famHasSpecific.set(fam, true);
+  });
+  // Second pass: add mappings, but ignore ALL for families that have specific mappings
+  Object.keys(linked).forEach((k) => {
+    if (!k.endsWith(":linkedSubcategory")) return;
+    const parts = String(k).split(":");
+    const fam = parts[0] || "";
     const raw = linked[k];
     const val = Array.isArray(raw) ? String(raw[0] || "") : String(raw || "");
-    const key = val || "ALL";
+    if (!val) return; // require explicit mapping
+    if (parts.length === 2 && val === "ALL" && famHasSpecific.get(fam)) return; // ignore ALL when specific exists
+    const key = val === "ALL" ? "ALL" : val;
     if (!familiesByTarget.has(key)) familiesByTarget.set(key, new Set());
     familiesByTarget.get(key).add(fam);
   });
@@ -757,16 +1120,32 @@ export default function PreviewPage() {
       } catch { return null; }
     };
 
-    // Local helper: compute min price in subtree for sorting before global is declared
+    // Local helper: compute min price in subtree including inventory pricesByRow for this node id
     const localMinPriceInSubtree = (n) => {
       let best = null;
+      const catKey = String(categoryId || '');
+      const consider = (val) => {
+        if (val == null) return;
+        const num = Number(val);
+        if (!Number.isNaN(num) && (best == null || num < best)) best = num;
+      };
       const visit = (x) => {
         if (!x) return;
-        const p = x.vendorPrice ?? x.price;
-        if (p != null) {
-          const num = Number(p);
-          if (!Number.isNaN(num) && (best == null || num < best)) best = num;
-        }
+        // Consider node/vendor price on the node
+        consider(x.vendorPrice ?? x.price);
+        // Consider inventory per-row prices targeting this node id
+        try {
+          const idStr = String(x.id || '');
+          const inv = Array.isArray(vendor?.inventorySelections?.[catKey]) ? vendor.inventorySelections[catKey] : [];
+          inv.forEach((entry) => {
+            const pbr = entry && entry.pricesByRow && typeof entry.pricesByRow === 'object' ? entry.pricesByRow : null;
+            if (!pbr) return;
+            for (const [rk, val] of Object.entries(pbr)) {
+              const parts = String(rk).split('|');
+              if (parts.some((pid) => String(pid) === idStr)) { consider(val); }
+            }
+          });
+        } catch {}
         if (Array.isArray(x.children) && x.children.length) x.children.forEach(visit);
       };
       visit(n);
@@ -818,11 +1197,18 @@ export default function PreviewPage() {
       const belongsToLvl1 = (entry) => {
         try {
           const lvl1Id = String(lvl1?.id || '');
-          const famSet = familiesByTarget.get(lvl1Id);
-          if (famSet) {
-            const fam = String(entry?.scopeFamily || '');
-            if (fam && !famSet.has(fam)) return false;
-          }
+          const fam = String(entry?.scopeFamily || '');
+          const famSetForLvl1 = familiesByTarget.get(lvl1Id);
+          const famSetAll = familiesByTarget.get('ALL');
+
+          // Require explicit mapping: either mapped to this lvl1 or mapped via ALL
+          const isExplicitlyAllowed = (
+            (famSetForLvl1 && famSetForLvl1.has(fam)) ||
+            (famSetAll && famSetAll.has(fam))
+          );
+          if (!isExplicitlyAllowed) return false;
+
+          // Additionally, if pricesByRow targets this lvl1, keep it. If pricesByRow exists but doesn't target, exclude.
           const pbr = entry?.pricesByRow;
           if (pbr && typeof pbr === 'object') {
             for (const key of Object.keys(pbr)) {
@@ -832,7 +1218,7 @@ export default function PreviewPage() {
             return false;
           }
           return true;
-        } catch { return true; }
+        } catch { return false; }
       };
 
       const normalizedForLvl1 = normalized.filter((n) => belongsToLvl1(n.entry));
@@ -1044,8 +1430,33 @@ export default function PreviewPage() {
                     const rows = Array.isArray(vendor?.rowImages?.[targetId]) ? vendor.rowImages[targetId] : [];
                     if (rows.length) images = rows.slice(0, 10);
                   }
-                  if (!images.length && displayNode?.imageUrl) images = [displayNode.imageUrl];
-                  const normImgs = images.map((s) => String(s).startsWith('http') ? String(s) : `${ASSET_BASE_URL}${String(s)}`);
+                  if (!images.length) {
+                    try {
+                      const all = vendor?.rowImages || {};
+                      for (const k in all) {
+                        const rows = Array.isArray(all[k]) ? all[k] : [];
+                        if (rows.length) { images = rows.slice(0, 10); break; }
+                      }
+                    } catch {}
+                  }
+                  if (!images.length && displayNode?.imageUrl) images.push(displayNode.imageUrl);
+                  // As a last resort, if no exact row images or inline image, try any rowImages from vendor
+                  if (!images.length) {
+                    try {
+                      const all = vendor?.rowImages || {};
+                      for (const k in all) {
+                        if (Array.isArray(all[k]) && all[k].length) { images = images.concat(all[k].slice(0, 10)); break; }
+                      }
+                    } catch {}
+                  }
+                  if (!images.length && Array.isArray(vendor?.profilePictures) && vendor.profilePictures.length) {
+                    images = images.concat(vendor.profilePictures.slice(0, 10));
+                  }
+                  const normImgs = images.map((s) => {
+                    const str = String(s);
+                    if (str.startsWith('http://') || str.startsWith('https://') || str.startsWith('data:')) return str;
+                    return `${ASSET_BASE_URL}${str}`;
+                  });
                   if (!normImgs.length) return <div />;
                   const idx = Number(invImgIdx[targetId] || 0) % normImgs.length;
                   return (
@@ -1412,7 +1823,14 @@ export default function PreviewPage() {
                         if (rows.length) images = rows.slice(0, 10);
                       }
                       if (!images.length && displayNode?.imageUrl) images = [displayNode.imageUrl];
-                      const normImgs = images.map((s) => String(s).startsWith('http') ? String(s) : `${ASSET_BASE_URL}${String(s)}`);
+                      if (!images.length && Array.isArray(vendor?.profilePictures) && vendor.profilePictures.length) {
+                        images = vendor.profilePictures.slice(0, 10);
+                      }
+                      const normImgs = images.map((s) => {
+                        const str = String(s);
+                        if (str.startsWith('http://') || str.startsWith('https://') || str.startsWith('data:')) return str;
+                        return `${ASSET_BASE_URL}${str}`;
+                      });
                       if (!normImgs.length) return <div />;
                       const idx = Number(invImgIdx[targetId] || 0) % normImgs.length;
                       return (
@@ -1900,6 +2318,7 @@ export default function PreviewPage() {
                 )
               ];
             }
+            
             // If ALL children are leaves, render a single parent card with inline buttons (sizes)
             const allKidsAreLeaves = kidsTop.length > 0 && kidsTop.every((k) => !Array.isArray(k.children) || k.children.length === 0);
             if (allKidsAreLeaves) {
@@ -1974,7 +2393,7 @@ export default function PreviewPage() {
           <main id="products" style={{ padding: "20px", marginTop: "10px" }}>
             {Array.isArray(combos) && combos.length > 0 ? (
               <section style={{ marginBottom: 8 }}>
-                <h2 style={{ margin: '0 0 10px 0' }}>Packages</h2>
+                {/* <h2 style={{ margin: '0 0 10px 0' }}>Packages</h2> */}
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: "16px", alignItems: 'stretch', justifyContent: 'center' }}>
                   {combos.map((combo, idx) => {
                     const name = combo?.name || 'Package';
@@ -1993,11 +2412,35 @@ export default function PreviewPage() {
                         });
                       });
                     } catch {}
-                    // Build includes label and sizes list
+                    // Build includes label from parent services (Step 2 selections)
                     const includesLabel = (() => {
                       try {
-                        const labels = items.map((it) => it?.name || (it?.kind === 'custom' ? 'Custom' : 'Service')).filter(Boolean);
-                        return labels.join(', ');
+                        const pickId = (n) => String(n?.id || n?._id || '');
+                        const findParentName = (node, targetId, parentName = '') => {
+                          if (!node) return '';
+                          const id = pickId(node);
+                          if (id === String(targetId)) return parentName || '';
+                          const children = Array.isArray(node.children) ? node.children : [];
+                          for (const ch of children) {
+                            const res = findParentName(ch, targetId, node?.name || parentName || '');
+                            if (res) return res;
+                          }
+                          return '';
+                        };
+                        const seen = new Set();
+                        const names = [];
+                        items.forEach((it) => {
+                          let nm = '';
+                          if (it?.kind === 'custom') nm = it?.name || 'Custom';
+                          else if (it?.categoryId) {
+                            const pidName = findParentName(categoryTree, String(it.categoryId));
+                            nm = pidName || 'Service';
+                          }
+                          nm = String(nm || '').trim();
+                          const key = nm.toLowerCase();
+                          if (nm && !seen.has(key)) { seen.add(key); names.push(nm); }
+                        });
+                        return names.join(', ');
                       } catch { return ''; }
                     })();
                     const sizes = (() => {
@@ -2102,7 +2545,7 @@ export default function PreviewPage() {
                 </div>
               </section>
             ) : null}
-            <h2 style={{ margin: '0', padding: '0 0 10px 0' }}>Individuals</h2>
+            {/* <h2 style={{ margin: '0', padding: '0 0 10px 0' }}>Individuals</h2> */}
             {renderTree(categoryTree)}
           </main>
           <BenefitsSection />

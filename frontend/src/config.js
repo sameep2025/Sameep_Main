@@ -9,9 +9,17 @@ const API_BASE_URL = (() => {
   if (ENV_URL && typeof ENV_URL === "string" && ENV_URL.trim()) {
     return ENV_URL.trim().replace(/\/$/, "");
   }
-  return process.env.NODE_ENV === "development"
-    ? "http://localhost:5000"
-    : "/api";
+  try {
+    const loc = typeof window !== 'undefined' ? window.location : null;
+    const host = loc ? loc.hostname : '';
+    const port = loc ? String(loc.port || '') : '';
+    if (host === 'localhost' || host === '127.0.0.1') {
+      // If running the frontend on :3001 dev server, prefer Next proxy on :3000 to avoid CORS
+      if (port === '3001') return "http://localhost:3000";
+      return "http://localhost:5000";
+    }
+  } catch {}
+  return process.env.NODE_ENV === "development" ? "http://localhost:5000" : "/api";
 })();
 
 export default API_BASE_URL;

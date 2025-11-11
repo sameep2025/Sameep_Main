@@ -3,8 +3,178 @@ const mongoose = require("mongoose");
 const DummyVendor = require("../models/DummyVendor");
 const DummyCategory = require("../models/dummyCategory");
 const DummySubcategory = require("../models/dummySubcategory");
+const multer = require("multer");
+const path = require("path");
 
 const router = express.Router();
+
+// Multer setup for dummy vendor images
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => cb(null, "uploads/"),
+  filename: (req, file, cb) => cb(null, Date.now() + "-dummyvendor-" + Math.round(Math.random() * 1e9) + path.extname(file.originalname)),
+});
+const upload = multer({ storage });
+
+/** Non-inventory row images per category node (Dummy Vendor) **/
+// Append up to 5 images for a category leaf node (row)
+router.post("/:vendorId/rows/:nodeId/images", upload.array("images", 5), async (req, res) => {
+  try {
+    const { vendorId, nodeId } = req.params;
+    const vendor = await DummyVendor.findById(vendorId);
+    if (!vendor) return res.status(404).json({ message: "Vendor not found" });
+    const urls = (req.files || []).map((f) => `/uploads/${f.filename}`);
+    const current = Array.isArray(vendor.rowImages?.[nodeId]) ? vendor.rowImages[nodeId] : [];
+    const next = [...current, ...urls].slice(0, 5);
+    vendor.rowImages = { ...(vendor.rowImages || {}), [nodeId]: next };
+    vendor.markModified('rowImages');
+    await vendor.save();
+    res.json({ success: true, images: vendor.rowImages[nodeId] });
+  } catch (err) {
+    console.error("Append dummy row images error:", err);
+    res.status(500).json({ message: "Server error", error: err.message });
+  }
+});
+
+// Replace specific image by index for a row
+router.put("/:vendorId/rows/:nodeId/images/:index", upload.single("image"), async (req, res) => {
+  try {
+    const { vendorId, nodeId, index } = req.params;
+    const idxNum = Number(index);
+    const vendor = await DummyVendor.findById(vendorId);
+    if (!vendor) return res.status(404).json({ message: "Vendor not found" });
+    const arr = Array.isArray(vendor.rowImages?.[nodeId]) ? vendor.rowImages[nodeId] : [];
+    if (!req.file) return res.status(400).json({ message: "image file required" });
+    if (idxNum < 0 || idxNum >= arr.length) return res.status(400).json({ message: "Invalid index" });
+    arr[idxNum] = `/uploads/${req.file.filename}`;
+    vendor.rowImages = { ...(vendor.rowImages || {}), [nodeId]: arr };
+    vendor.markModified('rowImages');
+    await vendor.save();
+    res.json({ success: true, images: vendor.rowImages[nodeId] });
+  } catch (err) {
+    console.error("Replace dummy row image error:", err);
+    res.status(500).json({ message: "Server error", error: err.message });
+  }
+});
+
+// Delete image by index for a row
+router.delete("/:vendorId/rows/:nodeId/images/:index", async (req, res) => {
+  try {
+    const { vendorId, nodeId, index } = req.params;
+    const idxNum = Number(index);
+    const vendor = await DummyVendor.findById(vendorId);
+    if (!vendor) return res.status(404).json({ message: "Vendor not found" });
+    const arr = Array.isArray(vendor.rowImages?.[nodeId]) ? vendor.rowImages[nodeId] : [];
+    if (idxNum < 0 || idxNum >= arr.length) return res.status(400).json({ message: "Invalid index" });
+    arr.splice(idxNum, 1);
+    vendor.rowImages = { ...(vendor.rowImages || {}), [nodeId]: arr };
+    vendor.markModified('rowImages');
+    await vendor.save();
+    res.json({ success: true, images: vendor.rowImages[nodeId] });
+  } catch (err) {
+    console.error("Delete dummy row image error:", err);
+    res.status(500).json({ message: "Server error", error: err.message });
+  }
+});
+
+// Get all images for a non-inventory row (category node)
+router.get("/:vendorId/rows/:nodeId/images", async (req, res) => {
+  try {
+    const { vendorId, nodeId } = req.params;
+    const vendor = await DummyVendor.findById(vendorId);
+    if (!vendor) return res.status(404).json({ message: "Vendor not found" });
+    const arr = Array.isArray(vendor.rowImages?.[nodeId]) ? vendor.rowImages[nodeId] : [];
+    res.json({ success: true, images: arr });
+  } catch (err) {
+    console.error("Get dummy row images error:", err);
+    res.status(500).json({ message: "Server error", error: err.message });
+  }
+});
+
+/** Inventory entry images (per item in dummy vendor inventorySelections[categoryId]) **/
+// Append up to 5 images for a given inventory entry (key can be _id or at)
+router.post("/:vendorId/inventory/:categoryId/:entryKey/images", upload.array("images", 5), async (req, res) => {
+  try {
+    const { vendorId, categoryId, entryKey } = req.params;
+    const vendor = await DummyVendor.findById(vendorId);
+    if (!vendor) return res.status(404).json({ message: "Vendor not found" });
+    const list = Array.isArray(vendor.inventorySelections?.[categoryId]) ? vendor.inventorySelections[categoryId] : [];
+    const idx = list.findIndex((it) => String(it._id || it.at) === String(entryKey));
+    if (idx < 0) return res.status(404).json({ message: "Inventory entry not found" });
+    const urls = (req.files || []).map((f) => `/uploads/${f.filename}`);
+    const current = Array.isArray(list[idx].images) ? list[idx].images : [];
+    list[idx].images = [...current, ...urls].slice(0, 5);
+    vendor.markModified('inventorySelections');
+    await vendor.save();
+    res.json({ success: true, images: list[idx].images });
+  } catch (err) {
+    console.error("Append dummy inventory images error:", err);
+    res.status(500).json({ message: "Server error", error: err.message });
+  }
+});
+
+// Replace specific image by index for an inventory entry
+router.put("/:vendorId/inventory/:categoryId/:entryKey/images/:index", upload.single("image"), async (req, res) => {
+  try {
+    const { vendorId, categoryId, entryKey, index } = req.params;
+    const idxNum = Number(index);
+    const vendor = await DummyVendor.findById(vendorId);
+    if (!vendor) return res.status(404).json({ message: "Vendor not found" });
+    const list = Array.isArray(vendor.inventorySelections?.[categoryId]) ? vendor.inventorySelections[categoryId] : [];
+    const i = list.findIndex((it) => String(it._id || it.at) === String(entryKey));
+    if (i < 0) return res.status(404).json({ message: "Inventory entry not found" });
+    if (!req.file) return res.status(400).json({ message: "image file required" });
+    const arr = Array.isArray(list[i].images) ? list[i].images : [];
+    if (idxNum < 0 || idxNum >= arr.length) return res.status(400).json({ message: "Invalid index" });
+    arr[idxNum] = `/uploads/${req.file.filename}`;
+    list[i].images = arr;
+    vendor.markModified('inventorySelections');
+    await vendor.save();
+    res.json({ success: true, images: list[i].images });
+  } catch (err) {
+    console.error("Replace dummy inventory image error:", err);
+    res.status(500).json({ message: "Server error", error: err.message });
+  }
+});
+
+// Delete image by index for an inventory entry
+router.delete("/:vendorId/inventory/:categoryId/:entryKey/images/:index", async (req, res) => {
+  try {
+    const { vendorId, categoryId, entryKey, index } = req.params;
+    const idxNum = Number(index);
+    const vendor = await DummyVendor.findById(vendorId);
+    if (!vendor) return res.status(404).json({ message: "Vendor not found" });
+    const list = Array.isArray(vendor.inventorySelections?.[categoryId]) ? vendor.inventorySelections[categoryId] : [];
+    const i = list.findIndex((it) => String(it._id || it.at) === String(entryKey));
+    if (i < 0) return res.status(404).json({ message: "Inventory entry not found" });
+    const arr = Array.isArray(list[i].images) ? list[i].images : [];
+    if (idxNum < 0 || idxNum >= arr.length) return res.status(400).json({ message: "Invalid index" });
+    arr.splice(idxNum, 1);
+    list[i].images = arr;
+    vendor.markModified('inventorySelections');
+    await vendor.save();
+    res.json({ success: true, images: list[i].images });
+  } catch (err) {
+    console.error("Delete dummy inventory image error:", err);
+    res.status(500).json({ message: "Server error", error: err.message });
+  }
+});
+
+// Get all images for an inventory entry
+router.get("/:vendorId/inventory/:categoryId/:entryKey/images", async (req, res) => {
+  try {
+    const { vendorId, categoryId, entryKey } = req.params;
+    const vendor = await DummyVendor.findById(vendorId);
+    if (!vendor) return res.status(404).json({ message: "Vendor not found" });
+    const list = Array.isArray(vendor.inventorySelections?.[categoryId]) ? vendor.inventorySelections[categoryId] : [];
+    const idx = list.findIndex((it) => String(it._id || it.at) === String(entryKey));
+    if (idx < 0) return res.status(404).json({ message: "Inventory entry not found" });
+    const arr = Array.isArray(list[idx].images) ? list[idx].images : [];
+    res.json({ success: true, images: arr });
+  } catch (err) {
+    console.error("Get dummy inventory images error:", err);
+    res.status(500).json({ message: "Server error", error: err.message });
+  }
+});
 
 // Create dummy vendor
 router.post("/", async (req, res) => {
@@ -32,6 +202,59 @@ router.post("/", async (req, res) => {
     res.status(201).json(vendor);
   } catch (err) {
     console.error("POST /dummy-vendors error:", err);
+    res.status(500).json({ message: "Server error" });
+  }
+});
+
+// GET single dummy vendor
+router.get("/:vendorId", async (req, res) => {
+  try {
+    const { vendorId } = req.params;
+    if (!mongoose.Types.ObjectId.isValid(vendorId)) {
+      return res.status(400).json({ message: "Invalid vendorId" });
+    }
+    const v = await DummyVendor.findById(vendorId).lean();
+    if (!v) return res.status(404).json({ message: "Vendor not found" });
+    return res.json(v);
+  } catch (err) {
+    console.error("GET /dummy-vendors/:vendorId error:", err);
+    res.status(500).json({ message: "Server error" });
+  }
+});
+
+// PUT update dummy vendor (supports inventorySelections merge)
+router.put("/:vendorId", async (req, res) => {
+  try {
+    const { vendorId } = req.params;
+    if (!mongoose.Types.ObjectId.isValid(vendorId)) {
+      return res.status(400).json({ message: "Invalid vendorId" });
+    }
+
+    const update = { ...req.body };
+
+    // Merge inventorySelections if provided as object
+    if (update && typeof update.inventorySelections === 'object' && update.inventorySelections !== null) {
+      const vdoc = await DummyVendor.findById(vendorId);
+      if (!vdoc) return res.status(404).json({ message: "Vendor not found" });
+      const existing = (vdoc.inventorySelections && typeof vdoc.inventorySelections === 'object') ? vdoc.inventorySelections : {};
+      vdoc.inventorySelections = { ...existing, ...update.inventorySelections };
+      // Allow updating a few other simple fields too
+      ["businessName","contactName","phone","status","location","businessHours","profilePictures","rowImages"].forEach((k) => {
+        if (update[k] !== undefined) vdoc[k] = update[k];
+      });
+      await vdoc.save();
+      return res.json(vdoc.toObject());
+    }
+
+    const v = await DummyVendor.findByIdAndUpdate(
+      vendorId,
+      { $set: update },
+      { new: true }
+    ).lean();
+    if (!v) return res.status(404).json({ message: "Vendor not found" });
+    return res.json(v);
+  } catch (err) {
+    console.error("PUT /dummy-vendors/:vendorId error:", err);
     res.status(500).json({ message: "Server error" });
   }
 });

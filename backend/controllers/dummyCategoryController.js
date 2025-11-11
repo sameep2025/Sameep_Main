@@ -124,8 +124,6 @@ exports.createCategory = async (req, res) => {
     // Create subcategory under given parent (category or subcategory)
     const parentCat = await DummyCategory.findById(parentId);
     if (parentCat) {
-      const dup = await DummySubcategory.findOne({ name, category: parentId, parentSubcategory: null });
-      if (dup) return res.status(400).json({ message: "Subcategory already exists under this category" });
       const subcategory = new DummySubcategory({
         name,
         imageUrl,
@@ -147,8 +145,6 @@ exports.createCategory = async (req, res) => {
     if (parentSub) {
       // Nested child under a subcategory: inherit top-level category id
       const topCategoryId = parentSub.category;
-      const dup = await DummySubcategory.findOne({ name, category: topCategoryId, parentSubcategory: parentId });
-      if (dup) return res.status(400).json({ message: "Subcategory already exists under this subcategory" });
       const subcategory = new DummySubcategory({
         name,
         imageUrl,
