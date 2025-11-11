@@ -21,10 +21,11 @@ export default function DummyVendorStatusListPage() {
     } catch {}
     return '';
   })();
-  // Prefer Next proxy on :3000 when running the React app on :3001, otherwise:
-  // - When hosted (go-kar.net), use same-origin '' (Next/site proxy handles /api)
-  // - Else use API_BASE_URL directly (e.g., http://localhost:5000 or http://localhost:3000)
-  const API_PREFIX = devProxy || (isHosted ? '' : API_BASE_URL);
+  // Prefer:
+  // - devProxy to Next on :3000 when running React app on :3001
+  // - API_BASE_URL when provided (works in hosted deployments without relying on same-origin proxy)
+  // - '' as a last resort (same-origin) only if neither devProxy nor API_BASE_URL is set
+  const API_PREFIX = devProxy || (API_BASE_URL && String(API_BASE_URL).trim()) || '';
   const [activeVendor, setActiveVendor] = useState(null);
   const [showPicker, setShowPicker] = useState(false);
   const [showNearby, setShowNearby] = useState(false);
