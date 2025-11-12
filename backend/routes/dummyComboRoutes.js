@@ -1,12 +1,13 @@
 const express = require("express");
 const mongoose = require("mongoose");
 const multer = require("multer");
+const { uploadBufferToS3 } = require("../utils/s3Upload");
 const DummyCombo = require("../models/dummyCombo");
 const DummyCategory = require("../models/dummyCategory");
 
 const router = express.Router();
 
-const upload = multer({ dest: "uploads/" });
+const upload = multer({ storage: multer.memoryStorage() });
 const uploadAny = upload.any();
 
 async function validateAllowedCategoryItems(items) {
@@ -60,8 +61,14 @@ router.post("/", uploadAny, async (req, res) => {
     const findFile = (field) => files.find((f) => f.fieldname === field);
     const iconFile = findFile('icon');
     const imageFile = findFile('image');
-    if (iconFile) iconUrl = `/uploads/${iconFile.filename}`;
-    if (imageFile) imageUrl = `/uploads/${imageFile.filename}`;
+    if (iconFile && iconFile.buffer && iconFile.mimetype) {
+      const uploaded = await uploadBufferToS3(iconFile.buffer, iconFile.mimetype, 'newcategory');
+      iconUrl = uploaded.url;
+    }
+    if (imageFile && imageFile.buffer && imageFile.mimetype) {
+      const uploaded = await uploadBufferToS3(imageFile.buffer, imageFile.mimetype, 'newcategory');
+      imageUrl = uploaded.url;
+    }
 
     if (!name || !parentCategoryId || !type) {
       return res.status(400).json({ message: "name, parentCategoryId, and type are required" });
@@ -84,17 +91,20 @@ router.post("/", uploadAny, async (req, res) => {
     }
 
     if (Array.isArray(items)) {
-      files.forEach((f) => {
-        if (!f.fieldname?.startsWith('variant_')) return;
+      for (const f of files) {
+        if (!f.fieldname?.startsWith('variant_')) continue;
         const parts = f.fieldname.split('_');
         const i = Number(parts[1]);
         const j = Number(parts[2]);
         if (Number.isInteger(i) && Number.isInteger(j) && items[i]) {
           if (!Array.isArray(items[i].variants)) items[i].variants = [];
           if (!items[i].variants[j]) items[i].variants[j] = { size: (items[i].sizeOptions||[])[j] || '', price: null, terms: '', imageUrl: '' };
-          items[i].variants[j].imageUrl = `/uploads/${f.filename}`;
+          if (f.buffer && f.mimetype) {
+            const uploaded = await uploadBufferToS3(f.buffer, f.mimetype, 'newcategory');
+            items[i].variants[j].imageUrl = uploaded.url;
+          }
         }
-      });
+      }
     }
 
     const ok = await validateAllowedCategoryItems(items);

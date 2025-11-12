@@ -1,7 +1,9 @@
 const express = require("express");
 const multer = require("multer");
+
 const router = express.Router();
-const upload = multer({ dest: "uploads/" });
+const upload = multer({ storage: multer.memoryStorage() });
+
 const uploadFields = upload.fields([
   { name: "image", maxCount: 1 },
   { name: "icon", maxCount: 1 },

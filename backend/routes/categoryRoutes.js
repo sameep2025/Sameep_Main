@@ -1,9 +1,10 @@
 const express = require("express");
 const multer = require("multer");
 const Category = require("../models/Category");
+const { uploadBufferToS3, deleteS3ObjectByUrl } = require("../utils/s3Upload");
 const router = express.Router();
 
-const upload = multer({ dest: "uploads/" });
+const upload = multer({ storage: multer.memoryStorage() });
 const uploadFields = upload.fields([
   { name: "image", maxCount: 1 },
   { name: "icon", maxCount: 1 },
@@ -78,8 +79,16 @@ router.post("/", upload.single("image"), async (req, res) => {
       loyaltyPoints: req.body.loyaltyPoints === "true",
       postRequestsDeals: req.body.postRequestsDeals === "true",
       inventoryLabelName: req.body.inventoryLabelName || "",
-      imageUrl: req.file ? `/uploads/${req.file.filename}` : undefined,
     };
+    // Upload image to S3 if provided
+    if (req.file && req.file.buffer && req.file.mimetype) {
+      try {
+        const { url } = await uploadBufferToS3(req.file.buffer, req.file.mimetype, "category");
+        categoryData.imageUrl = url;
+      } catch (e) {
+        return res.status(500).json({ message: "Failed to upload image to S3", error: e.message });
+      }
+    }
 
     // ✅ Persist 10 Free Text inputs for parent categories on create
     if (parent === null) {
@@ -247,7 +256,7 @@ router.get("/:id/leaf", async (req, res) => {
 });
 
 /* ---------------- UPDATE CATEGORY ---------------- */
-router.put("/:id", upload.single("image"), async (req, res) => {
+router.put("/:id", uploadFields, async (req, res) => {
   logApi(req, res, "update-category");
   try {
     const category = await Category.findById(req.params.id);
@@ -329,7 +338,27 @@ router.put("/:id", upload.single("image"), async (req, res) => {
     }
 
 
-    if (req.file) category.imageUrl = `/uploads/${req.file.filename}`;
+    // Handle image/icon uploads to S3 if provided
+    const imageFile = req.files && Array.isArray(req.files.image) ? req.files.image[0] : null;
+    const iconFile = req.files && Array.isArray(req.files.icon) ? req.files.icon[0] : null;
+    if (imageFile && imageFile.buffer && imageFile.mimetype) {
+      try {
+        if (category.imageUrl) { try { await deleteS3ObjectByUrl(category.imageUrl); } catch {} }
+        const { url } = await uploadBufferToS3(imageFile.buffer, imageFile.mimetype, "category");
+        category.imageUrl = url;
+      } catch (e) {
+        return res.status(500).json({ message: "Failed to upload image to S3", error: e.message });
+      }
+    }
+    if (iconFile && iconFile.buffer && iconFile.mimetype) {
+      try {
+        if (category.iconUrl) { try { await deleteS3ObjectByUrl(category.iconUrl); } catch {} }
+        const { url } = await uploadBufferToS3(iconFile.buffer, iconFile.mimetype, "category");
+        category.iconUrl = url;
+      } catch (e) {
+        return res.status(500).json({ message: "Failed to upload icon to S3", error: e.message });
+      }
+    }
     // Update color schemes if provided
     if (req.body.colorSchemes) {
       try {
@@ -372,8 +401,14 @@ router.put("/:id", upload.single("image"), async (req, res) => {
 router.delete("/:id", async (req, res) => {
   logApi(req, res, "delete-category");
   try {
-    await Category.findByIdAndDelete(req.params.id);
-    res.json({ message: "Category deleted" });
+    const doc = await Category.findById(req.params.id);
+    if (doc) {
+      if (doc.imageUrl) { try { await deleteS3ObjectByUrl(doc.imageUrl); } catch {} }
+      if (doc.iconUrl) { try { await deleteS3ObjectByUrl(doc.iconUrl); } catch {} }
+      await Category.findByIdAndDelete(req.params.id);
+      return res.json({ message: "Category deleted" });
+    }
+    res.status(404).json({ message: "Category not found" });
   } catch (err) {
     res.status(500).json({ message: err.message || "Server error" });
   }

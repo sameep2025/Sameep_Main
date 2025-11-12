@@ -663,7 +663,7 @@ const [subcategoryNameById, setSubcategoryNameById] = useState({});
             style={{ ...inputStyle, fontWeight: "600", color: "#0078d7" }}
           />
           <h4 style={labelStyle}>Upload Category Image</h4>
-          {initialData?.image && !image && (
+          {initialData?.imageUrl && !image && (
             <div style={{ textAlign: "center", marginBottom: "10px" }}>
               <img
                 src={initialData.imageUrl.startsWith("http")

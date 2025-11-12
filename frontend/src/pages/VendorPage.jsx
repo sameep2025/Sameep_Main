@@ -57,7 +57,7 @@ function VendorPage() {
               }}
             >
               <img
-                src={c.imageUrl ? `${API_BASE_URL}${c.imageUrl}` : ""}
+                src={c?.imageUrl?.startsWith("http") ? c.imageUrl : (c?.imageUrl ? `${API_BASE_URL}${c.imageUrl}` : "")}
                 alt={c.name}
                 style={{
                   width: "100%",

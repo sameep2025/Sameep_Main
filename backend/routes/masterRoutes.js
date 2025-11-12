@@ -3,13 +3,10 @@ const router = express.Router();
 const Master = require("../models/Master");
 const multer = require("multer");
 const path = require("path");
+const { uploadBufferToS3, deleteS3ObjectByUrl } = require("../utils/s3Upload");
 
-// --- Multer setup for file uploads ---
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => cb(null, "uploads/"),
-  filename: (req, file, cb) => cb(null, Date.now() + path.extname(file.originalname)),
-});
-const upload = multer({ storage });
+// --- Multer setup for file uploads (memory -> S3) ---
+const upload = multer({ storage: multer.memoryStorage() });
 
 // Helper: normalize a type into a family key
 function toFamilyKey(t) {
@@ -78,8 +75,17 @@ router.post("/", upload.single("image"), async (req, res) => {
       options: options ? options.split(",") : [],
       autoCalc: autoCalc === "true",
       parent: parent || null,
-      imageUrl: req.file ? `/uploads/${req.file.filename}` : null,
+      imageUrl: null,
     });
+
+    if (req.file && req.file.buffer && req.file.mimetype) {
+      try {
+        const { url } = await uploadBufferToS3(req.file.buffer, req.file.mimetype, "master");
+        item.imageUrl = url;
+      } catch (e) {
+        return res.status(500).json({ message: "Failed to upload image to S3", error: e.message });
+      }
+    }
 
     await item.save();
     res.status(201).json(item);
@@ -116,10 +122,21 @@ router.put("/:id", upload.single("image"), async (req, res) => {
       updateData.fieldType = finalType !== (type || null) ? (type || null) : null;
     }
 
-    if (req.file) updateData.imageUrl = `/uploads/${req.file.filename}`;
+    let oldUrl = null;
+    if (req.file && req.file.buffer && req.file.mimetype) {
+      try {
+        const existing = await Master.findById(req.params.id);
+        oldUrl = existing?.imageUrl || null;
+        const { url } = await uploadBufferToS3(req.file.buffer, req.file.mimetype, "master");
+        updateData.imageUrl = url;
+      } catch (e) {
+        return res.status(500).json({ message: "Failed to upload image to S3", error: e.message });
+      }
+    }
 
     const item = await Master.findByIdAndUpdate(req.params.id, updateData, { new: true });
     if (!item) return res.status(404).json({ message: "Not found" });
+    if (oldUrl) { try { await deleteS3ObjectByUrl(oldUrl); } catch {} }
 
     res.json(item);
   } catch (err) {
@@ -130,8 +147,10 @@ router.put("/:id", upload.single("image"), async (req, res) => {
 // --- DELETE item ---
 router.delete("/:id", async (req, res) => {
   try {
-    const item = await Master.findByIdAndDelete(req.params.id);
+    const item = await Master.findById(req.params.id);
     if (!item) return res.status(404).json({ message: "Not found" });
+    if (item.imageUrl) { try { await deleteS3ObjectByUrl(item.imageUrl); } catch {} }
+    await Master.findByIdAndDelete(req.params.id);
     res.json({ message: "Deleted" });
   } catch (err) {
     res.status(500).json({ message: err.message });

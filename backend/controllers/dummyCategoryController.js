@@ -1,6 +1,7 @@
 const DummyCategory = require("../models/dummyCategory");
 const DummySubcategory = require("../models/dummySubcategory");
 const fs = require("fs");
+const { uploadBufferToS3, deleteS3ObjectByUrl } = require("../utils/s3Upload");
 
 function parseNumber(value, defaultNull = true) {
   if (value === undefined || value === null) return defaultNull ? null : 0;
@@ -48,8 +49,14 @@ exports.createCategory = async (req, res) => {
     const imageFile = req.file || (req.files && Array.isArray(req.files.image) && req.files.image[0]);
     const iconFile = req.files && Array.isArray(req.files.icon) && req.files.icon[0];
 
-    const imageUrl = imageFile ? `/uploads/${imageFile.filename}` : undefined;
-    const iconUrl = iconFile ? `/uploads/${iconFile.filename}` : undefined;
+    let imageUrl = undefined;
+    let iconUrl = undefined;
+    if (imageFile && imageFile.buffer && imageFile.mimetype) {
+      try { const { url } = await uploadBufferToS3(imageFile.buffer, imageFile.mimetype, "newcategory"); imageUrl = url; } catch (e) { return res.status(500).json({ message: "Failed to upload image to S3", error: e.message }); }
+    }
+    if (iconFile && iconFile.buffer && iconFile.mimetype) {
+      try { const { url } = await uploadBufferToS3(iconFile.buffer, iconFile.mimetype, "newcategory"); iconUrl = url; } catch (e) { return res.status(500).json({ message: "Failed to upload icon to S3", error: e.message }); }
+    }
 
     if (!parentId) {
       // Create top-level category
@@ -192,8 +199,20 @@ exports.updateCategory = async (req, res) => {
 
     const imageFile = req.file || (req.files && Array.isArray(req.files.image) && req.files.image[0]);
     const iconFile = req.files && Array.isArray(req.files.icon) && req.files.icon[0];
-    if (imageFile) doc.imageUrl = `/uploads/${imageFile.filename}`;
-    if (iconFile) doc.iconUrl = `/uploads/${iconFile.filename}`;
+    if (imageFile && imageFile.buffer && imageFile.mimetype) {
+      try {
+        if (doc.imageUrl) { try { await deleteS3ObjectByUrl(doc.imageUrl); } catch {} }
+        const { url } = await uploadBufferToS3(imageFile.buffer, imageFile.mimetype, "newcategory");
+        doc.imageUrl = url;
+      } catch (e) { return res.status(500).json({ message: "Failed to upload image to S3", error: e.message }); }
+    }
+    if (iconFile && iconFile.buffer && iconFile.mimetype) {
+      try {
+        if (doc.iconUrl) { try { await deleteS3ObjectByUrl(doc.iconUrl); } catch {} }
+        const { url } = await uploadBufferToS3(iconFile.buffer, iconFile.mimetype, "newcategory");
+        doc.iconUrl = url;
+      } catch (e) { return res.status(500).json({ message: "Failed to upload icon to S3", error: e.message }); }
+    }
     if (inventoryLabelName !== undefined) doc.inventoryLabelName = inventoryLabelName;
 
     // top-level specific updates
@@ -249,13 +268,15 @@ exports.updateCategory = async (req, res) => {
 };
 
 async function deleteImageIfLocal(imageUrl) {
+  // For backward compatibility: delete from local uploads if needed
   if (imageUrl && imageUrl.startsWith("/uploads/")) {
     const localPath = imageUrl.slice(1);
-    try {
-      if (fs.existsSync(localPath)) fs.unlinkSync(localPath);
-    } catch (e) {
-      console.error("Error deleting file", localPath, e.message);
-    }
+    try { if (fs.existsSync(localPath)) fs.unlinkSync(localPath); } catch {}
+    return;
+  }
+  // Delete from S3 when url is S3
+  if (imageUrl && imageUrl.startsWith("http")) {
+    try { await deleteS3ObjectByUrl(imageUrl); } catch {}
   }
 }
 
@@ -268,9 +289,11 @@ exports.deleteCategory = async (req, res) => {
       const subs = await DummySubcategory.find({ category: id });
       for (const s of subs) {
         await deleteImageIfLocal(s.imageUrl);
+        await deleteImageIfLocal(s.iconUrl);
       }
       await DummySubcategory.deleteMany({ category: id });
       await deleteImageIfLocal(category.imageUrl);
+      await deleteImageIfLocal(category.iconUrl);
       await DummyCategory.findByIdAndDelete(id);
       return res.json({ message: "Deleted category and its subcategories" });
     }
@@ -283,6 +306,7 @@ exports.deleteCategory = async (req, res) => {
       const children = await DummySubcategory.find({ parentSubcategory: current });
       for (const ch of children) {
         await deleteImageIfLocal(ch.imageUrl);
+        await deleteImageIfLocal(ch.iconUrl);
         stack.push(ch._id);
       }
       await DummySubcategory.deleteMany({ parentSubcategory: current });

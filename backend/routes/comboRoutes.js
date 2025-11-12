@@ -1,13 +1,15 @@
 const express = require("express");
 const mongoose = require("mongoose");
 const multer = require("multer");
+const { uploadBufferToS3 } = require("../utils/s3Upload");
+
 const Combo = require("../models/Combo");
 const Category = require("../models/Category");
 
 const router = express.Router();
 
-// Upload middleware for icon and image
-const upload = multer({ dest: "uploads/" });
+// Upload middleware for icon and image (memory storage for S3)
+const upload = multer({ storage: multer.memoryStorage() });
 // use .any() so we can accept dynamic variant_<i>_<j> fields
 const uploadAny = upload.any();
 
@@ -68,13 +70,19 @@ router.post("/", uploadAny, async (req, res) => {
       try { sizes = JSON.parse(sizes); } catch { sizes = []; }
     }
 
-    // collect normal files
+    // collect normal files (now in memory)
     const files = Array.isArray(req.files) ? req.files : [];
     const findFile = (field) => files.find((f) => f.fieldname === field);
     const iconFile = findFile('icon');
     const imageFile = findFile('image');
-    if (iconFile) iconUrl = `/uploads/${iconFile.filename}`;
-    if (imageFile) imageUrl = `/uploads/${imageFile.filename}`;
+    if (iconFile && iconFile.buffer && iconFile.mimetype) {
+      const uploaded = await uploadBufferToS3(iconFile.buffer, iconFile.mimetype, 'category');
+      iconUrl = uploaded.url;
+    }
+    if (imageFile && imageFile.buffer && imageFile.mimetype) {
+      const uploaded = await uploadBufferToS3(imageFile.buffer, imageFile.mimetype, 'category');
+      imageUrl = uploaded.url;
+    }
 
     if (!name || !parentCategoryId || !type) {
       return res.status(400).json({ message: "name, parentCategoryId, and type are required" });
@@ -96,20 +104,22 @@ router.post("/", uploadAny, async (req, res) => {
       }
     }
 
-
     // attach variant images by convention: fieldname = variant_<itemIndex>_<sizeIndex>
     if (Array.isArray(items)) {
-      files.forEach((f) => {
-        if (!f.fieldname?.startsWith('variant_')) return;
+      for (const f of files) {
+        if (!f.fieldname?.startsWith('variant_')) continue;
         const parts = f.fieldname.split('_');
         const i = Number(parts[1]);
         const j = Number(parts[2]);
         if (Number.isInteger(i) && Number.isInteger(j) && items[i]) {
           if (!Array.isArray(items[i].variants)) items[i].variants = [];
           if (!items[i].variants[j]) items[i].variants[j] = { size: (items[i].sizeOptions||[])[j] || '', price: null, terms: '', imageUrl: '' };
-          items[i].variants[j].imageUrl = `/uploads/${f.filename}`;
+          if (f.buffer && f.mimetype) {
+            const uploaded = await uploadBufferToS3(f.buffer, f.mimetype, 'category');
+            items[i].variants[j].imageUrl = uploaded.url;
+          }
         }
-      });
+      }
     }
 
     const ok = await validateAllowedCategoryItems(items);
@@ -204,13 +214,19 @@ router.put("/:comboId", uploadAny, async (req, res) => {
       try { sizes = JSON.parse(sizes); } catch { /* ignore */ }
     }
 
-    // collect files via uploadAny
+    // collect files via uploadAny (now in memory)
     const files = Array.isArray(req.files) ? req.files : [];
     const findFile = (field) => files.find((f) => f.fieldname === field);
     const iconFile = findFile('icon');
     const imageFile = findFile('image');
-    if (iconFile) iconUrl = `/uploads/${iconFile.filename}`;
-    if (imageFile) imageUrl = `/uploads/${imageFile.filename}`;
+    if (iconFile && iconFile.buffer && iconFile.mimetype) {
+      const uploaded = await uploadBufferToS3(iconFile.buffer, iconFile.mimetype, 'category');
+      iconUrl = uploaded.url;
+    }
+    if (imageFile && imageFile.buffer && imageFile.mimetype) {
+      const uploaded = await uploadBufferToS3(imageFile.buffer, imageFile.mimetype, 'category');
+      imageUrl = uploaded.url;
+    }
 
     if (items) {
       const ok = await validateAllowedCategoryItems(items);

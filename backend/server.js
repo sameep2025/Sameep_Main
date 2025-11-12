@@ -16,6 +16,7 @@ const vendorPricingRoutes = require('./routes/vendorPricing');
 const modelRoutes = require('./routes/modelRoutes');
 const dummyCategoryRoutes = require('./routes/dummyCategoryRoutes');
 const dummyVendorRoutes = require('./routes/dummyVendorRoutes');
+const uploadRoutes = require('./routes/uploadRoutes');
 
 const app = express();
 
@@ -47,21 +48,24 @@ mongoose.connection.once('open', async () => {
 });
 
 // Middleware
-// CORS: allow cross-origin from dev (localhost) and production domains; also handle preflight
+// CORS: allow cross-origin; explicitly mirror Origin and ensure preflight responses
 app.use(cors({
-  origin: true, // reflect request origin
-  methods: ['GET','HEAD','PUT','PATCH','POST','DELETE','OPTIONS'],
-  allowedHeaders: ['Content-Type','Authorization','Accept','Origin','X-Requested-With'],
-  credentials: false,
-  optionsSuccessStatus: 200,
-}));
-app.options('*', cors({
   origin: true,
   methods: ['GET','HEAD','PUT','PATCH','POST','DELETE','OPTIONS'],
   allowedHeaders: ['Content-Type','Authorization','Accept','Origin','X-Requested-With'],
   credentials: false,
   optionsSuccessStatus: 200,
 }));
+// Explicit headers to cover any non-standard error paths and ensure headers are present
+app.use((req, res, next) => {
+  const origin = req.headers.origin || '*';
+  res.header('Access-Control-Allow-Origin', origin);
+  res.header('Vary', 'Origin');
+  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, Accept, Origin, X-Requested-With');
+  res.header('Access-Control-Allow-Methods', 'GET,HEAD,PUT,PATCH,POST,DELETE,OPTIONS');
+  if (req.method === 'OPTIONS') return res.sendStatus(200);
+  next();
+});
 // Increase body size limits to handle base64 data URLs for images in dummy vendor profilePictures
 app.use(express.json({ limit: '8mb' }));
 app.use(express.urlencoded({ limit: '8mb', extended: true }));
@@ -97,6 +101,7 @@ app.use('/api/vendorPricing', vendorPricingRoutes);
 app.use('/api/models', modelRoutes);
 app.use('/api/dummy-categories', dummyCategoryRoutes);
 app.use('/api/dummy-vendors', dummyVendorRoutes);
+app.use('/api', uploadRoutes);
 
 // Debug: DB connection info
 app.get('/api/_debug/db', (req, res) => {

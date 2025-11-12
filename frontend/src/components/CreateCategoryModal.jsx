@@ -1,10 +1,12 @@
 import { useState, useEffect, useMemo } from "react";
 import API_BASE_URL from "../config";
+
 function ChipSelect({ label, options = [], value = [], onChange, placeholder = "Select", multi = true, includeSelectAll = true }) {
   const [open, setOpen] = useState(false);
   const toggle = () => setOpen((o) => !o);
   const close = () => setOpen(false);
   const isSelected = (opt) => value.includes(opt);
+  // ... rest of the code remains the same ...
   const selectAll = () => onChange([...options]);
   const clearAll = () => onChange([]);
   const handleOptionClick = (opt) => {
@@ -921,6 +923,17 @@ const updateColorScheme = (index, key, value) => {
             onChange={(e) => setImage(e.target.files[0])}
             style={inputStyle}
           />
+          {/* Show existing image in edit mode if present and no new image selected */}
+          {initialData?.imageUrl && !image && (
+            <div style={{ textAlign: "center", marginBottom: "10px" }}>
+              <img
+                src={initialData.imageUrl}
+                alt="Current"
+                style={{ width: "120px", height: "120px", objectFit: "cover", borderRadius: "10px", border: "2px solid #999" }}
+              />
+              <p style={{ fontSize: "0.85rem", color: "#555" }}>Current Image</p>
+            </div>
+          )}
           {image && (
             <div style={{ textAlign: "center", marginBottom: "10px" }}>
               <img

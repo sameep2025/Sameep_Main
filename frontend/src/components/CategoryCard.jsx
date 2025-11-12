@@ -28,7 +28,7 @@ function CategoryCard({ category, onEdit, onDelete }) {
       }}
     >
       <img
-        src={`${API_BASE_URL}${category.imageUrl}`}
+        src={category?.imageUrl?.startsWith("http") ? category.imageUrl : `${API_BASE_URL}${category.imageUrl || ""}`}
         alt={category.name}
         style={{
           width: "100%",
