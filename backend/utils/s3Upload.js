@@ -15,8 +15,9 @@ const s3 = new S3Client({
 
 async function uploadBufferToS3(buffer, mimetype, folderType) {
   if (!buffer || !mimetype) throw new Error('Missing buffer or mimetype');
-  const allowed = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
-  if (!allowed.includes(mimetype)) throw new Error('Invalid file type');
+  const allowed = ['image/jpeg', 'image/png', 'image/webp', 'image/gif', 'image/svg+xml', 'image/heic', 'image/heif'];
+  if (!allowed.includes(mimetype)) throw new Error(`Invalid file type: ${mimetype}`);
+  if (!process.env.S3_BUCKET_NAME) throw new Error('S3 bucket not configured');
   const ext = mime.extension(mimetype) || 'bin';
   const key = `${folderType}/${uuidv4()}.${ext}`;
   await s3.send(new PutObjectCommand({

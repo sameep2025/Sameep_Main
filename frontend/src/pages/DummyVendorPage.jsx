@@ -89,7 +89,11 @@ export default function DummyVendorPage() {
         >
           {categories.map((c) => {
             const id = c._id || c.id;
-            const img = c.imageUrl ? `${API_BASE_URL}${c.imageUrl}` : "";
+            const img = c.imageUrl
+              ? (String(c.imageUrl).startsWith("http")
+                ? c.imageUrl
+                : `${API_BASE_URL}${c.imageUrl}`)
+              : "";
             return (
               <div
                 key={id}

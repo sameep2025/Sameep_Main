@@ -596,8 +596,15 @@ const [subcategoryNameById, setSubcategoryNameById] = useState({});
       }
       const res = await fetch(url, { method, body: formData });
       if (!res.ok) {
-        const errData = await res.json();
-        throw new Error(errData.message || "Failed to save category");
+        let errMsg = "Failed to save category";
+        try {
+          const errData = await res.json();
+          const combined = [errData?.message, errData?.error].filter(Boolean).join(': ');
+          errMsg = combined || errMsg;
+        } catch {
+          try { errMsg = `${res.status} ${res.statusText}`; } catch {}
+        }
+        throw new Error(errMsg);
       }
       setName("");
       setImage(null);
