@@ -58,6 +58,20 @@ async function validateAllowedCategoryItems(items) {
   return true;
 }
 
+async function getCategoryPathSegments(categoryId) {
+  if (!categoryId) return [];
+  try {
+    let cur = await Category.findById(categoryId, "name parent").lean();
+    const stack = [];
+    while (cur) {
+      stack.unshift(cur.name);
+      if (!cur.parent) break;
+      cur = await Category.findById(cur.parent, "name parent").lean();
+    }
+    return stack;
+  } catch { return []; }
+}
+
 // Create combo
 router.post("/", uploadAny, async (req, res) => {
   try {
@@ -76,11 +90,13 @@ router.post("/", uploadAny, async (req, res) => {
     const iconFile = findFile('icon');
     const imageFile = findFile('image');
     if (iconFile && iconFile.buffer && iconFile.mimetype) {
-      const uploaded = await uploadBufferToS3(iconFile.buffer, iconFile.mimetype, 'category');
+      const segs = await getCategoryPathSegments(parentCategoryId);
+      const uploaded = await uploadBufferToS3(iconFile.buffer, iconFile.mimetype, 'category', { segments: segs });
       iconUrl = uploaded.url;
     }
     if (imageFile && imageFile.buffer && imageFile.mimetype) {
-      const uploaded = await uploadBufferToS3(imageFile.buffer, imageFile.mimetype, 'category');
+      const segs = await getCategoryPathSegments(parentCategoryId);
+      const uploaded = await uploadBufferToS3(imageFile.buffer, imageFile.mimetype, 'category', { segments: segs });
       imageUrl = uploaded.url;
     }
 
@@ -115,7 +131,8 @@ router.post("/", uploadAny, async (req, res) => {
           if (!Array.isArray(items[i].variants)) items[i].variants = [];
           if (!items[i].variants[j]) items[i].variants[j] = { size: (items[i].sizeOptions||[])[j] || '', price: null, terms: '', imageUrl: '' };
           if (f.buffer && f.mimetype) {
-            const uploaded = await uploadBufferToS3(f.buffer, f.mimetype, 'category');
+            const segs = await getCategoryPathSegments(parentCategoryId);
+            const uploaded = await uploadBufferToS3(f.buffer, f.mimetype, 'category', { segments: segs });
             items[i].variants[j].imageUrl = uploaded.url;
           }
         }
@@ -220,11 +237,13 @@ router.put("/:comboId", uploadAny, async (req, res) => {
     const iconFile = findFile('icon');
     const imageFile = findFile('image');
     if (iconFile && iconFile.buffer && iconFile.mimetype) {
-      const uploaded = await uploadBufferToS3(iconFile.buffer, iconFile.mimetype, 'category');
+      const segs = await getCategoryPathSegments(req.body?.parentCategoryId);
+      const uploaded = await uploadBufferToS3(iconFile.buffer, iconFile.mimetype, 'category', { segments: segs });
       iconUrl = uploaded.url;
     }
     if (imageFile && imageFile.buffer && imageFile.mimetype) {
-      const uploaded = await uploadBufferToS3(imageFile.buffer, imageFile.mimetype, 'category');
+      const segs = await getCategoryPathSegments(req.body?.parentCategoryId);
+      const uploaded = await uploadBufferToS3(imageFile.buffer, imageFile.mimetype, 'category', { segments: segs });
       imageUrl = uploaded.url;
     }
 
@@ -243,17 +262,21 @@ router.put("/:comboId", uploadAny, async (req, res) => {
 
     // attach variant images by convention: fieldname = variant_<itemIndex>_<sizeIndex>
     if (Array.isArray(items)) {
-      files.forEach((f) => {
-        if (!f.fieldname?.startsWith('variant_')) return;
+      for (const f of files) {
+        if (!f.fieldname?.startsWith('variant_')) continue;
         const parts = f.fieldname.split('_');
         const i = Number(parts[1]);
         const j = Number(parts[2]);
         if (Number.isInteger(i) && Number.isInteger(j) && items[i]) {
           if (!Array.isArray(items[i].variants)) items[i].variants = [];
           if (!items[i].variants[j]) items[i].variants[j] = { size: (items[i].sizeOptions||[])[j] || '', price: null, terms: '', imageUrl: '' };
-          items[i].variants[j].imageUrl = `/uploads/${f.filename}`;
+          if (f.buffer && f.mimetype) {
+            const segs = await getCategoryPathSegments(req.body?.parentCategoryId || (await Combo.findById(comboId).lean())?.parentCategoryId);
+            const uploaded = await uploadBufferToS3(f.buffer, f.mimetype, 'category', { segments: segs });
+            items[i].variants[j].imageUrl = uploaded.url;
+          }
         }
-      });
+      }
     }
 
     const setPayload = { name, type, items, basePrice, terms, sizes };

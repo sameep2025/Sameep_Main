@@ -10,6 +10,20 @@ const router = express.Router();
 const upload = multer({ storage: multer.memoryStorage() });
 const uploadAny = upload.any();
 
+async function getDummyCategoryPathSegments(categoryId) {
+  if (!categoryId) return [];
+  try {
+    let cur = await DummyCategory.findById(categoryId, "name parent").lean();
+    const stack = [];
+    while (cur) {
+      stack.unshift(cur.name);
+      if (!cur.parent) break;
+      cur = await DummyCategory.findById(cur.parent, "name parent").lean();
+    }
+    return stack;
+  } catch { return []; }
+}
+
 async function validateAllowedCategoryItems(items) {
   const categoryIds = (items || [])
     .filter((it) => it.kind === "category" && it.categoryId)
@@ -62,11 +76,13 @@ router.post("/", uploadAny, async (req, res) => {
     const iconFile = findFile('icon');
     const imageFile = findFile('image');
     if (iconFile && iconFile.buffer && iconFile.mimetype) {
-      const uploaded = await uploadBufferToS3(iconFile.buffer, iconFile.mimetype, 'newcategory');
+      const segs = await getDummyCategoryPathSegments(parentCategoryId);
+      const uploaded = await uploadBufferToS3(iconFile.buffer, iconFile.mimetype, 'newcategory', { segments: segs });
       iconUrl = uploaded.url;
     }
     if (imageFile && imageFile.buffer && imageFile.mimetype) {
-      const uploaded = await uploadBufferToS3(imageFile.buffer, imageFile.mimetype, 'newcategory');
+      const segs = await getDummyCategoryPathSegments(parentCategoryId);
+      const uploaded = await uploadBufferToS3(imageFile.buffer, imageFile.mimetype, 'newcategory', { segments: segs });
       imageUrl = uploaded.url;
     }
 
@@ -100,7 +116,8 @@ router.post("/", uploadAny, async (req, res) => {
           if (!Array.isArray(items[i].variants)) items[i].variants = [];
           if (!items[i].variants[j]) items[i].variants[j] = { size: (items[i].sizeOptions||[])[j] || '', price: null, terms: '', imageUrl: '' };
           if (f.buffer && f.mimetype) {
-            const uploaded = await uploadBufferToS3(f.buffer, f.mimetype, 'newcategory');
+            const segs = await getDummyCategoryPathSegments(parentCategoryId);
+            const uploaded = await uploadBufferToS3(f.buffer, f.mimetype, 'newcategory', { segments: segs });
             items[i].variants[j].imageUrl = uploaded.url;
           }
         }

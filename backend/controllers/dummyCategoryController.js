@@ -10,6 +10,58 @@ function parseNumber(value, defaultNull = true) {
   return Number.isNaN(n) ? (defaultNull ? null : 0) : n;
 }
 
+async function buildDummySegmentsForCreate(parentId, name) {
+  const segs = [];
+  if (!parentId) {
+    segs.push(String(name));
+    return segs;
+  }
+  const parentCat = await DummyCategory.findById(parentId).lean();
+  if (parentCat) {
+    segs.push(parentCat.name, String(name));
+    return segs;
+  }
+  const parentSub = await DummySubcategory.findById(parentId).lean();
+  if (parentSub) {
+    const names = [];
+    let cur = parentSub;
+    while (cur) {
+      names.unshift(cur.name);
+      if (!cur.parentSubcategory) break;
+      cur = await DummySubcategory.findById(cur.parentSubcategory).lean();
+    }
+    const top = await DummyCategory.findById(parentSub.category).lean();
+    if (top) segs.push(top.name);
+    segs.push(...names, String(name));
+  }
+  return segs;
+}
+
+async function buildDummySegmentsForExisting(doc, overrideName) {
+  const leaf = String(overrideName || doc.name || "");
+  const segs = [];
+  // If doc has category field, it's a subcategory; otherwise top-level category
+  if (doc && (doc.category || doc.parentSubcategory)) {
+    try {
+      const names = [];
+      let cursor = doc;
+      while (cursor && cursor.parentSubcategory) {
+        const parent = await DummySubcategory.findById(cursor.parentSubcategory).lean();
+        if (!parent) break;
+        names.unshift(parent.name);
+        cursor = parent;
+      }
+      const top = await DummyCategory.findById(doc.category || (cursor && cursor.category)).lean();
+      if (top) segs.push(top.name);
+      segs.push(...names, leaf);
+      return segs;
+    } catch {
+      return [leaf];
+    }
+  }
+  return [leaf];
+}
+
 // GET dummy categories (top-level if no parentId, else subcategories of given category)
 exports.getCategories = async (req, res) => {
   try {
@@ -51,11 +103,20 @@ exports.createCategory = async (req, res) => {
 
     let imageUrl = undefined;
     let iconUrl = undefined;
-    if (imageFile && imageFile.buffer && imageFile.mimetype) {
-      try { const { url } = await uploadBufferToS3(imageFile.buffer, imageFile.mimetype, "newcategory"); imageUrl = url; } catch (e) { return res.status(500).json({ message: "Failed to upload image to S3", error: e.message }); }
-    }
-    if (iconFile && iconFile.buffer && iconFile.mimetype) {
-      try { const { url } = await uploadBufferToS3(iconFile.buffer, iconFile.mimetype, "newcategory"); iconUrl = url; } catch (e) { return res.status(500).json({ message: "Failed to upload icon to S3", error: e.message }); }
+    if ((imageFile && imageFile.buffer && imageFile.mimetype) || (iconFile && iconFile.buffer && iconFile.mimetype)) {
+      try {
+        const segments = await buildDummySegmentsForCreate(parentId, name);
+        if (imageFile && imageFile.buffer && imageFile.mimetype) {
+          const up = await uploadBufferToS3(imageFile.buffer, imageFile.mimetype, "newcategory", { segments });
+          imageUrl = up.url;
+        }
+        if (iconFile && iconFile.buffer && iconFile.mimetype) {
+          const up = await uploadBufferToS3(iconFile.buffer, iconFile.mimetype, "newcategory", { segments });
+          iconUrl = up.url;
+        }
+      } catch (e) {
+        return res.status(500).json({ message: "Failed to upload image to S3", error: e.message });
+      }
     }
 
     if (!parentId) {
@@ -107,10 +168,7 @@ exports.createCategory = async (req, res) => {
       }
 
       if (req.body.linkedAttributes) {
-        try {
-          const obj = JSON.parse(req.body.linkedAttributes);
-          if (obj && typeof obj === 'object') categoryData.linkedAttributes = obj;
-        } catch {}
+        try { const obj = JSON.parse(req.body.linkedAttributes); if (obj && typeof obj === 'object') categoryData.linkedAttributes = obj; } catch {}
       }
 
       if (req.body.colorSchemes) {
@@ -118,10 +176,7 @@ exports.createCategory = async (req, res) => {
       }
 
       if (req.body.signupLevels) {
-        try {
-          const levels = JSON.parse(req.body.signupLevels);
-          if (Array.isArray(levels)) categoryData.signupLevels = levels;
-        } catch {}
+        try { const levels = JSON.parse(req.body.signupLevels); if (Array.isArray(levels)) categoryData.signupLevels = levels; } catch {}
       }
 
       const category = new DummyCategory(categoryData);
@@ -202,17 +257,20 @@ exports.updateCategory = async (req, res) => {
     if (imageFile && imageFile.buffer && imageFile.mimetype) {
       try {
         if (doc.imageUrl) { try { await deleteS3ObjectByUrl(doc.imageUrl); } catch {} }
-        const { url } = await uploadBufferToS3(imageFile.buffer, imageFile.mimetype, "newcategory");
+        const segs = await buildDummySegmentsForExisting(doc, name);
+        const { url } = await uploadBufferToS3(imageFile.buffer, imageFile.mimetype, "newcategory", { segments: segs });
         doc.imageUrl = url;
       } catch (e) { return res.status(500).json({ message: "Failed to upload image to S3", error: e.message }); }
     }
     if (iconFile && iconFile.buffer && iconFile.mimetype) {
       try {
         if (doc.iconUrl) { try { await deleteS3ObjectByUrl(doc.iconUrl); } catch {} }
-        const { url } = await uploadBufferToS3(iconFile.buffer, iconFile.mimetype, "newcategory");
+        const segs = await buildDummySegmentsForExisting(doc, name);
+        const { url } = await uploadBufferToS3(iconFile.buffer, iconFile.mimetype, "newcategory", { segments: segs });
         doc.iconUrl = url;
       } catch (e) { return res.status(500).json({ message: "Failed to upload icon to S3", error: e.message }); }
     }
+
     if (inventoryLabelName !== undefined) doc.inventoryLabelName = inventoryLabelName;
 
     // top-level specific updates

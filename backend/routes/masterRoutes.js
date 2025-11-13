@@ -20,6 +20,48 @@ function toFamilyKey(t) {
   return tl; // leave as-is for other groups like status, etc.
 }
 
+async function buildMasterSegmentsForCreate(parent, name, type) {
+  const segments = [];
+  if (parent) {
+    // Walk parent chain by name
+    const names = [];
+    let cur = await Master.findById(parent).lean();
+    while (cur) {
+      names.unshift(cur.name);
+      if (!cur.parent) break;
+      cur = await Master.findById(cur.parent).lean();
+    }
+    segments.push(...names, String(name));
+    return segments;
+  }
+  const fam = toFamilyKey(type);
+  if (fam) segments.push(fam);
+  else if (type) segments.push(String(type));
+  if (name) segments.push(String(name));
+  return segments.filter(Boolean);
+}
+
+async function buildMasterSegmentsForUpdate(doc, overrideName) {
+  const leaf = String(overrideName || doc?.name || "");
+  const segments = [];
+  if (doc && (doc.parent || doc.parent === null)) {
+    const names = [];
+    let cur = doc;
+    // Load chain fresh to ensure current names
+    let walker = cur;
+    while (walker && walker.parent) {
+      const parent = await Master.findById(walker.parent).lean();
+      if (!parent) break;
+      names.unshift(parent.name);
+      walker = parent;
+    }
+    segments.push(...names, leaf);
+    return segments;
+  }
+  if (leaf) return [leaf];
+  return [];
+}
+
 // --- GET all items or by type ---
 router.get("/", async (req, res) => {
   try {
@@ -80,7 +122,21 @@ router.post("/", upload.single("image"), async (req, res) => {
 
     if (req.file && req.file.buffer && req.file.mimetype) {
       try {
-        const { url } = await uploadBufferToS3(req.file.buffer, req.file.mimetype, "master");
+        // Allow optional hierarchy from request to organize under master/
+        let opts = {
+          hierarchy: req.body?.hierarchy,
+          path: req.body?.path,
+          folderPath: req.body?.folderPath,
+          segments: (() => { try { return Array.isArray(req.body?.segments) ? req.body.segments : (req.body?.segments ? JSON.parse(req.body.segments) : undefined); } catch { return undefined; } })(),
+          labelName: req.body?.labelName || req.body?.name || name,
+          levels: (() => { const arr = []; for (let i=1;i<=5;i++){ if (req.body?.[`level${i}`]) arr.push(String(req.body[`level${i}`])); } return arr.length?arr:undefined; })()
+        };
+        // If no hierarchy provided, compute from parent chain or type
+        if (!opts.segments && !opts.hierarchy && !opts.path && !opts.levels) {
+          const segs = await buildMasterSegmentsForCreate(parent, name, finalType);
+          opts = { segments: segs, labelName: opts.labelName };
+        }
+        const { url } = await uploadBufferToS3(req.file.buffer, req.file.mimetype, "master", opts);
         item.imageUrl = url;
       } catch (e) {
         return res.status(500).json({ message: "Failed to upload image to S3", error: e.message });
@@ -127,7 +183,19 @@ router.put("/:id", upload.single("image"), async (req, res) => {
       try {
         const existing = await Master.findById(req.params.id);
         oldUrl = existing?.imageUrl || null;
-        const { url } = await uploadBufferToS3(req.file.buffer, req.file.mimetype, "master");
+        let opts = {
+          hierarchy: req.body?.hierarchy,
+          path: req.body?.path,
+          folderPath: req.body?.folderPath,
+          segments: (() => { try { return Array.isArray(req.body?.segments) ? req.body.segments : (req.body?.segments ? JSON.parse(req.body.segments) : undefined); } catch { return undefined; } })(),
+          labelName: req.body?.labelName || req.body?.name || name,
+          levels: (() => { const arr = []; for (let i=1;i<=5;i++){ if (req.body?.[`level${i}`]) arr.push(String(req.body[`level${i}`])); } return arr.length?arr:undefined; })()
+        };
+        if (!opts.segments && !opts.hierarchy && !opts.path && !opts.levels) {
+          const segs = await buildMasterSegmentsForUpdate(existing, name);
+          opts = { segments: segs, labelName: opts.labelName };
+        }
+        const { url } = await uploadBufferToS3(req.file.buffer, req.file.mimetype, "master", opts);
         updateData.imageUrl = url;
       } catch (e) {
         return res.status(500).json({ message: "Failed to upload image to S3", error: e.message });

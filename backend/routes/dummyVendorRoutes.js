@@ -4,25 +4,123 @@ const DummyVendor = require("../models/DummyVendor");
 const DummyCategory = require("../models/dummyCategory");
 const DummySubcategory = require("../models/dummySubcategory");
 const multer = require("multer");
-const path = require("path");
+const { v4: uuidv4 } = require("uuid");
+const { uploadBufferToS3, uploadBufferToS3WithLabel, deleteS3ObjectByUrl } = require("../utils/s3Upload");
 
 const router = express.Router();
 
-// Multer setup for dummy vendor images
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => cb(null, "uploads/"),
-  filename: (req, file, cb) => cb(null, Date.now() + "-dummyvendor-" + Math.round(Math.random() * 1e9) + path.extname(file.originalname)),
-});
-const upload = multer({ storage });
+// Multer setup for dummy vendor images (memory -> S3)
+const upload = multer({ storage: multer.memoryStorage() });
+
+function extractBase64ImagesFromBody(body) {
+  const candidates = [];
+  const pushIf = (v) => { if (v) candidates.push(v); };
+  // Common field names
+  pushIf(body?.image);
+  pushIf(body?.images);
+  pushIf(body?.profilePictures);
+  if (Array.isArray(body?.images)) {
+    for (const v of body.images) pushIf(v);
+  }
+  if (Array.isArray(body?.profilePictures)) {
+    for (const v of body.profilePictures) pushIf(v);
+  }
+  if (Array.isArray(body?.files)) {
+    for (const v of body.files) pushIf(v);
+  }
+  // Flatten and normalize to strings
+  const flat = [];
+  for (const item of candidates.flat()) {
+    if (typeof item === 'string') flat.push(item);
+  }
+  // Convert data URLs to { buffer, mimetype }
+  const out = [];
+  for (const s of flat) {
+    const m = s.match(/^data:(.+);base64,(.+)$/);
+    if (m) {
+      const mimetype = m[1];
+      try {
+        const buffer = Buffer.from(m[2], 'base64');
+        if (buffer && buffer.length) out.push({ buffer, mimetype });
+      } catch {}
+    }
+  }
+  return out;
+}
+
+async function getDummyPathSegments(nodeId) {
+  if (!nodeId) return [];
+  try {
+    // Try as subcategory first
+    let sub = await DummySubcategory.findById(nodeId).lean();
+    if (sub) {
+      const trail = [];
+      let cur = sub;
+      while (cur) {
+        trail.unshift(cur.name);
+        if (!cur.parentSubcategory) break;
+        cur = await DummySubcategory.findById(cur.parentSubcategory).lean();
+      }
+      const top = await DummyCategory.findById(sub.category).lean();
+      const segs = [];
+      if (top) segs.push(top.name);
+      segs.push(...trail);
+      return segs;
+    }
+    // Fallback: treat as top-level category id
+    const cat = await DummyCategory.findById(nodeId).lean();
+    if (cat) return [cat.name];
+  } catch {}
+  return [];
+}
+
+async function getDummyTopCategoryNameById(categoryId) {
+  try {
+    const cat = await DummyCategory.findById(categoryId, "name").lean();
+    return cat?.name || null;
+  } catch { return null; }
+}
+
+function getDummyVendorDisplayName(vendor) {
+  return (
+    vendor?.name || vendor?.contactName || vendor?.businessName || "Vendor"
+  );
+}
+
+async function buildDummyVendorPrefixedSegments(vendor, kind) {
+  // kind: 'images' | 'profile pictures'
+  const vendorName = getDummyVendorDisplayName(vendor);
+  let topCategoryName = null;
+  if (vendor?.categoryId) {
+    topCategoryName = await getDummyTopCategoryNameById(vendor.categoryId);
+  }
+  const prefix = topCategoryName ? `${vendorName} - ${topCategoryName}` : vendorName;
+  if (kind === 'profile pictures') return [prefix, 'profile pictures'];
+  return [prefix, 'images'];
+}
 
 /** Non-inventory row images per category node (Dummy Vendor) **/
 // Append up to 5 images for a category leaf node (row)
-router.post("/:vendorId/rows/:nodeId/images", upload.array("images", 5), async (req, res) => {
+router.post("/:vendorId/rows/:nodeId/images", upload.any(), async (req, res) => {
   try {
     const { vendorId, nodeId } = req.params;
     const vendor = await DummyVendor.findById(vendorId);
     if (!vendor) return res.status(404).json({ message: "Vendor not found" });
-    const urls = (req.files || []).map((f) => `/uploads/${f.filename}`);
+    const anyFiles = Array.isArray(req.files) ? req.files : [];
+    const files = anyFiles.filter(f => ["images","image","file","files"].includes(f.fieldname)).slice(0,5);
+    const urls = [];
+    const segs = await getDummyPathSegments(nodeId);
+    const base = await buildDummyVendorPrefixedSegments(vendor, 'images');
+    const extra = [];
+    for (let i=1;i<=5;i++){ if (req.body?.[`level${i}`]) extra.push(String(req.body[`level${i}`])); }
+    for (const f of files) {
+      if (f && f.buffer && f.mimetype) {
+        const merged = extra.length ? [...segs, ...extra] : segs;
+        const finalSegs = merged.length ? [...base, ...merged] : base;
+        const up = await uploadBufferToS3WithLabel(f.buffer, f.mimetype, "newvendor", uuidv4(), { segments: finalSegs });
+        urls.push(up.url);
+      }
+    }
     const current = Array.isArray(vendor.rowImages?.[nodeId]) ? vendor.rowImages[nodeId] : [];
     const next = [...current, ...urls].slice(0, 5);
     vendor.rowImages = { ...(vendor.rowImages || {}), [nodeId]: next };
@@ -36,16 +134,27 @@ router.post("/:vendorId/rows/:nodeId/images", upload.array("images", 5), async (
 });
 
 // Replace specific image by index for a row
-router.put("/:vendorId/rows/:nodeId/images/:index", upload.single("image"), async (req, res) => {
+router.put("/:vendorId/rows/:nodeId/images/:index", upload.any(), async (req, res) => {
   try {
     const { vendorId, nodeId, index } = req.params;
     const idxNum = Number(index);
     const vendor = await DummyVendor.findById(vendorId);
     if (!vendor) return res.status(404).json({ message: "Vendor not found" });
     const arr = Array.isArray(vendor.rowImages?.[nodeId]) ? vendor.rowImages[nodeId] : [];
-    if (!req.file) return res.status(400).json({ message: "image file required" });
+    const anyFiles = Array.isArray(req.files) ? req.files : [];
+    const file = anyFiles.find(f => ["image","images","file","files"].includes(f.fieldname));
+    if (!file) return res.status(400).json({ message: "image file required" });
     if (idxNum < 0 || idxNum >= arr.length) return res.status(400).json({ message: "Invalid index" });
-    arr[idxNum] = `/uploads/${req.file.filename}`;
+    const segs = await getDummyPathSegments(nodeId);
+    const base = await buildDummyVendorPrefixedSegments(vendor, 'images');
+    const extra = [];
+    for (let i=1;i<=5;i++){ if (req.body?.[`level${i}`]) extra.push(String(req.body[`level${i}`])); }
+    const merged = extra.length ? [...segs, ...extra] : segs;
+    const finalSegs = merged.length ? [...base, ...merged] : base;
+    const oldUrl = arr[idxNum];
+    const up = await uploadBufferToS3WithLabel(file.buffer, file.mimetype, "newvendor", uuidv4(), { segments: finalSegs });
+    arr[idxNum] = up.url;
+    if (oldUrl) { try { await deleteS3ObjectByUrl(oldUrl); } catch {} }
     vendor.rowImages = { ...(vendor.rowImages || {}), [nodeId]: arr };
     vendor.markModified('rowImages');
     await vendor.save();
@@ -65,7 +174,8 @@ router.delete("/:vendorId/rows/:nodeId/images/:index", async (req, res) => {
     if (!vendor) return res.status(404).json({ message: "Vendor not found" });
     const arr = Array.isArray(vendor.rowImages?.[nodeId]) ? vendor.rowImages[nodeId] : [];
     if (idxNum < 0 || idxNum >= arr.length) return res.status(400).json({ message: "Invalid index" });
-    arr.splice(idxNum, 1);
+    const removed = arr.splice(idxNum, 1)[0];
+    if (removed) { try { await deleteS3ObjectByUrl(removed); } catch {} }
     vendor.rowImages = { ...(vendor.rowImages || {}), [nodeId]: arr };
     vendor.markModified('rowImages');
     await vendor.save();
@@ -92,7 +202,7 @@ router.get("/:vendorId/rows/:nodeId/images", async (req, res) => {
 
 /** Inventory entry images (per item in dummy vendor inventorySelections[categoryId]) **/
 // Append up to 5 images for a given inventory entry (key can be _id or at)
-router.post("/:vendorId/inventory/:categoryId/:entryKey/images", upload.array("images", 5), async (req, res) => {
+router.post("/:vendorId/inventory/:categoryId/:entryKey/images", upload.any(), async (req, res) => {
   try {
     const { vendorId, categoryId, entryKey } = req.params;
     const vendor = await DummyVendor.findById(vendorId);
@@ -100,7 +210,21 @@ router.post("/:vendorId/inventory/:categoryId/:entryKey/images", upload.array("i
     const list = Array.isArray(vendor.inventorySelections?.[categoryId]) ? vendor.inventorySelections[categoryId] : [];
     const idx = list.findIndex((it) => String(it._id || it.at) === String(entryKey));
     if (idx < 0) return res.status(404).json({ message: "Inventory entry not found" });
-    const urls = (req.files || []).map((f) => `/uploads/${f.filename}`);
+    const anyFiles = Array.isArray(req.files) ? req.files : [];
+    const files = anyFiles.filter(f => ["images","image","file","files"].includes(f.fieldname)).slice(0,5);
+    const urls = [];
+    const segs = await getDummyPathSegments(categoryId);
+    const base = await buildDummyVendorPrefixedSegments(vendor, 'images');
+    const extra = [];
+    for (let i=1;i<=5;i++){ if (req.body?.[`level${i}`]) extra.push(String(req.body[`level${i}`])); }
+    for (const f of files) {
+      if (f && f.buffer && f.mimetype) {
+        const merged = extra.length ? [...segs, ...extra] : segs;
+        const finalSegs = merged.length ? [...base, ...merged] : base;
+        const up = await uploadBufferToS3(f.buffer, f.mimetype, "newvendor", { segments: finalSegs });
+        urls.push(up.url);
+      }
+    }
     const current = Array.isArray(list[idx].images) ? list[idx].images : [];
     list[idx].images = [...current, ...urls].slice(0, 5);
     vendor.markModified('inventorySelections');
@@ -113,7 +237,7 @@ router.post("/:vendorId/inventory/:categoryId/:entryKey/images", upload.array("i
 });
 
 // Replace specific image by index for an inventory entry
-router.put("/:vendorId/inventory/:categoryId/:entryKey/images/:index", upload.single("image"), async (req, res) => {
+router.put("/:vendorId/inventory/:categoryId/:entryKey/images/:index", upload.any(), async (req, res) => {
   try {
     const { vendorId, categoryId, entryKey, index } = req.params;
     const idxNum = Number(index);
@@ -122,10 +246,21 @@ router.put("/:vendorId/inventory/:categoryId/:entryKey/images/:index", upload.si
     const list = Array.isArray(vendor.inventorySelections?.[categoryId]) ? vendor.inventorySelections[categoryId] : [];
     const i = list.findIndex((it) => String(it._id || it.at) === String(entryKey));
     if (i < 0) return res.status(404).json({ message: "Inventory entry not found" });
-    if (!req.file) return res.status(400).json({ message: "image file required" });
+    const anyFiles = Array.isArray(req.files) ? req.files : [];
+    const file = anyFiles.find(f => ["image","images","file","files"].includes(f.fieldname));
+    if (!file) return res.status(400).json({ message: "image file required" });
     const arr = Array.isArray(list[i].images) ? list[i].images : [];
     if (idxNum < 0 || idxNum >= arr.length) return res.status(400).json({ message: "Invalid index" });
-    arr[idxNum] = `/uploads/${req.file.filename}`;
+    const segs = await getDummyPathSegments(categoryId);
+    const base = await buildDummyVendorPrefixedSegments(vendor, 'images');
+    const extra = [];
+    for (let i=1;i<=5;i++){ if (req.body?.[`level${i}`]) extra.push(String(req.body[`level${i}`])); }
+    const merged = extra.length ? [...segs, ...extra] : segs;
+    const finalSegs = merged.length ? [...base, ...merged] : base;
+    const oldUrl = arr[idxNum];
+    const up = await uploadBufferToS3(file.buffer, file.mimetype, "newvendor", { segments: finalSegs });
+    arr[idxNum] = up.url;
+    if (oldUrl) { try { await deleteS3ObjectByUrl(oldUrl); } catch {} }
     list[i].images = arr;
     vendor.markModified('inventorySelections');
     await vendor.save();
@@ -148,7 +283,8 @@ router.delete("/:vendorId/inventory/:categoryId/:entryKey/images/:index", async 
     if (i < 0) return res.status(404).json({ message: "Inventory entry not found" });
     const arr = Array.isArray(list[i].images) ? list[i].images : [];
     if (idxNum < 0 || idxNum >= arr.length) return res.status(400).json({ message: "Invalid index" });
-    arr.splice(idxNum, 1);
+    const removed = arr.splice(idxNum, 1)[0];
+    if (removed) { try { await deleteS3ObjectByUrl(removed); } catch {} }
     list[i].images = arr;
     vendor.markModified('inventorySelections');
     await vendor.save();
@@ -222,7 +358,6 @@ router.get("/:vendorId", async (req, res) => {
   }
 });
 
-// PUT update dummy vendor (supports inventorySelections merge)
 router.put("/:vendorId", async (req, res) => {
   try {
     const { vendorId } = req.params;
@@ -242,6 +377,23 @@ router.put("/:vendorId", async (req, res) => {
       ["businessName","contactName","phone","status","location","businessHours","profilePictures","rowImages"].forEach((k) => {
         if (update[k] !== undefined) vdoc[k] = update[k];
       });
+      // If profilePictures provided, delete removed S3 objects
+      if (Array.isArray(update.profilePictures)) {
+        const prev = Array.isArray(existing.profilePictures) ? existing.profilePictures : (Array.isArray(vdoc.profilePictures) ? vdoc.profilePictures : []);
+        const next = update.profilePictures.map(String);
+        const removed = (prev || []).filter(u => !next.includes(u));
+        for (const r of removed) { try { await deleteS3ObjectByUrl(r); } catch {} }
+      }
+      // If rowImages object provided, diff per nodeId and delete removed
+      if (update.rowImages && typeof update.rowImages === 'object') {
+        const prevObj = vdoc.rowImages && typeof vdoc.rowImages === 'object' ? vdoc.rowImages : {};
+        for (const nodeId of Object.keys(update.rowImages)) {
+          const nextArr = Array.isArray(update.rowImages[nodeId]) ? update.rowImages[nodeId].map(String) : [];
+          const prevArr = Array.isArray(prevObj[nodeId]) ? prevObj[nodeId] : [];
+          const removed = prevArr.filter(u => !nextArr.includes(u));
+          for (const r of removed) { try { await deleteS3ObjectByUrl(r); } catch {} }
+        }
+      }
       await vdoc.save();
       return res.json(vdoc.toObject());
     }
@@ -255,20 +407,6 @@ router.put("/:vendorId", async (req, res) => {
     return res.json(v);
   } catch (err) {
     console.error("PUT /dummy-vendors/:vendorId error:", err);
-    res.status(500).json({ message: "Server error" });
-  }
-});
-
-// GET all dummy vendors
-router.get("/", async (req, res) => {
-  try {
-    const vendors = await DummyVendor.find()
-      .populate("customerId", "fullNumber phone")
-      .populate("categoryId", "name price imageUrl")
-      .lean();
-    res.json(vendors);
-  } catch (err) {
-    console.error("GET /dummy-vendors error:", err);
     res.status(500).json({ message: "Server error" });
   }
 });
@@ -518,23 +656,74 @@ router.get("/:vendorId/profile-pictures", async (req, res) => {
   }
 });
 
-router.put("/:vendorId/profile-pictures", async (req, res) => {
+// Replace profile pictures: supports multipart files, base64, or URL list
+router.put("/:vendorId/profile-pictures", upload.any(), async (req, res) => {
   try {
+    const vdoc = await DummyVendor.findById(req.params.vendorId);
+    if (!vdoc) return res.status(404).json({ success: false, message: "Vendor not found" });
+
+    // 1) Try multipart files
+    const anyFiles = Array.isArray(req.files) ? req.files : [];
+    let files = anyFiles.filter(f => ["images","image","file","files"].includes(f.fieldname)).slice(0,5);
+    // 2) If none, try base64 from body
+    if (!files.length) {
+      const fromBody = extractBase64ImagesFromBody(req.body).slice(0,5);
+      files = fromBody.map(x => ({ buffer: x.buffer, mimetype: x.mimetype }));
+    }
+
+    if (files.length) {
+      const baseSegs = await buildDummyVendorPrefixedSegments(vdoc, 'profile pictures');
+      const urls = [];
+      for (const f of files) {
+        if (f && f.buffer && f.mimetype) {
+          const up = await uploadBufferToS3WithLabel(f.buffer, f.mimetype, "newvendor", uuidv4(), { segments: baseSegs });
+          urls.push(up.url);
+        }
+      }
+      vdoc.profilePictures = urls.slice(-5);
+      await vdoc.save();
+      return res.json({ success: true, profilePictures: vdoc.profilePictures });
+    }
+
+    // 3) Process profilePictures array: upload data URLs, keep http(s) URLs
     const list = Array.isArray(req.body?.profilePictures) ? req.body.profilePictures : [];
-    const pics = list.map((x) => String(x || "")).filter((s) => s.trim() !== "");
-    const v = await DummyVendor.findByIdAndUpdate(
-      req.params.vendorId,
-      { $set: { profilePictures: pics } },
-      { new: true }
-    ).lean();
-    if (!v) return res.status(404).json({ success: false, message: "Vendor not found" });
-    return res.json({ success: true, profilePictures: v.profilePictures || [] });
+    if (list.length) {
+      const baseSegs = await buildDummyVendorPrefixedSegments(vdoc, 'profile pictures');
+      const prev = Array.isArray(vdoc.profilePictures) ? vdoc.profilePictures.slice() : [];
+      const next = [];
+      for (const entry of list.slice(-5)) {
+        const s = String(entry || "");
+        if (/^data:.+;base64,/.test(s)) {
+          const m = s.match(/^data:(.+);base64,(.+)$/);
+          if (m) {
+            try {
+              const buffer = Buffer.from(m[2], 'base64');
+              const mimetype = m[1];
+              const up = await uploadBufferToS3WithLabel(buffer, mimetype, "newvendor", uuidv4(), { segments: baseSegs });
+              next.push(up.url);
+            } catch {}
+          }
+        } else if (/^https?:\/\//i.test(s)) {
+          next.push(s);
+        }
+      }
+      vdoc.profilePictures = next;
+      await vdoc.save();
+      // Delete any removed S3 objects no longer referenced
+      const removed = prev.filter(u => !next.includes(u));
+      for (const r of removed) { try { await deleteS3ObjectByUrl(r); } catch {} }
+      return res.json({ success: true, profilePictures: vdoc.profilePictures });
+    }
+
+    // Nothing provided
+    return res.json({ success: true, profilePictures: Array.isArray(vdoc.profilePictures) ? vdoc.profilePictures : [] });
   } catch (err) {
     console.error("PUT /dummy-vendors/:vendorId/profile-pictures error:", err);
     res.status(500).json({ success: false, message: "Server error" });
   }
 });
 
+// Replace a profile picture by URL (kept for compatibility)
 router.put("/:vendorId/profile-pictures/:index", async (req, res) => {
   try {
     const idx = Number(req.params.index);
@@ -551,6 +740,67 @@ router.put("/:vendorId/profile-pictures/:index", async (req, res) => {
     return res.json({ success: true, profilePictures: vdoc.profilePictures });
   } catch (err) {
     console.error("PUT /dummy-vendors/:vendorId/profile-pictures/:index error:", err);
+    return res.status(500).json({ success: false, message: "Server error" });
+  }
+});
+
+router.post("/:vendorId/profile-pictures", upload.any(), async (req, res) => {
+  try {
+    const { vendorId } = req.params;
+    const vdoc = await DummyVendor.findById(vendorId);
+    if (!vdoc) return res.status(404).json({ success: false, message: "Vendor not found" });
+    const anyFiles = Array.isArray(req.files) ? req.files : [];
+    let files = anyFiles.filter(f => ["images","image","file","files"].includes(f.fieldname)).slice(0,5);
+    const urls = [];
+    const baseSegs = await buildDummyVendorPrefixedSegments(vdoc, 'profile pictures');
+    // If no multipart files, try base64 in body
+    if (!files.length) {
+      const fromBody = extractBase64ImagesFromBody(req.body).slice(0,5);
+      files = fromBody.map(x => ({ buffer: x.buffer, mimetype: x.mimetype }));
+    }
+    for (const f of files) {
+      if (f && f.buffer && f.mimetype) {
+        const up = await uploadBufferToS3WithLabel(f.buffer, f.mimetype, "newvendor", uuidv4(), { segments: baseSegs });
+        urls.push(up.url);
+      }
+    }
+    const existing = Array.isArray(vdoc.profilePictures) ? vdoc.profilePictures : [];
+    vdoc.profilePictures = [...existing, ...urls].slice(-5);
+    await vdoc.save();
+    return res.json({ success: true, profilePictures: vdoc.profilePictures });
+  } catch (err) {
+    console.error("POST /dummy-vendors/:vendorId/profile-pictures error:", err);
+    res.status(500).json({ success: false, message: "Server error" });
+  }
+});
+
+// Upload and replace specific profile picture by index
+router.post("/:vendorId/profile-pictures/:index", upload.any(), async (req, res) => {
+  try {
+    const idx = Number(req.params.index);
+    if (!Number.isInteger(idx) || idx < 0) return res.status(400).json({ success: false, message: "Invalid index" });
+    const vdoc = await DummyVendor.findById(req.params.vendorId);
+    if (!vdoc) return res.status(404).json({ success: false, message: "Vendor not found" });
+    const anyFiles = Array.isArray(req.files) ? req.files : [];
+    let file = anyFiles.find(f => ["image","images","file","files"].includes(f.fieldname));
+    // If no multipart file, try base64 in body
+    if (!file) {
+      const fromBody = extractBase64ImagesFromBody(req.body);
+      if (fromBody.length) file = { buffer: fromBody[0].buffer, mimetype: fromBody[0].mimetype };
+    }
+    if (!file) return res.status(400).json({ success: false, message: "image file required" });
+    const arr = Array.isArray(vdoc.profilePictures) ? vdoc.profilePictures : [];
+    while (arr.length <= idx) arr.push("");
+    const baseSegs = await buildDummyVendorPrefixedSegments(vdoc, 'profile pictures');
+    const up = await uploadBufferToS3WithLabel(file.buffer, file.mimetype, "newvendor", uuidv4(), { segments: baseSegs });
+    const oldUrl = arr[idx];
+    arr[idx] = up.url;
+    vdoc.profilePictures = arr.filter((s) => String(s || "").trim() !== "");
+    await vdoc.save();
+    if (oldUrl) { try { await deleteS3ObjectByUrl(oldUrl); } catch {} }
+    return res.json({ success: true, profilePictures: vdoc.profilePictures });
+  } catch (err) {
+    console.error("POST /dummy-vendors/:vendorId/profile-pictures/:index error:", err);
     res.status(500).json({ success: false, message: "Server error" });
   }
 });
@@ -563,7 +813,8 @@ router.delete("/:vendorId/profile-pictures/:index", async (req, res) => {
     if (!vdoc) return res.status(404).json({ success: false, message: "Vendor not found" });
     const arr = Array.isArray(vdoc.profilePictures) ? vdoc.profilePictures : [];
     if (idx >= arr.length) return res.json({ success: true, profilePictures: arr });
-    arr.splice(idx, 1);
+    const removed = arr.splice(idx, 1)[0];
+    if (removed) { try { await deleteS3ObjectByUrl(removed); } catch {} }
     vdoc.profilePictures = arr;
     await vdoc.save();
     return res.json({ success: true, profilePictures: vdoc.profilePictures });

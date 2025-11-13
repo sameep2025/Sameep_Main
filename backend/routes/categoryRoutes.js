@@ -83,14 +83,33 @@ router.post("/", upload.single("image"), async (req, res) => {
     // Upload image to S3 if provided
     if (req.file && req.file.buffer && req.file.mimetype) {
       try {
-        const { url } = await uploadBufferToS3(req.file.buffer, req.file.mimetype, "category");
+        // Build path segments: full chain including new category name
+        const segments = [];
+        if (parent) {
+          // walk up the parent chain to root
+          let cur = await Category.findById(parent, "name parent").lean();
+          const stack = [];
+          while (cur) {
+            stack.unshift(cur.name);
+            if (!cur.parent) break;
+            cur = await Category.findById(cur.parent, "name parent").lean();
+          }
+          segments.push(...stack);
+        }
+        segments.push(String(name));
+        const { url } = await uploadBufferToS3(
+          req.file.buffer,
+          req.file.mimetype,
+          "category",
+          { segments }
+        );
         categoryData.imageUrl = url;
       } catch (e) {
         return res.status(500).json({ message: "Failed to upload image to S3", error: e.message });
       }
     }
 
-    // ✅ Persist 10 Free Text inputs for parent categories on create
+    // Persist 10 Free Text inputs for parent categories on create
     if (parent === null) {
       const freeTexts = [];
       for (let i = 1; i <= 10; i++) {
@@ -101,7 +120,7 @@ router.post("/", upload.single("image"), async (req, res) => {
       categoryData.freeTexts = freeTexts;
     }
 
-    // ✅ Normalize displayType to always be an array
+    // Normalize displayType to always be an array
     if (req.body.displayType) {
       try {
         const parsed = JSON.parse(req.body.displayType);
@@ -115,7 +134,7 @@ router.post("/", upload.single("image"), async (req, res) => {
       categoryData.displayType = [];
     }
 
-    // ✅ Parse optional dropdown fields (same logic)
+    // Parse optional dropdown fields (same logic)
     ["categoryVisibility", "categoryModel", "categoryPricing", "socialHandle"].forEach((key) => {
       if (req.body[key]) {
         try {
@@ -127,7 +146,7 @@ router.post("/", upload.single("image"), async (req, res) => {
       }
     });
 
-    // ✅ Handle linkedAttributes
+    // Handle linkedAttributes
     if (req.body.linkedAttributes) {
       try {
         const parsed = JSON.parse(req.body.linkedAttributes);
@@ -139,7 +158,7 @@ router.post("/", upload.single("image"), async (req, res) => {
       }
     }
 
-    // ✅ Handle color schemes
+    // Handle color schemes
     if (req.body.colorSchemes) {
       try {
         categoryData.colorSchemes = JSON.parse(req.body.colorSchemes);
@@ -277,7 +296,7 @@ router.put("/:id", uploadFields, async (req, res) => {
       category.postRequestsDeals = req.body.postRequestsDeals === "true";
       category.loyaltyPoints = req.body.loyaltyPoints === "true";
       category.linkAttributesPricing = req.body.linkAttributesPricing === "true";
-      // ✅ Correctly read freeText1..freeText10
+      // Correctly read freeText1..freeText10
       category.freeTexts = Array.from({ length: 10 }, (_, idx) => req.body[`freeText${idx + 1}`] || "");
       if (req.body.inventoryLabelName !== undefined) category.inventoryLabelName = req.body.inventoryLabelName;
     }
@@ -337,14 +356,25 @@ router.put("/:id", uploadFields, async (req, res) => {
       }
     }
 
-
     // Handle image/icon uploads to S3 if provided
     const imageFile = req.files && Array.isArray(req.files.image) ? req.files.image[0] : null;
     const iconFile = req.files && Array.isArray(req.files.icon) ? req.files.icon[0] : null;
     if (imageFile && imageFile.buffer && imageFile.mimetype) {
       try {
         if (category.imageUrl) { try { await deleteS3ObjectByUrl(category.imageUrl); } catch {} }
-        const { url } = await uploadBufferToS3(imageFile.buffer, imageFile.mimetype, "category");
+        // Compute full path segments for this existing category
+        const segs = [];
+        const stack = [];
+        let cur = category ? { name: category.name, parent: category.parent } : null;
+        // Load chain to root using DB so names are up-to-date
+        let walker = cur;
+        while (walker) {
+          stack.unshift(walker.name);
+          if (!walker.parent) break;
+          walker = await Category.findById(walker.parent, "name parent").lean();
+        }
+        segs.push(...stack);
+        const { url } = await uploadBufferToS3(imageFile.buffer, imageFile.mimetype, "category", { segments: segs });
         category.imageUrl = url;
       } catch (e) {
         return res.status(500).json({ message: "Failed to upload image to S3", error: e.message });
@@ -353,12 +383,22 @@ router.put("/:id", uploadFields, async (req, res) => {
     if (iconFile && iconFile.buffer && iconFile.mimetype) {
       try {
         if (category.iconUrl) { try { await deleteS3ObjectByUrl(category.iconUrl); } catch {} }
-        const { url } = await uploadBufferToS3(iconFile.buffer, iconFile.mimetype, "category");
+        const segs = [];
+        const stack = [];
+        let walker = category ? { name: category.name, parent: category.parent } : null;
+        while (walker) {
+          stack.unshift(walker.name);
+          if (!walker.parent) break;
+          walker = await Category.findById(walker.parent, "name parent").lean();
+        }
+        segs.push(...stack);
+        const { url } = await uploadBufferToS3(iconFile.buffer, iconFile.mimetype, "category", { segments: segs });
         category.iconUrl = url;
       } catch (e) {
         return res.status(500).json({ message: "Failed to upload icon to S3", error: e.message });
       }
     }
+
     // Update color schemes if provided
     if (req.body.colorSchemes) {
       try {

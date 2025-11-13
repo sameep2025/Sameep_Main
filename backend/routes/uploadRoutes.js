@@ -17,12 +17,11 @@ const s3 = new S3Client({
     : undefined,
 });
 
-
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: (Number(process.env.MAX_UPLOAD_MB) || 5) * 1024 * 1024 },
   fileFilter: (req, file, cb) => {
-    const allowed = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
+    const allowed = ['image/jpeg', 'image/png', 'image/webp', 'image/gif', 'image/svg+xml', 'image/heic', 'image/heif'];
     if (!allowed.includes(file.mimetype)) return cb(new Error('Invalid file type'), false);
     cb(null, true);
   }
@@ -41,11 +40,52 @@ router.post('/upload', upload.single('file'), async (req, res) => {
       return res.status(400).json({ error: 'Invalid folderType' });
     }
     if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
+    if (!process.env.S3_BUCKET_NAME) return res.status(500).json({ error: 'S3 bucket not configured' });
 
     const extension = mime.extension(req.file.mimetype) || 'bin';
 
-    const uniqueName = `${uuidv4()}.${extension}`;
-    const Key = `${folderType}/${uniqueName}`;
+    const readMaybeArray = (v) => Array.isArray(v) ? v : (v ? [v] : []);
+    let segments = [];
+    const b = req.body || {};
+    const q = req.query || {};
+    let rawHierarchy = b.hierarchy ?? q.hierarchy;
+    if (typeof rawHierarchy === 'string') {
+      try {
+        const parsed = JSON.parse(rawHierarchy);
+        if (Array.isArray(parsed)) segments = parsed;
+        else segments = String(rawHierarchy).split('/');
+      } catch {
+        segments = String(rawHierarchy).split('/');
+      }
+    } else if (Array.isArray(rawHierarchy)) {
+      segments = rawHierarchy;
+    }
+    if (!segments.length) {
+      const pathStr = b.path || q.path || b.folderPath || q.folderPath || '';
+      if (pathStr) segments = String(pathStr).split('/');
+    }
+    if (!segments.length) {
+      const alt = readMaybeArray(b.segments || q.segments);
+      if (alt.length) segments = alt;
+    }
+    if (!segments.length) {
+      const levels = ['level1','level2','level3','level4','level5'].map(k => b[k] || q[k]).filter(Boolean);
+      if (levels.length) segments = levels;
+    }
+    segments = (segments || []).map(s => String(s || '').replace(/^\/+|\/+$/g,'').trim()).filter(Boolean);
+
+    const rawLabel = (b.labelName || q.labelName || '').toString();
+    const leafLabel = segments.length ? segments[segments.length - 1] : rawLabel;
+    const baseForFile = leafLabel || uuidv4();
+    const slug = baseForFile
+      .toLowerCase()
+      .replace(/\s+/g, '-')
+      .replace(/[^a-z0-9\-]/g, '-')
+      .replace(/-+/g, '-')
+      .replace(/^-|-$/g, '');
+    const fileName = `${slug}.${extension}`;
+    const dirPath = segments.length ? segments.join('/') + '/' : '';
+    const Key = `${folderType}/${dirPath}${fileName}`;
 
     await s3.send(new PutObjectCommand({
       Bucket: process.env.S3_BUCKET_NAME,
@@ -55,8 +95,8 @@ router.post('/upload', upload.single('file'), async (req, res) => {
       CacheControl: 'public, max-age=31536000, immutable'
     }));
 
-    const url = `https://${process.env.S3_BUCKET_NAME}.s3.${process.env.AWS_REGION}.amazonaws.com/${Key}`;
-    return res.json({ key: Key, url });
+    const url = `https://${process.env.S3_BUCKET_NAME}.s3.${REGION}.amazonaws.com/${Key}`;
+    return res.json({ key: Key, url, fileName });
   } catch (err) {
   console.error("❌ Upload error:", err);
   return res.status(500).json({ 

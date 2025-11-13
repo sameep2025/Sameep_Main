@@ -9,7 +9,23 @@ const upload = multer({ storage: multer.memoryStorage() });
 async function uploadImageToS3IfPresent(req, res, next) {
   try {
     if (req.file && req.file.buffer && req.file.mimetype) {
-      const uploaded = await uploadBufferToS3(req.file.buffer, req.file.mimetype, 'category');
+      // Build hierarchy from :categoryId param when present
+      const catId = req.params?.categoryId || req.body?.categoryId;
+      let segments = [];
+      if (catId) {
+        try {
+          const Category = require('../models/Category');
+          let cur = await Category.findById(catId, 'name parent').lean();
+          const stack = [];
+          while (cur) {
+            stack.unshift(cur.name);
+            if (!cur.parent) break;
+            cur = await Category.findById(cur.parent, 'name parent').lean();
+          }
+          segments = stack;
+        } catch {}
+      }
+      const uploaded = await uploadBufferToS3(req.file.buffer, req.file.mimetype, 'category', segments.length ? { segments } : undefined);
       req.body = req.body || {};
       req.body.imageUrl = uploaded.url;
     }

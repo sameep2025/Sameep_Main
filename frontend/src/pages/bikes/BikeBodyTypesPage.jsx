@@ -61,14 +61,13 @@ export default function BikeBodyTypesPage() {
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))", gap: 16 }}>
         {bodyTypes.map((b) => (
           <div key={b._id} style={{ border: "1px solid #ccc", padding: 12, borderRadius: 8, position: "relative" }}>
-            {/* {b.imageUrl && <img src={b.imageUrl} alt={b.name} style={{ width: "100%", height: 80, objectFit: "contain" }} />} */}
             {b.imageUrl && (
-  <img 
-    src={`${API_BASE_URL}${b.imageUrl}`} 
-    alt={b.name} 
-    style={{ width: "100%", height: 80, objectFit: "contain" }} 
-  />
-)}
+              <img
+                src={b.imageUrl.startsWith("http") ? b.imageUrl : `${API_BASE_URL}${b.imageUrl}`}
+                alt={b.name}
+                style={{ width: "100%", height: 80, objectFit: "contain" }}
+              />
+            )}
 
             <h4>{b.name}</h4>
             <div style={{ position: "absolute", top: 8, right: 8, display: "flex", gap: 6 }}>

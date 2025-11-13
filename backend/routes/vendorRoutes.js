@@ -12,10 +12,83 @@ const VendorLocation = require("../models/VendorLocation");
 const router = express.Router();
 const multer = require("multer");
 const path = require("path");
-const { uploadBufferToS3, deleteS3ObjectByUrl } = require("../utils/s3Upload");
+const { uploadBufferToS3, uploadBufferToS3WithLabel, deleteS3ObjectByUrl } = require("../utils/s3Upload");
+const { v4: uuidv4 } = require("uuid");
 
 // Multer setup for vendor images (memory -> S3)
 const upload = multer({ storage: multer.memoryStorage() });
+
+// Helpers to build hierarchical S3 paths
+function extractHierarchyOptions(req) {
+  const b = req.body || {};
+  const q = req.query || {};
+  const out = {};
+  if (b.hierarchy != null || q.hierarchy != null) out.hierarchy = b.hierarchy ?? q.hierarchy;
+  if (b.path) out.path = b.path;
+  if (b.folderPath) out.folderPath = b.folderPath;
+  if (b.segments) {
+    try { out.segments = Array.isArray(b.segments) ? b.segments : JSON.parse(b.segments); } catch { /* ignore */ }
+  }
+  if (!out.segments && q.segments) {
+    try { out.segments = Array.isArray(q.segments) ? q.segments : JSON.parse(q.segments); } catch { /* ignore */ }
+  }
+  if (b.labelName) out.labelName = b.labelName;
+  const levels = [];
+  for (let i = 1; i <= 5; i++) {
+    const v = b[`level${i}`] ?? q[`level${i}`];
+    if (v) levels.push(String(v));
+  }
+  if (levels.length) out.levels = levels;
+  return out;
+}
+
+async function getCategoryPathSegments(categoryId) {
+  if (!categoryId) return [];
+  try {
+    let cur = await Category.findById(categoryId, "name parent").lean();
+    const stack = [];
+    while (cur) {
+      stack.unshift(cur.name);
+      if (!cur.parent) break;
+      cur = await Category.findById(cur.parent, "name parent").lean();
+    }
+    return stack;
+  } catch { return []; }
+}
+
+async function getTopCategoryNameById(categoryId) {
+  try {
+    const cat = await Category.findById(categoryId, "name").lean();
+    return cat?.name || null;
+  } catch { return null; }
+}
+
+function getVendorDisplayName(vendor) {
+  return (
+    vendor?.name || vendor?.contactName || vendor?.businessName || "Vendor"
+  );
+}
+
+async function buildVendorPrefixedSegments(vendor, categoryIdOrSegments, kind) {
+  // kind: 'images' | 'profile pictures'
+  const vendorName = getVendorDisplayName(vendor);
+  let topCategoryName = null;
+  if (vendor?.categoryId) {
+    topCategoryName = await getTopCategoryNameById(vendor.categoryId);
+  }
+  if (!topCategoryName && typeof categoryIdOrSegments === 'string') {
+    topCategoryName = await getTopCategoryNameById(categoryIdOrSegments);
+  }
+  const prefix = topCategoryName ? `${vendorName} - ${topCategoryName}` : vendorName;
+  let segs = Array.isArray(categoryIdOrSegments) ? categoryIdOrSegments : [];
+  if (!Array.isArray(categoryIdOrSegments) && typeof categoryIdOrSegments !== 'string') {
+    segs = [];
+  }
+  if (kind === 'profile pictures') {
+    return [prefix, 'profile pictures'];
+  }
+  return [prefix, 'images', ...segs];
+}
 
 /** Inventory entry images (per item in vendor.inventorySelections[categoryId]) **/
 // Append up to 5 images for a given inventory entry (key can be _id or at)
@@ -35,7 +108,14 @@ router.post(
     for (const f of files) {
       if (f && f.buffer && f.mimetype) {
         try {
-          const { url } = await uploadBufferToS3(f.buffer, f.mimetype, "vendor");
+          const segs = await getCategoryPathSegments(categoryId);
+          // optional extra levels from request for inventory label hierarchy
+          const extra = [];
+          for (let i=1;i<=5;i++){ if (req.body?.[`level${i}`]) extra.push(String(req.body[`level${i}`])); }
+          let merged = segs;
+          if (extra.length) merged = [...segs, ...extra];
+          const finalSegs = await buildVendorPrefixedSegments(vendor, segs, 'images');
+          const { url } = await uploadBufferToS3WithLabel(f.buffer, f.mimetype, "vendor", uuidv4(), { segments: extra.length ? [...finalSegs.slice(0,2), ...merged] : finalSegs });
           urls.push(url);
         } catch (e) {
           return res.status(500).json({ message: "Failed to upload image to S3", error: e.message });
@@ -71,7 +151,13 @@ router.put(
     if (idxNum < 0 || idxNum >= arr.length) return res.status(400).json({ message: "Invalid index" });
     try {
       const oldUrl = arr[idxNum];
-      const { url } = await uploadBufferToS3(req.file.buffer, req.file.mimetype, "vendor");
+      const segs = await getCategoryPathSegments(categoryId);
+      const extra = [];
+      for (let i=1;i<=5;i++){ if (req.body?.[`level${i}`]) extra.push(String(req.body[`level${i}`])); }
+      let merged = segs;
+      if (extra.length) merged = [...segs, ...extra];
+      const finalSegs = await buildVendorPrefixedSegments(vendor, segs, 'images');
+      const { url } = await uploadBufferToS3WithLabel(req.file.buffer, req.file.mimetype, "vendor", uuidv4(), { segments: extra.length ? [...finalSegs.slice(0,2), ...merged] : finalSegs });
       arr[idxNum] = url;
       if (oldUrl) { try { await deleteS3ObjectByUrl(oldUrl); } catch {} }
     } catch (e) {
@@ -143,7 +229,13 @@ router.post(
     for (const f of files) {
       if (f && f.buffer && f.mimetype) {
         try {
-          const { url } = await uploadBufferToS3(f.buffer, f.mimetype, "vendor");
+          const segs = await getCategoryPathSegments(nodeId);
+          const extra = [];
+          for (let i=1;i<=5;i++){ if (req.body?.[`level${i}`]) extra.push(String(req.body[`level${i}`])); }
+          let merged = segs;
+          if (extra.length) merged = [...segs, ...extra];
+          const finalSegs = await buildVendorPrefixedSegments(vendor, segs, 'images');
+          const { url } = await uploadBufferToS3(f.buffer, f.mimetype, "vendor", { segments: extra.length ? [...finalSegs.slice(0,2), ...merged] : finalSegs });
           urls.push(url);
         } catch (e) {
           return res.status(500).json({ message: "Failed to upload image to S3", error: e.message });
@@ -176,8 +268,16 @@ router.put(
     if (!req.file) return res.status(400).json({ message: "image file required" });
     if (idxNum < 0 || idxNum >= arr.length) return res.status(400).json({ message: "Invalid index" });
     try {
-      const { url } = await uploadBufferToS3(req.file.buffer, req.file.mimetype, "vendor");
+      const oldUrl = arr[idxNum];
+      const segs = await getCategoryPathSegments(nodeId);
+      const extra = [];
+      for (let i=1;i<=5;i++){ if (req.body?.[`level${i}`]) extra.push(String(req.body[`level${i}`])); }
+      let merged = segs;
+      if (extra.length) merged = [...segs, ...extra];
+      const finalSegs = await buildVendorPrefixedSegments(vendor, segs, 'images');
+      const { url } = await uploadBufferToS3(req.file.buffer, req.file.mimetype, "vendor", { segments: extra.length ? [...finalSegs.slice(0,2), ...merged] : finalSegs });
       arr[idxNum] = url;
+      if (oldUrl) { try { await deleteS3ObjectByUrl(oldUrl); } catch {} }
     } catch (e) {
       return res.status(500).json({ message: "Failed to upload image to S3", error: e.message });
     }
@@ -189,7 +289,8 @@ router.put(
     console.error("Replace row image error:", err);
     res.status(500).json({ message: "Server error", error: err.message });
   }
-});
+})
+;
 
 // Delete image by index for a row
 router.delete("/:vendorId/rows/:nodeId/images/:index", async (req, res) => {
@@ -244,7 +345,8 @@ router.put(
     if (idx < 0 || idx >= arr.length) return res.status(400).json({ message: "Invalid index" });
     try {
       const oldUrl = arr[idx];
-      const { url } = await uploadBufferToS3(req.file.buffer, req.file.mimetype, "vendor");
+      const finalSegs = await buildVendorPrefixedSegments(vendor, null, 'profile pictures');
+      const { url } = await uploadBufferToS3WithLabel(req.file.buffer, req.file.mimetype, "vendor", uuidv4(), { segments: finalSegs });
       arr[idx] = url;
       if (oldUrl) { try { await deleteS3ObjectByUrl(oldUrl); } catch {} }
     } catch (e) {
@@ -559,7 +661,8 @@ router.post(
     for (const f of files) {
       if (f && f.buffer && f.mimetype) {
         try {
-          const { url } = await uploadBufferToS3(f.buffer, f.mimetype, "vendor");
+          const finalSegs = await buildVendorPrefixedSegments(vendor, null, 'profile pictures');
+          const { url } = await uploadBufferToS3WithLabel(f.buffer, f.mimetype, "vendor", uuidv4(), { segments: finalSegs });
           urls.push(url);
         } catch (e) {
           return res.status(500).json({ message: "Failed to upload image to S3", error: e.message });
