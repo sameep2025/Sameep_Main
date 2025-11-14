@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useParams } from "react-router-dom";
 import axios from "axios";
-import API_BASE_URL, { PREVIEW_BASE_URL } from "../config";
+import API_BASE_URL, { PREVIEW_BASE_URL, NIKS_PREVIEW_BASE_URL } from "../config";
 
 function flattenTree(node, rows = [], parentLevels = [], parentIds = []) {
   if (!node) return rows;
@@ -539,6 +539,19 @@ export default function DummyVendorCategoriesDetailPage() {
             style={{ padding: "8px 12px", borderRadius: 8, background: "#2563eb", color: "#fff", textDecoration: "none", opacity: previewCategoryId ? 1 : 0.6, pointerEvents: previewCategoryId ? "auto" : "none", border: 'none' }}
           >
             Preview
+          </button>
+          <button
+            onClick={() => {
+              if (!previewCategoryId) return;
+              const homeLocs = (vendor?.location?.nearbyLocations || []).filter(Boolean);
+              const base = NIKS_PREVIEW_BASE_URL || (typeof window !== 'undefined' ? window.location.origin : '');
+              const url = `${base}/preview/${vendorId}/${previewCategoryId}?mode=dummy&homeLocs=${encodeURIComponent(JSON.stringify(homeLocs))}&t=${Date.now()}`;
+              window.open(url, '_blank');
+            }}
+            disabled={!previewCategoryId}
+            style={{ padding: "8px 12px", borderRadius: 8, background: "#059669", color: "#fff", textDecoration: "none", opacity: previewCategoryId ? 1 : 0.6, pointerEvents: previewCategoryId ? "auto" : "none", border: 'none' }}
+          >
+            NiksPreview
           </button>
         </div>
       </div>

@@ -20,6 +20,14 @@ const API_BASE_URL = (() => {
   try {
     const env = (typeof process !== 'undefined') ? (process.env.NEXT_PUBLIC_API_BASE_URL || process.env.REACT_APP_API_BASE_URL || "") : "";
     if (env && String(env).trim()) return String(env).trim().replace(/\/$/, "");
+    // If running in a browser and NOT on localhost, use production backend
+    try {
+      const loc = typeof window !== 'undefined' ? window.location : null;
+      const host = loc ? String(loc.hostname || '') : '';
+      if (host && host !== 'localhost' && host !== '127.0.0.1') {
+        return "https://newsameep-backend.go-kar.net";
+      }
+    } catch {}
     const isDev = (typeof process !== 'undefined' ? process.env.NODE_ENV : '') === 'development';
     if (isDev) return "http://localhost:5000";
     return "https://newsameep-backend.go-kar.net";
