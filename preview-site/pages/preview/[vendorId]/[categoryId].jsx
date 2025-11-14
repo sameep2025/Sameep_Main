@@ -1710,8 +1710,29 @@ export default function PreviewPage() {
 
           return (
             <section key={lvl1.id} style={{ marginBottom: 24, display: 'flex', flexDirection: 'column' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 14, justifyContent: 'space-between' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 14, justifyContent: 'flex-start' }}>
                 <h2 style={{ margin: 0, fontSize: 18, fontWeight: 600 }}>{lvl1.name}</h2>
+              </div>
+
+              <div
+                className="ds-tt-card"
+                style={{
+                  border: '1px solid #e2e8f0',
+                  borderRadius: 16,
+                  padding: 22,
+                  background: '#fff',
+                  width: '100%',
+                  minHeight: 480,
+                  height: '100%',
+                  boxShadow: '0 1px 6px rgba(0,0,0,0.08)',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: 12,
+                  justifyContent: 'flex-start',
+                  fontFamily: 'Poppins, sans-serif',
+                }}
+              >
+
                 {lvl2Kids.length > 0 ? (
                   <select
                     value={String(selectedLvl2?.id || '')}
@@ -1764,34 +1785,15 @@ export default function PreviewPage() {
                         },
                       }));
                     }}
-                    style={{ padding: '8px 10px', borderRadius: 8, border: '1px solid #d1d5db', background: '#fff', fontSize: 13 }}
+                    style={{ padding: '10px 14px', borderRadius: 999, border: '1px solid #d1d5db', background: '#fff', fontSize: 16, fontWeight: 600 }}
                   >
                     {lvl2Kids.map((opt) => (
                       <option key={opt.id} value={opt.id}>{opt.name}</option>
                     ))}
                   </select>
-                ) : null}
-              </div>
-
-              <div
-                className="ds-tt-card"
-                style={{
-                  border: '1px solid #e2e8f0',
-                  borderRadius: 16,
-                  padding: 22,
-                  background: '#fff',
-                  width: '100%',
-                  minHeight: 480,
-                  height: '100%',
-                  boxShadow: '0 1px 6px rgba(0,0,0,0.08)',
-                  display: 'flex',
-                  flexDirection: 'column',
-                  gap: 12,
-                  justifyContent: 'flex-start',
-                  fontFamily: 'Poppins, sans-serif',
-                }}
-              >
-                <h3 style={{ margin: '0 0 8px', fontSize: 16, fontWeight: 600 }}>{displayNode?.name}</h3>
+                ) : (
+                  <h3 style={{ margin: '0 0 8px', fontSize: 16, fontWeight: 600 }}>{displayNode?.name}</h3>
+                )}
 
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 12 }}>
                   {(() => {
@@ -1851,7 +1853,10 @@ export default function PreviewPage() {
                     } catch { return <div />; }
                   })()}
                   {attrAwarePrice != null ? (
-                    <div style={{ color: '#059669', fontWeight: 700, fontSize: 18 }}>₹ {attrAwarePrice}</div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 4, color: '#059669', fontWeight: 700, fontSize: 18 }}>
+                      <span>₹</span>
+                      <span>{attrAwarePrice}</span>
+                    </div>
                   ) : null}
                 </div>
 
@@ -1879,7 +1884,37 @@ export default function PreviewPage() {
                     value={String(selState.transmission || '')}
                     onChange={(e) => {
                       const val = e.target.value || undefined;
-                      setTaxiSelections((prev) => ({ ...prev, [lvl1.id]: { ...(prev[lvl1.id] || {}), transmission: val, bodyType: undefined, modelBrand: undefined } }));
+                      const targetId = String((selectedLvl3 || selectedLvl2 || lvl1)?.id || '');
+                      const listAll = normalizedForLvl1;
+                      const mp = (list) => {
+                        try {
+                          const prices = [];
+                          list.forEach((n) => {
+                            const pbr = (n.entry && n.entry.pricesByRow && typeof n.entry.pricesByRow === 'object') ? n.entry.pricesByRow : null;
+                            if (!pbr) return;
+                            for (const [key, value] of Object.entries(pbr)) {
+                              const ids = String(key).split('|');
+                              if (ids.some((id) => String(id) === String(targetId))) {
+                                const num = Number(value);
+                                if (!Number.isNaN(num)) prices.push(num);
+                              }
+                            }
+                          });
+                          if (prices.length === 0) return null;
+                          return Math.min(...prices);
+                        } catch { return null; }
+                      };
+                      const afterTr = val ? listAll.filter((n) => String(n.transmission) === String(val)) : listAll;
+                      const bodyOpts2 = Array.from(new Set(afterTr.map((n) => n.body).filter((v) => v && String(v).trim() !== '')));
+                      const bodyWithPrice = bodyOpts2.map((opt) => ({ opt, price: mp(afterTr.filter((n) => (n.body ? String(n.body) === String(opt) : true))) }));
+                      bodyWithPrice.sort((a,b)=>{ const va=a.price==null?Number.POSITIVE_INFINITY:Number(a.price); const vb=b.price==null?Number.POSITIVE_INFINITY:Number(b.price); return va-vb; });
+                      const bestBody = bodyWithPrice[0]?.opt;
+                      const afterBody = bestBody ? afterTr.filter((n) => (n.body ? String(n.body) === String(bestBody) : true)) : afterTr;
+                      const mbPairs2 = Array.from(new Set(afterBody.filter((n)=> n.model && n.brand).map((n)=> `${n.model}|${n.brand}`)));
+                      const mbWithPrice2 = mbPairs2.map((opt)=>{ const [m,b]=String(opt).split('|'); const lst = afterBody.filter((n)=> String(n.model)===String(m||'') && String(n.brand)===String(b||'')); return { opt, price: mp(lst) }; });
+                      mbWithPrice2.sort((a,b)=>{ const va=a.price==null?Number.POSITIVE_INFINITY:Number(a.price); const vb=b.price==null?Number.POSITIVE_INFINITY:Number(b.price); return va-vb; });
+                      const bestMB = mbWithPrice2[0]?.opt;
+                      setTaxiSelections((prev) => ({ ...prev, [lvl1.id]: { ...(prev[lvl1.id] || {}), transmission: val, bodyType: bestBody, modelBrand: bestMB } }));
                     }}
                     style={{ width: '100%', padding: '8px 10px', border: '1px solid #d1d5db', borderRadius: 8, background: '#fff', fontSize: 13 }}
                   >
@@ -1895,7 +1930,32 @@ export default function PreviewPage() {
                     value={String(selState.bodyType || '')}
                     onChange={(e) => {
                       const val = e.target.value || undefined;
-                      setTaxiSelections((prev) => ({ ...prev, [lvl1.id]: { ...(prev[lvl1.id] || {}), bodyType: val, modelBrand: undefined } }));
+                      const targetId = String((selectedLvl3 || selectedLvl2 || lvl1)?.id || '');
+                      const listBase = (!selState.transmission ? normalizedForLvl1 : normalizedForLvl1.filter((n) => String(n.transmission) === String(selState.transmission)));
+                      const afterBody = val ? listBase.filter((n) => (n.body ? String(n.body) === String(val) : true)) : listBase;
+                      const mp = (list) => {
+                        try {
+                          const prices = [];
+                          list.forEach((n) => {
+                            const pbr = (n.entry && n.entry.pricesByRow && typeof n.entry.pricesByRow === 'object') ? n.entry.pricesByRow : null;
+                            if (!pbr) return;
+                            for (const [key, value] of Object.entries(pbr)) {
+                              const ids = String(key).split('|');
+                              if (ids.some((id) => String(id) === String(targetId))) {
+                                const num = Number(value);
+                                if (!Number.isNaN(num)) prices.push(num);
+                              }
+                            }
+                          });
+                          if (prices.length === 0) return null;
+                          return Math.min(...prices);
+                        } catch { return null; }
+                      };
+                      const mbPairs2 = Array.from(new Set(afterBody.filter((n)=> n.model && n.brand).map((n)=> `${n.model}|${n.brand}`)));
+                      const mbWithPrice2 = mbPairs2.map((opt)=>{ const [m,b]=String(opt).split('|'); const lst = afterBody.filter((n)=> String(n.model)===String(m||'') && String(n.brand)===String(b||'')); return { opt, price: mp(lst) }; });
+                      mbWithPrice2.sort((a,b)=>{ const va=a.price==null?Number.POSITIVE_INFINITY:Number(a.price); const vb=b.price==null?Number.POSITIVE_INFINITY:Number(b.price); return va-vb; });
+                      const bestMB = mbWithPrice2[0]?.opt;
+                      setTaxiSelections((prev) => ({ ...prev, [lvl1.id]: { ...(prev[lvl1.id] || {}), bodyType: val, modelBrand: bestMB } }));
                     }}
                     style={{ width: '100%', padding: '8px 10px', border: '1px solid #d1d5db', borderRadius: 8, background: '#fff', fontSize: 13 }}
                   >
@@ -1925,6 +1985,32 @@ export default function PreviewPage() {
                     })}
                   </select>
                 )) : null}
+
+                {displayNode?.terms && String(displayNode.terms).trim() && (
+                  <div style={{ width: '100%', marginTop: 10, marginBottom: 12 }}>
+                    <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 4 }}>Terms:</div>
+                    <ul
+                      style={{
+                        margin: 0,
+                        paddingLeft: 18,
+                        fontSize: 12,
+                        color: '#111827',
+                        lineHeight: 1.5,
+                        maxHeight: 150,
+                        overflowY: 'auto',
+                      }}
+                    >
+                      {String(displayNode.terms)
+                        .split(',')
+                        .map((t) => String(t).trim())
+                        .filter((t) => t)
+                        .map((t, idx) => (
+                          <li key={idx} style={{ marginBottom: 2 }}>{t}</li>
+                        ))}
+                    </ul>
+                  </div>
+                )}
+
                 <button
                   onClick={() => alert(`Booking ${displayNode?.name}`)}
                   style={{

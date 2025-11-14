@@ -266,13 +266,14 @@ const CategoryCard = ({ node, onClick, onLeafClick, themeColor, cardBg, accentCo
 
 /* Product Card */
 /* Product Card */
-const ProductCard = ({ node, vendorId, themeColor, cardBg, accentColor, categoryType, isHighlighted }) => {
+const ProductCard = ({ node, vendorId, themeColor, cardBg, accentColor, categoryType, isHighlighted, rootCategoryName }) => {
   const displayPrice = node.vendorPrice ?? node.price;
   const nodeCategoryType = node.categoryType || categoryType || "Services";
   const isProducts = nodeCategoryType === "Products";
   const hasImage = node.imageUrl && resolveImageUrl(node.imageUrl);
   const { addItem: addToCart } = useCart();
   const [qty, setQty] = React.useState(1);
+  const isDrivingOrTaxi = (rootCategoryName || "").toLowerCase() === "driving school" || (rootCategoryName || "").toLowerCase() === "taxi services";
   const handleAdd = () => {
     const quantity = Math.max(1, parseInt(qty || 1, 10));
     addToCart(node, quantity);
@@ -354,30 +355,64 @@ const ProductCard = ({ node, vendorId, themeColor, cardBg, accentColor, category
       )}
 
       {node.terms && node.terms.trim() && (
-        <ul
-          style={{
-            width: "100%",
-            textAlign: "left",
-            fontSize: 12,
-            color: "#1e293b",
-            marginBottom: 10,
-            lineHeight: "1.4em",
-            paddingLeft: 18,
-            flex: 1,
-            overflowY: "auto",
-            maxHeight: 120,
-            margin: "8px 0",
-          }}
-        >
-          {node.terms
-            .split(",")
-            .filter((t) => t.trim())
-            .map((t, i) => (
-              <li key={i} style={{ marginBottom: 3 }}>
-                {t.trim()}
-              </li>
-            ))}
-        </ul>
+        isDrivingOrTaxi ? (
+          <div
+            style={{
+              width: "100%",
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fill, minmax(140px, 1fr))",
+              gap: 10,
+              margin: "8px 0 10px",
+              maxHeight: 160,
+              overflowY: "auto",
+            }}
+          >
+            {node.terms
+              .split(",")
+              .filter((t) => t.trim())
+              .map((t, i) => (
+                <div
+                  key={i}
+                  style={{
+                    background: "#F8FAFC",
+                    borderRadius: 10,
+                    padding: "8px 10px",
+                    border: `1px solid ${themeColor}30`,
+                    fontSize: 11,
+                    color: "#0f172a",
+                    boxShadow: "0 1px 3px rgba(15,23,42,0.08)",
+                  }}
+                >
+                  {t.trim()}
+                </div>
+              ))}
+          </div>
+        ) : (
+          <ul
+            style={{
+              width: "100%",
+              textAlign: "left",
+              fontSize: 12,
+              color: "#1e293b",
+              marginBottom: 10,
+              lineHeight: "1.4em",
+              paddingLeft: 18,
+              flex: 1,
+              overflowY: "auto",
+              maxHeight: 120,
+              margin: "8px 0",
+            }}
+          >
+            {node.terms
+              .split(",")
+              .filter((t) => t.trim())
+              .map((t, i) => (
+                <li key={i} style={{ marginBottom: 3 }}>
+                  {t.trim()}
+                </li>
+              ))}
+          </ul>
+        )
       )}
 
       <div style={{ display: "flex", gap: 8, width: "100%", marginTop: "auto", alignItems: "center" }}>
@@ -572,6 +607,7 @@ const OverlayModal = ({
                       accentColor={accentColor}
                       categoryType={categoryType}
                       isHighlighted={isHighlighted}
+                      rootCategoryName={categoryName}
                     />
                   )}
                 </div>
@@ -1394,6 +1430,7 @@ function PreviewPage() {
                   cardBg={cardBg}
                   accentColor={accent}
                   categoryType={categoryType}
+                  rootCategoryName={categoryTree.name}
                 />
               ) : (
                 <CategoryCard
