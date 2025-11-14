@@ -99,7 +99,12 @@ async function uploadBufferToS3WithLabel(buffer, mimetype, folderType, labelName
 function extractKeyFromUrl(url) {
   try {
     const u = new URL(url);
-    return u.pathname.replace(/^\//, '');
+    const raw = u.pathname.replace(/^\//, '');
+    try {
+      return decodeURIComponent(raw);
+    } catch {
+      return raw;
+    }
   } catch {
     return null;
   }

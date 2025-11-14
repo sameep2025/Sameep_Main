@@ -1,7 +1,8 @@
 const express = require("express");
 const multer = require("multer");
 const Category = require("../models/Category");
-const { uploadBufferToS3, deleteS3ObjectByUrl } = require("../utils/s3Upload");
+const { uploadBufferToS3, uploadBufferToS3WithLabel, deleteS3ObjectByUrl } = require("../utils/s3Upload");
+const { v4: uuidv4 } = require("uuid");
 const router = express.Router();
 
 const upload = multer({ storage: multer.memoryStorage() });
@@ -97,10 +98,11 @@ router.post("/", upload.single("image"), async (req, res) => {
           segments.push(...stack);
         }
         segments.push(String(name));
-        const { url } = await uploadBufferToS3(
+        const { url } = await uploadBufferToS3WithLabel(
           req.file.buffer,
           req.file.mimetype,
           "category",
+          uuidv4(),
           { segments }
         );
         categoryData.imageUrl = url;
@@ -374,7 +376,7 @@ router.put("/:id", uploadFields, async (req, res) => {
           walker = await Category.findById(walker.parent, "name parent").lean();
         }
         segs.push(...stack);
-        const { url } = await uploadBufferToS3(imageFile.buffer, imageFile.mimetype, "category", { segments: segs });
+        const { url } = await uploadBufferToS3WithLabel(imageFile.buffer, imageFile.mimetype, "category", uuidv4(), { segments: segs });
         category.imageUrl = url;
       } catch (e) {
         return res.status(500).json({ message: "Failed to upload image to S3", error: e.message });
@@ -392,7 +394,7 @@ router.put("/:id", uploadFields, async (req, res) => {
           walker = await Category.findById(walker.parent, "name parent").lean();
         }
         segs.push(...stack);
-        const { url } = await uploadBufferToS3(iconFile.buffer, iconFile.mimetype, "category", { segments: segs });
+        const { url } = await uploadBufferToS3WithLabel(iconFile.buffer, iconFile.mimetype, "category", uuidv4(), { segments: segs });
         category.iconUrl = url;
       } catch (e) {
         return res.status(500).json({ message: "Failed to upload icon to S3", error: e.message });

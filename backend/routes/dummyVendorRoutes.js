@@ -358,6 +358,45 @@ router.get("/:vendorId", async (req, res) => {
   }
 });
 
+/**
+ * GET /api/dummy-vendors/:vendorId/custom-fields
+ * Returns { freeText1, freeText2 }
+ */
+router.get("/:vendorId/custom-fields", async (req, res) => {
+  try {
+    const v = await DummyVendor.findById(req.params.vendorId).lean();
+    if (!v) return res.status(404).json({ message: "Vendor not found" });
+    const cf = (v.customFields && typeof v.customFields === 'object') ? v.customFields : {};
+    return res.json({
+      freeText1: typeof cf.freeText1 === 'string' ? cf.freeText1 : "",
+      freeText2: typeof cf.freeText2 === 'string' ? cf.freeText2 : "",
+    });
+  } catch (err) {
+    console.error("GET /dummy-vendors/:vendorId/custom-fields error:", err);
+    return res.status(500).json({ message: "Server error" });
+  }
+});
+
+/**
+ * PUT /api/dummy-vendors/:vendorId/custom-fields
+ * Body: { freeText1, freeText2 }
+ */
+router.put("/:vendorId/custom-fields", async (req, res) => {
+  try {
+    const { vendorId } = req.params;
+    const freeText1 = typeof req.body?.freeText1 === 'string' ? req.body.freeText1 : '';
+    const freeText2 = typeof req.body?.freeText2 === 'string' ? req.body.freeText2 : '';
+    const vdoc = await DummyVendor.findById(vendorId);
+    if (!vdoc) return res.status(404).json({ message: "Vendor not found" });
+    vdoc.customFields = { ...(vdoc.customFields || {}), freeText1, freeText2 };
+    await vdoc.save();
+    return res.json({ success: true, customFields: vdoc.customFields });
+  } catch (err) {
+    console.error("PUT /dummy-vendors/:vendorId/custom-fields error:", err);
+    return res.status(500).json({ message: "Server error" });
+  }
+});
+
 router.put("/:vendorId", async (req, res) => {
   try {
     const { vendorId } = req.params;
@@ -662,15 +701,9 @@ router.put("/:vendorId/profile-pictures", upload.any(), async (req, res) => {
     const vdoc = await DummyVendor.findById(req.params.vendorId);
     if (!vdoc) return res.status(404).json({ success: false, message: "Vendor not found" });
 
-    // 1) Try multipart files
+    // 1) If multipart files provided, replace with those
     const anyFiles = Array.isArray(req.files) ? req.files : [];
-    let files = anyFiles.filter(f => ["images","image","file","files"].includes(f.fieldname)).slice(0,5);
-    // 2) If none, try base64 from body
-    if (!files.length) {
-      const fromBody = extractBase64ImagesFromBody(req.body).slice(0,5);
-      files = fromBody.map(x => ({ buffer: x.buffer, mimetype: x.mimetype }));
-    }
-
+    const files = anyFiles.filter(f => ["images","image","file","files"].includes(f.fieldname)).slice(0,5);
     if (files.length) {
       const baseSegs = await buildDummyVendorPrefixedSegments(vdoc, 'profile pictures');
       const urls = [];
@@ -685,7 +718,7 @@ router.put("/:vendorId/profile-pictures", upload.any(), async (req, res) => {
       return res.json({ success: true, profilePictures: vdoc.profilePictures });
     }
 
-    // 3) Process profilePictures array: upload data URLs, keep http(s) URLs
+    // 2) Process profilePictures array in body: upload data URLs, keep http(s) URLs
     const list = Array.isArray(req.body?.profilePictures) ? req.body.profilePictures : [];
     if (list.length) {
       const baseSegs = await buildDummyVendorPrefixedSegments(vdoc, 'profile pictures');

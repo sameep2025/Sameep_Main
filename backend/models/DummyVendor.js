@@ -38,6 +38,12 @@ const dummyVendorSchema = new mongoose.Schema({
   rowImages: { type: Object, default: {} },
   inventorySelections: { type: Object, default: {} },
 
+  // Custom fields for preview Home section (Add-On Text)
+  customFields: {
+    freeText1: { type: String, default: "" }, // Heading
+    freeText2: { type: String, default: "" }, // Description
+  },
+
   createdAt: { type: Date, default: Date.now },
 });
 

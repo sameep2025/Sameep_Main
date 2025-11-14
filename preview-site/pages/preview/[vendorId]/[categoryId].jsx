@@ -49,19 +49,19 @@ export default function PreviewPage() {
       if (forceDummy) {
         // Dummy vendor flow (forced by query)
         try {
-          const dvRes = await fetch(`/api/dummy-vendors/${vendorId}/categories`, { cache: 'no-store' });
+          const dvRes = await fetch(`${API_BASE_URL}/api/dummy-vendors/${vendorId}/categories`, { cache: 'no-store' });
           const dv = await dvRes.json();
           // Fetch full dummy vendor document to hydrate inventorySelections/rowImages
           let dvDoc = {};
           try {
-            const vRes = await fetch(`/api/dummy-vendors/${vendorId}`, { cache: 'no-store' });
+            const vRes = await fetch(`${API_BASE_URL}/api/dummy-vendors/${vendorId}`, { cache: 'no-store' });
             dvDoc = await vRes.json().catch(() => ({}));
           } catch { dvDoc = {}; }
           let dvVendor = { ...(dv?.vendor || {}), ...(dvDoc || {}) };
           try {
             const pics = Array.isArray(dvVendor?.profilePictures) ? dvVendor.profilePictures : [];
             if (pics.length === 0) {
-              const pRes = await fetch(`/api/dummy-vendors/${vendorId}/profile-pictures`, { cache: 'no-store' });
+              const pRes = await fetch(`${API_BASE_URL}/api/dummy-vendors/${vendorId}/profile-pictures`, { cache: 'no-store' });
               if (pRes.ok) {
                 const pj = await pRes.json().catch(() => null);
                 const list = Array.isArray(pj?.profilePictures) ? pj.profilePictures : [];
@@ -80,7 +80,7 @@ export default function PreviewPage() {
             // Try to fetch the exact dummy category to read its freeTexts if tree doesn't have it
             let dummyCat = null;
             try {
-              const r = await fetch(`/api/dummy-categories/${categoryId}`, { cache: 'no-store' });
+              const r = await fetch(`${API_BASE_URL}/api/dummy-categories/${categoryId}`, { cache: 'no-store' });
               if (r.ok) dummyCat = await r.json();
             } catch {}
             const rawCatFT = (categoriesWithLinked && categoriesWithLinked.freeTexts)
@@ -99,11 +99,11 @@ export default function PreviewPage() {
           } catch {}
           // Fetch dummy combos for this category
           try {
-            const c1 = await fetch(`/api/dummy-combos?parentCategoryId=${categoryId}`, { cache: 'no-store' });
+            const c1 = await fetch(`${API_BASE_URL}/api/dummy-combos?parentCategoryId=${categoryId}`, { cache: 'no-store' });
             let list = await c1.json().catch(() => []);
             if (!Array.isArray(list) || list.length === 0) {
               try {
-                const c2 = await fetch(`/api/dummy-combos/byParent/${categoryId}`, { cache: 'no-store' });
+                const c2 = await fetch(`${API_BASE_URL}/api/dummy-combos/byParent/${categoryId}`, { cache: 'no-store' });
                 list = await c2.json().catch(() => []);
               } catch {}
             }
@@ -115,26 +115,26 @@ export default function PreviewPage() {
         }
       } else {
         // Try real vendor flow
-        const vendorRes = await fetch(`/api/vendors/${vendorId}`, { cache: 'no-store' });
+        const vendorRes = await fetch(`${API_BASE_URL}/api/vendors/${vendorId}`, { cache: 'no-store' });
         let vendorData = {};
         try { vendorData = await vendorRes.json(); } catch { vendorData = {}; }
         const isDummy = (!vendorRes.ok || vendorData?.message);
         if (isDummy) {
           // Fallback to dummy
           try {
-            const dvRes = await fetch(`/api/dummy-vendors/${vendorId}/categories`, { cache: 'no-store' });
+            const dvRes = await fetch(`${API_BASE_URL}/api/dummy-vendors/${vendorId}/categories`, { cache: 'no-store' });
             const dv = await dvRes.json();
             // Hydrate with full dummy vendor
             let dvDoc = {};
             try {
-              const vRes = await fetch(`/api/dummy-vendors/${vendorId}`, { cache: 'no-store' });
+              const vRes = await fetch(`${API_BASE_URL}/api/dummy-vendors/${vendorId}`, { cache: 'no-store' });
               dvDoc = await vRes.json().catch(() => ({}));
             } catch { dvDoc = {}; }
             let dvVendor = { ...(dv?.vendor || {}), ...(dvDoc || {}) };
             try {
               const pics = Array.isArray(dvVendor?.profilePictures) ? dvVendor.profilePictures : [];
               if (pics.length === 0) {
-                const pRes = await fetch(`/api/dummy-vendors/${vendorId}/profile-pictures`, { cache: 'no-store' });
+                const pRes = await fetch(`${API_BASE_URL}/api/dummy-vendors/${vendorId}/profile-pictures`, { cache: 'no-store' });
                 if (pRes.ok) {
                   const pj = await pRes.json().catch(() => null);
                   const list = Array.isArray(pj?.profilePictures) ? pj.profilePictures : [];
@@ -153,7 +153,7 @@ export default function PreviewPage() {
               // Try to fetch the exact dummy category to read its freeTexts if tree doesn't have it
               let dummyCat = null;
               try {
-                const r = await fetch(`/api/dummy-categories/${categoryId}`, { cache: 'no-store' });
+                const r = await fetch(`${API_BASE_URL}/api/dummy-categories/${categoryId}`, { cache: 'no-store' });
                 if (r.ok) dummyCat = await r.json();
               } catch {}
               const rawCatFT = (categoriesWithLinked && categoriesWithLinked.freeTexts)
@@ -172,11 +172,11 @@ export default function PreviewPage() {
             } catch {}
             // Fetch dummy combos for this category (fallback path)
             try {
-              const c1 = await fetch(`/api/dummy-combos?parentCategoryId=${categoryId}`, { cache: 'no-store' });
+              const c1 = await fetch(`${API_BASE_URL}/api/dummy-combos?parentCategoryId=${categoryId}`, { cache: 'no-store' });
               let list = await c1.json().catch(() => []);
               if (!Array.isArray(list) || list.length === 0) {
                 try {
-                  const c2 = await fetch(`/api/dummy-combos/byParent/${categoryId}`, { cache: 'no-store' });
+                  const c2 = await fetch(`${API_BASE_URL}/api/dummy-combos/byParent/${categoryId}`, { cache: 'no-store' });
                   list = await c2.json().catch(() => []);
                 } catch {}
               }
@@ -190,10 +190,10 @@ export default function PreviewPage() {
           // Real vendor: load preview tree and meta
           setVendor(vendorData);
           const [categoryRes, locationRes, catMetaRes, serverTreeRes] = await Promise.all([
-            fetch(`/api/vendors/${vendorId}/preview/${categoryId}`, { cache: 'no-store' }),
-            fetch(`/api/vendors/${vendorId}/location`, { cache: 'no-store' }),
-            fetch(`/api/categories/${categoryId}`, { cache: 'no-store' }),
-            fetch(`/api/categories/${categoryId}/tree`, { cache: 'no-store' }),
+            fetch(`${API_BASE_URL}/api/vendors/${vendorId}/preview/${categoryId}`, { cache: 'no-store' }),
+            fetch(`${API_BASE_URL}/api/vendors/${vendorId}/location`, { cache: 'no-store' }),
+            fetch(`${API_BASE_URL}/api/categories/${categoryId}`, { cache: 'no-store' }),
+            fetch(`${API_BASE_URL}/api/categories/${categoryId}/tree`, { cache: 'no-store' }),
           ]);
 
           const categoryData = await categoryRes.json().catch(() => ({}));
@@ -254,15 +254,15 @@ export default function PreviewPage() {
           } catch {}
 
           try {
-            const combosRes = await fetch(`/api/combos?parentCategoryId=${categoryId}`, { cache: 'no-store' });
+            const combosRes = await fetch(`${API_BASE_URL}/api/combos?parentCategoryId=${categoryId}`, { cache: 'no-store' });
             let combosData = await combosRes.json().catch(() => []);
             if (!Array.isArray(combosData) || combosData.length === 0) {
               // Fallback to dummy combos if real combos are empty
               try {
-                const c1 = await fetch(`/api/dummy-combos?parentCategoryId=${categoryId}`, { cache: 'no-store' });
+                const c1 = await fetch(`${API_BASE_URL}/api/dummy-combos?parentCategoryId=${categoryId}`, { cache: 'no-store' });
                 let list = await c1.json().catch(() => []);
                 if (!Array.isArray(list) || list.length === 0) {
-                  const c2 = await fetch(`/api/dummy-combos/byParent/${categoryId}`, { cache: 'no-store' });
+                  const c2 = await fetch(`${API_BASE_URL}/api/dummy-combos/byParent/${categoryId}`, { cache: 'no-store' });
                   list = await c2.json().catch(() => []);
                 }
                 combosData = Array.isArray(list) ? list : [];

@@ -139,10 +139,22 @@ function flattenTree(node, rows = [], parentLevels = []) {
 export default function VendorStatusListPage() {
   const { categoryId, status } = useParams();
   const navigate = useNavigate();
+  const devProxy = (() => {
+    try {
+      const loc = window.location;
+      const isLocal = loc && (loc.hostname === 'localhost' || loc.hostname === '127.0.0.1');
+      if (isLocal && String(loc.port) === '3001') return 'http://localhost:3000';
+    } catch {}
+    return '';
+  })();
   const [vendors, setVendors] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [selectedVendor, setSelectedVendor] = useState(null);
+  const [selectedVendorId, setSelectedVendorId] = useState(null);
+  const [showAddText, setShowAddText] = useState(false);
+  const [addHeading, setAddHeading] = useState("");
+  const [addDescription, setAddDescription] = useState("");
   const [tree, setTree] = useState([]);
   const [categoriesLoading, setCategoriesLoading] = useState(false);
   const [vendorCategoriesCache, setVendorCategoriesCache] = useState({});
@@ -322,6 +334,7 @@ export default function VendorStatusListPage() {
           if (!selectedVendor) {
             setSelectedVendor(v);
             setTree(treeData);
+            setSelectedVendorId(v._id);
           }
         })
         .catch(() => {});
@@ -419,6 +432,83 @@ export default function VendorStatusListPage() {
   return (
     <div style={{ padding: 20 }}>
       <h1>{status} Vendors</h1>
+      {/* Top navbar actions for selected vendor */}
+      <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', padding: 10, background: '#f8fafc', border: '1px solid #e5e7eb', borderRadius: 8, marginBottom: 12 }}>
+        <div style={{ fontWeight: 600, color: '#334155', marginRight: 8 }}>Actions:</div>
+        <button
+          onClick={() => {
+            const v = vendors.find(x => x._id === selectedVendorId);
+            if (!v) return alert('Please select a vendor first');
+            navigate(`/vendors/${v._id}/categories/${categoryId}`);
+          }}
+          style={{ padding: '6px 12px', borderRadius: 6, background: '#0ea5e9', color: '#fff', border: 'none' }}
+        >View Categories</button>
+        <button
+          onClick={() => {
+            const v = vendors.find(x => x._id === selectedVendorId);
+            if (!v) return alert('Please select a vendor first');
+            setSelectedVendorForLocation(v);
+            setShowLocationModal(true);
+          }}
+          style={{ padding: '6px 12px', borderRadius: 6, background: '#16a34a', color: '#fff', border: 'none' }}
+        >Set Home Location</button>
+        <button
+          onClick={() => {
+            const v = vendors.find(x => x._id === selectedVendorId);
+            if (!v) return alert('Please select a vendor first');
+            setSelectedVendorForBusiness(v);
+            setShowBusinessLocationModal(true);
+          }}
+          style={{ padding: '6px 12px', borderRadius: 6, background: '#f59e0b', color: '#fff', border: 'none' }}
+        >Business Location</button>
+        <button
+          onClick={() => {
+            const v = vendors.find(x => x._id === selectedVendorId);
+            if (!v) return alert('Please select a vendor first');
+            setSelectedVendorForBusinessHours(v);
+          }}
+          style={{ padding: '6px 12px', borderRadius: 6, background: '#7c3aed', color: '#fff', border: 'none' }}
+        >Business Hours</button>
+        <button
+          onClick={() => {
+            const v = vendors.find(x => x._id === selectedVendorId);
+            if (!v) return alert('Please select a vendor first');
+            (async () => {
+              try {
+                try {
+                  const res = await axios.get(`${API_BASE_URL}/api/vendors/${v._id}/custom-fields`);
+                  const cf = res.data || {};
+                  setAddHeading(String(cf.freeText1 || ''));
+                  setAddDescription(String(cf.freeText2 || ''));
+                } catch (e1) {
+                  try {
+                    const r2 = await axios.get(`${API_BASE_URL}/api/vendors/${v._id}`);
+                    const doc = r2.data || {};
+                    const cf = (doc.customFields && typeof doc.customFields === 'object') ? doc.customFields : {};
+                    setAddHeading(String(cf.freeText1 || ''));
+                    setAddDescription(String(cf.freeText2 || ''));
+                  } catch {
+                    // Fallback: localStorage
+                    try {
+                      const raw = localStorage.getItem(`vendor_addon_${v._id}`);
+                      if (raw) {
+                        const ls = JSON.parse(raw);
+                        setAddHeading(String(ls.freeText1 || ''));
+                        setAddDescription(String(ls.freeText2 || ''));
+                      } else {
+                        setAddHeading('');
+                        setAddDescription('');
+                      }
+                    } catch { setAddHeading(''); setAddDescription(''); }
+                  }
+                }
+              } catch {}
+              setShowAddText(true);
+            })();
+          }}
+          style={{ padding: '6px 12px', borderRadius: 6, background: '#111827', color: '#fff', border: 'none' }}
+        >Add on Text</button>
+      </div>
       {vendors.length === 0 ? (
         <p>No vendors found in this status.</p>
       ) : (
@@ -426,18 +516,26 @@ export default function VendorStatusListPage() {
         <table style={{ borderCollapse: 'collapse', width: '100%' }}>
           <thead>
             <tr>
+              <th style={{ border: '1px solid #ccc', padding: 8 }}>Select</th>
               <th style={{ border: '1px solid #ccc', padding: 8 }}>Vendor Name</th>
               <th style={{ border: '1px solid #ccc', padding: 8 }}>Contact Number</th>
               <th style={{ border: '1px solid #ccc', padding: 8 }}>Business Name</th>
               <th style={{ border: '1px solid #ccc', padding: 8 }}>Home Location</th>
               <th style={{ border: '1px solid #ccc', padding: 8 }}>Business Location</th>
               <th style={{ border: '1px solid #ccc', padding: 8 }}>Profile Pictures</th>
-              <th style={{ border: '1px solid #ccc', padding: 8 }}>Actions</th>
             </tr>
           </thead>
           <tbody>
             {vendors.map((v) => (
               <tr key={v._id}>
+                <td style={{ border: '1px solid #ccc', padding: 8, textAlign: 'center' }}>
+                  <input
+                    type="radio"
+                    name="selectedVendor"
+                    checked={selectedVendorId === v._id}
+                    onChange={() => { setSelectedVendorId(v._id); setSelectedVendor(v); }}
+                  />
+                </td>
                 <td style={{ border: '1px solid #ccc', padding: 8 }}>{v.contactName || '-'}</td>
                 <td style={{ border: '1px solid #ccc', padding: 8 }}>{v.customerId?.fullNumber || v.phone || '-'}</td>
                 <td style={{ border: '1px solid #ccc', padding: 8 }}>{v.businessName || '-'}</td>
@@ -550,19 +648,62 @@ export default function VendorStatusListPage() {
                     <div style={{ fontSize: 11, color: '#64748b' }}>You can upload up to 5 images.</div>
                   </div>
                 </td>
-                <td style={{ border: '1px solid #ccc', padding: 8 }}>
-                  <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                    <button title="View Categories" onClick={() => navigate(`/vendors/${v._id}/categories/${categoryId}`)} style={{ padding: '4px 10px', borderRadius: 6, background: '#0ea5e9', color: '#fff', border: 'none' }}>👁️</button>
-                    <button title={v.location ? 'Update Home Location' : 'Set Home Location'} onClick={() => { setSelectedVendorForLocation(v); setShowLocationModal(true); }} style={{ padding: '4px 10px', borderRadius: 6, background: '#16a34a', color: '#fff', border: 'none' }}>🏠</button>
-                    <button title="Business Location" onClick={() => { setSelectedVendorForBusiness(v); setShowBusinessLocationModal(true); }} style={{ padding: '4px 10px', borderRadius: 6, background: '#f59e0b', color: '#fff', border: 'none' }}>🏢</button>
-                    <button title="Business Hours" onClick={() => { setSelectedVendorForBusinessHours(v); }} style={{ padding: '4px 10px', borderRadius: 6, background: '#7c3aed', color: '#fff', border: 'none' }}>⏰</button>
-                  </div>
-                </td>
               </tr>
             ))}
           </tbody>
         </table>
 
+      )}
+
+      {showAddText && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1200 }}>
+          <div style={{ background: '#fff', padding: 16, borderRadius: 10, minWidth: 320, maxWidth: 480, width: '90%' }}>
+            <h3 style={{ marginTop: 0, marginBottom: 12 }}>Add on Text</h3>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <input
+                placeholder="Heading"
+                value={addHeading}
+                onChange={(e) => setAddHeading(e.target.value)}
+                style={{ padding: 8, border: '1px solid #ddd', borderRadius: 6 }}
+              />
+              <textarea
+                placeholder="Description"
+                value={addDescription}
+                onChange={(e) => setAddDescription(e.target.value)}
+                rows={4}
+                style={{ padding: 8, border: '1px solid #ddd', borderRadius: 6, resize: 'vertical' }}
+              />
+              <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 8 }}>
+                <button onClick={() => setShowAddText(false)} style={{ padding: '6px 10px', borderRadius: 6, background: '#e5e7eb', border: 'none' }}>Cancel</button>
+                <button onClick={async () => {
+                  const v = vendors.find(x => x._id === selectedVendorId);
+                  if (!v) { alert('Please select a vendor first'); return; }
+                  try {
+                    let saved = false;
+                    try {
+                      await axios.put(`${API_BASE_URL}/api/vendors/${v._id}/custom-fields`, {
+                        freeText1: String(addHeading || ''),
+                        freeText2: String(addDescription || ''),
+                      });
+                      saved = true;
+                    } catch (e1) {
+                      // No generic vendor PUT exists on some backends; use localStorage as last resort
+                    }
+                    if (!saved) {
+                      try {
+                        localStorage.setItem(`vendor_addon_${v._id}` , JSON.stringify({ freeText1: String(addHeading||''), freeText2: String(addDescription||'') }));
+                        saved = true;
+                      } catch {}
+                    }
+                    if (saved) setShowAddText(false);
+                    else alert('Failed to save');
+                  } catch (e) { alert('Failed to save'); }
+                }} style={{ padding: '6px 10px', borderRadius: 6, background: '#0ea5e9', color: '#fff', border: 'none' }}>Save</button>
+              </div>
+              
+            </div>
+          </div>
+        </div>
       )}
 
       {/* In-page tables removed. Use 'View Categories' to navigate to the details page (with Preview buttons). */}

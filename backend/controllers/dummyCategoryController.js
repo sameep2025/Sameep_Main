@@ -1,7 +1,8 @@
 const DummyCategory = require("../models/dummyCategory");
 const DummySubcategory = require("../models/dummySubcategory");
 const fs = require("fs");
-const { uploadBufferToS3, deleteS3ObjectByUrl } = require("../utils/s3Upload");
+const { uploadBufferToS3, uploadBufferToS3WithLabel, deleteS3ObjectByUrl } = require("../utils/s3Upload");
+const { v4: uuidv4 } = require("uuid");
 
 function parseNumber(value, defaultNull = true) {
   if (value === undefined || value === null) return defaultNull ? null : 0;
@@ -107,11 +108,11 @@ exports.createCategory = async (req, res) => {
       try {
         const segments = await buildDummySegmentsForCreate(parentId, name);
         if (imageFile && imageFile.buffer && imageFile.mimetype) {
-          const up = await uploadBufferToS3(imageFile.buffer, imageFile.mimetype, "newcategory", { segments });
+          const up = await uploadBufferToS3WithLabel(imageFile.buffer, imageFile.mimetype, "newcategory", uuidv4(), { segments });
           imageUrl = up.url;
         }
         if (iconFile && iconFile.buffer && iconFile.mimetype) {
-          const up = await uploadBufferToS3(iconFile.buffer, iconFile.mimetype, "newcategory", { segments });
+          const up = await uploadBufferToS3WithLabel(iconFile.buffer, iconFile.mimetype, "newcategory", uuidv4(), { segments });
           iconUrl = up.url;
         }
       } catch (e) {
@@ -258,7 +259,7 @@ exports.updateCategory = async (req, res) => {
       try {
         if (doc.imageUrl) { try { await deleteS3ObjectByUrl(doc.imageUrl); } catch {} }
         const segs = await buildDummySegmentsForExisting(doc, name);
-        const { url } = await uploadBufferToS3(imageFile.buffer, imageFile.mimetype, "newcategory", { segments: segs });
+        const { url } = await uploadBufferToS3WithLabel(imageFile.buffer, imageFile.mimetype, "newcategory", uuidv4(), { segments: segs });
         doc.imageUrl = url;
       } catch (e) { return res.status(500).json({ message: "Failed to upload image to S3", error: e.message }); }
     }
@@ -266,7 +267,7 @@ exports.updateCategory = async (req, res) => {
       try {
         if (doc.iconUrl) { try { await deleteS3ObjectByUrl(doc.iconUrl); } catch {} }
         const segs = await buildDummySegmentsForExisting(doc, name);
-        const { url } = await uploadBufferToS3(iconFile.buffer, iconFile.mimetype, "newcategory", { segments: segs });
+        const { url } = await uploadBufferToS3WithLabel(iconFile.buffer, iconFile.mimetype, "newcategory", uuidv4(), { segments: segs });
         doc.iconUrl = url;
       } catch (e) { return res.status(500).json({ message: "Failed to upload icon to S3", error: e.message }); }
     }

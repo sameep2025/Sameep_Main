@@ -643,6 +643,45 @@ router.get("/:id", async (req, res) => {
 });
 
 /**
+ * GET /api/vendors/:vendorId/custom-fields
+ * Returns { freeText1, freeText2 }
+ */
+router.get("/:vendorId/custom-fields", async (req, res) => {
+  try {
+    const v = await Vendor.findById(req.params.vendorId).lean();
+    if (!v) return res.status(404).json({ message: "Vendor not found" });
+    const cf = (v.customFields && typeof v.customFields === 'object') ? v.customFields : {};
+    return res.json({
+      freeText1: typeof cf.freeText1 === 'string' ? cf.freeText1 : "",
+      freeText2: typeof cf.freeText2 === 'string' ? cf.freeText2 : "",
+    });
+  } catch (err) {
+    console.error("GET /vendors/:vendorId/custom-fields error:", err);
+    return res.status(500).json({ message: "Server error" });
+  }
+});
+
+/**
+ * PUT /api/vendors/:vendorId/custom-fields
+ * Body: { freeText1, freeText2 }
+ */
+router.put("/:vendorId/custom-fields", async (req, res) => {
+  try {
+    const { vendorId } = req.params;
+    const freeText1 = typeof req.body?.freeText1 === 'string' ? req.body.freeText1 : '';
+    const freeText2 = typeof req.body?.freeText2 === 'string' ? req.body.freeText2 : '';
+    const v = await Vendor.findById(vendorId);
+    if (!v) return res.status(404).json({ message: "Vendor not found" });
+    v.customFields = { ...(v.customFields || {}), freeText1, freeText2 };
+    await v.save();
+    return res.json({ success: true, customFields: v.customFields });
+  } catch (err) {
+    console.error("PUT /vendors/:vendorId/custom-fields error:", err);
+    return res.status(500).json({ message: "Server error" });
+  }
+});
+
+/**
  * POST /api/vendors/:vendorId/profile-pictures
  * Upload up to 5 images for vendor profile pictures
  * Field name: images

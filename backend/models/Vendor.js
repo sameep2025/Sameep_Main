@@ -42,6 +42,12 @@ const vendorSchema = new mongoose.Schema({
   // Shape: { [categoryId]: Array<{ at:number, categoryId:string, selections: { [family]: { [field]: string } } }> }
   inventorySelections: { type: Object, default: {} },
 
+  // Custom fields for preview Home section (Add-On Text)
+  customFields: {
+    freeText1: { type: String, default: "" }, // Heading
+    freeText2: { type: String, default: "" }, // Description
+  },
+
   createdAt: { type: Date, default: Date.now },
 });
 

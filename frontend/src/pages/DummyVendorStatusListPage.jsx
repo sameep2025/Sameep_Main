@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import axios from "axios";
-import API_BASE_URL from "../config";
+import API_BASE_URL, { PREVIEW_BASE_URL } from "../config";
 import DummyBusinessHoursModal from "../components/DummyBusinessHoursModal";
 import DummyBusinessLocationModal from "../components/DummyBusinessLocationModal";
 import DummyLocationPickerModal from "../components/DummyLocationPickerModal";
@@ -13,23 +13,16 @@ export default function DummyVendorStatusListPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const isHosted = /go-kar\.net/i.test(String(API_BASE_URL || ""));
-  const devProxy = (() => {
-    try {
-      const loc = window.location;
-      const isLocal = loc && (loc.hostname === 'localhost' || loc.hostname === '127.0.0.1');
-      if (isLocal && String(loc.port) === '3001') return 'http://localhost:3000';
-    } catch {}
-    return '';
-  })();
-  // Prefer:
-  // - devProxy to Next on :3000 when running React app on :3001
-  // - API_BASE_URL when provided (works in hosted deployments without relying on same-origin proxy)
-  // - '' as a last resort (same-origin) only if neither devProxy nor API_BASE_URL is set
-  const API_PREFIX = devProxy || (API_BASE_URL && String(API_BASE_URL).trim()) || '';
+  // Always use API_BASE_URL for API calls to avoid proxy mismatches
+  const API_PREFIX = (API_BASE_URL && String(API_BASE_URL).trim()) || '';
   const [activeVendor, setActiveVendor] = useState(null);
+  const [selectedVendorId, setSelectedVendorId] = useState(null);
   const [showPicker, setShowPicker] = useState(false);
   const [showNearby, setShowNearby] = useState(false);
   const [showHours, setShowHours] = useState(false);
+  const [showAddText, setShowAddText] = useState(false);
+  const [addHeading, setAddHeading] = useState("");
+  const [addDescription, setAddDescription] = useState("");
   const [uploads, setUploads] = useState({}); // { [vendorId]: File[] }
 
   const applyLocalLocation = (vendorId, location) => {
@@ -117,7 +110,7 @@ export default function DummyVendorStatusListPage() {
     } catch {}
     // Fallback: refetch list and pick first vendor
     try {
-      const res = await axios.get(`${API_BASE_URL}/api/dummy-vendors/byCategory/${categoryId}`, { params: { status } });
+      const res = await axios.get(`${API_PREFIX}/api/dummy-vendors/byCategory/${categoryId}`, { params: { status: String(status || '').trim() } });
       const list = Array.isArray(res.data) ? res.data : [];
       if (list.length) return list[0];
     } catch {}
@@ -182,7 +175,7 @@ export default function DummyVendorStatusListPage() {
     const idx = Number(indexStr);
     if (!Number.isInteger(idx) || idx < 0) { alert('Invalid index'); return; }
     try {
-      await axios.delete(`${API_BASE_URL}/api/dummy-vendors/${v._id}/profile-pictures/${idx}`);
+      await axios.delete(`${API_PREFIX}/api/dummy-vendors/${v._id}/profile-pictures/${idx}`);
       await refreshVendor(v._id);
     } catch (e) { alert(e?.response?.data?.message || 'Failed to delete picture'); }
   };
@@ -192,9 +185,7 @@ export default function DummyVendorStatusListPage() {
     setLoading(true);
     setError("");
     try {
-      const res = await axios.get(
-        `${API_PREFIX}/api/dummy-vendors/byCategory/${categoryId}?status=${encodeURIComponent(status)}`
-      );
+      const res = await axios.get(`${API_PREFIX}/api/dummy-vendors/byCategory/${categoryId}`, { params: { status: String(status || '').trim() } });
       const vendorsData = Array.isArray(res.data) ? res.data : [];
       if (vendorsData.length === 0) {
         try {
@@ -243,6 +234,72 @@ export default function DummyVendorStatusListPage() {
   return (
     <div>
       <h2>Vendors - {decodeURIComponent(status || "")} </h2>
+      {/* Top navbar actions for selected vendor */}
+      <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', padding: 10, background: '#f8fafc', border: '1px solid #e5e7eb', borderRadius: 8, marginBottom: 12 }}>
+        <div style={{ fontWeight: 600, color: '#334155', marginRight: 8 }}>Actions:</div>
+        <button
+          onClick={() => {
+            const v = vendors.find(x => x._id === selectedVendorId);
+            if (!v) return alert('Please select a vendor first');
+            navigate(`/dummy-vendors/${v._id}/categories/${categoryId}`);
+          }}
+          style={{ padding: '6px 12px', borderRadius: 6, background: '#0ea5e9', color: '#fff', border: 'none' }}
+        >View Categories</button>
+        <button
+          onClick={() => {
+            const v = vendors.find(x => x._id === selectedVendorId);
+            if (!v) return alert('Please select a vendor first');
+            openHomePicker(v);
+          }}
+          style={{ padding: '6px 12px', borderRadius: 6, background: '#16a34a', color: '#fff', border: 'none' }}
+        >Set Home Location</button>
+        <button
+          onClick={() => {
+            const v = vendors.find(x => x._id === selectedVendorId);
+            if (!v) return alert('Please select a vendor first');
+            openNearbyModal(v);
+          }}
+          style={{ padding: '6px 12px', borderRadius: 6, background: '#f59e0b', color: '#fff', border: 'none' }}
+        >Business Location</button>
+        <button
+          onClick={() => {
+            const v = vendors.find(x => x._id === selectedVendorId);
+            if (!v) return alert('Please select a vendor first');
+            openHoursModal(v);
+          }}
+          style={{ padding: '6px 12px', borderRadius: 6, background: '#7c3aed', color: '#fff', border: 'none' }}
+        >Business Hours</button>
+        <button
+          onClick={() => {
+            const v = vendors.find(x => x._id === selectedVendorId);
+            if (!v) return alert('Please select a vendor first');
+            (async () => {
+              try {
+                try {
+                  const res = await axios.get(`${API_PREFIX}/api/dummy-vendors/${v._id}/custom-fields`);
+                  const cf = res.data || {};
+                  setAddHeading(String(cf.freeText1 || ''));
+                  setAddDescription(String(cf.freeText2 || ''));
+                } catch (e1) {
+                  // Fallback: read full vendor doc and pick customFields
+                  try {
+                    const r2 = await axios.get(`${API_PREFIX}/api/dummy-vendors/${v._id}`);
+                    const doc = r2.data || {};
+                    const cf = (doc.customFields && typeof doc.customFields === 'object') ? doc.customFields : {};
+                    setAddHeading(String(cf.freeText1 || ''));
+                    setAddDescription(String(cf.freeText2 || ''));
+                  } catch {
+                    setAddHeading('');
+                    setAddDescription('');
+                  }
+                }
+              } catch {}
+              setShowAddText(true);
+            })();
+          }}
+          style={{ padding: '6px 12px', borderRadius: 6, background: '#111827', color: '#fff', border: 'none' }}
+        >Add on Text</button>
+      </div>
       {loading ? (
         <div>Loading...</div>
       ) : error ? (
@@ -253,18 +310,26 @@ export default function DummyVendorStatusListPage() {
         <table style={{ borderCollapse: 'collapse', width: '100%' }}>
           <thead>
             <tr>
+              <th style={{ border: '1px solid #ccc', padding: 8 }}>Select</th>
               <th style={{ border: '1px solid #ccc', padding: 8 }}>Vendor Name</th>
               <th style={{ border: '1px solid #ccc', padding: 8 }}>Contact Number</th>
               <th style={{ border: '1px solid #ccc', padding: 8 }}>Business Name</th>
               <th style={{ border: '1px solid #ccc', padding: 8 }}>Home Location</th>
               <th style={{ border: '1px solid #ccc', padding: 8 }}>Business Location</th>
               <th style={{ border: '1px solid #ccc', padding: 8 }}>Profile Pictures</th>
-              <th style={{ border: '1px solid #ccc', padding: 8 }}>Actions</th>
             </tr>
           </thead>
           <tbody>
             {vendors.map((v) => (
               <tr key={v._id}>
+                <td style={{ border: '1px solid #ccc', padding: 8, textAlign: 'center' }}>
+                  <input
+                    type="radio"
+                    name="selectedVendor"
+                    checked={selectedVendorId === v._id}
+                    onChange={() => setSelectedVendorId(v._id)}
+                  />
+                </td>
                 <td style={{ border: '1px solid #ccc', padding: 8 }}>{v.contactName || '-'}</td>
                 <td style={{ border: '1px solid #ccc', padding: 8 }}>{v.customerId?.fullNumber || v.phone || '-'}</td>
                 <td style={{ border: '1px solid #ccc', padding: 8 }}>{v.businessName || '-'}</td>
@@ -312,21 +377,59 @@ export default function DummyVendorStatusListPage() {
                   </div>
                   <div style={{ fontSize: 12, color: '#6b7280', marginTop: 4 }}>You can upload up to 5 images.</div>
                 </td>
-                <td style={{ border: '1px solid #ccc', padding: 8 }}>
-                  <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                    <button onClick={() => navigate(`/dummy-vendors/${v._id}/categories/${categoryId}`)} style={{ padding: '4px 10px', borderRadius: 6, background: '#0ea5e9', color: '#fff', border: 'none' }}>👁️</button>
-                    <button onClick={() => openHomePicker(v)} style={{ padding: '4px 10px', borderRadius: 6, background: '#16a34a', color: '#fff', border: 'none' }}>🏠</button>
-                    <button onClick={() => openNearbyModal(v)} style={{ padding: '4px 10px', borderRadius: 6, background: '#f59e0b', color: '#fff', border: 'none' }}>🏢</button>
-                    <button onClick={() => openHoursModal(v)} style={{ padding: '4px 10px', borderRadius: 6, background: '#7c3aed', color: '#fff', border: 'none' }}>⏰</button>
-                    {/* <button onClick={() => onAddProfilePic(v)} style={{ padding: '4px 10px', borderRadius: 6, background: '#0891b2', color: '#fff', border: 'none' }}>➕🖼️</button>
-                    <button onClick={() => onReplaceProfilePic(v)} style={{ padding: '4px 10px', borderRadius: 6, background: '#0d9488', color: '#fff', border: 'none' }}>✎🖼️</button>
-                    <button onClick={() => onDeleteProfilePic(v)} style={{ padding: '4px 10px', borderRadius: 6, background: '#dc2626', color: '#fff', border: 'none' }}>🗑️</button> */}
-                  </div>
-                </td>
               </tr>
             ))}
           </tbody>
         </table>
+      )}
+      {showAddText && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1200 }}>
+          <div style={{ background: '#fff', padding: 16, borderRadius: 10, minWidth: 320, maxWidth: 480, width: '90%' }}>
+            <h3 style={{ marginTop: 0, marginBottom: 12 }}>Add on Text</h3>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <input
+                placeholder="Heading"
+                value={addHeading}
+                onChange={(e) => setAddHeading(e.target.value)}
+                style={{ padding: 8, border: '1px solid #ddd', borderRadius: 6 }}
+              />
+              <textarea
+                placeholder="Description"
+                value={addDescription}
+                onChange={(e) => setAddDescription(e.target.value)}
+                rows={4}
+                style={{ padding: 8, border: '1px solid #ddd', borderRadius: 6, resize: 'vertical' }}
+              />
+              <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 8 }}>
+                <button onClick={() => setShowAddText(false)} style={{ padding: '6px 10px', borderRadius: 6, background: '#e5e7eb', border: 'none' }}>Cancel</button>
+                <button onClick={async () => {
+                  const v = vendors.find(x => x._id === selectedVendorId);
+                  if (!v) { alert('Please select a vendor first'); return; }
+                  try {
+                    try {
+                      await axios.put(`${API_PREFIX}/api/dummy-vendors/${v._id}/custom-fields`, {
+                        freeText1: String(addHeading || ''),
+                        freeText2: String(addDescription || ''),
+                      });
+                    } catch (e1) {
+                      // Fallback: generic vendor update with customFields
+                      await axios.put(`${API_PREFIX}/api/dummy-vendors/${v._id}`, {
+                        customFields: {
+                          freeText1: String(addHeading || ''),
+                          freeText2: String(addDescription || ''),
+                        }
+                      });
+                    }
+                    setShowAddText(false);
+                  } catch (e) {
+                    alert(e?.response?.data?.message || 'Failed to save');
+                  }
+                }} style={{ padding: '6px 10px', borderRadius: 6, background: '#0ea5e9', color: '#fff', border: 'none' }}>Save</button>
+              </div>
+              
+            </div>
+          </div>
+        </div>
       )}
       {activeVendor && (
         <>
