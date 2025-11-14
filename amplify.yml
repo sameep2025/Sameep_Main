@@ -16,6 +16,7 @@ applications:
       cache:
         paths:
           - node_modules/**/*
+          
   - appRoot: preview-site
     frontend:
       phases:
@@ -32,3 +33,20 @@ applications:
       cache:
         paths:
           - node_modules/**/*
+          
+  - appRoot: nikspreview-site
+    frontend:
+      phases:
+        preBuild:
+          commands:
+            - npm install
+        build:
+          commands:
+            - npm run build
+      artifacts:
+        baseDirectory: dist
+        files:
+          - '**/*'
+      cache:
+        paths:
+          - nikspreview-site/node_modules/**/*
