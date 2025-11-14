@@ -58,6 +58,8 @@ export const NIKS_PREVIEW_BASE_URL = (() => {
     const loc = typeof window !== 'undefined' ? window.location : null;
     const host = loc ? loc.hostname : '';
     if (host === 'localhost' || host === '127.0.0.1') return 'http://localhost:3001';
+    // Production/testing default: Amplify URL
+    if (host) return 'https://main.d3t45ap4sbsqgp.amplifyapp.com';
   } catch {}
   if (typeof window !== "undefined" && window.location && window.location.origin) {
     return window.location.origin;
