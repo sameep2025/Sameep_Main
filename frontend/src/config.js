@@ -32,6 +32,33 @@ export const PREVIEW_BASE_URL = (() => {
   if (ENV_PREVIEW && typeof ENV_PREVIEW === "string" && ENV_PREVIEW.trim()) {
     return ENV_PREVIEW.trim().replace(/\/$/, "");
   }
+  // Default preview-site to port 3000 in local dev
+  try {
+    const loc = typeof window !== 'undefined' ? window.location : null;
+    const host = loc ? loc.hostname : '';
+    if (host === 'localhost' || host === '127.0.0.1') return 'http://localhost:3000';
+  } catch {}
+  if (typeof window !== "undefined" && window.location && window.location.origin) {
+    return window.location.origin;
+  }
+  return "";
+})();
+
+export const NIKS_PREVIEW_BASE_URL = (() => {
+  const ENV_NIKS =
+    process.env.REACT_APP_NIKS_PREVIEW_BASE_URL ||
+    process.env.VITE_NIKS_PREVIEW_BASE_URL ||
+    process.env.NEXT_PUBLIC_NIKS_PREVIEW_BASE_URL ||
+    "";
+  if (ENV_NIKS && typeof ENV_NIKS === "string" && ENV_NIKS.trim()) {
+    return ENV_NIKS.trim().replace(/\/$/, "");
+  }
+  // Default nikspreview-site to port 3001 in local dev
+  try {
+    const loc = typeof window !== 'undefined' ? window.location : null;
+    const host = loc ? loc.hostname : '';
+    if (host === 'localhost' || host === '127.0.0.1') return 'http://localhost:3001';
+  } catch {}
   if (typeof window !== "undefined" && window.location && window.location.origin) {
     return window.location.origin;
   }

@@ -1,18 +1,15 @@
-// import './globals.css';
+import './globals.css';
 import { Poppins } from 'next/font/google';
 
-// Load Poppins font
 const poppins = Poppins({
   subsets: ['latin'],
   weight: ['400', '500', '600', '700'],
 });
 
-function MyApp({ Component, pageProps }) {
+export default function RootLayout({ children }) {
   return (
-    <main className={poppins.className}>
-      <Component {...pageProps} />
-    </main>
+    <html lang="en">
+      <body className={poppins.className}>{children}</body>
+    </html>
   );
 }
-
-export default MyApp;

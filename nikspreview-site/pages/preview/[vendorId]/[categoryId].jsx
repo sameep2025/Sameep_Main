@@ -16,7 +16,15 @@ import categoryThemes from "../../../utils/categoryThemes";
 
 
 /* Helper Functions */
-const API_BASE_URL = (typeof process !== 'undefined' && (process.env.NEXT_PUBLIC_API_BASE_URL || process.env.REACT_APP_API_BASE_URL)) || "";
+const API_BASE_URL = (() => {
+  try {
+    const env = (typeof process !== 'undefined') ? (process.env.NEXT_PUBLIC_API_BASE_URL || process.env.REACT_APP_API_BASE_URL || "") : "";
+    if (env && String(env).trim()) return String(env).trim().replace(/\/$/, "");
+    const isDev = (typeof process !== 'undefined' ? process.env.NODE_ENV : '') === 'development';
+    if (isDev) return "http://localhost:5000";
+    return "https://newsameep-backend.go-kar.net";
+  } catch { return "https://newsameep-backend.go-kar.net"; }
+})();
 const resolveImageUrl = (url) => {
   if (!url) return null;
   if (url.startsWith("http")) return url;
@@ -795,7 +803,7 @@ function PreviewPage() {
 
   const fetchColorSchemes = async () => {
     try {
-      const res = await fetch("${API_BASE_URL}/api/categories/colors/parents");
+      const res = await fetch(`${API_BASE_URL}/api/categories/colors/parents`);
       const allCategories = await res.json();
 
       // Find matching category
@@ -942,7 +950,7 @@ function PreviewPage() {
 
         if (!forceDummy) {
           try {
-            const response = await fetch(`/api/vendors/${vendorId}/preview/${categoryId}`);
+            const response = await fetch(`${API_BASE_URL}/api/vendors/${vendorId}/preview/${categoryId}`);
             const data = await safeJson(response);
             console.log("📦 Preview API Response:", data);
             if (data && (data.vendor || data.categories)) {
@@ -957,14 +965,14 @@ function PreviewPage() {
         // Fallback: standard vendor endpoints
         if (!forceDummy && !vendorResp) {
           try {
-            const vRes = await fetch(`/api/vendors/${vendorId}`);
+            const vRes = await fetch(`${API_BASE_URL}/api/vendors/${vendorId}`);
             const v = await safeJson(vRes);
             if (v && typeof v === 'object') vendorResp = v;
           } catch {}
         }
         if (!forceDummy && !categoriesResp) {
           try {
-            const cRes = await fetch(`/api/vendors/${vendorId}/categories`);
+            const cRes = await fetch(`${API_BASE_URL}/api/vendors/${vendorId}/categories`);
             const c = await safeJson(cRes);
             let categories = c?.categories;
             if (!categories) {
@@ -983,12 +991,12 @@ function PreviewPage() {
         // Fallback: dummy vendor endpoints
         if (!vendorResp || !categoriesResp) {
           try {
-            const vRes = await fetch(`/api/dummy-vendors/${vendorId}`);
+            const vRes = await fetch(`${API_BASE_URL}/api/dummy-vendors/${vendorId}`);
             const v = await safeJson(vRes);
             vendorResp = v || {};
           } catch {}
           try {
-            const cRes = await fetch(`/api/dummy-vendors/${vendorId}/categories`);
+            const cRes = await fetch(`${API_BASE_URL}/api/dummy-vendors/${vendorId}/categories`);
             const c = await safeJson(cRes);
             // normalize format similar to vendor preview API
             let categories = c?.categories;
@@ -1003,7 +1011,7 @@ function PreviewPage() {
           // As last resort, attempt single dummy category by id
           if (!categoriesResp && categoryId) {
             try {
-              const oneRes = await fetch(`/api/dummy-categories/${categoryId}`);
+              const oneRes = await fetch(`${API_BASE_URL}/api/dummy-categories/${categoryId}`);
               const one = await safeJson(oneRes);
               const c = one || {};
               categoriesResp = { name: c.name || "Root", imageUrl: c.imageUrl, categoryType: c.categoryType, children: c.children || [] };
@@ -1023,7 +1031,7 @@ function PreviewPage() {
         // Ensure inventorySelections present: merge from dummy vendor if missing
         try {
           if (!vendorResp || !vendorResp.inventorySelections) {
-            const dvRes = await fetch(`/api/dummy-vendors/${vendorId}`);
+            const dvRes = await fetch(`${API_BASE_URL}/api/dummy-vendors/${vendorId}`);
             const dv = await (async (r)=>{ try { return await r.json(); } catch { return null; } })(dvRes);
             if (dv && typeof dv === 'object') {
               vendorResp = { ...(vendorResp || {}), inventorySelections: dv.inventorySelections || {}, rowImages: dv.rowImages || {}, businessHours: dv.businessHours || [], contactName: vendorResp?.contactName || dv.contactName, businessName: vendorResp?.businessName || dv.businessName, phone: vendorResp?.phone || dv.phone };

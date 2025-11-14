@@ -484,7 +484,7 @@ export default function PreviewPage() {
               // Instead, enqueue an async fetch to populate extraRowImages so subsequent renders have data.
               (async () => {
                 try {
-                  const r = await fetch(`/api/dummy-categories/${did}`, { cache: 'no-store' });
+                  const r = await fetch(`${API_BASE_URL}/api/dummy-categories/${did}`, { cache: 'no-store' });
                   if (r.ok) {
                     const j = await r.json();
                     const candidates = [];

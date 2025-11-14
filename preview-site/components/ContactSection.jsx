@@ -1,6 +1,7 @@
 // frontend/src/components/ContactSection.jsx
 import React, { useEffect, useState } from "react";
 import dynamic from "next/dynamic";
+import API_BASE_URL from "../config";
 
 // dynamically import LocationPickerModal only on client
 const LocationPickerModal = dynamic(() => import("./LocationPickerModal"), { ssr: false });
@@ -114,7 +115,7 @@ export default function ContactSection({
         const controller = new AbortController();
         const timeout = setTimeout(() => controller.abort(), 5000);
         try {
-          const url = `/api/reverse-geocode?lat=${encodeURIComponent(lat.toFixed(6))}&lng=${encodeURIComponent(lng.toFixed(6))}`;
+          const url = `${API_BASE_URL}/api/reverse-geocode?lat=${encodeURIComponent(lat.toFixed(6))}&lng=${encodeURIComponent(lng.toFixed(6))}`;
           const res = await fetch(url, { signal: controller.signal, headers: { 'Accept': 'application/json' } });
           if (!res.ok) throw new Error(`Reverse geocode HTTP ${res.status}`);
           const data = await res.json().catch(() => ({}));
@@ -143,7 +144,7 @@ export default function ContactSection({
     if (!pos?.lat || !pos?.lng) return;
 
     try {
-      const res = await fetch(`/api/vendors/${vendorId}/location`, {
+      const res = await fetch(`${API_BASE_URL}/api/vendors/${vendorId}/location`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ lat: pos.lat, lng: pos.lng }),

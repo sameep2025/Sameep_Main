@@ -39,14 +39,14 @@ applications:
       phases:
         preBuild:
           commands:
-            - npm install
+            - npm ci
         build:
           commands:
             - npm run build
       artifacts:
-        baseDirectory: dist
+        baseDirectory: .next
         files:
           - '**/*'
       cache:
         paths:
-          - nikspreview-site/node_modules/**/*
+          - node_modules/**/*
