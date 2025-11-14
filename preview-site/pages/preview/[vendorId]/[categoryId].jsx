@@ -90,11 +90,11 @@ export default function PreviewPage() {
             const rawVenFT = dvVendor?.freeTexts || []; const venFT = Array.isArray(rawVenFT) ? rawVenFT : [];
             const titleFromCategory = trimOrNull(catFT[0]) || firstNonEmpty(catFT);
             const descFromCategory = trimOrNull(catFT[1]) || firstNonEmpty(catFT);
-            const titleFromVendor = trimOrNull(venFT[0]) || trimOrNull(dvVendor?.customFields?.freeText1) || trimOrNull(dvVendor?.ui?.heroTitle) || firstNonEmpty(venFT);
-            const descFromVendor = trimOrNull(venFT[1]) || trimOrNull(dvVendor?.customFields?.freeText2) || trimOrNull(dvVendor?.ui?.heroDescription) || firstNonEmpty(venFT);
+            const titleFromVendor = trimOrNull(dvVendor?.customFields?.freeText1) || trimOrNull(venFT[0]) || trimOrNull(dvVendor?.ui?.heroTitle) || firstNonEmpty(venFT);
+            const descFromVendor = trimOrNull(dvVendor?.customFields?.freeText2) || trimOrNull(venFT[1]) || trimOrNull(dvVendor?.ui?.heroDescription) || firstNonEmpty(venFT);
             const q = router?.query || {};
-            const title = trimOrNull(q.ft1) || titleFromCategory || titleFromVendor || null;
-            const desc = trimOrNull(q.ft2) || descFromCategory || descFromVendor || null;
+            const title = trimOrNull(q.ft1) || titleFromVendor || titleFromCategory || null;
+            const desc = trimOrNull(q.ft2) || descFromVendor || descFromCategory || null;
             setHeroTitle(title); setHeroDescription(desc);
           } catch {}
           // Fetch dummy combos for this category
