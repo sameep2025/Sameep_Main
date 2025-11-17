@@ -826,7 +826,7 @@ export default function PreviewPage() {
                 })}
               </div>
             ) : (
-              <div style={{ marginBottom: 10 }}>
+              <div style={{ marginBottom: 10, display: 'flex', justifyContent: 'flex-start' }}>
                 <select
                   value={selectedParent?.id || ""}
                   onChange={(e) => {
@@ -835,7 +835,17 @@ export default function PreviewPage() {
                     onSelectionChange?.(next, leaf);
                     onLeafSelect?.(leaf);
                   }}
-                  style={{ width: "100%", padding: "8px 10px", borderRadius: 8, border: "1px solid #d1d5db", background: "#fff", fontSize: 13 }}
+                  style={{
+                    width: "auto",
+                    maxWidth: "100%",
+                    padding: "10px 32px 10px 16px",
+                    borderRadius: 999,
+                    border: "1px solid #111827",
+                    background: "#fff",
+                    fontSize: 13,
+                    fontWeight: 600,
+                    textAlign: "left",
+                  }}
                 >
                   {node.children.map((opt) => (
                     <option key={opt.id} value={opt.id}>{opt.name}</option>
