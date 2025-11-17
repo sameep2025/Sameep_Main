@@ -13,9 +13,30 @@ function DummyCategoryCard({ category, onEdit, onDelete }) {
     ? category.terms.split(",").map((term, index) => <li key={index}>{term.trim()}</li>)
     : null;
 
+  const resolvedImageUrl = (() => {
+  const src = category?.imageUrl || category?.iconUrl || "";
+  if (!src) return "";
+
+  // If already a full URL → encode spaces & return
+  if (src.startsWith("http://") || src.startsWith("https://")) {
+    return encodeURI(src).replace(/\+/g, "%2B");
+
+  }
+
+  // If relative path → build full path + encode
+  return encodeURI(`${API_BASE_URL}${src}`);
+})();
+
+
   return (
     <div className="card" style={{ borderRadius: "8px", background: "#fff", color: "#333", padding: "10px", width: "220px", boxShadow: "0 4px 8px rgba(0,0,0,0.1)" }}>
-      <img src={category?.imageUrl?.startsWith("http") ? category.imageUrl : `${API_BASE_URL}${category.imageUrl || ""}`} alt={category.name} style={{ width: "100%", height: "140px", objectFit: "cover", borderRadius: "6px" }} />
+      {resolvedImageUrl && (
+        <img
+          src={resolvedImageUrl}
+          alt={category.name}
+          style={{ width: "100%", height: "140px", objectFit: "cover", borderRadius: "6px" }}
+        />
+      )}
 
       <h3 style={{ marginTop: "10px", color: "#00AEEF" }}>{category.name}</h3>
 
