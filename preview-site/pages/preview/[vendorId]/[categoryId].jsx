@@ -499,10 +499,17 @@ export default function PreviewPage() {
             }
           } catch {}
         }
+        const base = String(ASSET_PREFIX || '').replace(/\/+$/, '');
         return arr.map((s) => {
           const str = String(s);
-          if (str.startsWith('http://') || str.startsWith('https://') || str.startsWith('data:')) return str;
-          return `${ASSET_PREFIX}${str}`;
+          let url;
+          if (str.startsWith('http://') || str.startsWith('https://') || str.startsWith('data:')) {
+            url = str;
+          } else {
+            const path = str.startsWith('/') ? str : `/${str}`;
+            url = `${base}${path}`;
+          }
+          return encodeURI(url).replace(/\+/g, '%2B');
         });
       } catch { return []; }
     })();
