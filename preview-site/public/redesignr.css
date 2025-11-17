@@ -668,7 +668,8 @@ div[style*="display:flex"][style*="flex-wrap:wrap"][style*="gap:16px"] {
   border-radius: 12px !important;
   border: 1px solid #d1d5db !important;
   background: #fff !important;
-  padding: 12px 14px !important;
+  /* extra right padding so native arrow has room and is not clipped */
+  padding: 12px 32px 12px 14px !important;
   box-shadow: 0 2px 0 rgba(0,0,0,0.02) inset !important;
 }
 
