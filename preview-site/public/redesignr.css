@@ -541,18 +541,22 @@ div[style*="display:flex"][style*="flex-wrap:wrap"][style*="gap:16px"] {
   #preview-page main#products section [style*="min-width: 260"],
   #preview-page main#products section > section[style*="min-width: 260"],
   #preview-page main#products section > section[style*="minWidth: 260"] {
-    flex: 1 1 100% !important;
-    min-width: 100% !important;
+    flex: 0 1 auto !important; /* shrink to content */
+    min-width: auto !important;
+    max-width: 100% !important; /* don’t overflow viewport */
+    display: inline-flex !important;
+    justify-content: center !important;
   }
 
   /* Make inner card expand to width */
   #preview-page main#products [style*="border: '1px solid #e5e7eb'"][style*="background: '#fff'"],
   #preview-page main#products [style*="border: 1px solid #e5e7eb"][style*="background: #fff"],
   #preview-page main#products [style*="border: '1px solid #e2e8f0'"][style*="background: '#fff'"],
-  #preview-page main#products [style*="border: 1px solid #e2e8f0"][style*="background: #fff"],
+  #preview-page main#products [style*="border: 1px solid #e2e8f0"][style*="background: '#fff'"],
   #preview-page main#products [style*="width: 300"] {
-    width: 100% !important;
-    min-height: 480px !important;
+    width: auto !important; /* follow dropdown/content width */
+    max-width: 100% !important;
+    min-height: auto !important;
   }
 }
 
