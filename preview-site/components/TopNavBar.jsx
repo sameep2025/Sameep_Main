@@ -1,231 +1,324 @@
-import React, { useState, useEffect } from "react";
-import ProductsMenu from "./ProductsMenu";
+"use client";
 
-export default function TopNavBar({ businessName, categoryTree, selectedLeaf, onLeafSelect, onProductsClick }) {
-  const [menuOpen, setMenuOpen] = useState(false); // mobile hamburger menu
-  const [productsOpen, setProductsOpen] = useState(false); // products dropdown
-  const [vw, setVw] = useState(typeof window !== 'undefined' ? window.innerWidth : 0);
+import React, { useState, useEffect } from "react";
+import { Menu, ChevronDown } from "lucide-react";
+
+export default function TopNavBar({ businessName, services = [
+  "Driving Packages",
+  "Individual Courses",
+  "Commercial Training",
+] }) {
+  const [mobile, setMobile] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [hoverKey, setHoverKey] = useState(null);
+  const [servicesOpen, setServicesOpen] = useState(false);
 
   useEffect(() => {
-    const onResize = () => setVw(window.innerWidth);
-    if (typeof window !== 'undefined') {
-      window.addEventListener('resize', onResize);
-      setVw(window.innerWidth);
-      return () => window.removeEventListener('resize', onResize);
-    }
+    const check = () => setMobile(window.innerWidth < 900);
+    check();
+    window.addEventListener("resize", check);
+    return () => window.removeEventListener("resize", check);
   }, []);
-
-  const isMobile = vw <= 768;
-  const isVerySmall = vw <= 640;
-
-
-
-  const navItems = ["Benefits", "About", "Contact"];
-
-  const handleSmoothNav = (id) => (e) => {
-    e.preventDefault();
-    const key = String(id || '').toLowerCase();
-    // Benefits/About likely have IDs
-    if (key === 'benefits' || key === 'about') {
-      const el = document.getElementById(key);
-      if (el) { el.scrollIntoView({ behavior: 'smooth', block: 'start' }); return; }
-    }
-    // Home: scroll to top or first section
-    if (key === 'home') {
-      const hero = document.querySelector('#preview-page > section:first-of-type');
-      if (hero) { hero.scrollIntoView({ behavior: 'smooth', block: 'start' }); return; }
-      window.scrollTo({ top: 0, behavior: 'smooth' });
-      return;
-    }
-    // Contact: find section containing the Connect With Us heading or the contact form
-    if (key === 'contact') {
-      const h = Array.from(document.querySelectorAll('#preview-page h2'))
-        .find((n) => /connect\s+with\s+us/i.test(n.textContent || ''));
-      if (h) { h.closest('section')?.scrollIntoView({ behavior: 'smooth', block: 'start' }); return; }
-      const form = document.querySelector('#preview-page form');
-      if (form) { form.closest('section')?.scrollIntoView({ behavior: 'smooth', block: 'start' }); return; }
-    }
-    // Fallback by id if present
-    const el = document.getElementById(key);
-    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
-  };
 
   return (
     <header
       style={{
-        display: "flex",
-        justifyContent: "space-between",
-        alignItems: "center",
-        padding: isMobile ? "12px 16px" : "15px 30px",
-        backgroundColor: "#E4E7EC",
-        position: "sticky",
+        position: "fixed",
         top: 0,
-        zIndex: 1000,
-        fontFamily: "Poppins, sans-serif",
+        left: 0,
+        width: "100%",
+        height: 80,
+        display: "flex",
+        alignItems: "center",
+        background: "#ffffff",
+        boxShadow: "0 4px 12px rgba(0,0,0,0.08)",
+        zIndex: 50,
       }}
     >
-      {/* Left: Business Name */}
-      <div style={{ fontSize: isMobile ? "18px" : "24px", fontWeight: "700", color: "#059669" }}>
-        {businessName}
-      </div>
+      <div
+        className="w-full mx-auto"
+        style={{
+          width: "100%",
+          margin: "0 auto",
+          maxWidth: "1150px",
+          paddingLeft: 0,
+          paddingRight: 40,
+          fontFamily:
+            "Poppins, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "flex-start",
+        }}
+      >
 
-      {/* Right: Nav */}
-      {/* Hamburger button for very small devices */}
-      {isVerySmall ? (
-        <button
-          aria-label={menuOpen ? "Close menu" : "Open menu"}
-          onClick={() => setMenuOpen((v) => !v)}
+
+
+
+        {/* Logo */}
+        <div
+          className="font-extrabold tracking-tight"
           style={{
-            background: "transparent",
-            border: "1px solid #d1d5db",
-            borderRadius: 8,
-            padding: '6px 8px',
-            display: 'inline-flex',
-            alignItems: 'center',
-            justifyContent: 'center'
+            fontSize: "32px",
+            background: "linear-gradient(to right, #06b26b, #00dba2)",
+            WebkitBackgroundClip: "text",
+            color: "transparent",
+            cursor: "pointer",
           }}
         >
-          <span style={{ display: 'inline-block', width: 18, height: 2, background: '#111827', position: 'relative' }}>
-            <span style={{ position: 'absolute', left: 0, right: 0, top: -6, height: 2, background: '#111827' }} />
-            <span style={{ position: 'absolute', left: 0, right: 0, top: 6, height: 2, background: '#111827' }} />
-          </span>
-        </button>
-      ) : null}
+          {businessName || "Driving"}
+        </div>
 
-      <nav style={{ position: "relative", marginLeft: isMobile ? 8 : 0 }}>
-        <ul style={{
-          display: isVerySmall ? (menuOpen ? 'flex' : 'none') : 'flex',
-          flexDirection: isVerySmall ? 'column' : 'row',
-          position: isVerySmall ? 'absolute' : 'static',
-          top: isVerySmall ? '100%' : 'auto',
-          right: isVerySmall ? 0 : 'auto',
-          background: isVerySmall ? '#ffffff' : 'transparent',
-          border: isVerySmall ? '1px solid #e5e7eb' : 'none',
-          borderRadius: isVerySmall ? 12 : 0,
-          padding: isVerySmall ? 12 : 0,
-          boxShadow: isVerySmall ? '0 10px 18px rgba(0,0,0,0.1)' : 'none',
-          zIndex: 100,
-          gap: isMobile ? "12px" : "20px",
-          listStyle: "none",
-          margin: 0,
-          alignItems: isVerySmall ? 'flex-start' : 'center'
-        }}>
-          {/* Home */}
-          <li key="Home">
-            <a
-              onClick={(e) => {
-                handleSmoothNav('home')(e);
-                if (isVerySmall) setMenuOpen(false);
-                setProductsOpen(false);
-              }}
+        {/* Desktop Menu */}
+        {!mobile && (
+          <nav
+  style={{
+    display: "flex",
+    alignItems: "center",
+    gap: 32,
+    marginLeft: "auto",
+    background: "transparent",
+    backgroundColor: "transparent",
+    boxShadow: "none",
+    border: "none",
+  }}
+>
+
+
+            {/* Home */}
+            <div
               style={{
-                color: "#333333",
-                textDecoration: "none",
-                fontWeight: 500,
-                fontSize: isMobile ? "14px" : "16px",
-                transition: "color 0.2s",
+                position: "relative",
                 cursor: "pointer",
+                fontSize: 15,
+                fontWeight: 500,
+                color: hoverKey === "home" ? "#059669" : "#111827",
+                paddingBottom: 4,
+                background: "transparent",
+                backgroundColor: "transparent",
               }}
+              onMouseEnter={() => setHoverKey("home")}
+              onMouseLeave={() => setHoverKey(null)}
             >
               Home
-            </a>
-          </li>
-
-          {/* Products Dropdown */}
-          <li style={{ position: "relative" }} key="Products">
-            <button
-              onClick={() => setProductsOpen((v) => !v)} // toggle dropdown
-              style={{
-                background: "transparent",
-                border: "none",
-                cursor: "pointer",
-                fontWeight: 500,
-                fontSize: isMobile ? "14px" : "16px",
-              }}
-            >
-              Our Services ▾
-            </button>
-
-            {productsOpen && categoryTree && !isVerySmall && (
               <div
-                onClick={(e) => e.stopPropagation()}
                 style={{
                   position: "absolute",
-                  top: "100%",
                   left: 0,
-                  background: "#fff",
-                  border: "1px solid #e5e7eb",
-                  borderRadius: 8,
-                  boxShadow: "0 4px 12px rgba(0,0,0,0.1)",
-                  zIndex: 100,
-                  padding: 8,
-                  minWidth: 220,
+                  right: 0,
+                  bottom: 0,
+                  height: 2,
+                  background: "#22c55e",
+                  transformOrigin: "left",
+                  transform: hoverKey === "home" ? "scaleX(1)" : "scaleX(0)",
+                  transition: "transform 0.2s ease",
                 }}
-              >
-                <ProductsMenu
-                  root={categoryTree}
-                  selectedLeaf={selectedLeaf}
-                  onLeafSelect={(leaf) => {
-                    onLeafSelect(leaf);
-                    setProductsOpen(false); // close after selection
-                    const el = document.getElementById("products");
-                    if (el) el.scrollIntoView({ behavior: "smooth" });
-                  }}
-                />
-              </div>
-            )}
-          </li>
+              />
+            </div>
 
-          {/* Other nav items */}
-          {navItems.map((item) => (
-            <li key={item}>
-              <a
-                href={`#${item.toLowerCase()}`}
+            {/* Our Services dropdown */}
+            <div
+              style={{ position: "relative", background: "transparent", backgroundColor: "transparent" }}
+              onMouseEnter={() => {
+                setHoverKey("services");
+                setServicesOpen(true);
+              }}
+              onMouseLeave={() => {
+                setHoverKey(null);
+                setServicesOpen(false);
+              }}
+            >
+              <div
                 style={{
-                  color: "#333333",
-                  textDecoration: "none",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 4,
+                  cursor: "pointer",
+                  fontSize: 15,
                   fontWeight: 500,
-                  fontSize: isMobile ? "14px" : "16px",
-                  transition: "color 0.2s",
+                  color: hoverKey === "services" ? "#059669" : "#111827",
+                  paddingBottom: 4,
+                  position: "relative",
+                  background: "transparent",
+                  backgroundColor: "transparent",
                 }}
-                onClick={(e) => {
-                  handleSmoothNav(item)(e);
-                  if (isVerySmall) setMenuOpen(false);
-                  setProductsOpen(false);
-                }}
-                onMouseOver={(e) => (e.currentTarget.style.color = "#059669")}
-                onMouseOut={(e) => (e.currentTarget.style.color = "#333333")}
               >
-                {item}
-              </a>
-            </li>
-          ))}
-          {/* On very small devices, place the ProductsMenu inline within the dropdown list when open */}
-          {isVerySmall && menuOpen && productsOpen && categoryTree ? (
-            <li style={{ width: '100%' }}>
-              <div style={{
-                marginTop: 6,
-                background: '#ffffff',
-                border: '1px solid #e5e7eb',
-                borderRadius: 8,
-                padding: 8,
-              }}>
-                <ProductsMenu
-                  root={categoryTree}
-                  selectedLeaf={selectedLeaf}
-                  onLeafSelect={(leaf) => {
-                    onLeafSelect(leaf);
-                    setProductsOpen(false);
-                    setMenuOpen(false);
-                    const el = document.getElementById('products');
-                    if (el) el.scrollIntoView({ behavior: 'smooth' });
+                <span>Our Services</span>
+                <ChevronDown style={{ width: 16, height: 16 }} />
+                <div
+                  style={{
+                    position: "absolute",
+                    left: 0,
+                    right: 0,
+                    bottom: 0,
+                    height: 2,
+                    background: "#22c55e",
+                    transformOrigin: "left",
+                    transform: hoverKey === "services" ? "scaleX(1)" : "scaleX(0)",
+                    transition: "transform 0.2s ease",
                   }}
                 />
               </div>
-            </li>
-          ) : null}
-        </ul>
-      </nav>
+
+              {/* Dropdown */}
+              {servicesOpen && (
+                <div
+                  style={{
+                    position: "absolute",
+                    top: "100%",
+                    left: 0,
+                    marginTop: 8,
+                    width: 240,
+                    background: "#ffffff",
+                    borderRadius: 12,
+                    boxShadow: "0 10px 25px rgba(0,0,0,0.15)",
+                    padding: 8,
+                  }}
+                >
+                  {services.map((label, index) => (
+                    <div
+                      key={index}
+                      style={{
+                        cursor: "pointer",
+                        fontSize: 15,
+                        fontWeight: 500,
+                        color: "#111827",
+                        padding: "10px 12px",
+                        borderBottom: index === services.length - 1 ? "none" : "1px solid #e5e7eb",
+                      }}
+                    >
+                      {label}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Why Us */}
+            <div
+              style={{
+                position: "relative",
+                cursor: "pointer",
+                fontSize: 15,
+                fontWeight: 500,
+                color: hoverKey === "why-us" ? "#059669" : "#111827",
+                paddingBottom: 4,
+                background: "transparent",
+                backgroundColor: "transparent",
+              }}
+              onMouseEnter={() => setHoverKey("why-us")}
+              onMouseLeave={() => setHoverKey(null)}
+            >
+              Why Us
+              <div
+                style={{
+                  position: "absolute",
+                  left: 0,
+                  right: 0,
+                  bottom: 0,
+                  height: 2,
+                  background: "#22c55e",
+                  transformOrigin: "left",
+                  transform: hoverKey === "why-us" ? "scaleX(1)" : "scaleX(0)",
+                  transition: "transform 0.2s ease",
+                  background: "transparent",
+                }}
+              />
+            </div>
+
+            {/* About */}
+            <div
+              style={{
+                position: "relative",
+                cursor: "pointer",
+                fontSize: 15,
+                fontWeight: 500,
+                color: hoverKey === "about" ? "#059669" : "#111827",
+                paddingBottom: 4,
+                background: "transparent",
+                backgroundColor: "transparent",
+              }}
+              onMouseEnter={() => setHoverKey("about")}
+              onMouseLeave={() => setHoverKey(null)}
+            >
+              About
+              <div
+                style={{
+                  position: "absolute",
+                  left: 0,
+                  right: 0,
+                  bottom: 0,
+                  height: 2,
+                  background: "#22c55e",
+                  transformOrigin: "left",
+                  transform: hoverKey === "about" ? "scaleX(1)" : "scaleX(0)",
+                  transition: "transform 0.2s ease",
+                  background: "transparent",
+                }}
+              />
+            </div>
+
+            {/* Contact */}
+            <div
+              style={{
+                position: "relative",
+                cursor: "pointer",
+                fontSize: 15,
+                fontWeight: 500,
+                color: hoverKey === "contact" ? "#059669" : "#111827",
+                paddingBottom: 4,
+                background: "transparent",
+                backgroundColor: "transparent",
+              }}
+              onMouseEnter={() => setHoverKey("contact")}
+              onMouseLeave={() => setHoverKey(null)}
+            >
+              Contact
+              <div
+                style={{
+                  position: "absolute",
+                  left: 0,
+                  right: 0,
+                  bottom: 0,
+                  height: 2,
+                  background: "#22c55e",
+                  transformOrigin: "left",
+                  transform: hoverKey === "contact" ? "scaleX(1)" : "scaleX(0)",
+                  transition: "transform 0.2s ease",
+                }}
+              />
+            </div>
+          </nav>
+        )}
+
+        {/* Mobile Menu Button */}
+        {mobile && (
+          <button onClick={() => setMenuOpen(!menuOpen)}>
+            <Menu size={30} />
+          </button>
+        )}
+      </div>
+
+      {/* Mobile Menu */}
+      {mobile && menuOpen && (
+        <div
+          className="w-full bg-white shadow-md"
+          style={{
+            marginTop: "80px",
+            padding: "20px 30px",
+            fontFamily: "Poppins",
+            fontSize: "17px",
+            fontWeight: "500",
+          }}
+        >
+          <a className="block py-2">Home</a>
+          <a className="block py-2">Driving Packages</a>
+          <a className="block py-2">Individual Courses</a>
+          <a className="block py-2">Commercial Training</a>
+          <a className="block py-2">Why Us</a>
+          <a className="block py-2">About</a>
+          <a className="block py-2">Contact</a>
+        </div>
+      )}
     </header>
   );
 }
