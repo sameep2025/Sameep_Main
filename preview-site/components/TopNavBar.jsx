@@ -14,7 +14,16 @@ export default function TopNavBar({ businessName, services = [
   const [servicesOpen, setServicesOpen] = useState(false);
 
   useEffect(() => {
-    const check = () => setMobile(window.innerWidth < 900);
+    const check = () => {
+      const isMobile = window.innerWidth < 900;
+      setMobile(isMobile);
+      // Reset menus when breakpoint changes
+      if (!isMobile) {
+        setMenuOpen(false);
+      }
+      setServicesOpen(false);
+      setHoverKey(null);
+    };
     check();
     window.addEventListener("resize", check);
     return () => window.removeEventListener("resize", check);
@@ -32,7 +41,7 @@ export default function TopNavBar({ businessName, services = [
         alignItems: "center",
         background: "#ffffff",
         boxShadow: "0 4px 12px rgba(0,0,0,0.08)",
-        zIndex: 50,
+        zIndex: 1000,
       }}
     >
       <div
@@ -41,13 +50,13 @@ export default function TopNavBar({ businessName, services = [
           width: "100%",
           margin: "0 auto",
           maxWidth: "1150px",
-          paddingLeft: 0,
-          paddingRight: 40,
+          paddingLeft: 16,
+          paddingRight: 16,
           fontFamily:
             "Poppins, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif",
           display: "flex",
           alignItems: "center",
-          justifyContent: "flex-start",
+          justifyContent: "space-between",
         }}
       >
 
@@ -58,7 +67,7 @@ export default function TopNavBar({ businessName, services = [
         <div
           className="font-extrabold tracking-tight"
           style={{
-            fontSize: "32px",
+            fontSize: "28px",
             background: "linear-gradient(to right, #06b26b, #00dba2)",
             WebkitBackgroundClip: "text",
             color: "transparent",
@@ -292,8 +301,19 @@ export default function TopNavBar({ businessName, services = [
 
         {/* Mobile Menu Button */}
         {mobile && (
-          <button onClick={() => setMenuOpen(!menuOpen)}>
-            <Menu size={30} />
+          <button
+            onClick={() => setMenuOpen(!menuOpen)}
+            style={{
+              marginLeft: "auto",
+              background: "transparent",
+              border: "none",
+              padding: 8,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+            }}
+          >
+            <Menu size={28} />
           </button>
         )}
       </div>
@@ -303,20 +323,52 @@ export default function TopNavBar({ businessName, services = [
         <div
           className="w-full bg-white shadow-md"
           style={{
-            marginTop: "80px",
-            padding: "20px 30px",
-            fontFamily: "Poppins",
-            fontSize: "17px",
-            fontWeight: "500",
+            position: "fixed",
+            top: 80,
+            left: 0,
+            right: 0,
+            padding: "14px 24px",
+            fontFamily: "Poppins, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif",
+            fontSize: "15px",
+            fontWeight: 500,
+            zIndex: 999,
+            backgroundColor: "#ffffff",
+            textAlign: "center",
+            borderBottom: "1px solid #e5e7eb",
           }}
         >
-          <a className="block py-2">Home</a>
-          <a className="block py-2">Driving Packages</a>
-          <a className="block py-2">Individual Courses</a>
-          <a className="block py-2">Commercial Training</a>
-          <a className="block py-2">Why Us</a>
-          <a className="block py-2">About</a>
-          <a className="block py-2">Contact</a>
+          <div style={{ padding: "6px 0" }}>Home</div>
+          <div
+            style={{
+              padding: "6px 0",
+              cursor: "pointer",
+            }}
+            onClick={() => setServicesOpen((open) => !open)}
+          >
+            Our Services {servicesOpen ? "▲" : "▼"}
+          </div>
+          {servicesOpen && (
+            <div
+              style={{
+                paddingBottom: 4,
+              }}
+            >
+              {services.map((label, index) => (
+                <div
+                  key={index}
+                  style={{
+                    padding: "4px 0",
+                    fontSize: 14,
+                  }}
+                >
+                  {label}
+                </div>
+              ))}
+            </div>
+          )}
+          <div style={{ padding: "6px 0" }}>Why Us</div>
+          <div style={{ padding: "6px 0" }}>About</div>
+          <div style={{ padding: "6px 0" }}>Contact</div>
         </div>
       )}
     </header>

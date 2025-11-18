@@ -139,33 +139,36 @@ export default function HomeSection({ businessName, profilePictures = [], heroTi
             }}
           >
             <button
-              onClick={() => {
-                const el = document.getElementById("products");
-                if (el) el.scrollIntoView({ behavior: "smooth" });
-              }}
-              onMouseEnter={() => setPrimaryHover(true)}
-              onMouseLeave={() => setPrimaryHover(false)}
-              style={{
-                padding: "12px 28px",
-                backgroundColor: "#16a34a",
-                color: "#ffffff",
-                border: "none",
-                borderRadius: 999,
-                cursor: "pointer",
-                fontWeight: 600,
-                fontSize: 15,
-                boxShadow: "0 8px 20px rgba(22,163,74,0.35)",
-                display: "inline-flex",
-                alignItems: "center",
-                gap: 10,
-                whiteSpace: "nowrap",
-                fontFamily: "Poppins, sans-serif",
-                justifyContent: "center",
-                transform: primaryHover ? "translateY(-7px)" : "translateY(0)",
-                opacity: primaryHover ? 1 : 0.9,
-                transition: "transform 250ms ease, box-shadow 250ms ease, opacity 250ms ease",
-              }}
-            >
+  onClick={() => {
+    const el = document.getElementById("products");
+    if (el) el.scrollIntoView({ behavior: "smooth" });
+  }}
+  onMouseEnter={() => setPrimaryHover(true)}
+  onMouseLeave={() => setPrimaryHover(false)}
+  style={{
+    padding: "12px 28px",
+    backgroundColor: "#16a34a",
+    color: "#ffffff",
+    border: "none",
+    borderRadius: 999,
+    cursor: "pointer",
+    fontWeight: 600,
+    fontSize: 15,
+    boxShadow: "0 8px 20px rgba(22,163,74,0.35)",
+    display: "flex",                  // ⬅ FIX
+    alignItems: "center",             // ⬅ FIX
+    justifyContent: "center",         // ⬅ FIX
+    gap: 10,
+    whiteSpace: "nowrap",
+    fontFamily: "Poppins, sans-serif",
+    textAlign: "center",
+    transform: primaryHover ? "translateY(-7px)" : "translateY(0)",
+    opacity: primaryHover ? 1 : 0.9,
+    transition: "transform 250ms ease, box-shadow 250ms ease, opacity 250ms ease",
+    
+  }}
+>
+
               <span style={{ display: "inline-flex", alignItems: "center", whiteSpace: "nowrap", fontFamily: "Poppins, sans-serif" }}>
                 <svg
                   xmlns="http://www.w3.org/2000/svg"

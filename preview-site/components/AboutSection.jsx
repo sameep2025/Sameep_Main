@@ -1,115 +1,246 @@
 import React from "react";
+import { Target, Eye, Star } from "lucide-react";
 
-export default function AboutSection() {
+export default function AboutSection({ categoryName, businessName }) {
+  const isDriving = String(categoryName || "").toLowerCase() === "driving school";
+
+  const trimmedBusiness = String(businessName || "").trim();
+  const heading = trimmedBusiness
+    ? `About ${trimmedBusiness}`
+    : isDriving
+    ? "About Driving School"
+    : "About Our Business";
+
+  const mainText = isDriving
+    ? "At Driving School, we believe that learning to drive should be a journey of excitement, not anxiety. With over 15 years of experience, we've helped thousands of students gain the skills and confidence to navigate the roads safely and responsibly."
+    : "Lorem ipsum dolor sit amet, consectetur adipiscing elit. Integer nec odio. Praesent libero. Sed cursus ante dapibus diam. Sed nisi. Nulla quis sem at nibh elementum imperdiet. Duis sagittis ipsum. Praesent mauris.";
+
+  const missionText = isDriving
+    ? "To empower every student with the essential driving skills and unwavering confidence needed for a lifetime of safe and enjoyable travel."
+    : "To provide the best quality service to our customers.";
+
+  const visionText = isDriving
+    ? "To be the most trusted and innovative driving school, setting the standard for excellence in driver education globally."
+    : "To become the most trusted brand worldwide.";
+
+  const rightTitle = isDriving ? "Unmatched Quality" : "Why Customers Trust Us";
+  const rightText = isDriving
+    ? "Every lesson, every car, every instructor – curated for your success."
+    : "We carefully design our services, team, and support to deliver a consistently great experience.";
+
   return (
     <section
       id="about"
       style={{
-        display: "flex",
-        gap: "40px",
-        padding: "50px 20px",
-        alignItems: "center",
-        backgroundColor: "#F7FEE7",
-        fontFamily: "Poppins, sans-serif",
-        flexWrap: "wrap",
+        padding: "72px 16px",
+        backgroundColor: "#ffffff",
+        fontFamily:
+          "Poppins, ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial",
       }}
     >
-      {/* Left Column */}
-      <div style={{ flex: 1 }}>
-        <h2 style={{ fontSize: "32px", fontWeight: "bold", marginBottom: "20px" }}>
-          About Our Business
-        </h2>
-        <p style={{ marginBottom: "30px", lineHeight: "1.6", color: "#555" }}>
-          Lorem ipsum dolor sit amet, consectetur adipiscing elit. Integer nec odio.
-          Praesent libero. Sed cursus ante dapibus diam. Sed nisi. Nulla quis sem at nibh
-          elementum imperdiet. Duis sagittis ipsum. Praesent mauris. 
-        </p>
-
-        <div style={{ display: "flex", gap: "20px" }}>
-          <div
-            style={{
-              flex: 1,
-              border: "1px solid #ddd",
-              padding: "20px",
-              borderRadius: "10px",
-              boxShadow: "0 2px 6px rgba(0,0,0,0.1)",
-            }}
-          >
-            <h4 style={{ marginBottom: "10px" }}>Our Mission</h4>
-            <p style={{ fontSize: "14px" }}>
-              To provide the best quality service to our customers.
-            </p>
-          </div>
-
-          <div
-            style={{
-              flex: 1,
-              border: "1px solid #ddd",
-              padding: "20px",
-              borderRadius: "10px",
-              boxShadow: "0 2px 6px rgba(0,0,0,0.1)",
-            }}
-          >
-            <h4 style={{ marginBottom: "10px" }}>Our Vision</h4>
-            <p style={{ fontSize: "14px" }}>
-              To become the most trusted brand worldwide.
-            </p>
-          </div>
-        </div>
-      </div>
-
-      {/* Right Column */}
       <div
         style={{
-          flex: 1,
-          display: "flex",
-          justifyContent: "center",
+          maxWidth: 1180,
+          margin: "0 auto",
+          display: "grid",
+          gridTemplateColumns: "minmax(0, 1.2fr) minmax(0, 1fr)",
+          gap: 48,
           alignItems: "center",
+          paddingLeft: "12px",
+          paddingRight: 16,
+          transform: "translateX(-20px)",
         }}
       >
-        <div
-          style={{
-            width: "80%",
-            padding: "40px",
-            textAlign: "center",
-            borderRadius: "15px",
-            backgroundColor: "#058963",
-            boxShadow: "0 4px 10px rgba(0,0,0,0.1)",
-          }}
-        >
-          {/* Circle Icon */}
+        {/* Left Column */}
+        <div>
+          <h2
+            style={{
+              fontSize: 36,
+              fontWeight: 900,
+              color: "#0f172a",
+              margin: "0 0 24px 0",
+            }}
+          >
+            {heading}
+          </h2>
+          <p
+            className="about-main-text"
+            style={{
+              fontSize: 18,
+              color: "#374151",
+              lineHeight: 1.7,
+              margin: "0 0 32px 0",
+            }}
+          >
+            {mainText}
+          </p>
+
           <div
             style={{
-              width: "70px",
-              height: "70px",
-              borderRadius: "50%",
-              backgroundColor: "#369B7D",
-              margin: "0 auto 20px auto",
-              display: "flex",
-              justifyContent: "center",
-              alignItems: "center",
-              color: "white",
-              fontSize: "24px",
+              display: "grid",
+              gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+              gap: 20,
             }}
           >
-            
+            <div
+              style={{
+                background:
+                  "linear-gradient(135deg, #ecfdf3 0%, #ffffff 60%, #f9fafb 100%)",
+                padding: 24,
+                borderRadius: 16,
+                boxShadow: "0 8px 20px rgba(15,23,42,0.04)",
+                border: "1px solid #e5e7eb",
+              }}
+            >
+              <h4
+                style={{
+                  fontSize: 18,
+                  fontWeight: 700,
+                  color: "#111827",
+                  margin: 0,
+                  marginBottom: 10,
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 8,
+                }}
+              >
+                <Target style={{ width: 20, height: 20, color: "#059669" }} />
+                Our Mission
+              </h4>
+              <p
+                style={{
+                  fontSize: 14,
+                  color: "#6b7280",
+                  margin: 0,
+                  marginTop: 6,
+                }}
+              >
+                {missionText}
+              </p>
+            </div>
+
+            <div
+              style={{
+                background:
+                  "linear-gradient(135deg, #eff6ff 0%, #ffffff 60%, #f9fafb 100%)",
+                padding: 24,
+                borderRadius: 16,
+                boxShadow: "0 8px 20px rgba(15,23,42,0.04)",
+                border: "1px solid #e5e7eb",
+              }}
+            >
+              <h4
+                style={{
+                  fontSize: 18,
+                  fontWeight: 700,
+                  color: "#111827",
+                  margin: 0,
+                  marginBottom: 10,
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 8,
+                }}
+              >
+                <Eye style={{ width: 20, height: 20, color: "#2563eb" }} />
+                Our Vision
+              </h4>
+              <p
+                style={{
+                  fontSize: 14,
+                  color: "#6b7280",
+                  margin: 0,
+                  marginTop: 6,
+                }}
+              >
+                {visionText}
+              </p>
+            </div>
           </div>
+        </div>
 
-          <h3 style={{ marginBottom: "10px", color: "white" }}>Quality</h3>
-          <p style={{ marginBottom: "20px", color: "white" }}>Pure Service</p>
-
-          <button
+        {/* Right Column */}
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "center",
+            alignItems: "center",
+          }}
+        >
+          <div
             style={{
-              padding: "10px 20px",
-              backgroundColor: "#369B7D",
-              color: "white",
-              border: "none",
-              borderRadius: "30px",
-              cursor: "pointer",
+              width: "100%",
+              maxWidth: 320,
+              padding: 36,
+              borderRadius: 28,
+              backgroundColor: "#16a34a",
+              boxShadow: "0 20px 40px rgba(5,150,105,0.45)",
+              textAlign: "center",
+              color: "#ffffff",
+              transform: "translateY(0)",
+              transition: "transform 0.2s ease, box-shadow 0.2s ease",
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.transform = "translateY(-4px)";
+              e.currentTarget.style.boxShadow =
+                "0 26px 52px rgba(5,150,105,0.6)";
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.transform = "translateY(0)";
+              e.currentTarget.style.boxShadow =
+                "0 20px 40px rgba(5,150,105,0.45)";
             }}
           >
-            Learn More
-          </button>
+            <div
+              style={{
+                width: 96,
+                height: 96,
+                borderRadius: 999,
+                backgroundColor: "#22c55e",
+                margin: "0 auto 20px auto",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                boxShadow: "0 12px 24px rgba(0,0,0,0.28)",
+              }}
+            >
+              <Star style={{ width: 40, height: 40, color: "#ffffff" }} />
+            </div>
+            <h3
+              style={{
+                fontSize: 30,
+                fontWeight: 800,
+                color: "#ffffff",
+                margin: "0 0 12px 0",
+              }}
+            >
+              {rightTitle}
+            </h3>
+            <p
+              className="about-right-text"
+              style={{
+                fontSize: 16,
+                color: "#DCFCE7",
+                margin: "0 0 24px 0",
+              }}
+            >
+              {rightText}
+            </p>
+            <button
+              style={{
+                padding: "11px 26px",
+                borderRadius: 999,
+                backgroundColor: "#ffffff",
+                color: "#047857",
+                border: "none",
+                fontWeight: 700,
+                cursor: "pointer",
+                fontSize: 14,
+                boxShadow: "0 10px 18px rgba(255,255,255,0.32)",
+              }}
+            >
+              Discover More
+            </button>
+          </div>
         </div>
       </div>
     </section>

@@ -11,6 +11,19 @@ export default async function handler(req, res) {
     return res.status(400).json({ error: 'Invalid lat/lng' });
   }
 
+  // In local development, avoid relying on upstream Nominatim (which can 403 or rate-limit)
+  if (process.env.NODE_ENV === 'development') {
+    return res.status(200).json({
+      ok: true,
+      lat,
+      lng,
+      display_name: '',
+      address: {},
+      city: '',
+      area: '',
+    });
+  }
+
   const url = `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${encodeURIComponent(lat.toFixed(6))}&lon=${encodeURIComponent(lng.toFixed(6))}`;
 
   try {
@@ -23,7 +36,17 @@ export default async function handler(req, res) {
     });
 
     if (!upstream.ok) {
-      return res.status(upstream.status).json({ error: `Upstream error ${upstream.status}` });
+      // Don't propagate upstream 4xx/5xx directly; return a safe empty payload
+      return res.status(200).json({
+        ok: false,
+        lat,
+        lng,
+        display_name: '',
+        address: {},
+        city: '',
+        area: '',
+        error: `Upstream error ${upstream.status}`,
+      });
     }
 
     const data = await upstream.json();

@@ -1,134 +1,173 @@
 // components/BenefitsSection.jsx
 import React from "react";
+import { Zap, Award, ShieldCheck, CalendarCheck2, Handshake, Gem } from "lucide-react";
 
-export default function BenefitsSection() {
-  const benefitsData = [
-    { title: "Fast Delivery", desc: "Get your orders quickly and reliably." },
-    { title: "Quality Products", desc: "Only the best products for our customers." },
-    { title: "Expert Advice", desc: "Professional guidance for your needs." },
-    { title: "Organic", desc: "100% pure and natural products." },
-    { title: "Trusted Service", desc: "We value long-term customer relationships." },
-    { title: "Special Offers", desc: "Exciting deals and discounts regularly." },
-  ];
+export default function BenefitsSection({ categoryName, businessName }) {
+  const isDriving = String(categoryName || "").toLowerCase() === "driving school";
+  const trimmedBusiness = String(businessName || "").trim();
 
-  const [vw, setVw] = React.useState(typeof window !== 'undefined' ? window.innerWidth : 1200);
-  React.useEffect(() => {
-    const onResize = () => setVw(window.innerWidth);
-    if (typeof window !== 'undefined') {
-      window.addEventListener('resize', onResize);
-      setVw(window.innerWidth);
-      return () => window.removeEventListener('resize', onResize);
-    }
-  }, []);
+  const heading = trimmedBusiness
+    ? `Why Choose ${trimmedBusiness}?`
+    : isDriving
+    ? "Why Choose Driving School?"
+    : "Why Choose Us";
 
-  const isMobile = vw <= 640;
-  const isTablet = vw > 640 && vw <= 1024;
+  const subText = isDriving
+    ? "Experience the difference with our commitment to excellence, safety, and customer satisfaction."
+    : "We provide top-notch services and products that help you achieve the best results. Our commitment to quality and customer satisfaction is unmatched.";
+
+  const benefitsData = isDriving
+    ? [
+        {
+          title: "Efficient Learning",
+          desc: "Structured lessons for quick, effective skill acquisition.",
+        },
+        {
+          title: "Certified Instructors",
+          desc: "Learn from the best, with experienced and patient teachers.",
+        },
+        {
+          title: "Safety First",
+          desc: "Modern vehicles and rigorous safety protocols.",
+        },
+        {
+          title: "Flexible Scheduling",
+          desc: "Lessons designed to fit your busy lifestyle.",
+        },
+        {
+          title: "Personalized Approach",
+          desc: "Tailored lessons to meet individual learning needs.",
+        },
+        {
+          title: "Great Value",
+          desc: "Premium education at competitive, fair pricing.",
+        },
+      ]
+    : [
+        { title: "Fast Delivery", desc: "Get your orders quickly and reliably." },
+        { title: "Quality Products", desc: "Only the best products for our customers." },
+        { title: "Expert Advice", desc: "Professional guidance for your needs." },
+        { title: "Organic", desc: "100% pure and natural products." },
+        { title: "Trusted Service", desc: "We value long-term customer relationships." },
+        { title: "Special Offers", desc: "Exciting deals and discounts regularly." },
+      ];
+  const icons = [Zap, Award, ShieldCheck, CalendarCheck2, Handshake, Gem];
 
   return (
     <section
       id="benefits"
       style={{
-        padding: "50px 20px",
-        backgroundColor: "#F7FEE7",
-        fontFamily: "Poppins, sans-serif",
-        textAlign: "center",
+        padding: "72px 16px",
+        backgroundColor: "#ECFDF5", // forced mint background
+        fontFamily:
+          "Poppins, ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial",
+        fontSize: "16px",
       }}
     >
-      {/* Heading */}
-      <h2
-        style={{
-          fontSize: "32px",
-          fontWeight: "bold",
-          marginBottom: "15px",
-          color: "#000",
-        }}
-      >
-        Why Choose Us
-      </h2>
-
-      {/* Paragraph */}
-      <p
-        style={{
-          fontSize: "16px",
-          marginBottom: "40px",
-          maxWidth: "600px",
-          margin: "0 auto",
-          color: "#475467",
-        }}
-      >
-        We provide top-notch services and products that help you achieve the best results.
-        Our commitment to quality and customer satisfaction is unmatched.
-      </p>
-
-      {/* Cards */}
       <div
         style={{
-          display: "grid",
-          gridTemplateColumns: isMobile ? "1fr" : isTablet ? "repeat(2, 1fr)" : "repeat(3, 1fr)",
-          gap: isMobile ? "12px" : "20px",
-          maxWidth: "1000px",
+          maxWidth: 1180,
           margin: "0 auto",
-          backgroundColor: "#F7FEE7",
-          padding: "12px",
-          borderRadius: "16px",
+          textAlign: "center",
         }}
       >
-        {benefitsData.map((item, idx) => (
-          <div
-            key={idx}
-            style={{
-              background: "#F7FEE7",
-              border: "1px solid #e7f3d1",
-              borderRadius: "12px",
-              padding: "20px",
-              display: "flex",
-              flexDirection: "column",
-              alignItems: "center",
-              transition: "all 0.3s ease",
-              cursor: "pointer",
-              border: "1px solid transparent", // default border
-            }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.border = "3px solid #047857"; // green border
-              e.currentTarget.style.transform = "translateY(-5px)";
-              e.currentTarget.style.boxShadow = "0 6px 15px rgba(0,0,0,0.15)";
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.border = "1px solid transparent";
-              e.currentTarget.style.transform = "translateY(0)";
-              e.currentTarget.style.boxShadow = "none";
-            }}
-          >
-            {/* Small green circle */}
-            <div
-              style={{
-                width: "40px",
-                height: "40px",
-                borderRadius: "50%",
-                backgroundColor: "#047857",
-                marginBottom: "15px",
-              }}
-            ></div>
+        <h2
+          style={{
+            fontSize: "36px",
+            fontWeight: 900,
+            color: "#0f172a",
+            margin: 0,
+            marginBottom: 10,
+          }}
+        >
+          {heading}
+        </h2>
+        <p
+          className="benefits-subtitle"
+          style={{
+            fontSize: "26px",
+            color: "#64748b",
+            maxWidth: 760,
+            margin: "10px auto 44px auto",
+          }}
+        >
+          {subText}
+        </p>
 
-            {/* Card heading */}
-            <h3
-              style={{
-                fontSize: "18px",
-                fontWeight: "bold",
-                marginBottom: "8px",
-                color: "#000",
-                textAlign: "center",
-              }}
-            >
-              {item.title}
-            </h3>
-
-            {/* Card description */}
-            <p style={{ fontSize: "14px", color: "#475467", textAlign: "center" }}>
-              {item.desc}
-            </p>
-          </div>
-        ))}
+        {/* Cards grid */}
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
+            gap: 24,
+          }}
+        >
+          {benefitsData.map((item, idx) => {
+            const Icon = icons[idx % icons.length];
+            return (
+              <div
+                key={idx}
+                style={{
+                  backgroundColor: "#FFFFFF", // forced card background
+                  borderRadius: 16,
+                  padding: 26,
+                  boxShadow: "0 14px 28px rgba(15,23,42,0.10)",
+                  display: "flex",
+                  flexDirection: "column",
+                  alignItems: "center",
+                  textAlign: "center",
+                  transition: "transform 0.2s ease, box-shadow 0.2s ease",
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.transform = "translateY(-4px)";
+                  e.currentTarget.style.boxShadow =
+                    "0 18px 36px rgba(15,23,42,0.16)";
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.transform = "translateY(0)";
+                  e.currentTarget.style.boxShadow =
+                    "0 14px 28px rgba(15,23,42,0.10)";
+                }}
+              >
+                <div
+                  style={{
+                    width: 60,
+                    height: 60,
+                    borderRadius: 999,
+                    backgroundColor: "#D1FAE5", // icon bg
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    color: "#059669", // icon color
+                    marginBottom: 16,
+                  }}
+                >
+                  <Icon style={{ width: 28, height: 28 }} />
+                </div>
+                <h3
+                  style={{
+                    fontSize: 19,
+                    fontWeight: 700,
+                    color: "#111827",
+                    margin: 0,
+                    marginBottom: 10,
+                  }}
+                >
+                  {item.title}
+                </h3>
+                <p
+                  style={{
+                    fontSize: "14px",
+                    color: "#6b7280",
+                    margin: 0,
+                  }}
+                >
+                  {item.desc}
+                </p>
+              </div>
+            );
+          })}
+        </div>
       </div>
     </section>
   );

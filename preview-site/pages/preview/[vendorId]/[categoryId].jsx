@@ -1,5 +1,5 @@
 // pages/preview/[vendorId]/[categoryId].jsx
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useMemo } from "react";
 
 import { useRouter } from "next/router";
 import Head from "next/head";
@@ -38,6 +38,19 @@ export default function PreviewPage() {
   const [heroDescription, setHeroDescription] = useState(null);
 
   const loading = loadingVendor || loadingCategories;
+
+  // Build dynamic service labels from top-level category children (product card sections)
+  const serviceLabels = useMemo(() => {
+    try {
+      const children = Array.isArray(categoryTree?.children) ? categoryTree.children : [];
+      const labels = children
+        .map((n) => (n && typeof n.name === "string" ? n.name.trim() : ""))
+        .filter((name) => !!name);
+      if (labels.length > 0) return labels;
+    } catch {}
+    // Fallback to default static labels if we cannot derive from tree
+    return ["Driving Packages", "Individual Courses", "Commercial Training"];
+  }, [categoryTree]);
 
   // ----------------- Fetch vendor & categories -----------------
   const fetchData = useCallback(async () => {
@@ -550,17 +563,17 @@ export default function PreviewPage() {
     }, [vendorId, displayNode?.id, selectedParent?.id, node?.id]);
 
     return (
-      <section style={{ marginBottom: 16 }}>
+      <section style={{ marginBottom: 20 }}>
         <div
           style={{
             border: "1px solid #e2e8f0",
-            borderRadius: 16,
-            padding: 20,
-            background: "#fff",
-            width: '100%',
-            minHeight: 400,
-            height: '100%',
-            boxShadow: "0 1px 6px rgba(0,0,0,0.08)",
+            borderRadius: 18,
+            padding: 24,
+            background: "#D6EEDE", // match HomeSection background
+            width: "100%",
+            minHeight: 420,
+            height: "100%",
+            boxShadow: "0 10px 20px rgba(0,0,0,0.06)",
             display: "flex",
             flexDirection: "column",
             justifyContent: "space-between",
@@ -1737,7 +1750,7 @@ export default function PreviewPage() {
                   border: '1px solid #e2e8f0',
                   borderRadius: 16,
                   padding: 22,
-                  background: '#fff',
+                  background: "#D6EEDE",
                   width: '100%',
                   minHeight: 480,
                   height: '100%',
@@ -1802,7 +1815,7 @@ export default function PreviewPage() {
                         },
                       }));
                     }}
-                    style={{ padding: '10px 14px', borderRadius: 999, border: '1px solid #d1d5db', background: '#fff', fontSize: 16, fontWeight: 600 }}
+                    style={{ padding: '10px 14px', borderRadius: 999, border: '1px solid #d1d5db', background: '#D6EEDE', fontSize: 16, fontWeight: 600 }}
                   >
                     {lvl2Kids.map((opt) => (
                       <option key={opt.id} value={opt.id}>{opt.name}</option>
@@ -2476,7 +2489,13 @@ export default function PreviewPage() {
         <FullPageShimmer />
       ) : (
         <>
-          <TopNavBar businessName={vendor?.businessName || "Loading..."} categoryTree={categoryTree} selectedLeaf={selectedLeaf} onLeafSelect={setSelectedLeaf} />
+          <TopNavBar
+            businessName={vendor?.businessName || "Loading..."}
+            services={serviceLabels}
+            categoryTree={categoryTree}
+            selectedLeaf={selectedLeaf}
+            onLeafSelect={setSelectedLeaf}
+          />
           <HomeSection
             businessName={vendor?.businessName || "Loading..."}
             profilePictures={vendor?.profilePictures || []}
@@ -2641,8 +2660,14 @@ export default function PreviewPage() {
             {/* <h2 style={{ margin: '0', padding: '0 0 10px 0' }}>Individuals</h2> */}
             {renderTree(categoryTree)}
           </main>
-          <BenefitsSection />
-          <AboutSection />
+          <BenefitsSection
+            categoryName={String(categoryTree?.name || "").toLowerCase()}
+            businessName={vendor?.businessName}
+          />
+          <AboutSection
+            categoryName={String(categoryTree?.name || "").toLowerCase()}
+            businessName={vendor?.businessName}
+          />
           <ContactSection
             contactNumber={vendor?.customerId?.fullNumber || vendor?.phone || "-"}
             location={location}
@@ -2653,7 +2678,53 @@ export default function PreviewPage() {
               setVendor((prev) => ({ ...prev, location: newLoc }));
             }}
           />
-          <Footer />
+          <Footer
+            businessName={vendor?.businessName}
+            categoryName={categoryTree?.name || "Driving School"}
+            navLinks={[
+              { label: "Home", href: "#home" },
+              { label: "Our Services", href: "#products" },
+              { label: "Why Us", href: "#benefits" },
+              { label: "About", href: "#about" },
+              { label: "Contact", href: "#contact" },
+            ]}
+            popularCourses={serviceLabels}
+            reachUs={{
+              phone: vendor?.customerId?.fullNumber || vendor?.phone || "-",
+              address:
+                location
+                  ? (() => {
+                      try {
+                        const loc = location || {};
+                        const primary = (loc.areaCity || "").trim();
+                        if (primary) return primary;
+
+                        const text = [
+                          loc.area,
+                          loc.city,
+                          loc.address,
+                          loc.addressLine1,
+                        ]
+                          .map((v) => (v || "").trim())
+                          .filter(Boolean)
+                          .join(", ");
+                        if (text) return text;
+
+                        const plat = Number(loc.lat);
+                        const plng = Number(loc.lng);
+                        if (Number.isFinite(plat) && Number.isFinite(plng)) {
+                          return `${plat.toFixed(4)}, ${plng.toFixed(4)}`;
+                        }
+                        return "-";
+                      } catch {
+                        return "-";
+                      }
+                    })()
+                  : "-",
+              hours: (vendor?.businessHours && vendor.businessHours[0]?.hours) ||
+                "Mon-Fri: 8:00 AM - 8:00 PM",
+            }}
+          />
         </>
       )}
     </div>
