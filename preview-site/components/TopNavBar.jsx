@@ -13,6 +13,20 @@ export default function TopNavBar({ businessName, services = [
   const [hoverKey, setHoverKey] = useState(null);
   const [servicesOpen, setServicesOpen] = useState(false);
 
+  const scrollToSection = (id) => {
+    try {
+      if (typeof window === "undefined") return;
+      if (!id || id === "home") {
+        window.scrollTo({ top: 0, behavior: "smooth" });
+        return;
+      }
+      const el = document.getElementById(id);
+      if (el) {
+        el.scrollIntoView({ behavior: "smooth", block: "start" });
+      }
+    } catch {}
+  };
+
   useEffect(() => {
     const check = () => {
       const isMobile = window.innerWidth < 900;
@@ -49,8 +63,8 @@ export default function TopNavBar({ businessName, services = [
         style={{
           width: "100%",
           margin: "0 auto",
-          maxWidth: "1150px",
-          paddingLeft: 16,
+          maxWidth: "1180px",
+          paddingLeft: 0,
           paddingRight: 16,
           fontFamily:
             "Poppins, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif",
@@ -72,6 +86,7 @@ export default function TopNavBar({ businessName, services = [
             WebkitBackgroundClip: "text",
             color: "transparent",
             cursor: "pointer",
+            marginLeft: -8,
           }}
         >
           {businessName || "Driving"}
@@ -98,7 +113,7 @@ export default function TopNavBar({ businessName, services = [
               style={{
                 position: "relative",
                 cursor: "pointer",
-                fontSize: 15,
+                fontSize: 18,
                 fontWeight: 500,
                 color: hoverKey === "home" ? "#059669" : "#111827",
                 paddingBottom: 4,
@@ -107,6 +122,7 @@ export default function TopNavBar({ businessName, services = [
               }}
               onMouseEnter={() => setHoverKey("home")}
               onMouseLeave={() => setHoverKey(null)}
+              onClick={() => scrollToSection("home")}
             >
               Home
               <div
@@ -142,7 +158,7 @@ export default function TopNavBar({ businessName, services = [
                   alignItems: "center",
                   gap: 4,
                   cursor: "pointer",
-                  fontSize: 15,
+                  fontSize: 18,
                   fontWeight: 500,
                   color: hoverKey === "services" ? "#059669" : "#111827",
                   paddingBottom: 4,
@@ -150,6 +166,7 @@ export default function TopNavBar({ businessName, services = [
                   background: "transparent",
                   backgroundColor: "transparent",
                 }}
+                onClick={() => scrollToSection("products")}
               >
                 <span>Our Services</span>
                 <ChevronDown style={{ width: 16, height: 16 }} />
@@ -188,11 +205,26 @@ export default function TopNavBar({ businessName, services = [
                       key={index}
                       style={{
                         cursor: "pointer",
-                        fontSize: 15,
+                        fontSize: 18,
                         fontWeight: 500,
                         color: "#111827",
                         padding: "10px 12px",
                         borderBottom: index === services.length - 1 ? "none" : "1px solid #e5e7eb",
+                      }}
+                      onClick={() => {
+                        try {
+                          const raw = String(label || "");
+                          const key = raw
+                            .toLowerCase()
+                            .replace(/[^a-z0-9]+/g, "-")
+                            .replace(/(^-|-$)/g, "");
+                          if (typeof window !== "undefined" && key) {
+                            const evt = new CustomEvent("preview:service-click", {
+                              detail: { label: raw, key },
+                            });
+                            window.dispatchEvent(evt);
+                          }
+                        } catch {}
                       }}
                     >
                       {label}
@@ -207,7 +239,7 @@ export default function TopNavBar({ businessName, services = [
               style={{
                 position: "relative",
                 cursor: "pointer",
-                fontSize: 15,
+                fontSize: 18,
                 fontWeight: 500,
                 color: hoverKey === "why-us" ? "#059669" : "#111827",
                 paddingBottom: 4,
@@ -216,6 +248,7 @@ export default function TopNavBar({ businessName, services = [
               }}
               onMouseEnter={() => setHoverKey("why-us")}
               onMouseLeave={() => setHoverKey(null)}
+              onClick={() => scrollToSection("benefits")}
             >
               Why Us
               <div
@@ -239,7 +272,7 @@ export default function TopNavBar({ businessName, services = [
               style={{
                 position: "relative",
                 cursor: "pointer",
-                fontSize: 15,
+                fontSize: 18,
                 fontWeight: 500,
                 color: hoverKey === "about" ? "#059669" : "#111827",
                 paddingBottom: 4,
@@ -248,6 +281,7 @@ export default function TopNavBar({ businessName, services = [
               }}
               onMouseEnter={() => setHoverKey("about")}
               onMouseLeave={() => setHoverKey(null)}
+              onClick={() => scrollToSection("about")}
             >
               About
               <div
@@ -271,7 +305,7 @@ export default function TopNavBar({ businessName, services = [
               style={{
                 position: "relative",
                 cursor: "pointer",
-                fontSize: 15,
+                fontSize: 18,
                 fontWeight: 500,
                 color: hoverKey === "contact" ? "#059669" : "#111827",
                 paddingBottom: 4,
@@ -280,6 +314,7 @@ export default function TopNavBar({ businessName, services = [
               }}
               onMouseEnter={() => setHoverKey("contact")}
               onMouseLeave={() => setHoverKey(null)}
+              onClick={() => scrollToSection("contact")}
             >
               Contact
               <div
@@ -337,13 +372,24 @@ export default function TopNavBar({ businessName, services = [
             borderBottom: "1px solid #e5e7eb",
           }}
         >
-          <div style={{ padding: "6px 0" }}>Home</div>
+          <div
+            style={{ padding: "6px 0", cursor: "pointer" }}
+            onClick={() => {
+              scrollToSection("home");
+              setMenuOpen(false);
+            }}
+          >
+            Home
+          </div>
           <div
             style={{
               padding: "6px 0",
               cursor: "pointer",
             }}
-            onClick={() => setServicesOpen((open) => !open)}
+            onClick={() => {
+              setServicesOpen((open) => !open);
+              scrollToSection("products");
+            }}
           >
             Our Services {servicesOpen ? "▲" : "▼"}
           </div>
@@ -359,6 +405,22 @@ export default function TopNavBar({ businessName, services = [
                   style={{
                     padding: "4px 0",
                     fontSize: 14,
+                    cursor: "pointer",
+                  }}
+                  onClick={() => {
+                    try {
+                      const raw = String(label || "");
+                      const key = raw
+                        .toLowerCase()
+                        .replace(/[^a-z0-9]+/g, "-")
+                        .replace(/(^-|-$)/g, "");
+                      if (typeof window !== "undefined" && key) {
+                        const evt = new CustomEvent("preview:service-click", {
+                          detail: { label: raw, key },
+                        });
+                        window.dispatchEvent(evt);
+                      }
+                    } catch {}
                   }}
                 >
                   {label}
@@ -366,9 +428,33 @@ export default function TopNavBar({ businessName, services = [
               ))}
             </div>
           )}
-          <div style={{ padding: "6px 0" }}>Why Us</div>
-          <div style={{ padding: "6px 0" }}>About</div>
-          <div style={{ padding: "6px 0" }}>Contact</div>
+          <div
+            style={{ padding: "6px 0", cursor: "pointer" }}
+            onClick={() => {
+              scrollToSection("benefits");
+              setMenuOpen(false);
+            }}
+          >
+            Why Us
+          </div>
+          <div
+            style={{ padding: "6px 0", cursor: "pointer" }}
+            onClick={() => {
+              scrollToSection("about");
+              setMenuOpen(false);
+            }}
+          >
+            About
+          </div>
+          <div
+            style={{ padding: "6px 0", cursor: "pointer" }}
+            onClick={() => {
+              scrollToSection("contact");
+              setMenuOpen(false);
+            }}
+          >
+            Contact
+          </div>
         </div>
       )}
     </header>

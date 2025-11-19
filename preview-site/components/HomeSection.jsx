@@ -101,7 +101,7 @@ export default function HomeSection({ businessName, profilePictures = [], heroTi
               fontSize: 18,
               color: "#4b5563",
               maxWidth: 560,
-              margin: isMobile ? "0 auto 32px" : "0 0 32px",
+              margin: isMobile ? "0 auto 16px" : "0 0 16px",
             }}
           >
             {heroDescription || ""}
@@ -110,7 +110,7 @@ export default function HomeSection({ businessName, profilePictures = [], heroTi
           <div
             style={{
               display: "flex",
-              gap: 32,
+              gap: 12,
               marginBottom: 32,
               flexWrap: "wrap",
               justifyContent: isMobile ? "center" : "flex-start",

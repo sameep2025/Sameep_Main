@@ -136,12 +136,50 @@ export default function Footer({
             {popularCourses.length > 0
               ? popularCourses.map((label, idx) => (
                   <li key={idx} style={{ fontSize: 16 }}>
-                    {label}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (typeof document === "undefined") return;
+                        const el = document.getElementById("products");
+                        if (el) el.scrollIntoView({ behavior: "smooth" });
+                      }}
+                      style={{
+                        background: "transparent",
+                        border: "none",
+                        padding: 0,
+                        margin: 0,
+                        color: "#e5e7eb",
+                        cursor: "pointer",
+                        fontSize: 16,
+                        textAlign: isMobile ? "center" : "left",
+                      }}
+                    >
+                      {label}
+                    </button>
                   </li>
                 ))
               : ["Special Combo Package", "Two Wheeler Training", "Four Wheeler Training", "Commercial Vehicle Course"].map((label) => (
                   <li key={label} style={{ fontSize: 16 }}>
-                    {label}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (typeof document === "undefined") return;
+                        const el = document.getElementById("products");
+                        if (el) el.scrollIntoView({ behavior: "smooth" });
+                      }}
+                      style={{
+                        background: "transparent",
+                        border: "none",
+                        padding: 0,
+                        margin: 0,
+                        color: "#e5e7eb",
+                        cursor: "pointer",
+                        fontSize: 16,
+                        textAlign: isMobile ? "center" : "left",
+                      }}
+                    >
+                      {label}
+                    </button>
                   </li>
                 ))}
           </ul>
@@ -168,10 +206,10 @@ export default function Footer({
               <MapPin size={18} color="#22c55e" />
               <span>{reachUs.address || "-"}</span>
             </div>
-            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            {/* <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
               <Clock size={18} color="#22c55e" />
               <span>Mon-Fri: 10 AM - 6 PM</span>
-            </div>
+            </div> */}
           </div>
         </div>
       </div>

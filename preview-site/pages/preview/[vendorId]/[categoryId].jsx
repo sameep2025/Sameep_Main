@@ -36,6 +36,7 @@ export default function PreviewPage() {
   const [invImgIdx, setInvImgIdx] = useState({}); // { [targetId]: number }
   const [heroTitle, setHeroTitle] = useState(null);
   const [heroDescription, setHeroDescription] = useState(null);
+  const [activeServiceKey, setActiveServiceKey] = useState(null); // which service/card should animate
 
   const loading = loadingVendor || loadingCategories;
 
@@ -51,6 +52,37 @@ export default function PreviewPage() {
     // Fallback to default static labels if we cannot derive from tree
     return ["Driving Packages", "Individual Courses", "Commercial Training"];
   }, [categoryTree]);
+
+  const makeServiceKey = useCallback((name) => {
+    try {
+      const raw = String(name || "");
+      return raw
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, "-")
+        .replace(/(^-|-$)/g, "");
+    } catch {
+      return "";
+    }
+  }, []);
+
+  // Listen for service selection events from TopNavBar (Our Services dropdown)
+  useEffect(() => {
+    if (typeof window === "undefined") return undefined;
+    const handler = (event) => {
+      try {
+        const detail = event?.detail || {};
+        const key = detail.key || detail.serviceKey || makeServiceKey(detail.label);
+        if (!key) return;
+        setActiveServiceKey(key);
+        // Clear after animation duration so we can re-trigger
+        window.setTimeout(() => {
+          setActiveServiceKey((current) => (current === key ? null : current));
+        }, 900);
+      } catch {}
+    };
+    window.addEventListener("preview:service-click", handler);
+    return () => window.removeEventListener("preview:service-click", handler);
+  }, [makeServiceKey]);
 
   // ----------------- Fetch vendor & categories -----------------
   const fetchData = useCallback(async () => {
@@ -580,7 +612,7 @@ export default function PreviewPage() {
             fontFamily: "Poppins, sans-serif",
           }}
         >
-          <h2 style={{ margin: "0 0 10px", fontSize: 16, fontWeight: 600 }}>{node.name}</h2>
+          <h2 style={{ margin: "0 0 10px", fontSize: 16, fontWeight: 600, textAlign: "center" }}>{node.name}</h2>
 
           {imagesForCard.length > 0 ? (
             <div style={{ width: '100%', height: 160, borderRadius: 10, overflow: 'hidden', background: '#f8fafc', position: 'relative', marginBottom: 12 }}>
@@ -839,7 +871,7 @@ export default function PreviewPage() {
                 })}
               </div>
             ) : (
-              <div style={{ marginBottom: 10, display: 'flex', justifyContent: 'flex-start' }}>
+              <div style={{ marginBottom: 10, display: 'flex', justifyContent: 'center' }}>
                 <select
                   value={selectedParent?.id || ""}
                   onChange={(e) => {
@@ -1120,9 +1152,13 @@ export default function PreviewPage() {
       .map((n) => `${n.model}|${n.brand}`)));
 
     const uiRow = (label, control) => (
-      <div style={{ marginBottom: 10 }}>
+      <div
+        style={{
+          marginBottom: 10,
+        }}
+      >
         <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 6 }}>{label}</div>
-        {control}
+        <div style={{ width: '100%' }}>{control}</div>
       </div>
     );
 
@@ -1199,6 +1235,7 @@ export default function PreviewPage() {
     return (
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 30, alignItems: 'stretch' }}>
         {root.children.map((lvl1) => {
+          const serviceKey = makeServiceKey(lvl1?.name || "");
       const lvl2KidsRaw = Array.isArray(lvl1.children) ? lvl1.children : [];
       // Sort L2 by min subtree price
       const lvl2Kids = [...lvl2KidsRaw].sort((a, b) => {
@@ -1334,9 +1371,31 @@ export default function PreviewPage() {
       })();
 
       return (
-        <section key={lvl1.id} style={{ marginBottom: 16 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12 }}>
-            <h2 style={{ margin: 0, textTransform: 'Capitalize', fontSize: 18, fontWeight: 600 }}>{lvl1.name}</h2>
+        <section key={lvl1.id} style={{
+      marginBottom: 16,
+      flex: "0 0 320px",       // same width for Two/Four/Commercial
+      maxWidth: 340,
+      display: "flex",
+      flexDirection: "column",
+      alignItems: "stretch",
+    }}
+    className={activeServiceKey === serviceKey ? 'service-card-fade-out' : ''}
+    >
+          <div style={{ display: 'flex', alignItems: 'flex-end', gap: 12, marginBottom: 12 }}>
+            <h2
+              style={{
+                margin: 0,
+                textTransform: 'Capitalize',
+                fontSize: 18,
+                fontWeight: 600,
+                minHeight: 44,
+                display: 'flex',
+                alignItems: 'flex-end',
+                whiteSpace: 'nowrap',
+              }}
+            >
+              {lvl1.name}
+            </h2>
             {lvl2Kids.length > 0 ? (
               <select
                 value={String(selectedLvl2?.id || '')}
@@ -1418,24 +1477,24 @@ export default function PreviewPage() {
           </div>
 
           <div
-            style={{
-              border: '1px solid #e2e8f0',
-              borderRadius: 16,
-              padding: 20,
-              background: '#fff',
-              width: 300,
-              minHeight: 400,
-              height: '100%',
-              boxShadow: '0 1px 6px rgba(0,0,0,0.08)',
-              display: 'flex',
-              flexDirection: 'column',
-              justifyContent: 'space-between',
-              fontFamily: 'Poppins, sans-serif',
-            }}
-          >
+  style={{
+    border: '1px solid #e2e8f0',
+    borderRadius: 16,
+    padding: 20,
+    background: '#fff',
+    width: '100%',
+    minHeight: 400,
+    height: '100%',
+    boxShadow: '0 1px 6px rgba(0,0,0,0.08)',
+    display: 'flex',
+    flexDirection: 'column',
+    justifyContent: 'space-between',
+    fontFamily: 'Poppins, sans-serif',
+  }}
+>
             <h3 style={{ margin: '0 0 10px', fontSize: 16, fontWeight: 600 }}>{displayNode?.name}</h3>
 
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 12 }}>
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 8 }}>
               {(() => {
                 try {
                   const targetId = String((selectedLvl3 || selectedLvl2 || lvl1)?.id || '');
@@ -1456,22 +1515,14 @@ export default function PreviewPage() {
                     const rows = Array.isArray(vendor?.rowImages?.[targetId]) ? vendor.rowImages[targetId] : [];
                     if (rows.length) images = rows.slice(0, 10);
                   }
-                  if (!images.length) {
-                    try {
-                      const all = vendor?.rowImages || {};
-                      for (const k in all) {
-                        const rows = Array.isArray(all[k]) ? all[k] : [];
-                        if (rows.length) { images = rows.slice(0, 10); break; }
-                      }
-                    } catch {}
-                  }
                   if (!images.length && displayNode?.imageUrl) images.push(displayNode.imageUrl);
                   // As a last resort, if no exact row images or inline image, try any rowImages from vendor
                   if (!images.length) {
                     try {
                       const all = vendor?.rowImages || {};
                       for (const k in all) {
-                        if (Array.isArray(all[k]) && all[k].length) { images = images.concat(all[k].slice(0, 10)); break; }
+                        const rows = Array.isArray(all[k]) ? all[k] : [];
+                        if (rows.length) { images = images.concat(rows.slice(0, 10)); break; }
                       }
                     } catch {}
                   }
@@ -1606,6 +1657,7 @@ export default function PreviewPage() {
     })}
   </div>
 );
+
 }
 
   // Driving School specialized layout (single card per first-level)
@@ -1738,12 +1790,14 @@ export default function PreviewPage() {
             }
           })();
 
-          return (
-            <section key={lvl1.id} style={{ marginBottom: 24, display: 'flex', flexDirection: 'column' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 14, justifyContent: 'flex-start' }}>
-                <h2 style={{ margin: 0, fontSize: 18, fontWeight: 600 }}>{lvl1.name}</h2>
-              </div>
+          const serviceKey = makeServiceKey(lvl1?.name || "");
 
+          return (
+            <section
+              key={lvl1.id}
+              style={{ marginTop: 0, marginBottom: 24, display: 'flex', flexDirection: 'column' }}
+              className={activeServiceKey === serviceKey ? 'service-card-fade-out' : ''}
+            >
               <div
                 className="ds-tt-card"
                 style={{
@@ -1752,21 +1806,36 @@ export default function PreviewPage() {
                   padding: 22,
                   background: "#D6EEDE",
                   width: '100%',
-                  minHeight: 480,
-                  height: '100%',
+                  height: 820,
                   boxShadow: '0 1px 6px rgba(0,0,0,0.08)',
                   display: 'flex',
                   flexDirection: 'column',
                   gap: 12,
                   justifyContent: 'flex-start',
                   fontFamily: 'Poppins, sans-serif',
+                  marginTop: 0,
                 }}
               >
+                {/* Top row: title (left) + primary select (right) */}
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginBottom: 8 }}>
+                  <div
+                    className="ds-tt-title"
+                    style={{
+                      margin: 0,
+                      fontSize: 22,
+                      lineHeight: 1.15,
+                      fontWeight: 600,
+                      flex: 1,
+                      whiteSpace: 'normal',
+                    }}
+                  >
+                    {lvl1.name}
+                  </div>
 
-                {lvl2Kids.length > 0 ? (
-                  <select
-                    value={String(selectedLvl2?.id || '')}
-                    onChange={(e) => {
+                  {lvl2Kids.length > 0 ? (
+                    <select
+                      value={String(selectedLvl2?.id || '')}
+                      onChange={(e) => {
                       const next = lvl2Kids.find((c) => String(c.id) === e.target.value) || lvl2Kids[0] || null;
                       // Compute cheapest defaults for Driving School (transmission, bodyType, modelBrand)
                       const nextTargetId = String((selectedLvl3 || next || lvl1)?.id || '');
@@ -1815,17 +1884,28 @@ export default function PreviewPage() {
                         },
                       }));
                     }}
-                    style={{ padding: '10px 14px', borderRadius: 999, border: '1px solid #d1d5db', background: '#D6EEDE', fontSize: 16, fontWeight: 600 }}
-                  >
-                    {lvl2Kids.map((opt) => (
-                      <option key={opt.id} value={opt.id}>{opt.name}</option>
-                    ))}
-                  </select>
-                ) : (
-                  <h3 style={{ margin: '0 0 8px', fontSize: 16, fontWeight: 600 }}>{displayNode?.name}</h3>
-                )}
+                      style={{
+                        padding: '8px 18px',
+                        borderRadius: 999,
+                        border: '1px solid #d1d5db',
+                        background: '#ffffff',
+                        fontSize: 14,
+                        fontWeight: 600,
+                        flexShrink: 0,
+                        maxWidth: '50%',
+                      }}
+                    >
+                      {lvl2Kids.map((opt) => (
+                        <option key={opt.id} value={opt.id}>{opt.name}</option>
+                      ))}
+                    </select>
+                  ) : (
+                    <h3 style={{ margin: 0, fontSize: 16, fontWeight: 600 }}>{displayNode?.name}</h3>
+                  )}
+                </div>
 
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 12 }}>
+                {/* Media row: image (left) + price (right) */}
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
                   {(() => {
                     try {
                       const targetId = String((selectedLvl3 || selectedLvl2 || lvl1)?.id || '');
@@ -1856,7 +1936,7 @@ export default function PreviewPage() {
                       if (!normImgs.length) return <div />;
                       const idx = Number(invImgIdx[targetId] || 0) % normImgs.length;
                       return (
-                        <div style={{ width: '100%', height: 140, borderRadius: 10, overflow: 'hidden', background: '#f8fafc', position: 'relative' }}>
+                        <div style={{ flex: 1, height: 140, borderRadius: 10, overflow: 'hidden', background: '#f8fafc', position: 'relative' }}>
                           <div style={{ display: 'flex', width: `${normImgs.length * 100}%`, height: '100%', transform: `translateX(-${idx * (100 / normImgs.length)}%)`, transition: 'transform 400ms ease' }}>
                             {normImgs.map((src, i) => (
                               <div key={i} style={{ width: `${100 / normImgs.length}%`, height: '100%', flex: '0 0 auto' }}>
@@ -1883,7 +1963,7 @@ export default function PreviewPage() {
                     } catch { return <div />; }
                   })()}
                   {attrAwarePrice != null ? (
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 4, color: '#059669', fontWeight: 700, fontSize: 18 }}>
+                    <div style={{ marginLeft: 12, display: 'flex', alignItems: 'center', gap: 4, color: '#059669', fontWeight: 700, fontSize: 18 }}>
                       <span>₹</span>
                       <span>{attrAwarePrice}</span>
                     </div>
@@ -1901,7 +1981,15 @@ export default function PreviewPage() {
                       }));
                       setSelectedLeaf(next || selectedLvl2 || lvl1);
                     }}
-                    style={{ width: '100%', padding: '10px 12px', borderRadius: 8, border: '1px solid #d1d5db', background: '#fff', fontSize: 13 }}
+                    style={{
+                      display: 'block',
+                      width: 'auto',
+                      padding: '10px 12px',
+                      borderRadius: 8,
+                      border: '1px solid #d1d5db',
+                      background: '#fff',
+                      fontSize: 13,
+                    }}
                   >
                     {lvl3Kids.map((opt) => (
                       <option key={opt.id} value={opt.id}>{opt.name}</option>
@@ -1946,7 +2034,15 @@ export default function PreviewPage() {
                       const bestMB = mbWithPrice2[0]?.opt;
                       setTaxiSelections((prev) => ({ ...prev, [lvl1.id]: { ...(prev[lvl1.id] || {}), transmission: val, bodyType: bestBody, modelBrand: bestMB } }));
                     }}
-                    style={{ width: '100%', padding: '8px 10px', border: '1px solid #d1d5db', borderRadius: 8, background: '#fff', fontSize: 13 }}
+                    style={{
+                      display: 'block',
+                      width: 'auto',
+                      padding: '8px 10px',
+                      border: '1px solid #d1d5db',
+                      borderRadius: 8,
+                      background: '#fff',
+                      fontSize: 13,
+                    }}
                   >
                     <option value="">Any</option>
                     {transmissionOptions.map((opt) => (
@@ -1955,66 +2051,75 @@ export default function PreviewPage() {
                   </select>
                 )) : null}
 
-                {bodyOptions.length > 0 ? uiRow('Body Type', (
-                  <select
-                    value={String(selState.bodyType || '')}
-                    onChange={(e) => {
-                      const val = e.target.value || undefined;
-                      const targetId = String((selectedLvl3 || selectedLvl2 || lvl1)?.id || '');
-                      const listBase = (!selState.transmission ? normalizedForLvl1 : normalizedForLvl1.filter((n) => String(n.transmission) === String(selState.transmission)));
-                      const afterBody = val ? listBase.filter((n) => (n.body ? String(n.body) === String(val) : true)) : listBase;
-                      const mp = (list) => {
-                        try {
-                          const prices = [];
-                          list.forEach((n) => {
-                            const pbr = (n.entry && n.entry.pricesByRow && typeof n.entry.pricesByRow === 'object') ? n.entry.pricesByRow : null;
-                            if (!pbr) return;
-                            for (const [key, value] of Object.entries(pbr)) {
-                              const ids = String(key).split('|');
-                              if (ids.some((id) => String(id) === String(targetId))) {
-                                const num = Number(value);
-                                if (!Number.isNaN(num)) prices.push(num);
-                              }
-                            }
-                          });
-                          if (prices.length === 0) return null;
-                          return Math.min(...prices);
-                        } catch { return null; }
-                      };
-                      const mbPairs2 = Array.from(new Set(afterBody.filter((n)=> n.model && n.brand).map((n)=> `${n.model}|${n.brand}`)));
-                      const mbWithPrice2 = mbPairs2.map((opt)=>{ const [m,b]=String(opt).split('|'); const lst = afterBody.filter((n)=> String(n.model)===String(m||'') && String(n.brand)===String(b||'')); return { opt, price: mp(lst) }; });
-                      mbWithPrice2.sort((a,b)=>{ const va=a.price==null?Number.POSITIVE_INFINITY:Number(a.price); const vb=b.price==null?Number.POSITIVE_INFINITY:Number(b.price); return va-vb; });
-                      const bestMB = mbWithPrice2[0]?.opt;
-                      setTaxiSelections((prev) => ({ ...prev, [lvl1.id]: { ...(prev[lvl1.id] || {}), bodyType: val, modelBrand: bestMB } }));
-                    }}
-                    style={{ width: '100%', padding: '8px 10px', border: '1px solid #d1d5db', borderRadius: 8, background: '#fff', fontSize: 13 }}
-                  >
-                    <option value="">Any</option>
-                    {bodyOptions.map((opt) => (
-                      <option key={opt} value={opt}>{opt}</option>
-                    ))}
-                  </select>
-                )) : null}
+                {/* Body Type + Brand+Model row side-by-side */}
+                {(bodyOptions.length > 0 || modelBrandOptions.length > 0) && (
+                  <div style={{ display: 'flex', gap: 12, marginBottom: 10 }}>
+                    {bodyOptions.length > 0 && (
+                      <div style={{ flex: 1 }}>
+                        <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 6 }}>Body Type</div>
+                        <select
+                          value={String(selState.bodyType || '')}
+                          onChange={(e) => {
+                            const val = e.target.value || undefined;
+                            const targetId = String((selectedLvl3 || selectedLvl2 || lvl1)?.id || '');
+                            const listBase = (!selState.transmission ? normalizedForLvl1 : normalizedForLvl1.filter((n) => String(n.transmission) === String(selState.transmission)));
+                            const afterBody = val ? listBase.filter((n) => (n.body ? String(n.body) === String(val) : true)) : listBase;
+                            const mp = (list) => {
+                              try {
+                                const prices = [];
+                                list.forEach((n) => {
+                                  const pbr = (n.entry && n.entry.pricesByRow && typeof n.entry.pricesByRow === 'object') ? n.entry.pricesByRow : null;
+                                  if (!pbr) return;
+                                  for (const [key, value] of Object.entries(pbr)) {
+                                    const ids = String(key).split('|');
+                                    if (ids.some((id) => String(id) === String(targetId))) {
+                                      const num = Number(value);
+                                      if (!Number.isNaN(num)) prices.push(num);
+                                    }
+                                  }
+                                });
+                                if (prices.length === 0) return null;
+                                return Math.min(...prices);
+                              } catch { return null; }
+                            };
+                            const mbPairs2 = Array.from(new Set(afterBody.filter((n)=> n.model && n.brand).map((n)=> `${n.model}|${n.brand}`)));
+                            const mbWithPrice2 = mbPairs2.map((opt)=>{ const [m,b]=String(opt).split('|'); const lst = afterBody.filter((n)=> String(n.model)===String(m||'') && String(n.brand)===String(b||'')); return { opt, price: mp(lst) }; });
+                            mbWithPrice2.sort((a,b)=>{ const va=a.price==null?Number.POSITIVE_INFINITY:Number(a.price); const vb=b.price==null?Number.POSITIVE_INFINITY:Number(b.price); return va-vb; });
+                            const bestMB = mbWithPrice2[0]?.opt;
+                            setTaxiSelections((prev) => ({ ...prev, [lvl1.id]: { ...(prev[lvl1.id] || {}), bodyType: val, modelBrand: bestMB } }));
+                          }}
+                          style={{ width: '100%', padding: '8px 10px', border: '1px solid #d1d5db', borderRadius: 8, background: '#fff', fontSize: 13 }}
+                        >
+                          <option value="">Any</option>
+                          {bodyOptions.map((opt) => (
+                            <option key={opt.id} value={opt}>{opt}</option>
+                          ))}
+                        </select>
+                      </div>
+                    )}
 
-                
-
-                {modelBrandOptions.length > 0 ? uiRow('Brand + Model', (
-                  <select
-                    value={String(selState.modelBrand ?? modelBrandOptions[0] ?? '')}
-                    onChange={(e) => {
-                      const val = e.target.value || undefined;
-                      setTaxiSelections((prev) => ({ ...prev, [lvl1.id]: { ...(prev[lvl1.id] || {}), modelBrand: val } }));
-                    }}
-                    style={{ width: '100%', padding: '8px 10px', border: '1px solid #d1d5db', borderRadius: 8, background: '#fff', fontSize: 13 }}
-                  >
-                    {modelBrandOptions.map((opt) => {
-                      const [model, brand] = String(opt).split('|');
-                      return (
-                        <option key={opt} value={opt}>{`${brand || ''} | ${model || ''}`.trim()}</option>
-                      );
-                    })}
-                  </select>
-                )) : null}
+                    {modelBrandOptions.length > 0 && (
+                      <div style={{ flex: 1 }}>
+                        <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 6 }}>Brand + Model</div>
+                        <select
+                          value={String(selState.modelBrand ?? modelBrandOptions[0] ?? '')}
+                          onChange={(e) => {
+                            const val = e.target.value || undefined;
+                            setTaxiSelections((prev) => ({ ...prev, [lvl1.id]: { ...(prev[lvl1.id] || {}), modelBrand: val } }));
+                          }}
+                          style={{ width: '100%', padding: '8px 10px', border: '1px solid #d1d5db', borderRadius: 8, background: '#fff', fontSize: 13 }}
+                        >
+                          {modelBrandOptions.map((opt) => {
+                            const [model, brand] = String(opt).split('|');
+                            return (
+                              <option key={opt} value={opt}>{`${brand || ''} | ${model || ''}`.trim()}</option>
+                            );
+                          })}
+                        </select>
+                      </div>
+                    )}
+                  </div>
+                )}
 
                 {displayNode?.terms && String(displayNode.terms).trim() && (
                   <div style={{ width: '100%', marginTop: 10, marginBottom: 12 }}>
@@ -2600,6 +2705,28 @@ export default function PreviewPage() {
                           .filter(Boolean);
                     const terms = termsArr.join(', ');
                     const imgSrc = (() => {
+                      // Prefer an image tied to the currently selected size, if available
+                      try {
+                        if (selectedSize) {
+                          for (const it of items) {
+                            const vs = Array.isArray(it?.variants) ? it.variants : [];
+                            const hasSize = vs.some((v) => (v?.size || '—') === selectedSize);
+                            if (!hasSize) continue;
+
+                            // First look for a variant-level image for this size
+                            const withImg = vs.find((v) => (v?.size || '—') === selectedSize && (v?.imageUrl || v?.image));
+                            const cand = withImg?.imageUrl || withImg?.image || it?.imageUrl || it?.image;
+                            if (cand) {
+                              const s = String(cand);
+                              if (s.startsWith('http://') || s.startsWith('https://') || s.startsWith('data:')) return s;
+                              if (s.startsWith('/')) return `${ASSET_BASE_URL}${s}`;
+                              return `${ASSET_BASE_URL}/${s}`;
+                            }
+                          }
+                        }
+                      } catch {}
+
+                      // Fallback to combo-level image
                       if (!img) return null;
                       const s = String(img);
                       if (s.startsWith('http://') || s.startsWith('https://') || s.startsWith('data:')) return s;

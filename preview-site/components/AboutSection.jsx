@@ -11,20 +11,20 @@ export default function AboutSection({ categoryName, businessName }) {
     ? "About Driving School"
     : "About Our Business";
 
-  const mainText = isDriving
-    ? "At Driving School, we believe that learning to drive should be a journey of excitement, not anxiety. With over 15 years of experience, we've helped thousands of students gain the skills and confidence to navigate the roads safely and responsibly."
+  const mainText = trimmedBusiness || isDriving
+    ? `At ${trimmedBusiness || "Driving School"}, we believe that learning to drive should be a journey of excitement, not anxiety. With over 15 years of experience, we've helped thousands of students gain the skills and confidence to navigate the roads safely and responsibly.`
     : "Lorem ipsum dolor sit amet, consectetur adipiscing elit. Integer nec odio. Praesent libero. Sed cursus ante dapibus diam. Sed nisi. Nulla quis sem at nibh elementum imperdiet. Duis sagittis ipsum. Praesent mauris.";
 
-  const missionText = isDriving
+  const missionText = trimmedBusiness || isDriving
     ? "To empower every student with the essential driving skills and unwavering confidence needed for a lifetime of safe and enjoyable travel."
     : "To provide the best quality service to our customers.";
 
-  const visionText = isDriving
+  const visionText = trimmedBusiness || isDriving
     ? "To be the most trusted and innovative driving school, setting the standard for excellence in driver education globally."
     : "To become the most trusted brand worldwide.";
 
-  const rightTitle = isDriving ? "Unmatched Quality" : "Why Customers Trust Us";
-  const rightText = isDriving
+  const rightTitle = trimmedBusiness || isDriving ? "Unmatched Quality" : "Why Customers Trust Us";
+  const rightText = trimmedBusiness || isDriving
     ? "Every lesson, every car, every instructor – curated for your success."
     : "We carefully design our services, team, and support to deliver a consistently great experience.";
 

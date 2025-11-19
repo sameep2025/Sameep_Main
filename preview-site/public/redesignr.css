@@ -133,7 +133,7 @@ div[style*="display:flex"][style*="flex-wrap:wrap"][style*="gap:16px"] {
   color: #111827 !important;
   font-family: 'Poppins', ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial !important;
   font-weight: 600 !important;
-  font-size: 16px !important;
+  font-size: 28px !important;
   padding: 4px 0 !important;
   position: relative !important;
 }
@@ -275,7 +275,7 @@ div[style*="display:flex"][style*="flex-wrap:wrap"][style*="gap:16px"] {
 /* Increase gap between text and buttons */
 #preview-page section:first-of-type .hero-buttons,
 #preview-page section:first-of-type div[style*="display: flex"][style*="gap"] {
-    margin-top: 50px !important;   /* Increase space */
+    margin-top: 20px !important;
 }
 
 
@@ -685,6 +685,8 @@ div[style*="display:flex"][style*="flex-wrap:wrap"][style*="gap:16px"] {
 #preview-page main#products ul li {
   margin: 6px 0 !important;
   list-style: disc outside !important;
+  font-family: 'Poppins', ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial !important;
+  font-size: 14px !important;
 }
 
 /* Size selector label and select */
@@ -693,8 +695,10 @@ div[style*="display:flex"][style*="flex-wrap:wrap"][style*="gap:16px"] {
 #preview-page main#products select {
   width: auto !important; /* shrink to fit content */
   min-width: min-content !important;
-  max-width: 100% !important; /* dont overflow card */
-  display: inline-block !important;
+  max-width: 100% !important; /* don’t overflow card */
+  display: block !important;
+  margin-left: auto !important;
+  margin-right: auto !important; /* center the dropdown box */
   box-sizing: border-box !important;
   border-radius: 12px !important;
   border: 1px solid #d1d5db !important;
@@ -705,6 +709,14 @@ div[style*="display:flex"][style*="flex-wrap:wrap"][style*="gap:16px"] {
   overflow: hidden !important;
   text-overflow: ellipsis !important;
   box-shadow: 0 2px 0 rgba(0,0,0,0.02) inset !important;
+  text-align-last: center !important; /* center selected text in most browsers */
+}
+
+/* Driving School / Taxi cards: ensure selects are centered inside the green cards */
+#preview-page .ds-tt-card select {
+  display: block !important;
+  margin-left: 0 !important;   /* override global centering: align whole dropdown block to left */
+  margin-right: 0 !important;
 }
 
 /* On small screens, make dropdown text slightly smaller so long labels fit better */
@@ -1200,6 +1212,13 @@ section[style*="background-color: '#f9f9f9'"] > div[style*="display: grid"] {
   min-width: 0; /* prevent overflow pushing */
 }
 
+/* Heading row above each Driving/Taxi card: fixed height so all cards align */
+#preview-page .ds-tt-grid > section > div:first-child {
+  min-height: 56px;
+  display: flex;
+  align-items: flex-end;
+}
+
 #preview-page .ds-tt-card {
   width: auto !important; /* avoid any inherited fixed widths */
   height: 100% !important;
@@ -1209,14 +1228,27 @@ section[style*="background-color: '#f9f9f9'"] > div[style*="display: grid"] {
   gap: 12px !important;
   border-radius: 16px !important;
   border: 1px solid #e2e8f0 !important;
-  background: #fff !important;
+  background: #D6EEDE !important; /* unified green card background */
   box-shadow: 0 10px 20px rgba(0,0,0,0.08) !important;
   padding: 22px !important;
   overflow: hidden; /* prevent inner content bleeding */
+  margin-top: 0 !important;
 }
 
-#preview-page .ds-tt-card h3 { margin: 0 0 8px 0 !important; font-weight: 700 !important; color: #0f172a !important; }
-#preview-page .ds-tt-card select { width: 100% !important; max-width: 100% !important; padding: 10px 12px !important; border-radius: 10px !important; }
+/* Headings inside Driving / Taxi / Combo cards */
+#preview-page .ds-tt-card h2,
+#preview-page .ds-tt-card h3 {
+  text-align: center !important;
+  font-weight: 700 !important;
+}
+
+/* Top row title (e.g. Two Wheeler / Four Wheeler) */
+#preview-page .ds-tt-card .ds-tt-title {
+  text-align: left !important;   /* align with Terms/content */
+  font-weight: 700 !important;
+  white-space: normal !important;
+}
+
 
 /* Heading row select (next to subcategory) should not overflow */
 #preview-page .ds-tt-grid > section > div select { max-width: 50% !important; }
@@ -1313,6 +1345,18 @@ div[style*="display:flex"][style*="flex-wrap:wrap"][style*="gap:16px"] > section
   gap: 12px !important;
   justify-content: flex-start !important;
   overflow: hidden !important; /* prevent inner content from pushing layout */
+}
+
+
+
+/* Generic fade-out animation for cards triggered from Our Services menu */
+#preview-page .service-card-fade-out {
+  animation: serviceCardFadeOut 0.8s ease forwards;
+}
+
+@keyframes serviceCardFadeOut {
+  0% { opacity: 1; transform: translateY(0); }
+  100% { opacity: 0; transform: translateY(10px); }
 }
 
 /* Taxi image frame: widen to card width and adjust height */
