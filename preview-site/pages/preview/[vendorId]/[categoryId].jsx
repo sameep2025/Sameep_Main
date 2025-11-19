@@ -29,6 +29,7 @@ export default function PreviewPage() {
   const [nodeSelections, setNodeSelections] = useState({});
   // Attribute filter bar state (driven by uiConfig.attributesBar)
   const [attrSelections, setAttrSelections] = useState({}); // { field: value }
+  const [attrDropdownOpen, setAttrDropdownOpen] = useState({}); // { [cardKey]: boolean }
   const [pairSelections, setPairSelections] = useState({}); // { index: "A|B" }
   const [taxiSelections, setTaxiSelections] = useState({}); // { [lvl1Id]: { lvl2, lvl3, bodySeats: "body|seats", fuelType: string, modelBrand: "model|brand" } }
   const [combos, setCombos] = useState([]);
@@ -981,7 +982,7 @@ export default function PreviewPage() {
                     if (pairs.length === 0) {
                       pairs = Object.entries(sel).filter(([k, v]) => v != null && String(v).trim() !== '');
                     }
-                    return { key: entry._id || entry.at || idx, pairs, sel };
+                    return { key: entry._id || entry.at || idx, pairs, sel, fam: famLower };
                   }).filter((b) => b.pairs.length > 0);
                   // Fallback: if nothing matched, render first inventory selection raw pairs
                   if (blocks.length === 0 && entriesAll.length > 0) {
@@ -996,115 +997,244 @@ export default function PreviewPage() {
                       if (key) sel = sels[key];
                     }
                     const pairs = Object.entries(sel).filter(([k, v]) => v != null && String(v).trim() !== '');
-                    if (pairs.length > 0) blocks = [{ key: first._id || first.at || 'first', pairs }];
+                    if (pairs.length > 0) blocks = [{ key: first._id || first.at || 'first', pairs, sel, fam: famLower }];
                   }
                   if (blocks.length === 0) return null;
 
-                  // Aggregate unique values per field across all blocks so we get a clean
-                  // horizontal button group per attribute (like Abacus levels), instead of
-                  // repeating blocks per inventory row.
-                  const groupedAll = {};
-                  blocks.forEach((b) => {
-                    const currentSel = b.sel || {};
-                    b.pairs.forEach(([k, v]) => {
-                      const field = String(k);
-                      const val = String(v);
-                      if (!val.trim()) return;
-                      let compatible = true;
-                      try {
-                        Object.entries(attrSelections || {}).forEach(([fk, fv]) => {
-                          if (!fv) return;
-                          if (String(fk) === field) return;
-                          if (!Object.prototype.hasOwnProperty.call(currentSel, fk)) return;
-                          const currVal = currentSel[fk];
-                          if (String(currVal ?? '') !== String(fv)) compatible = false;
-                        });
-                      } catch {}
-                      if (!compatible) return;
-                      if (!groupedAll[field]) groupedAll[field] = new Set();
-                      groupedAll[field].add(val);
-                    });
-                  });
+                  // Build combo options: each inventory selection becomes one combo
+                  const dropdownKey = String(node?.id || 'global');
 
-                  let fields = Object.keys(groupedAll);
-                  if (!fields.length) {
-                    const fallbackGrouped = {};
-                    blocks.forEach((b) => {
-                      b.pairs.forEach(([k, v]) => {
-                        const field = String(k);
-                        const val = String(v);
-                        if (!val.trim()) return;
-                        if (!fallbackGrouped[field]) fallbackGrouped[field] = new Set();
-                        fallbackGrouped[field].add(val);
+                  const combos = blocks.map((b) => {
+                    const sel = b.sel || {};
+                    const famLower = String(b.fam || sel.family || '').toLowerCase();
+                    const isBike = famLower === 'bikes';
+                    const brand = isBike
+                      ? (sel.bikeBrand || sel.brand || '')
+                      : (sel.brand || '');
+                    const model = isBike
+                      ? (sel.bikeModel || sel.model || '')
+                      : (sel.model || '');
+                    const transmission = isBike
+                      ? (sel.bikeTransmission || sel.transmission || '')
+                      : (sel.transmission || '');
+                    const bodyType = !isBike ? (sel.bodyType || '') : '';
+                    return {
+                      key: b.key,
+                      brand: String(brand || '').trim(),
+                      model: String(model || '').trim(),
+                      transmission: String(transmission || '').trim(),
+                      bodyType: String(bodyType || '').trim(),
+                      isBike,
+                    };
+                  }).filter((c) => c.brand || c.model || c.transmission || c.bodyType);
+
+                  if (!combos.length) return null;
+
+                  const current = attrSelections || {};
+                  const activeIndex = combos.findIndex((c) => {
+                    if (c.isBike) {
+                      return (
+                        (!current.bikeBrand || String(current.bikeBrand) === c.brand) &&
+                        (!current.bikeModel || String(current.bikeModel) === c.model) &&
+                        (!current.bikeTransmission || String(current.bikeTransmission) === c.transmission)
+                      );
+                    }
+                    return (
+                      (!current.brand || String(current.brand) === c.brand) &&
+                      (!current.model || String(current.model) === c.model) &&
+                      (!current.transmission || String(current.transmission) === c.transmission) &&
+                      (!current.bodyType || String(current.bodyType) === c.bodyType)
+                    );
+                  });
+                  const activeCombo = activeIndex >= 0 ? combos[activeIndex] : null;
+
+                  const buildLabel = (c) => {
+                    const hasTrans = !!c.transmission;
+                    const hasBody = !!c.bodyType;
+                    const row1 = hasTrans
+                      ? [c.transmission, hasBody ? ` · ${c.bodyType}` : '']
+                      : [c.bodyType, ''];
+                    const row2 = [c.brand, c.model].filter(Boolean).join(' · ');
+                    if (!row1[0] && !row2) return 'Select Vehicle';
+                    if (!row1[0]) return row2;
+                    return `${row1.filter(Boolean).join('') } / ${row2}`;
+                  };
+
+                  const triggerLabel = activeCombo ? buildLabel(activeCombo) : 'Select Vehicle';
+
+                  const handleSelectCombo = (combo) => {
+                    setAttrSelections((prev) => {
+                      const next = { ...(prev || {}) };
+                      if (combo.isBike) {
+                        next.bikeBrand = combo.brand || undefined;
+                        next.bikeModel = combo.model || undefined;
+                        next.bikeTransmission = combo.transmission || undefined;
+                        delete next.brand;
+                        delete next.model;
+                        delete next.transmission;
+                        delete next.bodyType;
+                      } else {
+                        next.brand = combo.brand || undefined;
+                        next.model = combo.model || undefined;
+                        next.transmission = combo.transmission || undefined;
+                        next.bodyType = combo.bodyType || undefined;
+                        delete next.bikeBrand;
+                        delete next.bikeModel;
+                        delete next.bikeTransmission;
+                      }
+                      Object.keys(next).forEach((k) => {
+                        if (next[k] === undefined || next[k] === '') delete next[k];
                       });
+                      return next;
                     });
-                    fields = Object.keys(fallbackGrouped);
-                    if (!fields.length) return null;
-                    Object.assign(groupedAll, fallbackGrouped);
-                  }
+                    setAttrDropdownOpen((prev) => ({ ...(prev || {}), [dropdownKey]: false }));
+                  };
 
                   return (
-                    <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 6 }}>
-                      {fields.map((field) => (
-                        <div key={field} style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-                          {Array.from(groupedAll[field]).map((val) => {
-                            const isActive = String(attrSelections?.[field] ?? '') === String(val);
-                            return (
-                              <button
-                                key={val}
-                                type="button"
-                                onClick={() => {
-                                  setAttrSelections((prev) => {
-                                    const current = prev || {};
-                                    const prevVal = String(current[field] ?? '');
-                                    const clicked = String(val);
-                                    const next = { ...current };
+                    <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 4 }}>
+                      <div style={{ fontSize: 11, fontWeight: 500, color: '#e5e7eb', marginLeft: 2 }}>
+                        Select model:
+                      </div>
+                      <div style={{ position: 'relative', display: 'inline-block', width: '100%' }}>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setAttrDropdownOpen((prev) => {
+                              const current = prev && prev[dropdownKey];
+                              return { ...(prev || {}), [dropdownKey]: !current };
+                            })
+                          }
+                          style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'space-between',
+                            gap: 8,
+                            minWidth: 220,
+                            padding: '10px 16px',
+                            borderRadius: 999,
+                            border: '1px solid rgba(148, 163, 184, 0.5)',
+                            background: 'linear-gradient(135deg, #111827, #1f2937)',
+                            color: '#ffffff',
+                            boxShadow: '0 10px 25px rgba(15, 23, 42, 0.45)',
+                            cursor: 'pointer',
+                            fontSize: 13,
+                            fontWeight: 600,
+                            letterSpacing: 0.2,
+                            transition: 'transform 160ms ease, box-shadow 160ms ease, background 160ms ease',
+                          }}
+                          onMouseEnter={(e) => {
+                            e.currentTarget.style.transform = 'translateY(-1px)';
+                            e.currentTarget.style.boxShadow = '0 14px 30px rgba(15, 23, 42, 0.6)';
+                          }}
+                          onMouseLeave={(e) => {
+                            e.currentTarget.style.transform = 'translateY(0)';
+                            e.currentTarget.style.boxShadow = '0 10px 25px rgba(15, 23, 42, 0.45)';
+                          }}
+                        >
+                          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            {triggerLabel}
+                          </span>
+                          <span style={{ fontSize: 16, lineHeight: 1 }}>▾</span>
+                        </button>
 
-                                    if (prevVal === clicked) {
-                                      delete next[field];
-                                    } else {
-                                      next[field] = clicked;
-                                    }
+                        {!!attrDropdownOpen?.[dropdownKey] && (
+                          <div
+                            style={{
+                              marginTop: 8,
+                              zIndex: 1,
+                              width: '100%',
+                              maxHeight: '45vh',
+                              overflowY: 'auto',
+                              padding: 8,
+                              borderRadius: 18,
+                              background: 'rgba(15, 23, 42, 0.98)',
+                              boxShadow: '0 20px 45px rgba(15, 23, 42, 0.85)',
+                              backdropFilter: 'blur(14px)',
+                              overscrollBehavior: 'contain',
+                            }}
+                          >
+                            {combos.map((combo) => {
+                              const hasTrans = !!combo.transmission;
+                              const hasBody = !!combo.bodyType;
+                              const row1Left = hasTrans ? combo.transmission : combo.bodyType;
+                              const row1Right = hasTrans && hasBody ? combo.bodyType : '';
+                              const row2Left = combo.brand;
+                              const row2Right = combo.model;
 
-                                    const clearDownstream = (f, obj) => {
-                                      const key = String(f || '');
-                                      if (key === 'brand' || key === 'bikeBrand') {
-                                        delete obj.model;
-                                        delete obj.transmission;
-                                        delete obj.bikeTransmission;
-                                        delete obj.bodyType;
-                                      } else if (key === 'model') {
-                                        delete obj.transmission;
-                                        delete obj.bikeTransmission;
-                                        delete obj.bodyType;
-                                      } else if (key === 'transmission' || key === 'bikeTransmission') {
-                                        delete obj.bodyType;
-                                      }
-                                    };
-
-                                    clearDownstream(field, next);
-                                    return next;
-                                  });
-                                }}
-                                style={{
-                                  padding: '6px 14px',
-                                  borderRadius: 999,
-                                  border: isActive ? 'none' : '1px solid #d1d5db',
-                                  background: isActive ? '#2563eb' : '#ffffff',
-                                  color: isActive ? '#ffffff' : '#111827',
-                                  boxShadow: '0 2px 4px rgba(15, 23, 42, 0.12)',
-                                  cursor: 'pointer',
-                                  fontSize: 12,
-                                  fontWeight: 600,
-                                  whiteSpace: 'nowrap',
-                                }}
-                              >
-                                {val}
-                              </button>
-                            );
-                          })}
-                        </div>
-                      ))}
+                              return (
+                                <button
+                                  key={combo.key}
+                                  type="button"
+                                  onClick={() => handleSelectCombo(combo)}
+                                  style={{
+                                    width: '100%',
+                                    textAlign: 'left',
+                                    padding: '10px 12px',
+                                    marginBottom: 6,
+                                    borderRadius: 14,
+                                    border: '1px solid rgba(55, 65, 81, 0.9)',
+                                    background: 'linear-gradient(135deg, #020617, #020617)',
+                                    color: '#ffffff',
+                                    cursor: 'pointer',
+                                    fontSize: 12,
+                                    transition: 'background 140ms ease, transform 140ms ease, box-shadow 140ms ease',
+                                  }}
+                                  onMouseEnter={(e) => {
+                                    e.currentTarget.style.background = 'linear-gradient(135deg, #0f172a, #1e293b)';
+                                    e.currentTarget.style.boxShadow = '0 8px 20px rgba(15, 23, 42, 0.8)';
+                                    e.currentTarget.style.transform = 'translateY(-1px)';
+                                  }}
+                                  onMouseLeave={(e) => {
+                                    e.currentTarget.style.background = 'linear-gradient(135deg, #020617, #020617)';
+                                    e.currentTarget.style.boxShadow = 'none';
+                                    e.currentTarget.style.transform = 'translateY(0)';
+                                  }}
+                                >
+                                  <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                                    <div
+                                      style={{
+                                        display: 'flex',
+                                        justifyContent: 'space-between',
+                                        fontWeight: 600,
+                                        opacity: row1Left || row1Right ? 0.95 : 0.4,
+                                      }}
+                                    >
+                                      <span>{row1Left}</span>
+                                      <span>{row1Right}</span>
+                                    </div>
+                                    <div
+                                      style={{
+                                        margin: '3px 0',
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        justifyContent: 'center',
+                                        gap: 8,
+                                        fontSize: 10,
+                                        letterSpacing: 2,
+                                        color: 'rgba(148, 163, 184, 0.9)',
+                                      }}
+                                    >
+                                      <span style={{ flex: 1, height: 1, background: 'linear-gradient(to right, transparent, rgba(148, 163, 184, 0.9))' }} />
+                                      <span>●</span>
+                                      <span style={{ flex: 1, height: 1, background: 'linear-gradient(to left, transparent, rgba(148, 163, 184, 0.9))' }} />
+                                    </div>
+                                    <div
+                                      style={{
+                                        display: 'flex',
+                                        justifyContent: 'space-between',
+                                        fontWeight: 600,
+                                      }}
+                                    >
+                                      <span>{row2Left}</span>
+                                      <span>{row2Right}</span>
+                                    </div>
+                                  </div>
+                                </button>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
                     </div>
                   );
                 } catch { return null; }
