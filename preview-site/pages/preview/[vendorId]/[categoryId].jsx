@@ -1,5 +1,5 @@
 // pages/preview/[vendorId]/[categoryId].jsx
-import React, { useState, useEffect, useCallback, useMemo } from "react";
+import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
 
 import { useRouter } from "next/router";
 import Head from "next/head";
@@ -434,6 +434,73 @@ export default function PreviewPage() {
     } catch {}
   }, [vendor, categoryTree, categoryId]);
 
+  // Initialize attribute bar (brand/model/transmission/bodyType) to first brand combo when empty
+  useEffect(() => {
+    try {
+      if (!vendor || !categoryTree) return;
+
+      if (attrSelections && (attrSelections.brand || attrSelections.model || attrSelections.transmission || attrSelections.bodyType || attrSelections.bikeBrand || attrSelections.bikeTransmission)) {
+        return; // do not override user/default once set
+      }
+
+      const catKey = String(categoryId || '');
+      const inv = Array.isArray(vendor?.inventorySelections?.[catKey]) ? vendor.inventorySelections[catKey] : [];
+      if (!inv.length) return;
+
+      const cars = [];
+      const bikes = [];
+      inv.forEach((entry) => {
+        try {
+          const fam = String(entry?.scopeFamily || '').toLowerCase();
+          const sels = entry?.selections || {};
+          let sel = sels[fam] || sels.cars || sels.bikes || {};
+          if (!sel || typeof sel !== 'object') sel = {};
+          if (fam === 'cars') {
+            const brand = sel.brand != null ? String(sel.brand) : '';
+            const transmission = sel.transmission != null ? String(sel.transmission) : '';
+            const model = sel.model != null ? String(sel.model) : '';
+            const bodyType = sel.bodyType != null ? String(sel.bodyType) : '';
+            if (brand || model || transmission || bodyType) {
+              cars.push({ brand, model, transmission, bodyType });
+            }
+          } else if (fam === 'bikes') {
+            const brand = sel.bikeBrand != null ? String(sel.bikeBrand) : (sel.brand != null ? String(sel.brand) : '');
+            const transmission = sel.bikeTransmission != null ? String(sel.bikeTransmission) : (sel.transmission != null ? String(sel.transmission) : '');
+            const model = sel.model != null ? String(sel.model) : '';
+            if (brand || model || transmission) {
+              bikes.push({ brand, model, transmission });
+            }
+          }
+        } catch {}
+      });
+
+      const carBrands = Array.from(new Set(cars.map((n) => String(n.brand || '').trim()).filter(Boolean)));
+      const firstCarBrand = carBrands[0] || '';
+      const carsForBrand = firstCarBrand
+        ? cars.filter((n) => String(n.brand || '').trim() === firstCarBrand)
+        : [];
+
+      // We only default the brand for cars; user will choose model/trans/bodyType.
+
+      const bikeBrands = Array.from(new Set(bikes.map((n) => String(n.brand || '').trim()).filter(Boolean)));
+      const firstBikeBrand = bikeBrands[0] || '';
+      const bikesForBrand = firstBikeBrand
+        ? bikes.filter((n) => String(n.brand || '').trim() === firstBikeBrand)
+        : [];
+
+      // For bikes we also only default the brand.
+
+      setAttrSelections((prev) => {
+        const current = prev || {};
+        if (current.brand || current.model || current.transmission || current.bodyType || current.bikeBrand || current.bikeTransmission) return current;
+        const next = { ...current };
+        if (firstCarBrand) next.brand = firstCarBrand;
+        if (firstBikeBrand) next.bikeBrand = firstBikeBrand;
+        return next;
+      });
+    } catch {}
+  }, [vendor, categoryTree, categoryId, attrSelections]);
+
   // Listen for vendor pricing updates from other tabs/pages and refresh
   useEffect(() => {
     if (!vendorId || !categoryId) return;
@@ -650,33 +717,114 @@ export default function PreviewPage() {
             <div style={{ marginBottom: 12 }}>
               {(() => {
                 try {
-                  // Prefer inventory-based row price if available for current display target
                   const catKey = String(categoryId || '');
                   const inv = Array.isArray(vendor?.inventorySelections?.[catKey]) ? vendor.inventorySelections[catKey] : [];
                   const ids = [displayNode?.id, selectedParent?.id, node?.id].map((x) => String(x || ''));
-                  let invPrice = null;
-                  inv.forEach((entry) => {
-                    if (invPrice != null) return;
-                    const pbr = (entry && entry.pricesByRow && typeof entry.pricesByRow === 'object') ? entry.pricesByRow : null;
-                    if (!pbr) return;
-                    // Strict preference: displayNode id > selectedParent id > node id
-                    for (const target of ids) {
-                      if (!target) continue;
-                      for (const [rk, val] of Object.entries(pbr)) {
-                        const parts = String(rk).split('|');
-                        if (parts.some((id) => String(id) === target)) {
-                          const num = Number(val);
-                          if (!Number.isNaN(num)) { invPrice = num; break; }
+                  const rootNameLocal = String(categoryTree?.name || '').toLowerCase();
+                  const isDrivingLocal = rootNameLocal === 'driving school';
+
+                  const pickBaselinePrice = () => {
+                    let invPrice = null;
+                    inv.forEach((entry) => {
+                      if (invPrice != null) return;
+                      const pbr = (entry && entry.pricesByRow && typeof entry.pricesByRow === 'object') ? entry.pricesByRow : null;
+                      if (!pbr) return;
+                      for (const target of ids) {
+                        if (!target) continue;
+                        for (const [rk, val] of Object.entries(pbr)) {
+                          const parts = String(rk).split('|');
+                          if (parts.some((id) => String(id) === target)) {
+                            const num = Number(val);
+                            if (!Number.isNaN(num)) { invPrice = num; break; }
+                          }
                         }
+                        if (invPrice != null) break;
                       }
-                      if (invPrice != null) break;
-                    }
-                  });
-                  const nodePrice =
-                    (displayNode.vendorPrice ?? displayNode.price) ??
-                    (selectedParent?.vendorPrice ?? selectedParent?.price) ??
-                    (node.vendorPrice ?? node.price) ?? null;
-                  const resolvedPrice = (invPrice != null) ? invPrice : nodePrice;
+                    });
+                    const nodePrice =
+                      (displayNode.vendorPrice ?? displayNode.price) ??
+                      (selectedParent?.vendorPrice ?? selectedParent?.price) ??
+                      (node.vendorPrice ?? node.price) ?? null;
+                    return (invPrice != null) ? invPrice : nodePrice;
+                  };
+
+                  // For Driving School, make price aware of current brand/model/transmission/bodyType selections
+                  if (isDrivingLocal && inv.length > 0) {
+                    const targetId = String((displayNode?.id || selectedParent?.id || node?.id || ''));
+                    const normalized = [];
+                    inv.forEach((entry) => {
+                      try {
+                        const fam = String(entry?.scopeFamily || '').toLowerCase();
+                        const sels = entry?.selections || {};
+                        let sel = sels[fam] || sels.cars || sels.bikes || {};
+                        if (!sel || typeof sel !== 'object') sel = {};
+                        if (fam === 'bikes') {
+                          const brand = sel.bikeBrand != null ? String(sel.bikeBrand) : (sel.brand != null ? String(sel.brand) : '');
+                          const transmission = sel.bikeTransmission != null ? String(sel.bikeTransmission) : (sel.transmission != null ? String(sel.transmission) : '');
+                          const model = sel.model != null ? String(sel.model) : '';
+                          if (brand || model || transmission) {
+                            normalized.push({ family: fam, brand, model, transmission, bodyType: null, entry });
+                          }
+                        } else if (fam === 'cars') {
+                          const brand = sel.brand != null ? String(sel.brand) : '';
+                          const transmission = sel.transmission != null ? String(sel.transmission) : '';
+                          const model = sel.model != null ? String(sel.model) : '';
+                          const bodyType = sel.bodyType != null ? String(sel.bodyType) : '';
+                          if (brand || model || transmission || bodyType) {
+                            normalized.push({ family: fam, brand, model, transmission, bodyType, entry });
+                          }
+                        }
+                      } catch {}
+                    });
+
+                    const minPriceForList = (list) => {
+                      try {
+                        const prices = [];
+                        list.forEach((n) => {
+                          const pbr = (n.entry && n.entry.pricesByRow && typeof n.entry.pricesByRow === 'object') ? n.entry.pricesByRow : null;
+                          if (!pbr) return;
+                          for (const [key, value] of Object.entries(pbr)) {
+                            const ids = String(key).split('|');
+                            if (ids.some((id) => String(id) === targetId)) {
+                              const num = Number(value);
+                              if (!Number.isNaN(num)) prices.push(num);
+                            }
+                          }
+                        });
+                        if (!prices.length) return null;
+                        return Math.min(...prices);
+                      } catch { return null; }
+                    };
+
+                    const carBrand = String(attrSelections?.brand ?? '').trim() || null;
+                    const carModel = String(attrSelections?.model ?? '').trim() || null;
+                    const carTrans = String(attrSelections?.transmission ?? '').trim() || null;
+                    const carBody = String(attrSelections?.bodyType ?? '').trim() || null;
+                    const bikeBrand = String(attrSelections?.bikeBrand ?? '').trim() || null;
+                    const bikeModel = String(attrSelections?.bikeModel ?? '').trim() || null;
+                    const bikeTrans = String(attrSelections?.bikeTransmission ?? '').trim() || null;
+
+                    const refined = normalized.filter((n) => {
+                      const fam = String(n.family || '').toLowerCase();
+                      const effBrand = fam === 'bikes' ? bikeBrand : carBrand;
+                      const effModel = fam === 'bikes' ? bikeModel : carModel;
+                      const effTrans = fam === 'bikes' ? bikeTrans : carTrans;
+                      const effBody = fam === 'cars' ? carBody : null;
+                      if (effBrand && String(n.brand) !== String(effBrand)) return false;
+                      if (effModel && String(n.model) !== String(effModel)) return false;
+                      if (effTrans && String(n.transmission) !== String(effTrans)) return false;
+                      if (effBody && n.bodyType && String(n.bodyType) !== String(effBody)) return false;
+                      return true;
+                    });
+
+                    const attrAwarePrice = refined.length ? minPriceForList(refined) : null;
+                    const fallback = pickBaselinePrice();
+                    const resolvedPrice = (attrAwarePrice != null) ? attrAwarePrice : fallback;
+                    if (resolvedPrice == null) return null;
+                    return (<p style={{ color: "#059669", fontWeight: 600, margin: 0 }}>₹ {resolvedPrice}</p>);
+                  }
+
+                  const resolvedPrice = pickBaselinePrice();
                   if (resolvedPrice == null) return null;
                   return (<p style={{ color: "#059669", fontWeight: 600, margin: 0 }}>₹ {resolvedPrice}</p>);
                 } catch { return null; }
@@ -724,28 +872,29 @@ export default function PreviewPage() {
                     famIndex.set(lower, curr);
                   });
                   // Families allowed to render with precedence: specific match > family-level match; treat 'ALL' as global only if no specific mappings exist
-                  const targetIds = [displayNode?.id, selectedParent?.id, node?.id].map((x) => String(x || ''));
+                  const targetIdsLinkedAttrs = [displayNode?.id, selectedParent?.id, node?.id].map((x) => String(x || ''));
                   const familiesAllLower = new Set(
                     Array.from(famIndex.entries())
                       .filter(([, v]) => {
                         // Specific mappings take precedence
                         const hasSpecific = v.specificSubs && v.specificSubs.size > 0;
                         if (hasSpecific) {
-                          return targetIds.some((tid) => tid && v.specificSubs.has(String(tid)));
+                          return targetIdsLinkedAttrs.some((tid) => tid && v.specificSubs.has(String(tid)));
                         }
                         // Then check family-level
                         const ls = v.linkedSub;
                         if (!ls) return false; // require explicit mapping
                         if (ls === 'ALL') return true;
-                        return targetIds.some((tid) => tid && String(ls) === String(tid));
+                        return targetIdsLinkedAttrs.some((tid) => tid && String(ls) === String(tid));
                       })
                       .map(([k]) => k)
                   );
                   const catKey = String(categoryId || '');
-                  const inv = Array.isArray(vendor?.inventorySelections?.[catKey]) ? vendor.inventorySelections[catKey] : [];
-                  // Do NOT auto-allow families not configured; they will render only if an explicit mapping exists
-                  // Now enforce subcategory mapping per entry using preferred order: fam:label:linkedSubcategory > fam:inventoryLabels:linkedSubcategory > fam:linkedSubcategory
-                  const entriesAll = inv.filter((e) => {
+                  const invPriceList = Array.isArray(vendor?.inventorySelections?.[catKey]) ? vendor.inventorySelections[catKey] : [];
+                  // Do NOT auto-allow families not configured; they will render only if an explicit mapping exists.
+                  // First try strict linkedAttributes-based entries; then, if nothing matches, fall back to any entries
+                  // whose pricesByRow target this card's node ids.
+                  let entriesAll = invPriceList.filter((e) => {
                     const famLower = String(e?.scopeFamily || '').toLowerCase();
                     if (!familiesAllLower.has(famLower)) return false;
                     const fam = String(e?.scopeFamily || '');
@@ -759,8 +908,23 @@ export default function PreviewPage() {
                     else if (Array.isArray(linked[familyKey]) && linked[familyKey].length) mapped = String(linked[familyKey][0] || '');
                     if (mapped === 'ALL') return true;
                     if (!mapped) return false; // require explicit mapping to show
-                    return targetIds.some((tid) => tid && String(mapped) === String(tid));
+                    return targetIdsLinkedAttrs.some((tid) => tid && String(mapped) === String(tid));
                   });
+
+                  if (entriesAll.length === 0 && invPriceList.length > 0) {
+                    // Fallback: any inventory entry that has pricesByRow targeting this card's node ids.
+                    entriesAll = invPriceList.filter((e) => {
+                      try {
+                        const pbr = e && e.pricesByRow && typeof e.pricesByRow === 'object' ? e.pricesByRow : null;
+                        if (!pbr) return false;
+                        for (const [rk] of Object.entries(pbr)) {
+                          const parts = String(rk).split('|');
+                          if (targetIdsLinkedAttrs.some((tid) => tid && parts.some((id) => String(id) === tid))) return true;
+                        }
+                        return false;
+                      } catch { return false; }
+                    });
+                  }
                   // Prefer entries that have a pricesByRow targeting this card's node ids
                   const entriesMatched = entriesAll.filter((entry) => {
                     try {
@@ -791,11 +955,24 @@ export default function PreviewPage() {
                     // Normalize known alias keys per family
                     if (famLower === 'bikes') {
                       try {
-                        if (sel && sel.brand && !sel.bikeBrand) sel = { ...sel, bikeBrand: sel.brand };
+                        let nextSel = sel || {};
+                        if (nextSel.brand && !nextSel.bikeBrand) nextSel = { ...nextSel, bikeBrand: nextSel.brand };
+                        if (nextSel.model && !nextSel.bikeModel) nextSel = { ...nextSel, bikeModel: nextSel.model };
+                        // Remove shared car keys so bikes do not interfere with car filters
+                        if (Object.prototype.hasOwnProperty.call(nextSel, 'brand') || Object.prototype.hasOwnProperty.call(nextSel, 'model')) {
+                          const { brand: _b, model: _m, ...rest } = nextSel;
+                          nextSel = rest;
+                        }
+                        sel = nextSel;
                       } catch {}
                     }
                     const conf = famIndex.get(famLower) || { fields: [], modelFields: [] };
                     const allowed = new Set([...(conf.fields || []), ...(conf.modelFields || [])].map(String));
+                    if (famLower === 'cars' || famLower === 'bikes') {
+                      ['brand', 'bikeBrand', 'model', 'bikeModel', 'transmission', 'bikeTransmission', 'bodyType'].forEach((k) => {
+                        allowed.add(String(k));
+                      });
+                    }
                     let pairs = Object.entries(sel).filter(([k, v]) => {
                       if (v == null || String(v).trim() === '') return false;
                       return (allowed.size === 0 || allowed.has(String(k)));
@@ -804,7 +981,7 @@ export default function PreviewPage() {
                     if (pairs.length === 0) {
                       pairs = Object.entries(sel).filter(([k, v]) => v != null && String(v).trim() !== '');
                     }
-                    return { key: entry._id || entry.at || idx, pairs };
+                    return { key: entry._id || entry.at || idx, pairs, sel };
                   }).filter((b) => b.pairs.length > 0);
                   // Fallback: if nothing matched, render first inventory selection raw pairs
                   if (blocks.length === 0 && entriesAll.length > 0) {
@@ -822,15 +999,110 @@ export default function PreviewPage() {
                     if (pairs.length > 0) blocks = [{ key: first._id || first.at || 'first', pairs }];
                   }
                   if (blocks.length === 0) return null;
+
+                  // Aggregate unique values per field across all blocks so we get a clean
+                  // horizontal button group per attribute (like Abacus levels), instead of
+                  // repeating blocks per inventory row.
+                  const groupedAll = {};
+                  blocks.forEach((b) => {
+                    const currentSel = b.sel || {};
+                    b.pairs.forEach(([k, v]) => {
+                      const field = String(k);
+                      const val = String(v);
+                      if (!val.trim()) return;
+                      let compatible = true;
+                      try {
+                        Object.entries(attrSelections || {}).forEach(([fk, fv]) => {
+                          if (!fv) return;
+                          if (String(fk) === field) return;
+                          if (!Object.prototype.hasOwnProperty.call(currentSel, fk)) return;
+                          const currVal = currentSel[fk];
+                          if (String(currVal ?? '') !== String(fv)) compatible = false;
+                        });
+                      } catch {}
+                      if (!compatible) return;
+                      if (!groupedAll[field]) groupedAll[field] = new Set();
+                      groupedAll[field].add(val);
+                    });
+                  });
+
+                  let fields = Object.keys(groupedAll);
+                  if (!fields.length) {
+                    const fallbackGrouped = {};
+                    blocks.forEach((b) => {
+                      b.pairs.forEach(([k, v]) => {
+                        const field = String(k);
+                        const val = String(v);
+                        if (!val.trim()) return;
+                        if (!fallbackGrouped[field]) fallbackGrouped[field] = new Set();
+                        fallbackGrouped[field].add(val);
+                      });
+                    });
+                    fields = Object.keys(fallbackGrouped);
+                    if (!fields.length) return null;
+                    Object.assign(groupedAll, fallbackGrouped);
+                  }
+
                   return (
-                    <div style={{ border: '1px solid #e5e7eb', borderRadius: 10, padding: 10, background: '#f8fafc', marginTop: 8 }}>
-                      {blocks.map((b) => (
-                        <div key={b.key} style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))', gap: 6, marginBottom: 6 }}>
-                          {b.pairs.map(([k, v]) => (
-                            <div key={k} style={{ fontSize: 12, color: '#334155' }}>
-                              <span style={{ fontWeight: 600 }}>{String(k)}:</span> <span>{String(v)}</span>
-                            </div>
-                          ))}
+                    <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 6 }}>
+                      {fields.map((field) => (
+                        <div key={field} style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                          {Array.from(groupedAll[field]).map((val) => {
+                            const isActive = String(attrSelections?.[field] ?? '') === String(val);
+                            return (
+                              <button
+                                key={val}
+                                type="button"
+                                onClick={() => {
+                                  setAttrSelections((prev) => {
+                                    const current = prev || {};
+                                    const prevVal = String(current[field] ?? '');
+                                    const clicked = String(val);
+                                    const next = { ...current };
+
+                                    if (prevVal === clicked) {
+                                      delete next[field];
+                                    } else {
+                                      next[field] = clicked;
+                                    }
+
+                                    const clearDownstream = (f, obj) => {
+                                      const key = String(f || '');
+                                      if (key === 'brand' || key === 'bikeBrand') {
+                                        delete obj.model;
+                                        delete obj.transmission;
+                                        delete obj.bikeTransmission;
+                                        delete obj.bodyType;
+                                      } else if (key === 'model') {
+                                        delete obj.transmission;
+                                        delete obj.bikeTransmission;
+                                        delete obj.bodyType;
+                                      } else if (key === 'transmission' || key === 'bikeTransmission') {
+                                        delete obj.bodyType;
+                                      }
+                                    };
+
+                                    clearDownstream(field, next);
+                                    return next;
+                                  });
+                                }}
+                                style={{
+                                  padding: '6px 14px',
+                                  borderRadius: 999,
+                                  border: isActive ? 'none' : '1px solid #d1d5db',
+                                  background: isActive ? '#2563eb' : '#ffffff',
+                                  color: isActive ? '#ffffff' : '#111827',
+                                  boxShadow: '0 2px 4px rgba(15, 23, 42, 0.12)',
+                                  cursor: 'pointer',
+                                  fontSize: 12,
+                                  fontWeight: 600,
+                                  whiteSpace: 'nowrap',
+                                }}
+                              >
+                                {val}
+                              </button>
+                            );
+                          })}
                         </div>
                       ))}
                     </div>
@@ -1659,543 +1931,6 @@ export default function PreviewPage() {
 );
 
 }
-
-  // Driving School specialized layout (single card per first-level)
-  if (rootName.toLowerCase().includes('driving') || rootName.toLowerCase().includes('taxi')) {
-    // Normalize cars and bikes into common fields
-    const dsEntries = vendor?.inventorySelections?.[categoryId] || [];
-    const extract = (entry) => {
-      const fam = entry?.scopeFamily;
-      const sel = (entry?.selections && fam && entry.selections[fam]) ? entry.selections[fam] : {};
-      if (fam === 'cars') {
-        return {
-          body: sel?.bodyType != null ? String(sel.bodyType) : '',
-          transmission: sel?.transmission != null ? String(sel.transmission) : '',
-          fuel: sel?.fuelType != null ? String(sel.fuelType) : '',
-          model: sel?.model != null ? String(sel.model) : '',
-          brand: sel?.brand != null ? String(sel.brand) : '',
-          entry,
-        };
-      }
-      if (fam === 'bikes') {
-        return {
-          body: '',
-          transmission: sel?.bikeTransmission != null ? String(sel.bikeTransmission) : '',
-          fuel: sel?.fuelType != null ? String(sel.fuelType) : '',
-          model: sel?.model != null ? String(sel.model) : '',
-          brand: sel?.bikeBrand != null ? String(sel.bikeBrand) : '',
-          entry,
-        };
-      }
-      return null;
-    };
-
-    const normalized = dsEntries.map(extract).filter(Boolean);
-    const bodyOptions = Array.from(new Set(normalized.map((n) => n.body).filter((v) => v && String(v).trim() !== '')));
-    const filterByBody = (body) => (!body ? normalized : normalized.filter((n) => (n.body ? String(n.body) === String(body) : true)));
-    const transmissionOptionsFrom = (list) => Array.from(new Set(list.map((n) => n.transmission).filter((v) => v && String(v).trim() !== '')));
-    const filterByTransmission = (list, tr) => (!tr ? list : list.filter((n) => String(n.transmission) === String(tr)));
-    const fuelOptionsFrom = (list) => Array.from(new Set(list.map((n) => n.fuel).filter((v) => v && String(v).trim() !== '')));
-    const modelBrandFrom = (list) => Array.from(new Set(list.filter((n) => n.model && n.brand).map((n) => `${n.model}|${n.brand}`)));
-    const uiRow = (label, control) => (
-      <div style={{ marginBottom: 10 }}>
-        <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 6 }}>{label}</div>
-        {control}
-      </div>
-    );
-
-    return (
-      <div className="ds-tt-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: 16, alignItems: 'stretch', maxWidth: 1100, margin: '12px auto 0', padding: '0 12px' }}>
-        {root.children.map((lvl1) => {
-      const belongsToLvl1 = (entry) => {
-        try {
-          const lvl1Id = String(lvl1?.id || '');
-          const famSet = familiesByTarget.get(lvl1Id);
-          if (famSet) {
-            const fam = String(entry?.scopeFamily || '');
-            if (fam && !famSet.has(fam)) return false;
-          }
-          const pbr = entry?.pricesByRow;
-          if (pbr && typeof pbr === 'object') {
-            for (const key of Object.keys(pbr)) {
-              const ids = String(key).split('|');
-              if (ids.some((id) => String(id) === lvl1Id)) return true;
-            }
-            return false;
-          }
-          return true;
-        } catch { return true; }
-      };
-          const lvl2Kids = Array.isArray(lvl1.children) ? lvl1.children : [];
-          const selState = taxiSelections[lvl1.id] || {};
-          const selectedLvl2 = lvl2Kids.find((c) => String(c.id) === String(selState.lvl2)) || lvl2Kids[0] || null;
-          const lvl3Kids = Array.isArray(selectedLvl2?.children) ? selectedLvl2.children : [];
-          const selectedLvl3 = lvl3Kids.find((c) => String(c.id) === String(selState.lvl3)) || lvl3Kids[0] || null;
-
-          const normalizedForLvl1 = normalized.filter((n) => belongsToLvl1(n.entry));
-          const transmissionOptions = Array.from(new Set(normalizedForLvl1.map((n) => n.transmission).filter((v) => v && String(v).trim() !== '')));
-          const byTr = (!selState.transmission ? normalizedForLvl1 : normalizedForLvl1.filter((n) => String(n.transmission) === String(selState.transmission)));
-          const bodyOptions = Array.from(new Set(byTr.map((n) => n.body).filter((v) => v && String(v).trim() !== '')));
-          const byBody = (!selState.bodyType ? byTr : byTr.filter((n) => (n.body ? String(n.body) === String(selState.bodyType) : true)));
-          const modelBrandOptions = Array.from(new Set(byBody.filter((n) => n.model && n.brand).map((n) => `${n.model}|${n.brand}`)));
-
-          const displayNode = selectedLvl3 || selectedLvl2 || lvl1;
-          // Resolve baseline live price for selected node
-          let livePrice = null;
-          try {
-            const priceRows = vendor?.inventorySelections?.[categoryId] || [];
-            for (const inv of priceRows) {
-              const pbr = (inv && inv.pricesByRow && typeof inv.pricesByRow === 'object') ? inv.pricesByRow : null;
-              if (!pbr) continue;
-              for (const [key, value] of Object.entries(pbr)) {
-                const ids = String(key).split('|');
-                if (ids.some((id) => String(id) === String(displayNode?.id))) { livePrice = Number(value); break; }
-              }
-              if (livePrice != null) break;
-            }
-          } catch {}
-          if (livePrice == null) {
-            livePrice = displayNode?.vendorPrice ?? displayNode?.price ?? null;
-          }
-
-          const hasBodyOptions = bodyOptions.length > 0;
-          const hasTransmissionOptions = transmissionOptions.length > 0;
-          const hasModelBrandOptions = modelBrandOptions.length > 0;
-          const isComplete = (!hasTransmissionOptions || Boolean(selState.transmission)) && (!hasBodyOptions || Boolean(selState.bodyType)) && (!hasModelBrandOptions || Boolean(selState.modelBrand));
-          const attrAwarePrice = (() => {
-            try {
-              if (!isComplete) return null;
-              const prices = [];
-              const targetId = String((selectedLvl3 || selectedLvl2 || lvl1)?.id || '');
-              const refined = (() => {
-                if (!selState.modelBrand) return byBody;
-                const [m, b] = String(selState.modelBrand).split('|');
-                return byBody.filter((n) => String(n.model) === String(m || '') && String(n.brand) === String(b || ''));
-              })();
-              refined.forEach((n) => {
-                const pbr = (n.entry && n.entry.pricesByRow && typeof n.entry.pricesByRow === 'object') ? n.entry.pricesByRow : null;
-                if (!pbr) return;
-                for (const [key, value] of Object.entries(pbr)) {
-                  const ids = String(key).split('|');
-                  if (ids.some((id) => String(id) === targetId)) {
-                    const num = Number(value);
-                    if (!Number.isNaN(num)) prices.push(num);
-                  }
-                }
-              });
-              if (prices.length === 0) return livePrice;
-              return Math.min(...prices);
-            } catch {
-              return livePrice;
-            }
-          })();
-
-          const serviceKey = makeServiceKey(lvl1?.name || "");
-
-          return (
-            <section
-              key={lvl1.id}
-              style={{ marginTop: 0, marginBottom: 24, display: 'flex', flexDirection: 'column' }}
-              className={activeServiceKey === serviceKey ? 'service-card-fade-out' : ''}
-            >
-              <div
-                className="ds-tt-card"
-                style={{
-                  border: '1px solid #e2e8f0',
-                  borderRadius: 16,
-                  padding: 22,
-                  background: "#D6EEDE",
-                  width: '100%',
-                  height: 820,
-                  boxShadow: '0 1px 6px rgba(0,0,0,0.08)',
-                  display: 'flex',
-                  flexDirection: 'column',
-                  gap: 12,
-                  justifyContent: 'flex-start',
-                  fontFamily: 'Poppins, sans-serif',
-                  marginTop: 0,
-                }}
-              >
-                {/* Top row: title (left) + primary select (right) */}
-                <div
-                  style={{
-                    display: 'flex',
-                    alignItems: 'flex-end',
-                    justifyContent: 'space-between',
-                    gap: 12,
-                    minHeight: 56,
-                    marginBottom: 8,
-                  }}
-                >
-                  <div
-                    className="ds-tt-title"
-                    style={{
-                      margin: 0,
-                      fontSize: 20,
-                      lineHeight: 1.2,
-                      fontWeight: 600,
-                      flex: 1,
-                      whiteSpace: 'normal',
-                      textAlign: 'center',
-                    }}
-                  >
-                    {lvl1.name}
-                  </div>
-
-                  {lvl2Kids.length > 0 ? (
-                    <select
-                      value={String(selectedLvl2?.id || '')}
-                      onChange={(e) => {
-                      const next = lvl2Kids.find((c) => String(c.id) === e.target.value) || lvl2Kids[0] || null;
-                      // Compute cheapest defaults for Driving School (transmission, bodyType, modelBrand)
-                      const nextTargetId = String((selectedLvl3 || next || lvl1)?.id || '');
-                      const listAll = normalizedForLvl1;
-                      const mp = (list) => {
-                        try {
-                          const prices = [];
-                          list.forEach((n) => {
-                            const pbr = (n.entry && n.entry.pricesByRow && typeof n.entry.pricesByRow === 'object') ? n.entry.pricesByRow : null;
-                            if (!pbr) return;
-                            for (const [key, value] of Object.entries(pbr)) {
-                              const ids = String(key).split('|');
-                              if (ids.some((id) => String(id) === String(nextTargetId))) {
-                                const num = Number(value);
-                                if (!Number.isNaN(num)) prices.push(num);
-                              }
-                            }
-                          });
-                          if (prices.length === 0) return null;
-                          return Math.min(...prices);
-                        } catch { return null; }
-                      };
-                      const trOpts = Array.from(new Set(listAll.map((n) => n.transmission).filter((v) => v && String(v).trim() !== '')));
-                      const trWithPrice = trOpts.map((opt) => ({ opt, price: mp(listAll.filter((n) => String(n.transmission) === String(opt))) }));
-                      trWithPrice.sort((a,b)=>{ const va=a.price==null?Number.POSITIVE_INFINITY:Number(a.price); const vb=b.price==null?Number.POSITIVE_INFINITY:Number(b.price); return va-vb; });
-                      const bestTr = trWithPrice[0]?.opt;
-                      const afterTr = bestTr ? listAll.filter((n) => String(n.transmission) === String(bestTr)) : listAll;
-                      const bodyOpts2 = Array.from(new Set(afterTr.map((n) => n.body).filter((v) => v && String(v).trim() !== '')));
-                      const bodyWithPrice = bodyOpts2.map((opt) => ({ opt, price: mp(afterTr.filter((n) => n.body ? String(n.body) === String(opt) : true)) }));
-                      bodyWithPrice.sort((a,b)=>{ const va=a.price==null?Number.POSITIVE_INFINITY:Number(a.price); const vb=b.price==null?Number.POSITIVE_INFINITY:Number(b.price); return va-vb; });
-                      const bestBody = bodyWithPrice[0]?.opt;
-                      const afterBody = bestBody ? afterTr.filter((n) => (n.body ? String(n.body) === String(bestBody) : true)) : afterTr;
-                      const mbPairs2 = Array.from(new Set(afterBody.filter((n)=> n.model && n.brand).map((n)=> `${n.model}|${n.brand}`)));
-                      const mbWithPrice2 = mbPairs2.map((opt)=>{ const [m,b]=String(opt).split('|'); const lst = afterBody.filter((n)=> String(n.model)===String(m||'') && String(n.brand)===String(b||'')); return { opt, price: mp(lst) }; });
-                      mbWithPrice2.sort((a,b)=>{ const va=a.price==null?Number.POSITIVE_INFINITY:Number(a.price); const vb=b.price==null?Number.POSITIVE_INFINITY:Number(b.price); return va-vb; });
-                      const bestMB = mbWithPrice2[0]?.opt;
-
-                      setTaxiSelections((prev) => ({
-                        ...prev,
-                        [lvl1.id]: {
-                          lvl2: next?.id,
-                          lvl3: (Array.isArray(next?.children) && next.children[0]?.id) || undefined,
-                          transmission: bestTr,
-                          bodyType: bestBody,
-                          modelBrand: bestMB,
-                        },
-                      }));
-                    }}
-                      style={{
-                        padding: '8px 18px',
-                        borderRadius: 999,
-                        border: '1px solid #d1d5db',
-                        background: '#ffffff',
-                        fontSize: 14,
-                        fontWeight: 600,
-                        flexShrink: 0,
-                        maxWidth: '50%',
-                      }}
-                    >
-                      {lvl2Kids.map((opt) => (
-                        <option key={opt.id} value={opt.id}>{opt.name}</option>
-                      ))}
-                    </select>
-                  ) : (
-                    <h3 style={{ margin: 0, fontSize: 16, fontWeight: 600 }}>{displayNode?.name}</h3>
-                  )}
-                </div>
-
-                {/* Media row: image (left) + price (right, but grouped to the left) */}
-                <div
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'flex-start',
-                    gap: 12,
-                  }}
-                >
-                  {(() => {
-                    try {
-                      const targetId = String((selectedLvl3 || selectedLvl2 || lvl1)?.id || '');
-                      // For DS, reuse byBody as the narrowed list
-                      const listBase = byBody;
-                      const refinedForImages = (() => {
-                        if (!selState.modelBrand) return listBase;
-                        const [m, b] = String(selState.modelBrand).split('|');
-                        return listBase.filter((n) => String(n.model) === String(m || '') && String(n.brand) === String(b || ''));
-                      })();
-                      // Build images: prefer inventory entry images, then rowImages, then imageUrl
-                      let images = [];
-                      refinedForImages.some((n) => {
-                        const imgs = Array.isArray(n.entry?.images) ? n.entry.images : [];
-                        if (imgs.length) { images = imgs.slice(0, 10); return true; }
-                        return false;
-                      });
-                      if (!images.length) {
-                        const rows = Array.isArray(vendor?.rowImages?.[targetId]) ? vendor.rowImages[targetId] : [];
-                        if (rows.length) images = rows.slice(0, 10);
-                      }
-                      if (!images.length && displayNode?.imageUrl) images = [displayNode.imageUrl];
-                      const normImgs = images.map((s) => {
-                        const str = String(s);
-                        if (str.startsWith('http://') || str.startsWith('https://') || str.startsWith('data:')) return str;
-                        return `${ASSET_BASE_URL}${str}`;
-                      });
-                      if (!normImgs.length) return <div />;
-                      const idx = Number(invImgIdx[targetId] || 0) % normImgs.length;
-                      return (
-                        <div style={{ flex: 1, height: 140, borderRadius: 10, overflow: 'hidden', background: '#f8fafc', position: 'relative' }}>
-                          <div style={{ display: 'flex', width: `${normImgs.length * 100}%`, height: '100%', transform: `translateX(-${idx * (100 / normImgs.length)}%)`, transition: 'transform 400ms ease' }}>
-                            {normImgs.map((src, i) => (
-                              <div key={i} style={{ width: `${100 / normImgs.length}%`, height: '100%', flex: '0 0 auto' }}>
-                                <img src={src} alt={`img-${i}`} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-                              </div>
-                            ))}
-                          </div>
-                          {normImgs.length > 1 ? (
-                            <>
-                              <button aria-label="Prev" onClick={() => setInvImgIdx((p) => ({ ...p, [targetId]: ((idx - 1 + normImgs.length) % normImgs.length) }))}
-                                style={{ position: 'absolute', left: 6, top: '50%', transform: 'translateY(-50%)', width: 22, height: 22, borderRadius: 999, border: 'none', background: 'rgba(0,0,0,0.45)', color: '#fff', cursor: 'pointer' }}>‹</button>
-                              <button aria-label="Next" onClick={() => setInvImgIdx((p) => ({ ...p, [targetId]: ((idx + 1) % normImgs.length) }))}
-                                style={{ position: 'absolute', right: 6, top: '50%', transform: 'translateY(-50%)', width: 22, height: 22, borderRadius: 999, border: 'none', background: 'rgba(0,0,0,0.45)', color: '#fff', cursor: 'pointer' }}>›</button>
-                              <div style={{ position: 'absolute', bottom: 6, left: 0, right: 0, display: 'flex', gap: 6, justifyContent: 'center' }}>
-                                {normImgs.map((_, i) => (
-                                  <button key={i} onClick={() => setInvImgIdx((p) => ({ ...p, [targetId]: i }))} aria-label={`Go to ${i+1}`}
-                                    style={{ width: i===idx?8:6, height: i===idx?8:6, borderRadius: 999, border: 'none', background: i===idx ? '#fff' : 'rgba(255,255,255,0.6)', cursor: 'pointer' }} />
-                                ))}
-                              </div>
-                            </>
-                          ) : null}
-                        </div>
-                      );
-                    } catch { return <div />; }
-                  })()}
-                  {attrAwarePrice != null ? (
-                    <div
-                      style={{
-                        marginLeft: 12,
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: 4,
-                        color: '#059669',
-                        fontWeight: 700,
-                        fontSize: 18,
-                      }}
-                    >
-                      <span>₹</span>
-                      <span>{attrAwarePrice}</span>
-                    </div>
-                  ) : null}
-                </div>
-
-                {lvl3Kids.length > 0 ? uiRow('Options', (
-                  <select
-                    value={String(selectedLvl3?.id || '')}
-                    onChange={(e) => {
-                      const next = lvl3Kids.find((c) => String(c.id) === e.target.value) || lvl3Kids[0] || null;
-                      setTaxiSelections((prev) => ({
-                        ...prev,
-                        [lvl1.id]: { ...(prev[lvl1.id] || {}), lvl3: next?.id },
-                      }));
-                      setSelectedLeaf(next || selectedLvl2 || lvl1);
-                    }}
-                    style={{
-                      display: 'block',
-                      width: 'auto',
-                      padding: '10px 12px',
-                      borderRadius: 8,
-                      border: '1px solid #d1d5db',
-                      background: '#fff',
-                      fontSize: 13,
-                    }}
-                  >
-                    {lvl3Kids.map((opt) => (
-                      <option key={opt.id} value={opt.id}>{opt.name}</option>
-                    ))}
-                  </select>
-                )) : null}
-
-                {transmissionOptions.length > 0 ? uiRow('Transmission', (
-                  <select
-                    value={String(selState.transmission || '')}
-                    onChange={(e) => {
-                      const val = e.target.value || undefined;
-                      const targetId = String((selectedLvl3 || selectedLvl2 || lvl1)?.id || '');
-                      const listAll = normalizedForLvl1;
-                      const mp = (list) => {
-                        try {
-                          const prices = [];
-                          list.forEach((n) => {
-                            const pbr = (n.entry && n.entry.pricesByRow && typeof n.entry.pricesByRow === 'object') ? n.entry.pricesByRow : null;
-                            if (!pbr) return;
-                            for (const [key, value] of Object.entries(pbr)) {
-                              const ids = String(key).split('|');
-                              if (ids.some((id) => String(id) === String(targetId))) {
-                                const num = Number(value);
-                                if (!Number.isNaN(num)) prices.push(num);
-                              }
-                            }
-                          });
-                          if (prices.length === 0) return null;
-                          return Math.min(...prices);
-                        } catch { return null; }
-                      };
-                      const afterTr = val ? listAll.filter((n) => String(n.transmission) === String(val)) : listAll;
-                      const bodyOpts2 = Array.from(new Set(afterTr.map((n) => n.body).filter((v) => v && String(v).trim() !== '')));
-                      const bodyWithPrice = bodyOpts2.map((opt) => ({ opt, price: mp(afterTr.filter((n) => (n.body ? String(n.body) === String(opt) : true))) }));
-                      bodyWithPrice.sort((a,b)=>{ const va=a.price==null?Number.POSITIVE_INFINITY:Number(a.price); const vb=b.price==null?Number.POSITIVE_INFINITY:Number(b.price); return va-vb; });
-                      const bestBody = bodyWithPrice[0]?.opt;
-                      const afterBody = bestBody ? afterTr.filter((n) => (n.body ? String(n.body) === String(bestBody) : true)) : afterTr;
-                      const mbPairs2 = Array.from(new Set(afterBody.filter((n)=> n.model && n.brand).map((n)=> `${n.model}|${n.brand}`)));
-                      const mbWithPrice2 = mbPairs2.map((opt)=>{ const [m,b]=String(opt).split('|'); const lst = afterBody.filter((n)=> String(n.model)===String(m||'') && String(n.brand)===String(b||'')); return { opt, price: mp(lst) }; });
-                      mbWithPrice2.sort((a,b)=>{ const va=a.price==null?Number.POSITIVE_INFINITY:Number(a.price); const vb=b.price==null?Number.POSITIVE_INFINITY:Number(b.price); return va-vb; });
-                      const bestMB = mbWithPrice2[0]?.opt;
-                      setTaxiSelections((prev) => ({ ...prev, [lvl1.id]: { ...(prev[lvl1.id] || {}), transmission: val, bodyType: bestBody, modelBrand: bestMB } }));
-                    }}
-                    style={{
-                      display: 'block',
-                      width: 'auto',
-                      padding: '8px 10px',
-                      border: '1px solid #d1d5db',
-                      borderRadius: 8,
-                      background: '#fff',
-                      fontSize: 13,
-                    }}
-                  >
-                    <option value="">Any</option>
-                    {transmissionOptions.map((opt) => (
-                      <option key={opt} value={opt}>{opt}</option>
-                    ))}
-                  </select>
-                )) : null}
-
-                {/* Body Type + Brand+Model row side-by-side */}
-                {(bodyOptions.length > 0 || modelBrandOptions.length > 0) && (
-                  <div style={{ display: 'flex', gap: 12, marginBottom: 10 }}>
-                    {bodyOptions.length > 0 && (
-                      <div style={{ flex: 1 }}>
-                        <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 6 }}>Body Type</div>
-                        <select
-                          value={String(selState.bodyType || '')}
-                          onChange={(e) => {
-                            const val = e.target.value || undefined;
-                            const targetId = String((selectedLvl3 || selectedLvl2 || lvl1)?.id || '');
-                            const listBase = (!selState.transmission ? normalizedForLvl1 : normalizedForLvl1.filter((n) => String(n.transmission) === String(selState.transmission)));
-                            const afterBody = val ? listBase.filter((n) => (n.body ? String(n.body) === String(val) : true)) : listBase;
-                            const mp = (list) => {
-                              try {
-                                const prices = [];
-                                list.forEach((n) => {
-                                  const pbr = (n.entry && n.entry.pricesByRow && typeof n.entry.pricesByRow === 'object') ? n.entry.pricesByRow : null;
-                                  if (!pbr) return;
-                                  for (const [key, value] of Object.entries(pbr)) {
-                                    const ids = String(key).split('|');
-                                    if (ids.some((id) => String(id) === String(targetId))) {
-                                      const num = Number(value);
-                                      if (!Number.isNaN(num)) prices.push(num);
-                                    }
-                                  }
-                                });
-                                if (prices.length === 0) return null;
-                                return Math.min(...prices);
-                              } catch { return null; }
-                            };
-                            const mbPairs2 = Array.from(new Set(afterBody.filter((n)=> n.model && n.brand).map((n)=> `${n.model}|${n.brand}`)));
-                            const mbWithPrice2 = mbPairs2.map((opt)=>{ const [m,b]=String(opt).split('|'); const lst = afterBody.filter((n)=> String(n.model)===String(m||'') && String(n.brand)===String(b||'')); return { opt, price: mp(lst) }; });
-                            mbWithPrice2.sort((a,b)=>{ const va=a.price==null?Number.POSITIVE_INFINITY:Number(a.price); const vb=b.price==null?Number.POSITIVE_INFINITY:Number(b.price); return va-vb; });
-                            const bestMB = mbWithPrice2[0]?.opt;
-                            setTaxiSelections((prev) => ({ ...prev, [lvl1.id]: { ...(prev[lvl1.id] || {}), bodyType: val, modelBrand: bestMB } }));
-                          }}
-                          style={{ width: '100%', padding: '8px 10px', border: '1px solid #d1d5db', borderRadius: 8, background: '#fff', fontSize: 13 }}
-                        >
-                          <option value="">Any</option>
-                          {bodyOptions.map((opt) => (
-                            <option key={opt.id} value={opt}>{opt}</option>
-                          ))}
-                        </select>
-                      </div>
-                    )}
-
-                    {modelBrandOptions.length > 0 && (
-                      <div style={{ flex: 1 }}>
-                        <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 6 }}>Brand + Model</div>
-                        <select
-                          value={String(selState.modelBrand ?? modelBrandOptions[0] ?? '')}
-                          onChange={(e) => {
-                            const val = e.target.value || undefined;
-                            setTaxiSelections((prev) => ({ ...prev, [lvl1.id]: { ...(prev[lvl1.id] || {}), modelBrand: val } }));
-                          }}
-                          style={{ width: '100%', padding: '8px 10px', border: '1px solid #d1d5db', borderRadius: 8, background: '#fff', fontSize: 13 }}
-                        >
-                          {modelBrandOptions.map((opt) => {
-                            const [model, brand] = String(opt).split('|');
-                            return (
-                              <option key={opt} value={opt}>{`${brand || ''} | ${model || ''}`.trim()}</option>
-                            );
-                          })}
-                        </select>
-                      </div>
-                    )}
-                  </div>
-                )}
-
-                {displayNode?.terms && String(displayNode.terms).trim() && (
-                  <div style={{ width: '100%', marginTop: 10, marginBottom: 12 }}>
-                    <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 4 }}>Terms:</div>
-                    <ul
-                      style={{
-                        margin: 0,
-                        paddingLeft: 18,
-                        fontSize: 12,
-                        color: '#111827',
-                        lineHeight: 1.5,
-                        maxHeight: 150,
-                        overflowY: 'auto',
-                      }}
-                    >
-                      {String(displayNode.terms)
-                        .split(',')
-                        .map((t) => String(t).trim())
-                        .filter((t) => t)
-                        .map((t, idx) => (
-                          <li key={idx} style={{ marginBottom: 2 }}>{t}</li>
-                        ))}
-                    </ul>
-                  </div>
-                )}
-
-                <button
-                  onClick={() => alert(`Booking ${displayNode?.name}`)}
-                  style={{
-                    marginTop: 'auto',
-                    width: '100%',
-                    padding: '10px 14px',
-                    borderRadius: 28,
-                    border: 'none',
-                    background: 'rgb(245 158 11)',
-                    color: '#111827',
-                    fontWeight: 600,
-                    cursor: 'pointer',
-                  }}
-                >
-                  Book Now
-                </button>
-              </div>
-            </section>
-          );
-        })}
-      </div>
-    );
-  }
 
   const minPriceInSubtree = (n) => {
     let best = null;

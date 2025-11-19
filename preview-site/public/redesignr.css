@@ -1271,8 +1271,8 @@ section[style*="background-color: '#f9f9f9'"] > div[style*="display: grid"] {
   white-space: normal !important;
   font-size: 18px !important;       /* slightly smaller so two-line titles fit */
   line-height: 1.25 !important;
-  max-width: 95% !important;        /* allow more width inside the card */
-  margin: 0 0 0 2px !important;     /* small left inset from card edge */
+  max-width: 100% !important;
+  margin: 0 !important;
 }
 
 /* All selects inside Driving / Taxi cards: flush left, no centered text */
