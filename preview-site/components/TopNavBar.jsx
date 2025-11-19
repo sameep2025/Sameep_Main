@@ -16,14 +16,22 @@ export default function TopNavBar({ businessName, services = [
   const scrollToSection = (id) => {
     try {
       if (typeof window === "undefined") return;
+      // Measure actual header height so content is fully visible below it
+      const header = document.querySelector("header");
+      const headerHeight = header ? header.getBoundingClientRect().height : 80;
+      const HEADER_OFFSET = headerHeight + 16; // small extra gap
+
       if (!id || id === "home") {
         window.scrollTo({ top: 0, behavior: "smooth" });
         return;
       }
+
       const el = document.getElementById(id);
-      if (el) {
-        el.scrollIntoView({ behavior: "smooth", block: "start" });
-      }
+      if (!el) return;
+
+      const rect = el.getBoundingClientRect();
+      const targetY = window.scrollY + rect.top - HEADER_OFFSET;
+      window.scrollTo({ top: targetY, behavior: "smooth" });
     } catch {}
   };
 
@@ -140,16 +148,14 @@ export default function TopNavBar({ businessName, services = [
               />
             </div>
 
-            {/* Our Services dropdown */}
+            {/* Our Services dropdown (desktop) */}
             <div
               style={{ position: "relative", background: "transparent", backgroundColor: "transparent" }}
               onMouseEnter={() => {
                 setHoverKey("services");
-                setServicesOpen(true);
               }}
               onMouseLeave={() => {
                 setHoverKey(null);
-                setServicesOpen(false);
               }}
             >
               <div
@@ -166,10 +172,19 @@ export default function TopNavBar({ businessName, services = [
                   background: "transparent",
                   backgroundColor: "transparent",
                 }}
-                onClick={() => scrollToSection("products")}
               >
-                <span>Our Services</span>
-                <ChevronDown style={{ width: 16, height: 16 }} />
+                {/* Clicking label just scrolls to products */}
+                <span onClick={() => scrollToSection("products")}>
+                  Our Services
+                </span>
+                {/* Only the arrow toggles dropdown open/close */}
+                <ChevronDown
+                  style={{ width: 16, height: 16, cursor: "pointer" }}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setServicesOpen((open) => !open);
+                  }}
+                />
                 <div
                   style={{
                     position: "absolute",
@@ -218,6 +233,11 @@ export default function TopNavBar({ businessName, services = [
                             .toLowerCase()
                             .replace(/[^a-z0-9]+/g, "-")
                             .replace(/(^-|-$)/g, "");
+                          // Scroll to products section so the card is visible
+                          scrollToSection("products");
+                          // Close the dropdown
+                          setServicesOpen(false);
+                          // Notify preview page which service/card was chosen
                           if (typeof window !== "undefined" && key) {
                             const evt = new CustomEvent("preview:service-click", {
                               detail: { label: raw, key },

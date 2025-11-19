@@ -1477,21 +1477,21 @@ export default function PreviewPage() {
           </div>
 
           <div
-  style={{
-    border: '1px solid #e2e8f0',
-    borderRadius: 16,
-    padding: 20,
-    background: '#fff',
-    width: '100%',
-    minHeight: 400,
-    height: '100%',
-    boxShadow: '0 1px 6px rgba(0,0,0,0.08)',
-    display: 'flex',
-    flexDirection: 'column',
-    justifyContent: 'space-between',
-    fontFamily: 'Poppins, sans-serif',
-  }}
->
+            style={{
+              border: '1px solid #e2e8f0',
+              borderRadius: 16,
+              padding: 20,
+              background: '#D6EEDE',
+              width: '100%',
+              minHeight: 400,
+              height: '100%',
+              boxShadow: '0 1px 6px rgba(0,0,0,0.08)',
+              display: 'flex',
+              flexDirection: 'column',
+              justifyContent: 'space-between',
+              fontFamily: 'Poppins, sans-serif',
+            }}
+          >
             <h3 style={{ margin: '0 0 10px', fontSize: 16, fontWeight: 600 }}>{displayNode?.name}</h3>
 
             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 8 }}>
@@ -1817,16 +1817,26 @@ export default function PreviewPage() {
                 }}
               >
                 {/* Top row: title (left) + primary select (right) */}
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginBottom: 8 }}>
+                <div
+                  style={{
+                    display: 'flex',
+                    alignItems: 'flex-end',
+                    justifyContent: 'space-between',
+                    gap: 12,
+                    minHeight: 56,
+                    marginBottom: 8,
+                  }}
+                >
                   <div
                     className="ds-tt-title"
                     style={{
                       margin: 0,
-                      fontSize: 22,
-                      lineHeight: 1.15,
+                      fontSize: 20,
+                      lineHeight: 1.2,
                       fontWeight: 600,
                       flex: 1,
                       whiteSpace: 'normal',
+                      textAlign: 'center',
                     }}
                   >
                     {lvl1.name}
@@ -1904,8 +1914,15 @@ export default function PreviewPage() {
                   )}
                 </div>
 
-                {/* Media row: image (left) + price (right) */}
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+                {/* Media row: image (left) + price (right, but grouped to the left) */}
+                <div
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'flex-start',
+                    gap: 12,
+                  }}
+                >
                   {(() => {
                     try {
                       const targetId = String((selectedLvl3 || selectedLvl2 || lvl1)?.id || '');
@@ -1963,7 +1980,17 @@ export default function PreviewPage() {
                     } catch { return <div />; }
                   })()}
                   {attrAwarePrice != null ? (
-                    <div style={{ marginLeft: 12, display: 'flex', alignItems: 'center', gap: 4, color: '#059669', fontWeight: 700, fontSize: 18 }}>
+                    <div
+                      style={{
+                        marginLeft: 12,
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 4,
+                        color: '#059669',
+                        fontWeight: 700,
+                        fontSize: 18,
+                      }}
+                    >
                       <span>₹</span>
                       <span>{attrAwarePrice}</span>
                     </div>

@@ -379,6 +379,13 @@ div[style*="display:flex"][style*="flex-wrap:wrap"][style*="gap:16px"] {
 #preview-page [style*="borderRadius: 30px"],
 #preview-page [style*="border-radius: 30px"] { border-radius: 999px !important; }
 
+/* Special Combos card (DOM inline styles using rgb values) -> force green card background */
+#preview-page div[style*="border: 1px solid rgb(229, 231, 235)"][style*="min-height: 400px"][style*="display: flex"][style*="flex-direction: column"] {
+  background: #D6EEDE !important;
+  border-radius: 16px !important;
+  box-shadow: 0 10px 20px rgba(0,0,0,0.08) !important;
+}
+
 /* Replace inline orange CTA styling with accent class if present */
 #preview-page button,
 #preview-page a.button {
@@ -791,6 +798,13 @@ div[style*="display:flex"][style*="flex-wrap:wrap"][style*="gap:16px"] {
   color: #111827 !important;
   margin-right: 8px !important;
   margin-top: 6px !important;
+}
+
+/* FINAL OVERRIDE: any remaining white product/combos cards should use the green card background */
+#preview-page [style*="border: '1px solid #e2e8f0'"][style*="boxShadow: '0 1px 6px rgba(0,0,0,0.08)"],
+#preview-page [style*="border: '1px solid #e2e8f0'"][style*="box-shadow: '0 1px 6px rgba(0,0,0,0.08)"],
+#preview-page [style*="border: 1px solid #e2e8f0"][style*="box-shadow: 0 1px 6px rgba(0,0,0,0.08)"] {
+  background: #D6EEDE !important;
 }
 
 /* ==========================
@@ -1231,24 +1245,42 @@ section[style*="background-color: '#f9f9f9'"] > div[style*="display: grid"] {
   background: #D6EEDE !important; /* unified green card background */
   box-shadow: 0 10px 20px rgba(0,0,0,0.08) !important;
   padding: 22px !important;
-  overflow: hidden; /* prevent inner content bleeding */
   margin-top: 0 !important;
 }
 
 /* Headings inside Driving / Taxi / Combo cards */
 #preview-page .ds-tt-card h2,
 #preview-page .ds-tt-card h3 {
-  text-align: center !important;
+  text-align: left !important;
   font-weight: 700 !important;
+}
+
+/* Top row inside each Driving / Taxi card: stack title above select, all left-aligned */
+#preview-page .ds-tt-card > div:first-child {
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: flex-start !important;
+  gap: 6px !important;
+  margin-bottom: 8px !important;
 }
 
 /* Top row title (e.g. Two Wheeler / Four Wheeler) */
 #preview-page .ds-tt-card .ds-tt-title {
-  text-align: left !important;   /* align with Terms/content */
+  text-align: left !important;      /* keep heading visually inside its own card */
   font-weight: 700 !important;
   white-space: normal !important;
+  font-size: 18px !important;       /* slightly smaller so two-line titles fit */
+  line-height: 1.25 !important;
+  max-width: 95% !important;        /* allow more width inside the card */
+  margin: 0 0 0 2px !important;     /* small left inset from card edge */
 }
 
+/* All selects inside Driving / Taxi cards: flush left, no centered text */
+#preview-page .ds-tt-card select {
+  margin-left: 0 !important;
+  margin-right: 0 !important;
+  text-align-last: left !important;
+}
 
 /* Heading row select (next to subcategory) should not overflow */
 #preview-page .ds-tt-grid > section > div select { max-width: 50% !important; }
@@ -1349,14 +1381,28 @@ div[style*="display:flex"][style*="flex-wrap:wrap"][style*="gap:16px"] > section
 
 
 
-/* Generic fade-out animation for cards triggered from Our Services menu */
+/* Highlight animation for cards triggered from Our Services menu */
 #preview-page .service-card-fade-out {
-  animation: serviceCardFadeOut 0.8s ease forwards;
+	animation: serviceCardPulse 0.75s ease-out;
 }
 
-@keyframes serviceCardFadeOut {
-  0% { opacity: 1; transform: translateY(0); }
-  100% { opacity: 0; transform: translateY(10px); }
+@keyframes serviceCardPulse {
+	0% {
+		transform: scale(1);
+		box-shadow: 0 10px 20px rgba(0,0,0,0.10);
+	}
+	30% {
+		transform: scale(1.03) translateY(-2px);
+		box-shadow: 0 18px 30px rgba(16,185,129,0.40);
+	}
+	60% {
+		transform: scale(0.99) translateY(0);
+		box-shadow: 0 12px 22px rgba(0,0,0,0.12);
+	}
+	100% {
+		transform: scale(1);
+		box-shadow: 0 10px 20px rgba(0,0,0,0.10);
+	}
 }
 
 /* Taxi image frame: widen to card width and adjust height */
