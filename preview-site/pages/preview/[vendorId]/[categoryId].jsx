@@ -543,10 +543,15 @@ export default function PreviewPage() {
 
     const getDeepestFirstChild = (n) => (!n?.children?.length ? n : getDeepestFirstChild(n.children[0]));
 
+    // Local flag to detect Driving School cards for conditional headings
+    const rootNameForCard = String(categoryTree?.name || '').toLowerCase();
+    const isDriving = rootNameForCard === 'driving school';
+
     const selectedParent = selection?.parent || node.children?.[0] || node;
     const selectedChild = selection?.child || getDeepestFirstChild(selectedParent);
 
     const displayNode = selectedChild || selectedParent;
+    let attributeDropdown = null;
 
     const getUiForLocal = (nodeOrId) => ({ mode: 'buttons', includeLeafChildren: true });
 
@@ -1090,11 +1095,14 @@ export default function PreviewPage() {
                     setAttrDropdownOpen((prev) => ({ ...(prev || {}), [dropdownKey]: false }));
                   };
 
-                  return (
-                    <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 4 }}>
-                      <div style={{ fontSize: 11, fontWeight: 500, color: '#e5e7eb', marginLeft: 2 }}>
-                        Select model:
+                  attributeDropdown = (
+                    <div style={{ marginTop: 8, marginBottom: 15, display: 'flex', flexDirection: 'column', gap: 4 }}>
+                      <div style={{ fontSize: 14, fontWeight: 400, color: 'black', marginLeft: 2 }}>
+                        Select Model :
                       </div>
+                      {/* <div style={{ fontSize: 11, fontWeight: 500, color: '#e5e7eb', marginLeft: 2 }}>
+                        Select model:
+                      </div> */}
                       <div style={{ position: 'relative', display: 'inline-block', width: '100%' }}>
                         <button
                           type="button"
@@ -1112,10 +1120,10 @@ export default function PreviewPage() {
                             minWidth: 220,
                             padding: '10px 16px',
                             borderRadius: 999,
-                            border: '1px solid rgba(148, 163, 184, 0.5)',
-                            background: 'linear-gradient(135deg, #111827, #1f2937)',
-                            color: '#ffffff',
-                            boxShadow: '0 10px 25px rgba(15, 23, 42, 0.45)',
+                            border: '1px solid rgba(148, 163, 184, 0.9)',
+                            background: '#ffffff',
+                            color: '#111827',
+                            boxShadow: '0 6px 18px rgba(15, 23, 42, 0.18)',
                             cursor: 'pointer',
                             fontSize: 13,
                             fontWeight: 600,
@@ -1124,11 +1132,11 @@ export default function PreviewPage() {
                           }}
                           onMouseEnter={(e) => {
                             e.currentTarget.style.transform = 'translateY(-1px)';
-                            e.currentTarget.style.boxShadow = '0 14px 30px rgba(15, 23, 42, 0.6)';
+                            e.currentTarget.style.boxShadow = '0 10px 24px rgba(15, 23, 42, 0.28)';
                           }}
                           onMouseLeave={(e) => {
                             e.currentTarget.style.transform = 'translateY(0)';
-                            e.currentTarget.style.boxShadow = '0 10px 25px rgba(15, 23, 42, 0.45)';
+                            e.currentTarget.style.boxShadow = '0 6px 18px rgba(15, 23, 42, 0.18)';
                           }}
                         >
                           <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
@@ -1146,10 +1154,9 @@ export default function PreviewPage() {
                               maxHeight: '45vh',
                               overflowY: 'auto',
                               padding: 8,
-                              borderRadius: 18,
-                              background: 'rgba(15, 23, 42, 0.98)',
-                              boxShadow: '0 20px 45px rgba(15, 23, 42, 0.85)',
-                              backdropFilter: 'blur(14px)',
+                              borderRadius: 14,
+                              background: 'rgba(255, 255, 255, 0.98)',
+                              boxShadow: '0 20px 45px rgba(15, 23, 42, 0.25)',
                               overscrollBehavior: 'contain',
                             }}
                           >
@@ -1161,6 +1168,14 @@ export default function PreviewPage() {
                               const row2Left = combo.brand;
                               const row2Right = combo.model;
 
+                              const lineParts = [
+                                row1Left,
+                                row1Right,
+                                row2Left,
+                                row2Right,
+                              ].filter((p) => p && String(p).trim() !== '');
+                              const lineText = lineParts.join(' · ');
+
                               return (
                                 <button
                                   key={combo.key}
@@ -1169,66 +1184,38 @@ export default function PreviewPage() {
                                   style={{
                                     width: '100%',
                                     textAlign: 'left',
-                                    padding: '10px 12px',
-                                    marginBottom: 6,
-                                    borderRadius: 14,
-                                    border: '1px solid rgba(55, 65, 81, 0.9)',
-                                    background: 'linear-gradient(135deg, #020617, #020617)',
-                                    color: '#ffffff',
+                                    padding: '8px 10px',
+                                    marginBottom: 4,
+                                    borderRadius: 10,
+                                    border: '1px solid rgba(148, 163, 184, 0.8)',
+                                    background: '#ffffff',
+                                    color: '#0f172a',
                                     cursor: 'pointer',
                                     fontSize: 12,
                                     transition: 'background 140ms ease, transform 140ms ease, box-shadow 140ms ease',
                                   }}
                                   onMouseEnter={(e) => {
-                                    e.currentTarget.style.background = 'linear-gradient(135deg, #0f172a, #1e293b)';
-                                    e.currentTarget.style.boxShadow = '0 8px 20px rgba(15, 23, 42, 0.8)';
+                                    e.currentTarget.style.background = '#e5f0ff';
+                                    e.currentTarget.style.boxShadow = '0 4px 12px rgba(15, 23, 42, 0.18)';
                                     e.currentTarget.style.transform = 'translateY(-1px)';
                                   }}
                                   onMouseLeave={(e) => {
-                                    e.currentTarget.style.background = 'linear-gradient(135deg, #020617, #020617)';
+                                    e.currentTarget.style.background = '#ffffff';
                                     e.currentTarget.style.boxShadow = 'none';
                                     e.currentTarget.style.transform = 'translateY(0)';
                                   }}
                                 >
-                                  <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                                    <div
-                                      style={{
-                                        display: 'flex',
-                                        justifyContent: 'space-between',
-                                        fontWeight: 600,
-                                        opacity: row1Left || row1Right ? 0.95 : 0.4,
-                                      }}
-                                    >
-                                      <span>{row1Left}</span>
-                                      <span>{row1Right}</span>
-                                    </div>
-                                    <div
-                                      style={{
-                                        margin: '3px 0',
-                                        display: 'flex',
-                                        alignItems: 'center',
-                                        justifyContent: 'center',
-                                        gap: 8,
-                                        fontSize: 10,
-                                        letterSpacing: 2,
-                                        color: 'rgba(148, 163, 184, 0.9)',
-                                      }}
-                                    >
-                                      <span style={{ flex: 1, height: 1, background: 'linear-gradient(to right, transparent, rgba(148, 163, 184, 0.9))' }} />
-                                      <span>●</span>
-                                      <span style={{ flex: 1, height: 1, background: 'linear-gradient(to left, transparent, rgba(148, 163, 184, 0.9))' }} />
-                                    </div>
-                                    <div
-                                      style={{
-                                        display: 'flex',
-                                        justifyContent: 'space-between',
-                                        fontWeight: 600,
-                                      }}
-                                    >
-                                      <span>{row2Left}</span>
-                                      <span>{row2Right}</span>
-                                    </div>
-                                  </div>
+                                  <span
+                                    style={{
+                                      display: 'block',
+                                      whiteSpace: 'nowrap',
+                                      overflow: 'hidden',
+                                      textOverflow: 'ellipsis',
+                                      fontWeight: 600,
+                                    }}
+                                  >
+                                    {lineText || '—'}
+                                  </span>
                                 </button>
                               );
                             })}
@@ -1245,6 +1232,12 @@ export default function PreviewPage() {
           {/* Parent Buttons / Dropdown (resolved per node) */}
           {node.children?.length > 0 && (
             parentSelectorMode === "buttons" ? (
+              <>
+                {isDriving && (
+                  <div style={{ fontSize: 15, fontWeight: 400, color: "#111827", marginLeft: 2, marginBottom: -14 }}>
+                    Select course type :
+                  </div>
+                )}
               <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 10 }}>
                 {node.children.map((opt) => {
                   const leaf = getDeepestFirstChild(opt);
@@ -1272,8 +1265,14 @@ export default function PreviewPage() {
                   );
                 })}
               </div>
+            </>
             ) : (
-              <div style={{ marginBottom: 10, display: 'flex', justifyContent: 'center' }}>
+              <div style={{ marginBottom: 10, display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+                {isDriving && (
+                  <div style={{ fontSize: 13, fontWeight: 400, color: "#111827", marginBottom: 0 }}>
+                    Select course type :
+                  </div>
+                )}
                 <select
                   value={selectedParent?.id || ""}
                   onChange={(e) => {
@@ -1305,29 +1304,31 @@ export default function PreviewPage() {
           {/* Child Buttons / Dropdown (resolved per selected parent) */}
           {includeLeafChildren && selectedParent?.children?.length > 0 && (
             childSelectorMode === "buttons" ? (
-              <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 12 }}>
-                {selectedParent.children.map((child) => (
-                  <button
-                    key={child.id}
-                    type="button"
-                    onClick={() => {
-                      onSelectionChange?.(selectedParent, child);
-                      onLeafSelect?.(child);
-                    }}
-                    style={{
-                      padding: "6px 12px",
-                      borderRadius: 999,
-                      border: selectedChild?.id === child.id ? "2px solid #2563eb" : "1px solid #d1d5db",
-                      background: selectedChild?.id === child.id ? "#2563eb" : "#f9fafb",
-                      color: selectedChild?.id === child.id ? "#fff" : "#111827",
-                      cursor: "pointer",
-                      fontSize: 13,
-                    }}
-                  >
-                    {child.name}
-                  </button>
-                ))}
-              </div>
+              <>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 12 }}>
+                  {selectedParent.children.map((child) => (
+                    <button
+                      key={child.id}
+                      type="button"
+                      onClick={() => {
+                        onSelectionChange?.(selectedParent, child);
+                        onLeafSelect?.(child);
+                      }}
+                      style={{
+                        padding: "6px 12px",
+                        borderRadius: 999,
+                        border: selectedChild?.id === child.id ? "2px solid #2563eb" : "1px solid #d1d5db",
+                        background: selectedChild?.id === child.id ? "#2563eb" : "#f9fafb",
+                        color: selectedChild?.id === child.id ? "#fff" : "#111827",
+                        cursor: "pointer",
+                        fontSize: 13,
+                      }}
+                    >
+                      {child.name}
+                    </button>
+                  ))}
+                </div>
+              </>
             ) : (
               <div style={{ marginBottom: 12 }}>
                 <select
@@ -1346,6 +1347,8 @@ export default function PreviewPage() {
               </div>
             )
           )}
+
+          {attributeDropdown}
 
           <button
             onClick={() => alert(`Booking ${displayNode?.name}`)}
