@@ -539,6 +539,11 @@ div[style*="display:flex"][style*="flex-wrap:wrap"][style*="gap:16px"] {
   margin-right: auto !important;
 }
 
+/* First-level subcategory cards: no extra layout overrides; use inline flex styles only */
+#preview-page main#products .first-level-card-row {
+  /* intentionally left minimal to preserve original behavior */
+}
+
 /* Individuals rows (after first section): left-align cards */
 #preview-page main#products > section:not(:first-of-type) > div[style*="display: 'flex'"][style*="flexWrap: 'wrap'"],
 #preview-page main#products > section:not(:first-of-type) > div[style*="display: 'flex'"][style*="flex-wrap: wrap"] {
@@ -615,6 +620,12 @@ div[style*="display:flex"][style*="flex-wrap:wrap"][style*="gap:16px"] {
   flex-direction: column !important;
 }
 
+/* But inside first-level-card-row, let cards stretch to grid column width */
+#preview-page main#products .first-level-card-row section > div[style*="border: 1px solid"] {
+  width: 100% !important;
+  max-width: 100% !important;
+}
+
 /* On small screens, let card height be driven purely by content */
 @media (max-width: 768px) {
   #preview-page main#products [style*="border: '1px solid #e5e7eb'"][style*="background: '#fff'"],
@@ -637,11 +648,24 @@ div[style*="display:flex"][style*="flex-wrap:wrap"][style*="gap:16px"] {
 #preview-page main#products [style*="color: '#0ea5e9'"] { /* fallback if any price uses a different green/blue */
   color: #10b981 !important; /* screenshot green */
   font-weight: 900 !important;
-  font-size: 26px !important; /* slightly larger */
+  font-size: 26px !important; /* default card prices */
   line-height: 1.2 !important;
   letter-spacing: -0.01em !important;
   margin: 6px 0 8px 0 !important;
   text-align: left !important; /* unified alignment */
+  display: block !important;
+  font-family: 'Poppins', ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial !important;
+}
+
+/* Explicit shared price style for combos and individual/category cards */
+#preview-page .unified-price {
+  color: #10b981 !important;
+  font-size: 34px !important; /* same as combos heading price */
+  font-weight: 900 !important;
+  line-height: 1.2 !important;
+  letter-spacing: -0.01em !important;
+  margin: 6px 0 8px 0 !important;
+  text-align: center !important;
   display: block !important;
   font-family: 'Poppins', ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial !important;
 }
@@ -717,6 +741,15 @@ div[style*="display:flex"][style*="flex-wrap:wrap"][style*="gap:16px"] {
   text-overflow: ellipsis !important;
   box-shadow: 0 2px 0 rgba(0,0,0,0.02) inset !important;
   text-align-last: center !important; /* center selected text in most browsers */
+}
+
+/* Combos size dropdown: force left alignment and full width */
+#preview-page main#products .combo-size-select {
+  width: 100% !important;
+  margin-left: 0 !important;
+  margin-right: 0 !important;
+  text-align: left !important;
+  text-align-last: left !important;
 }
 
 /* Driving School / Taxi cards: ensure selects are centered inside the green cards */

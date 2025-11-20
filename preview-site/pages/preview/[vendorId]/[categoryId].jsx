@@ -827,12 +827,12 @@ export default function PreviewPage() {
                     const fallback = pickBaselinePrice();
                     const resolvedPrice = (attrAwarePrice != null) ? attrAwarePrice : fallback;
                     if (resolvedPrice == null) return null;
-                    return (<p style={{ color: "#059669", fontWeight: 600, margin: 0 }}>₹ {resolvedPrice}</p>);
+                    return (<p className="unified-price">₹ {resolvedPrice}</p>);
                   }
 
                   const resolvedPrice = pickBaselinePrice();
                   if (resolvedPrice == null) return null;
-                  return (<p style={{ color: "#059669", fontWeight: 600, margin: 0 }}>₹ {resolvedPrice}</p>);
+                  return (<p className="unified-price">₹ {resolvedPrice}</p>);
                 } catch { return null; }
               })()}
               {(() => {
@@ -1097,7 +1097,7 @@ export default function PreviewPage() {
 
                   attributeDropdown = (
                     <div style={{ marginTop: 8, marginBottom: 15, display: 'flex', flexDirection: 'column', gap: 4 }}>
-                      <div style={{ fontSize: 14, fontWeight: 400, color: 'black', marginLeft: 2 }}>
+                      <div style={{ fontSize: 11, fontWeight: 400, color: 'black', marginLeft: 2 }}>
                         Select Model :
                       </div>
                       {/* <div style={{ fontSize: 11, fontWeight: 500, color: '#e5e7eb', marginLeft: 2 }}>
@@ -1234,7 +1234,7 @@ export default function PreviewPage() {
             parentSelectorMode === "buttons" ? (
               <>
                 {isDriving && (
-                  <div style={{ fontSize: 15, fontWeight: 400, color: "#111827", marginLeft: 2, marginBottom: -14 }}>
+                  <div style={{ fontSize: 11, fontWeight: 400, color: "#111827", marginLeft: 2, marginBottom: -14 }}>
                     Select course type :
                   </div>
                 )}
@@ -1966,7 +1966,7 @@ export default function PreviewPage() {
                 } catch { return <div />; }
               })()}
               {attrAwarePrice != null ? (
-                <div style={{ color: '#059669', fontWeight: 700, fontSize: 18 }}>₹ {attrAwarePrice}</div>
+                <div className="unified-price">₹ {attrAwarePrice}</div>
               ) : null}
             </div>
 
@@ -2175,22 +2175,30 @@ export default function PreviewPage() {
     return { ...node, children: newChildren };
   };
 
-  // 🧠 First-level headings only
-  const rendered = root.children.map((lvl1) => {
+  // 🧠 First-level headings only (but hide heading if lvl1 has only flat children-as-cards)
+  const renderedTree = root.children.map((lvl1) => {
     const enriched = enrichNode(lvl1);
+    const children = Array.isArray(enriched?.children) ? enriched.children : [];
+    const hasDeeperLevels = children.some((c) => Array.isArray(c?.children) && c.children.length > 0);
+
     return (
-            <section key={lvl1.id} style={{ marginBottom: 16 }}>        {(() => { return null; })()}
-        <h2
-          style={{
-            margin: "0 0 12px",
-            textTransform: "Capitalize",
-            fontSize: "18px",
-            fontWeight: 600,
-          }}
+      <section key={lvl1.id} style={{ marginBottom: 16 }}>
+        {hasDeeperLevels && (
+          <h2
+            style={{
+              margin: "0 0 12px",
+              textTransform: "Capitalize",
+              fontSize: "18px",
+              fontWeight: 600,
+            }}
+          >
+            {lvl1.name}
+          </h2>
+        )}
+        <div
+          className="first-level-card-row"
+          style={{ display: "flex", flexWrap: "wrap", gap: "16px", alignItems: 'stretch', justifyContent: 'center' }}
         >
-          {lvl1.name}
-        </h2>
-        <div style={{ display: "flex", flexWrap: "wrap", gap: "16px", alignItems: 'stretch', justifyContent: 'center' }}>
           {(() => {
             const mapModeToDt = (m) => {
               const x = String(m || '').toLowerCase();
@@ -2287,7 +2295,7 @@ export default function PreviewPage() {
                       ) : null}
                       <div style={{ marginTop: 'auto', display: 'flex', flexDirection: 'column', gap: 8 }}>
                         {livePrice != null ? (
-                          <div style={{ fontSize: 18, fontWeight: 800, color: '#059669' }}>₹{Number(livePrice)}</div>
+                          <div className="unified-price">₹{Number(livePrice)}</div>
                         ) : null}
                         {terms ? (
                           <div style={{ fontSize: 12, color: '#6b7280' }}>{terms}</div>
@@ -2407,7 +2415,7 @@ export default function PreviewPage() {
                       ) : null}
                       <div style={{ marginTop: 'auto', display: 'flex', flexDirection: 'column', gap: 8 }}>
                         {livePrice != null ? (
-                          <div style={{ fontSize: 18, fontWeight: 800, color: '#059669', margin: 0 }}>₹{Number(livePrice)}</div>
+                          <div className="unified-price">₹{Number(livePrice)}</div>
                         ) : null}
                         {terms ? (
                           <div style={{ fontSize: 12, color: '#6b7280' }}>{terms}</div>
@@ -2475,9 +2483,10 @@ export default function PreviewPage() {
     );
   });
 
-  return rendered;
+  return renderedTree;
 };
 
+  const isDrivingSchool = String(categoryTree?.name || "").toLowerCase() === "driving school";
 
   return (
     <div id="preview-page" style={{ padding: 0, background: "#F0FDF4" }}>
@@ -2505,12 +2514,35 @@ export default function PreviewPage() {
           <main id="products" style={{ padding: "20px", marginTop: "10px" }}>
             {Array.isArray(combos) && combos.length > 0 ? (
               <section style={{ marginBottom: 8 }}>
+                {isDrivingSchool ? (
+                  <div style={{ textAlign: "center", marginBottom: 16, fontFamily: "Poppins, sans-serif"   }}>
+                    <h2 style={{ margin: 0, fontSize: 30, fontWeight: 700 }}>Explore Our Driving Packages</h2>
+                    <p style={{ margin: "6px 0 0", fontSize: 18, color: "#4b5563" }}>
+                      Comprehensive bundles designed to give you the best value and a complete learning experience.
+                    </p>
+                  </div>
+                ) : null}
                 {/* <h2 style={{ margin: '0 0 10px 0' }}>Packages</h2> */}
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: "16px", alignItems: 'stretch', justifyContent: 'center' }}>
                   {combos.map((combo, idx) => {
                     const name = combo?.name || 'Package';
-                    const img = combo?.imageUrl || combo?.image || null;
+                    // Be very tolerant about where the combo image might live
+                    const comboImageCandidates = (() => {
+                      try {
+                        const out = [];
+                        const push = (v) => { if (v) out.push(v); };
+                        push(combo?.imageUrl);
+                        push(combo?.image);
+                        if (Array.isArray(combo?.images)) combo.images.forEach(push);
+                        if (Array.isArray(combo?.imageUrls)) combo.imageUrls.forEach(push);
+                        if (Array.isArray(combo?.photos)) combo.photos.forEach(push);
+                        if (Array.isArray(combo?.pictures)) combo.pictures.forEach(push);
+                        return out;
+                      } catch { return []; }
+                    })();
+                    const img = comboImageCandidates.find((v) => v) || null;
                     const items = Array.isArray(combo?.items) ? combo.items : [];
+                    const perSizeArr = Array.isArray(combo?.perSize) ? combo.perSize : [];
                     // Compute best price from variants across items, fallback to basePrice
                     let variantPrices = [];
                     try {
@@ -2589,7 +2621,12 @@ export default function PreviewPage() {
                     const bestVar = variantPrices.length ? Math.min(...variantPrices) : null;
                     const price = (priceBySize != null ? priceBySize : (bestVar != null ? bestVar : base));
                     const priceNode = (price != null && !Number.isNaN(price)) ? (
-                      <div className="text-4xl font-extrabold text-emerald-600" style={{ marginBottom: "mb-4" }}>₹{price}</div>
+                      <div
+                        className="font-extrabold text-emerald-600 unified-price"
+                        style={{ marginBottom: 8, fontSize: 16, textAlign: 'center' }}
+                      >
+                        ₹{price}
+                      </div>
                     ) : null;
                     const termsRaw = combo?.terms || combo?.term || '';
                     const termsArr = Array.isArray(termsRaw)
@@ -2600,56 +2637,93 @@ export default function PreviewPage() {
                           .filter(Boolean);
                     const terms = termsArr.join(', ');
                     const imgSrc = (() => {
-                      // Prefer an image tied to the currently selected size, if available
-                      try {
-                        if (selectedSize) {
-                          for (const it of items) {
-                            const vs = Array.isArray(it?.variants) ? it.variants : [];
-                            const hasSize = vs.some((v) => (v?.size || '—') === selectedSize);
-                            if (!hasSize) continue;
+                      const isValidImg = (val) => {
+                        if (!val) return false;
+                        const s = String(val || '');
+                        if (!s) return false;
+                        // Ignore broken dummy upload paths
+                        if (s.includes('/uploads/undefined')) return false;
+                        return true;
+                      };
 
-                            // First look for a variant-level image for this size
-                            const withImg = vs.find((v) => (v?.size || '—') === selectedSize && (v?.imageUrl || v?.image));
-                            const cand = withImg?.imageUrl || withImg?.image || it?.imageUrl || it?.image;
-                            if (cand) {
-                              const s = String(cand);
-                              if (s.startsWith('http://') || s.startsWith('https://') || s.startsWith('data:')) return s;
-                              if (s.startsWith('/')) return `${ASSET_BASE_URL}${s}`;
-                              return `${ASSET_BASE_URL}/${s}`;
-                            }
+                      const normalize = (val) => {
+                        const s = String(val || '');
+                        if (s.startsWith('http://') || s.startsWith('https://') || s.startsWith('data:')) return s;
+                        if (s.startsWith('/')) return `${ASSET_BASE_URL}${s}`;
+                        return `${ASSET_BASE_URL}/${s}`;
+                      };
+
+                      // 1) Try perSize entry for the selected size
+                      try {
+                        if (selectedSize && perSizeArr.length) {
+                          const ps = perSizeArr.find((p) => String(p?.size || '') === String(selectedSize));
+                          if (ps && isValidImg(ps.imageUrl || ps.iconUrl)) {
+                            return normalize(ps.imageUrl || ps.iconUrl);
                           }
                         }
                       } catch {}
 
-                      // Fallback to combo-level image
-                      if (!img) return null;
-                      const s = String(img);
-                      if (s.startsWith('http://') || s.startsWith('https://') || s.startsWith('data:')) return s;
-                      if (s.startsWith('/')) return `${ASSET_BASE_URL}${s}`;
-                      return `${ASSET_BASE_URL}/${s}`;
+                      // 2) Try combo-level images (icon/image)
+                      try {
+                        const direct = combo?.imageUrl || combo?.iconUrl;
+                        if (isValidImg(direct)) return normalize(direct);
+                      } catch {}
+
+                      // 3) Try any good variant/image on items, prioritising selectedSize
+                      try {
+                        const pickVariantImg = (preferSize) => {
+                          for (const it of items) {
+                            const vs = Array.isArray(it?.variants) ? it.variants : [];
+                            for (const v of vs) {
+                              if (preferSize && String(v?.size || '—') !== String(preferSize)) continue;
+                              const cand = v?.imageUrl || v?.image || it?.imageUrl || it?.image;
+                              if (isValidImg(cand)) return normalize(cand);
+                            }
+                          }
+                          return null;
+                        };
+
+                        // First: exact selected size
+                        if (selectedSize) {
+                          const fromSelected = pickVariantImg(selectedSize);
+                          if (fromSelected) return fromSelected;
+                        }
+
+                        // Then: any good variant image
+                        const anyVariant = pickVariantImg(null);
+                        if (anyVariant) return anyVariant;
+                      } catch {}
+
+                      // 4) Fallback to any combo-level candidate (supports multiple uploads)
+                      const cand = comboImageCandidates.find((v) => isValidImg(v)) || null;
+                      if (!cand) return null;
+                      return normalize(cand);
                     })();
                     return (
                       <section key={`pkg-${idx}`} style={{ flex: '1 1 320px', minWidth: 300, marginBottom: 0 }}>
-                        <div style={{ border: '1px solid #e5e7eb', borderRadius: 12, padding: 12, background: '#fff', display: 'flex', flexDirection: 'column', gap: 10, width: '100%', minHeight: 400, height: '100%', justifyContent: 'space-between' }}>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                            {imgSrc ? (
-                              <img src={imgSrc} alt={name} style={{ width: 40, height: 40, objectFit: 'cover', borderRadius: 8 }} />
-                            ) : null}
-                            <h3 style={{ margin: 0 }}>{name}</h3>
-                          </div>
-                          {/* Size selector */}
-                          {sizes && sizes.length ? (
-                            <div>
-                              <div style={{ fontSize: 12, marginBottom: 4, color: '#374151', fontWeight: 600 }}>Size</div>
-                              <select
-                                value={String(selectedSize || '')}
-                                onChange={(e) => setPackageSelections((prev) => ({ ...prev, [idx]: { ...(prev[idx] || {}), size: e.target.value } }))}
-                                style={{ width: '100%', padding: '8px 10px', border: '1px solid #d1d5db', borderRadius: 8, background: '#fff', fontSize: 13 }}
-                              >
-                                {sizes.map((sz) => (
-                                  <option key={String(sz)} value={String(sz)}>{String(sz)}</option>
-                                ))}
-                              </select>
+                        <div
+                          style={{
+                            border: '1px solid #e5e7eb',
+                            borderRadius: 12,
+                            padding: 16,
+                            background: '#D6EEDE',
+                            display: 'flex',
+                            flexDirection: 'column',
+                            gap: 12,
+                            width: '100%',
+                            minHeight: 420,
+                            height: '100%',
+                            justifyContent: 'flex-start',
+                          }}
+                        >
+                          <h2 style={{ margin: 0, textAlign: 'center', fontSize: 30, fontWeight: 600 }}>{name}</h2>
+                          {imgSrc ? (
+                            <div style={{ display: 'flex', justifyContent: 'center' }}>
+                              <img
+                                src={imgSrc}
+                                alt={name}
+                                style={{ width: '100%', maxWidth: 260, height: 160, objectFit: 'cover', borderRadius: 12 }}
+                              />
                             </div>
                           ) : null}
                           {priceNode}
@@ -2666,9 +2740,55 @@ export default function PreviewPage() {
                               ))}
                             </ul>
                           ) : null}
+                          {/* Size selector */}
+                          {sizes && sizes.length ? (
+                            <div>
+                              <div style={{ fontSize: 14, marginBottom: 6, color: '#374151', fontWeight: 600, textAlign: 'left', fontFamily: 'Poppins, sans-serif' }}>Size</div>
+                              <select
+                                className="combo-size-select"
+                                value={String(selectedSize || '')}
+                                onChange={(e) =>
+                                  setPackageSelections((prev) => ({
+                                    ...prev,
+                                    [idx]: { ...(prev[idx] || {}), size: e.target.value },
+                                  }))
+                                }
+                                style={{
+                                  width: '100%',
+                                  padding: '10px 12px',
+                                  border: '1px solid #d1d5db',
+                                  borderRadius: 8,
+                                  background: '#fff',
+                                  fontSize: 15,
+                                  textAlign: 'left',
+                                  textAlignLast: 'left',
+                                  display: 'block',
+                                  marginLeft: 0,
+                                  marginRight: 'auto',
+                                  fontFamily: 'Poppins, sans-serif',
+                                }}
+                              >
+                                {sizes.map((sz) => (
+                                  <option key={String(sz)} value={String(sz)}>
+                                    {String(sz)}
+                                  </option>
+                                ))}
+                              </select>
+                            </div>
+                          ) : null}
                           <button
                             onClick={() => alert(`Booking ${name}`)}
-                            style={{ marginTop: 'auto', width: '100%', padding: '10px 14px', borderRadius: 28, border: 'none', background: 'rgb(245 158 11)', color: '#111827', fontWeight: 600, cursor: 'pointer' }}
+                            style={{
+                              marginTop: 'auto',
+                              width: '100%',
+                              padding: '10px 14px',
+                              borderRadius: 28,
+                              border: 'none',
+                              background: 'rgb(245 158 11)',
+                              color: '#111827',
+                              fontWeight: 600,
+                              cursor: 'pointer',
+                            }}
                           >
                             Book Now
                           </button>
@@ -2680,6 +2800,14 @@ export default function PreviewPage() {
               </section>
             ) : null}
             {/* <h2 style={{ margin: '0', padding: '0 0 10px 0' }}>Individuals</h2> */}
+            {isDrivingSchool ? (
+              <div style={{ textAlign: "center", marginBottom: 20, fontFamily: "Poppins, sans-serif" }}>
+                <h2 style={{ margin: 0, fontSize: 30, fontWeight: 700 }}>Individual Driving Courses</h2>
+                <p style={{ margin: "6px 0 0", fontSize: 18, color: "#4b5563" }}>
+                  Choose specialized training for specific vehicle types, with or without a license.
+                </p>
+              </div>
+            ) : null}
             {renderTree(categoryTree)}
           </main>
           <BenefitsSection
