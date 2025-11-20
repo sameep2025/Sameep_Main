@@ -7,11 +7,15 @@ export default function TopNavBar({ businessName, services = [
   "Driving Packages",
   "Individual Courses",
   "Commercial Training",
-] }) {
+] , hasPackages = false }) {
   const [mobile, setMobile] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [hoverKey, setHoverKey] = useState(null);
   const [servicesOpen, setServicesOpen] = useState(false);
+
+  const effectiveServices = hasPackages
+    ? ["Packages", ...services]
+    : services;
 
   const scrollToSection = (id) => {
     try {
@@ -215,7 +219,7 @@ export default function TopNavBar({ businessName, services = [
                     padding: 8,
                   }}
                 >
-                  {services.map((label, index) => (
+                  {effectiveServices.map((label, index) => (
                     <div
                       key={index}
                       style={{
@@ -224,7 +228,7 @@ export default function TopNavBar({ businessName, services = [
                         fontWeight: 500,
                         color: "#111827",
                         padding: "10px 12px",
-                        borderBottom: index === services.length - 1 ? "none" : "1px solid #e5e7eb",
+                        borderBottom: index === effectiveServices.length - 1 ? "none" : "1px solid #e5e7eb",
                       }}
                       onClick={() => {
                         try {
@@ -419,7 +423,7 @@ export default function TopNavBar({ businessName, services = [
                 paddingBottom: 4,
               }}
             >
-              {services.map((label, index) => (
+              {effectiveServices.map((label, index) => (
                 <div
                   key={index}
                   style={{

@@ -30,6 +30,7 @@ export default function PreviewPage() {
   // Attribute filter bar state (driven by uiConfig.attributesBar)
   const [attrSelections, setAttrSelections] = useState({}); // { field: value }
   const [attrDropdownOpen, setAttrDropdownOpen] = useState({}); // { [cardKey]: boolean }
+  const [comboSizeDropdownOpen, setComboSizeDropdownOpen] = useState({}); // { [comboIndex]: boolean }
   const [pairSelections, setPairSelections] = useState({}); // { index: "A|B" }
   const [taxiSelections, setTaxiSelections] = useState({}); // { [lvl1Id]: { lvl2, lvl3, bodySeats: "body|seats", fuelType: string, modelBrand: "model|brand" } }
   const [combos, setCombos] = useState([]);
@@ -1098,7 +1099,7 @@ export default function PreviewPage() {
                   attributeDropdown = (
                     <div style={{ marginTop: 8, marginBottom: 15, display: 'flex', flexDirection: 'column', gap: 4 }}>
                       <div style={{ fontSize: 11, fontWeight: 400, color: 'black', marginLeft: 2 }}>
-                        Select Model :
+                        Select Model 
                       </div>
                       {/* <div style={{ fontSize: 11, fontWeight: 500, color: '#e5e7eb', marginLeft: 2 }}>
                         Select model:
@@ -1142,7 +1143,7 @@ export default function PreviewPage() {
                           <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                             {triggerLabel}
                           </span>
-                          <span style={{ fontSize: 16, lineHeight: 1 }}>▾</span>
+                          <span style={{ fontSize: 20, lineHeight: 1 }}>▾</span>
                         </button>
 
                         {!!attrDropdownOpen?.[dropdownKey] && (
@@ -1235,7 +1236,7 @@ export default function PreviewPage() {
               <>
                 {isDriving && (
                   <div style={{ fontSize: 11, fontWeight: 400, color: "#111827", marginLeft: 2, marginBottom: -14 }}>
-                    Select course type :
+                    Select course type 
                   </div>
                 )}
               <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 10 }}>
@@ -1362,9 +1363,10 @@ export default function PreviewPage() {
               color: "#111827",
               fontWeight: 600,
               cursor: "pointer",
+              fontFamily: "Poppins, sans-serif",
             }}
           >
-            Book Now
+            Enroll Now
           </button>
         </div>
       </section>
@@ -2052,9 +2054,10 @@ export default function PreviewPage() {
                 color: '#111827',
                 fontWeight: 600,
                 cursor: 'pointer',
+                fontFamily: 'Poppins, sans-serif',
               }}
             >
-              Book Now
+              Enroll Now
             </button>
           </div>
         </section>
@@ -2197,7 +2200,13 @@ export default function PreviewPage() {
         )}
         <div
           className="first-level-card-row"
-          style={{ display: "flex", flexWrap: "wrap", gap: "16px", alignItems: 'stretch', justifyContent: 'center' }}
+          style={{
+            display: "flex",
+            flexWrap: "wrap",
+            gap: "16px",
+            alignItems: 'stretch',
+            justifyContent: 'center',
+          }}
         >
           {(() => {
             const mapModeToDt = (m) => {
@@ -2302,9 +2311,9 @@ export default function PreviewPage() {
                         ) : null}
                         <button
                           onClick={() => alert(`Booking ${child?.name}`)}
-                          style={{ width: '100%', padding: '10px 14px', borderRadius: 28, border: 'none', background: 'rgb(245 158 11)', color: '#111827', fontWeight: 600, cursor: 'pointer' }}
+                          style={{ width: '100%', padding: '10px 14px', borderRadius: 28, border: 'none', background: 'rgb(245 158 11)', color: '#111827', fontWeight: 600, cursor: 'pointer', fontFamily: 'Poppins, sans-serif' }}
                         >
-                          Book Now
+                          Enroll Now
                         </button>
                       </div>
                     </div>
@@ -2422,9 +2431,9 @@ export default function PreviewPage() {
                         ) : null}
                         <button
                           onClick={() => alert(`Booking ${enriched?.name}`)}
-                          style={{ width: '100%', padding: '10px 14px', borderRadius: 28, border: 'none', background: 'rgb(245 158 11)', color: '#111827', fontWeight: 600, cursor: 'pointer' }}
+                          style={{ width: '100%', padding: '10px 14px', borderRadius: 28, border: 'none', background: 'rgb(245 158 11)', color: '#111827', fontWeight: 600, cursor: 'pointer', fontFamily: 'Poppins, sans-serif' }}
                         >
-                          Book Now
+                          Enroll Now
                         </button>
                       </div>
                     </div>
@@ -2504,6 +2513,7 @@ export default function PreviewPage() {
             categoryTree={categoryTree}
             selectedLeaf={selectedLeaf}
             onLeafSelect={setSelectedLeaf}
+            hasPackages={Array.isArray(combos) && combos.length > 0}
           />
           <HomeSection
             businessName={vendor?.businessName || "Loading..."}
@@ -2523,7 +2533,16 @@ export default function PreviewPage() {
                   </div>
                 ) : null}
                 {/* <h2 style={{ margin: '0 0 10px 0' }}>Packages</h2> */}
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: "16px", alignItems: 'stretch', justifyContent: 'center' }}>
+                <div
+                  className="combos-card-row"
+                  style={{
+                    display: 'flex',
+                    flexWrap: 'wrap',
+                    gap: "16px",
+                    alignItems: 'stretch',
+                    justifyContent: 'center',
+                  }}
+                >
                   {combos.map((combo, idx) => {
                     const name = combo?.name || 'Package';
                     // Be very tolerant about where the combo image might live
@@ -2743,37 +2762,124 @@ export default function PreviewPage() {
                           {/* Size selector */}
                           {sizes && sizes.length ? (
                             <div>
-                              <div style={{ fontSize: 14, marginBottom: 6, color: '#374151', fontWeight: 600, textAlign: 'left', fontFamily: 'Poppins, sans-serif' }}>Size</div>
-                              <select
-                                className="combo-size-select"
-                                value={String(selectedSize || '')}
-                                onChange={(e) =>
-                                  setPackageSelections((prev) => ({
-                                    ...prev,
-                                    [idx]: { ...(prev[idx] || {}), size: e.target.value },
-                                  }))
-                                }
-                                style={{
-                                  width: '100%',
-                                  padding: '10px 12px',
-                                  border: '1px solid #d1d5db',
-                                  borderRadius: 8,
-                                  background: '#fff',
-                                  fontSize: 15,
-                                  textAlign: 'left',
-                                  textAlignLast: 'left',
-                                  display: 'block',
-                                  marginLeft: 0,
-                                  marginRight: 'auto',
-                                  fontFamily: 'Poppins, sans-serif',
-                                }}
-                              >
-                                {sizes.map((sz) => (
-                                  <option key={String(sz)} value={String(sz)}>
-                                    {String(sz)}
-                                  </option>
-                                ))}
-                              </select>
+                              <div style={{ fontSize: 14, marginBottom: 6, color: '#374151', fontWeight: 600, textAlign: 'left', fontFamily: 'Poppins, sans-serif' }}>
+                                {isDrivingSchool && idx === 0
+                                  ? 'Select vehicle type'
+                                  : isDrivingSchool && idx === 1
+                                  ? 'Select combo type'
+                                  : 'Size'}
+                              </div>
+                              <div style={{ position: 'relative', display: 'inline-block', width: '100%' }}>
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    setComboSizeDropdownOpen((prev) => {
+                                      const current = prev && prev[idx];
+                                      return { ...(prev || {}), [idx]: !current };
+                                    })
+                                  }
+                                  style={{
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'space-between',
+                                    gap: 8,
+                                    minWidth: 220,
+                                    padding: '10px 16px',
+                                    borderRadius: 999,
+                                    border: '1px solid rgba(148, 163, 184, 0.9)',
+                                    background: '#ffffff',
+                                    color: '#111827',
+                                    boxShadow: '0 6px 18px rgba(15, 23, 42, 0.18)',
+                                    cursor: 'pointer',
+                                    fontSize: 13,
+                                    fontWeight: 600,
+                                    letterSpacing: 0.2,
+                                    transition: 'transform 160ms ease, box-shadow 160ms ease, background 160ms ease',
+                                  }}
+                                  onMouseEnter={(e) => {
+                                    e.currentTarget.style.transform = 'translateY(-1px)';
+                                    e.currentTarget.style.boxShadow = '0 10px 24px rgba(15, 23, 42, 0.28)';
+                                  }}
+                                  onMouseLeave={(e) => {
+                                    e.currentTarget.style.transform = 'translateY(0)';
+                                    e.currentTarget.style.boxShadow = '0 6px 18px rgba(15, 23, 42, 0.18)';
+                                  }}
+                                >
+                                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                    {selectedSize || 'Select size'}
+                                  </span>
+                                  <span style={{ fontSize: 20, lineHeight: 1 }}>▾</span>
+                                </button>
+
+                                {!!comboSizeDropdownOpen?.[idx] && (
+                                  <div
+                                    style={{
+                                      marginTop: 8,
+                                      zIndex: 1,
+                                      width: '100%',
+                                      maxHeight: '45vh',
+                                      overflowY: 'auto',
+                                      padding: 8,
+                                      borderRadius: 14,
+                                      background: 'rgba(255, 255, 255, 0.98)',
+                                      boxShadow: '0 20px 45px rgba(15, 23, 42, 0.25)',
+                                      overscrollBehavior: 'contain',
+                                    }}
+                                  >
+                                    {sizes.map((s) => {
+                                      const value = String(s || '');
+                                      return (
+                                        <button
+                                          key={value}
+                                          type="button"
+                                          onClick={() => {
+                                            setPackageSelections((prev) => ({
+                                              ...prev,
+                                              [idx]: { ...(prev[idx] || {}), size: value },
+                                            }));
+                                            setComboSizeDropdownOpen((prev) => ({ ...(prev || {}), [idx]: false }));
+                                          }}
+                                          style={{
+                                            width: '100%',
+                                            textAlign: 'left',
+                                            padding: '8px 10px',
+                                            marginBottom: 4,
+                                            borderRadius: 10,
+                                            border: '1px solid rgba(148, 163, 184, 0.8)',
+                                            background: value === String(selectedSize || '') ? '#e5f0ff' : '#ffffff',
+                                            color: '#0f172a',
+                                            cursor: 'pointer',
+                                            fontSize: 12,
+                                            transition: 'background 140ms ease, transform 140ms ease, box-shadow 140ms ease',
+                                          }}
+                                          onMouseEnter={(e) => {
+                                            e.currentTarget.style.background = '#e5f0ff';
+                                            e.currentTarget.style.boxShadow = '0 4px 12px rgba(15, 23, 42, 0.18)';
+                                            e.currentTarget.style.transform = 'translateY(-1px)';
+                                          }}
+                                          onMouseLeave={(e) => {
+                                            e.currentTarget.style.background = value === String(selectedSize || '') ? '#e5f0ff' : '#ffffff';
+                                            e.currentTarget.style.boxShadow = 'none';
+                                            e.currentTarget.style.transform = 'translateY(0)';
+                                          }}
+                                        >
+                                          <span
+                                            style={{
+                                              display: 'block',
+                                              whiteSpace: 'nowrap',
+                                              overflow: 'hidden',
+                                              textOverflow: 'ellipsis',
+                                              fontWeight: 600,
+                                            }}
+                                          >
+                                            {s}
+                                          </span>
+                                        </button>
+                                      );
+                                    })}
+                                  </div>
+                                )}
+                              </div>
                             </div>
                           ) : null}
                           <button
@@ -2790,7 +2896,7 @@ export default function PreviewPage() {
                               cursor: 'pointer',
                             }}
                           >
-                            Book Now
+                            Enroll Now
                           </button>
                         </div>
                       </section>
