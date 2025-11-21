@@ -67,6 +67,22 @@ export default function PreviewPage() {
     }
   }, []);
 
+  const scrollToServiceSection = useCallback((serviceKey) => {
+    try {
+      if (typeof window === "undefined" || !serviceKey) return;
+      const header = document.querySelector("header");
+      const headerHeight = header ? header.getBoundingClientRect().height : 80;
+      const OFFSET = headerHeight + 16;
+
+      const el = document.getElementById(`service-${serviceKey}`);
+      if (!el) return;
+
+      const rect = el.getBoundingClientRect();
+      const targetY = window.scrollY + rect.top - OFFSET;
+      window.scrollTo({ top: targetY, behavior: "smooth" });
+    } catch {}
+  }, []);
+
   // Listen for service selection events from TopNavBar (Our Services dropdown)
   useEffect(() => {
     if (typeof window === "undefined") return undefined;
@@ -76,6 +92,7 @@ export default function PreviewPage() {
         const key = detail.key || detail.serviceKey || makeServiceKey(detail.label);
         if (!key) return;
         setActiveServiceKey(key);
+        scrollToServiceSection(key);
         // Clear after animation duration so we can re-trigger
         window.setTimeout(() => {
           setActiveServiceKey((current) => (current === key ? null : current));
@@ -84,7 +101,7 @@ export default function PreviewPage() {
     };
     window.addEventListener("preview:service-click", handler);
     return () => window.removeEventListener("preview:service-click", handler);
-  }, [makeServiceKey]);
+  }, [makeServiceKey, scrollToServiceSection]);
 
   // ----------------- Fetch vendor & categories -----------------
   const fetchData = useCallback(async () => {
@@ -2184,8 +2201,13 @@ export default function PreviewPage() {
     const children = Array.isArray(enriched?.children) ? enriched.children : [];
     const hasDeeperLevels = children.some((c) => Array.isArray(c?.children) && c.children.length > 0);
 
+    const serviceKey = makeServiceKey(lvl1?.name);
     return (
-      <section key={lvl1.id} style={{ marginBottom: 16 }}>
+      <section
+        key={lvl1.id}
+        id={serviceKey ? `service-${serviceKey}` : undefined}
+        style={{ marginBottom: 16 }}
+      >
         {hasDeeperLevels && (
           <h2
             style={{
@@ -2762,7 +2784,7 @@ export default function PreviewPage() {
                           {/* Size selector */}
                           {sizes && sizes.length ? (
                             <div>
-                              <div style={{ fontSize: 14, marginBottom: 6, color: '#374151', fontWeight: 600, textAlign: 'left', fontFamily: 'Poppins, sans-serif' }}>
+                              <div style={{ fontSize: 11, fontWeight: 400, color: "#111827", marginBottom: 6, fontFamily: 'Poppins' }}>
                                 {isDrivingSchool && idx === 0
                                   ? 'Select vehicle type'
                                   : isDrivingSchool && idx === 1

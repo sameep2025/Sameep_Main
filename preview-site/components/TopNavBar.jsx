@@ -370,114 +370,203 @@ export default function TopNavBar({ businessName, services = [
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
+              cursor: "pointer",
             }}
           >
-            <Menu size={28} />
+            <Menu size={26} />
           </button>
         )}
       </div>
 
-      {/* Mobile Menu */}
+      {/* Mobile Menu - full screen overlay */}
       {mobile && menuOpen && (
         <div
-          className="w-full bg-white shadow-md"
           style={{
             position: "fixed",
-            top: 80,
-            left: 0,
-            right: 0,
-            padding: "14px 24px",
-            fontFamily: "Poppins, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif",
-            fontSize: "15px",
-            fontWeight: 500,
+            inset: 0,
             zIndex: 999,
-            backgroundColor: "#ffffff",
-            textAlign: "center",
-            borderBottom: "1px solid #e5e7eb",
+            display: "flex",
+            flexDirection: "column",
+            justifyContent: "flex-start",
+            paddingTop: 90,
+            background:
+              "linear-gradient(160deg, rgba(15,23,42,0.96), rgba(15,23,42,0.7))",
           }}
         >
-          <div
-            style={{ padding: "6px 0", cursor: "pointer" }}
-            onClick={() => {
-              scrollToSection("home");
-              setMenuOpen(false);
-            }}
-          >
-            Home
-          </div>
-          <div
+          <button
+            type="button"
+            onClick={() => setMenuOpen(false)}
             style={{
-              padding: "6px 0",
+              position: "absolute",
+              top: 18,
+              right: 18,
+              width: 30,
+              height: 30,
+              borderRadius: 999,
+              border: "1px solid rgba(248,250,252,0.9)",
+              background: "transparent",
+              color: "#F9FAFB",
+              fontSize: 18,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
               cursor: "pointer",
             }}
-            onClick={() => {
-              setServicesOpen((open) => !open);
-              scrollToSection("products");
+          >
+            ×
+          </button>
+
+          <div
+            style={{
+              margin: "0 16px 24px",
+              borderRadius: 28,
+              background: "#ffffff",
+              padding: "18px 18px 14px",
+              boxShadow: "0 18px 45px rgba(15,23,42,0.55)",
+              fontFamily:
+                "Poppins, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif",
+              maxHeight: "calc(100vh - 160px)",
+              overflowY: "auto",
             }}
           >
-            Our Services {servicesOpen ? "▲" : "▼"}
-          </div>
-          {servicesOpen && (
             <div
               style={{
-                paddingBottom: 4,
+                padding: "10px 4px",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                fontSize: 18,
+                fontWeight: 600,
+                cursor: "pointer",
+                borderBottom: "1px solid #e5e7eb",
+              }}
+              onClick={() => {
+                scrollToSection("home");
+                setMenuOpen(false);
               }}
             >
-              {effectiveServices.map((label, index) => (
-                <div
-                  key={index}
-                  style={{
-                    padding: "4px 0",
-                    fontSize: 14,
-                    cursor: "pointer",
-                  }}
-                  onClick={() => {
-                    try {
-                      const raw = String(label || "");
-                      const key = raw
-                        .toLowerCase()
-                        .replace(/[^a-z0-9]+/g, "-")
-                        .replace(/(^-|-$)/g, "");
-                      if (typeof window !== "undefined" && key) {
-                        const evt = new CustomEvent("preview:service-click", {
-                          detail: { label: raw, key },
-                        });
-                        window.dispatchEvent(evt);
-                      }
-                    } catch {}
-                  }}
-                >
-                  {label}
-                </div>
-              ))}
+              <span>Home</span>
             </div>
-          )}
-          <div
-            style={{ padding: "6px 0", cursor: "pointer" }}
-            onClick={() => {
-              scrollToSection("benefits");
-              setMenuOpen(false);
-            }}
-          >
-            Why Us
-          </div>
-          <div
-            style={{ padding: "6px 0", cursor: "pointer" }}
-            onClick={() => {
-              scrollToSection("about");
-              setMenuOpen(false);
-            }}
-          >
-            About
-          </div>
-          <div
-            style={{ padding: "6px 0", cursor: "pointer" }}
-            onClick={() => {
-              scrollToSection("contact");
-              setMenuOpen(false);
-            }}
-          >
-            Contact
+
+            <div
+              style={{
+                padding: "10px 4px",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                fontSize: 18,
+                fontWeight: 600,
+                cursor: "pointer",
+                borderBottom: servicesOpen ? "none" : "1px solid #e5e7eb",
+              }}
+              onClick={() => {
+                setServicesOpen((open) => !open);
+                scrollToSection("products");
+              }}
+            >
+              <span>Our Services</span>
+              <span style={{ fontSize: 18 }}>{servicesOpen ? "↑" : "↗"}</span>
+            </div>
+
+            {servicesOpen && (
+              <div
+                style={{
+                  paddingTop: 8,
+                  paddingBottom: 10,
+                  borderBottom: "1px solid #e5e7eb",
+                }}
+              >
+                {effectiveServices.map((label, index) => (
+                  <div
+                    key={index}
+                    style={{
+                      padding: "8px 4px",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "space-between",
+                      fontSize: 15,
+                      cursor: "pointer",
+                    }}
+                    onClick={() => {
+                      try {
+                        const raw = String(label || "");
+                        const key = raw
+                          .toLowerCase()
+                          .replace(/[^a-z0-9]+/g, "-")
+                          .replace(/(^-|-$)/g, "");
+                        scrollToSection("products");
+                        setMenuOpen(false);
+                        if (typeof window !== "undefined" && key) {
+                          const evt = new CustomEvent("preview:service-click", {
+                            detail: { label: raw, key },
+                          });
+                          window.dispatchEvent(evt);
+                        }
+                      } catch {}
+                    }}
+                  >
+                    <span>{label}</span>
+                    <span style={{ fontSize: 16 }}>›</span>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            <div
+              style={{
+                padding: "10px 4px",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                fontSize: 18,
+                fontWeight: 600,
+                cursor: "pointer",
+                borderBottom: "1px solid #e5e7eb",
+              }}
+              onClick={() => {
+                scrollToSection("benefits");
+                setMenuOpen(false);
+              }}
+            >
+              <span>Why Us</span>
+            </div>
+
+            <div
+              style={{
+                padding: "10px 4px",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                fontSize: 18,
+                fontWeight: 600,
+                cursor: "pointer",
+                borderBottom: "1px solid #e5e7eb",
+              }}
+              onClick={() => {
+                scrollToSection("about");
+                setMenuOpen(false);
+              }}
+            >
+              <span>About</span>
+            </div>
+
+            <div
+              style={{
+                padding: "10px 4px 6px",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                fontSize: 18,
+                fontWeight: 600,
+                cursor: "pointer",
+              }}
+              onClick={() => {
+                scrollToSection("contact");
+                setMenuOpen(false);
+              }}
+            >
+              <span>Contact</span>
+            </div>
           </div>
         </div>
       )}
