@@ -15,6 +15,7 @@ export default function Footer({
   ],
   popularCourses = [],
   reachUs = {},
+  contact,
 }) {
   const [vw, setVw] = useState(typeof window !== 'undefined' ? window.innerWidth : 1200);
   useEffect(() => {
@@ -29,6 +30,23 @@ export default function Footer({
   const isTablet = vw > 640 && vw <= 1024;
 
   const titleName = (businessName && String(businessName).trim()) || categoryName || "Driving School";
+  const hasContact = contact && typeof contact === "object";
+  const column1Heading = hasContact && (contact.footerHeading1 || contact.footerHeading) && String((contact.footerHeading1 || contact.footerHeading)).trim().length
+    ? String(contact.footerHeading1 || contact.footerHeading).trim()
+    : titleName;
+  const column1Description = hasContact && contact.footerDescription && String(contact.footerDescription).trim().length
+    ? String(contact.footerDescription).trim()
+    : (description || "Your trusted partner for learning to drive. We offer comprehensive, safe, and effective training tailored to your success.");
+
+  const column2Heading = hasContact && contact.footerHeading2 && String(contact.footerHeading2).trim().length
+    ? String(contact.footerHeading2).trim()
+    : "Quick Links";
+  const column3Heading = hasContact && contact.footerHeading3 && String(contact.footerHeading3).trim().length
+    ? String(contact.footerHeading3).trim()
+    : "Popular Courses";
+  const column4Heading = hasContact && contact.footerHeading4 && String(contact.footerHeading4).trim().length
+    ? String(contact.footerHeading4).trim()
+    : "Reach Us";
 
   return (
     <footer
@@ -59,7 +77,7 @@ export default function Footer({
               marginBottom: 10,
             }}
           >
-            {titleName}
+            {column1Heading}
           </h3>
           <p
             style={{
@@ -70,7 +88,7 @@ export default function Footer({
               margin: isMobile ? "0 auto" : 0,
             }}
           >
-            {description || "Your trusted partner for learning to drive. We offer comprehensive, safe, and effective training tailored to your success."}
+            {column1Description}
           </p>
         </div>
 
@@ -84,7 +102,7 @@ export default function Footer({
               marginBottom: 10,
             }}
           >
-            Quick Links
+            {column2Heading}
           </h3>
           <ul
             style={{
@@ -122,7 +140,7 @@ export default function Footer({
               marginBottom: 10,
             }}
           >
-            Popular Courses
+            {column3Heading}
           </h3>
           <ul
             style={{
@@ -195,7 +213,7 @@ export default function Footer({
               marginBottom: 10,
             }}
           >
-            Reach Us
+            {column4Heading}
           </h3>
           <div style={{ fontSize: 16, lineHeight: 2, color: "#d1d5db" }}>
             <div style={{ display: "flex", alignItems: "center", gap: 8 }}>

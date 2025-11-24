@@ -197,6 +197,14 @@ function DummyCreateCategoryModal({
   const [aboutCardDescription, setAboutCardDescription] = useState("");
   const [aboutCardButtonLabel, setAboutCardButtonLabel] = useState("");
   const [aboutCardIconFile, setAboutCardIconFile] = useState(null);
+  const [showContactPopup, setShowContactPopup] = useState(false);
+  const [contactHeading, setContactHeading] = useState("");
+  const [contactDescription, setContactDescription] = useState("");
+  const [contactFooterHeading, setContactFooterHeading] = useState("");
+  const [contactFooterDescription, setContactFooterDescription] = useState("");
+  const [contactFooterHeading2, setContactFooterHeading2] = useState("");
+  const [contactFooterHeading3, setContactFooterHeading3] = useState("");
+  const [contactFooterHeading4, setContactFooterHeading4] = useState("");
 const [selectedMasterIndex, setSelectedMasterIndex] = useState(0);
 // Subcategory linking modal state (dummy)
 const [showSubcatSelector, setShowSubcatSelector] = useState(false);
@@ -358,6 +366,23 @@ const [subcategoryNameById, setSubcategoryNameById] = useState({});
         setAboutCardButtonLabel("");
       }
       setAboutCardIconFile(null);
+      if (initialData.contact && typeof initialData.contact === "object") {
+        setContactHeading(initialData.contact.heading || "");
+        setContactDescription(initialData.contact.description || "");
+        setContactFooterHeading(initialData.contact.footerHeading || "");
+        setContactFooterDescription(initialData.contact.footerDescription || "");
+        setContactFooterHeading2(initialData.contact.footerHeading2 || "");
+        setContactFooterHeading3(initialData.contact.footerHeading3 || "");
+        setContactFooterHeading4(initialData.contact.footerHeading4 || "");
+      } else {
+        setContactHeading("");
+        setContactDescription("");
+        setContactFooterHeading("");
+        setContactFooterDescription("");
+        setContactFooterHeading2("");
+        setContactFooterHeading3("");
+        setContactFooterHeading4("");
+      }
       if (Array.isArray(initialData.signupLevels)) {
         const levels = [];
         const details = {};
@@ -423,6 +448,13 @@ const [subcategoryNameById, setSubcategoryNameById] = useState({});
       setAboutCardDescription("");
       setAboutCardButtonLabel("");
       setAboutCardIconFile(null);
+      setContactHeading("");
+      setContactDescription("");
+      setContactFooterHeading("");
+      setContactFooterDescription("");
+      setContactFooterHeading2("");
+      setContactFooterHeading3("");
+      setContactFooterHeading4("");
     }
   }, [show, initialData, parentId, parentCategoryType, parentEnableFreeText]);
 
@@ -711,6 +743,14 @@ const [subcategoryNameById, setSubcategoryNameById] = useState({});
       if (aboutCardIconFile) {
         formData.append("aboutCardIcon", aboutCardIconFile);
       }
+      formData.append("contactHeading", contactHeading || "");
+      formData.append("contactDescription", contactDescription || "");
+      formData.append("contactFooterHeading", contactFooterHeading || "");
+      formData.append("contactFooterDescription", contactFooterDescription || "");
+      formData.append("contactFooterHeading1", contactFooterHeading || "");
+      formData.append("contactFooterHeading2", contactFooterHeading2 || "");
+      formData.append("contactFooterHeading3", contactFooterHeading3 || "");
+      formData.append("contactFooterHeading4", contactFooterHeading4 || "");
       if (!parentId) {
         const levelsPayload = (signupLevels || []).map((lvl, idx) => ({
           levelName: lvl,
@@ -902,6 +942,8 @@ const [subcategoryNameById, setSubcategoryNameById] = useState({});
               const hasWhyUsNow = arr.includes("Why Us");
               const hadAboutBefore = Array.isArray(webMenuItems) && webMenuItems.includes("About");
               const hasAboutNow = arr.includes("About");
+              const hadContactBefore = Array.isArray(webMenuItems) && webMenuItems.includes("Contact");
+              const hasContactNow = arr.includes("Contact");
               setWebMenuItems(arr);
               if (!hadHomeBefore && hasHomeNow) {
                 setShowHomePopup(true);
@@ -911,6 +953,9 @@ const [subcategoryNameById, setSubcategoryNameById] = useState({});
               }
               if (!hadAboutBefore && hasAboutNow) {
                 setShowAboutPopup(true);
+              }
+              if (!hadContactBefore && hasContactNow) {
+                setShowContactPopup(true);
               }
             }}
             placeholder="Select menu items"
@@ -1950,6 +1995,158 @@ const [subcategoryNameById, setSubcategoryNameById] = useState({});
                 <button
                   type="button"
                   onClick={() => setShowHomePopup(false)}
+                  style={{
+                    padding: "8px 12px",
+                    borderRadius: 8,
+                    border: "none",
+                    background: "#0078d7",
+                    color: "#fff",
+                    fontWeight: 600,
+                    cursor: "pointer",
+                  }}
+                >
+                  Save
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showContactPopup && (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            zIndex: 4000,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            background: "rgba(0,0,0,0.45)",
+          }}
+        >
+          <div
+            style={{
+              background: "#fff",
+              borderRadius: 12,
+              width: 650,
+              maxWidth: "95vw",
+              maxHeight: "85vh",
+              overflow: "hidden",
+              display: "flex",
+              flexDirection: "column",
+            }}
+          >
+            <div
+              style={{
+                padding: 14,
+                borderBottom: "1px solid #eee",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+              }}
+            >
+              <h3 style={{ margin: 0, color: "#0078d7" }}>Contact Configuration</h3>
+              <button
+                type="button"
+                onClick={() => setShowContactPopup(false)}
+                style={{
+                  border: "none",
+                  background: "transparent",
+                  fontSize: 20,
+                  cursor: "pointer",
+                }}
+              >
+                ×
+              </button>
+            </div>
+            <div style={{ padding: 16, overflowY: "auto" }}>
+              <div style={{ marginBottom: 12 }}>
+                <h4 style={labelStyle}>Heading</h4>
+                <input
+                  type="text"
+                  value={contactHeading}
+                  onChange={(e) => setContactHeading(e.target.value)}
+                  style={inputStyle}
+                  placeholder="Enter heading"
+                />
+              </div>
+              <div style={{ marginBottom: 12 }}>
+                <h4 style={labelStyle}>Description</h4>
+                <textarea
+                  value={contactDescription}
+                  onChange={(e) => setContactDescription(e.target.value)}
+                  style={{ ...inputStyle, minHeight: 80, resize: "vertical" }}
+                  placeholder="Enter description"
+                />
+              </div>
+              <div style={{ marginBottom: 12 }}>
+                <h4 style={labelStyle}>Footer Section</h4>
+                <div
+                  style={{
+                    border: "1px solid #e5e7eb",
+                    borderRadius: 10,
+                    padding: 10,
+                    background: "#f9fafb",
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: 6,
+                  }}
+                >
+                  <input
+                    type="text"
+                    value={contactFooterHeading}
+                    onChange={(e) => setContactFooterHeading(e.target.value)}
+                    placeholder="Footer Heading 1 (Column 1)"
+                    style={inputStyle}
+                  />
+                  <textarea
+                    value={contactFooterDescription}
+                    onChange={(e) => setContactFooterDescription(e.target.value)}
+                    placeholder="Footer description (Column 1)"
+                    style={{ ...inputStyle, minHeight: 60 }}
+                  />
+                  <input
+                    type="text"
+                    value={contactFooterHeading2}
+                    onChange={(e) => setContactFooterHeading2(e.target.value)}
+                    placeholder="Footer Heading 2 (Column 2)"
+                    style={inputStyle}
+                  />
+                  <input
+                    type="text"
+                    value={contactFooterHeading3}
+                    onChange={(e) => setContactFooterHeading3(e.target.value)}
+                    placeholder="Footer Heading 3 (Column 3)"
+                    style={inputStyle}
+                  />
+                  <input
+                    type="text"
+                    value={contactFooterHeading4}
+                    onChange={(e) => setContactFooterHeading4(e.target.value)}
+                    placeholder="Footer Heading 4 (Column 4)"
+                    style={inputStyle}
+                  />
+                  
+                </div>
+              </div>
+              <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 8 }}>
+                <button
+                  type="button"
+                  onClick={() => setShowContactPopup(false)}
+                  style={{
+                    padding: "8px 12px",
+                    borderRadius: 8,
+                    border: "1px solid #e2e8f0",
+                    background: "#fff",
+                    cursor: "pointer",
+                  }}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowContactPopup(false)}
                   style={{
                     padding: "8px 12px",
                     borderRadius: 8,

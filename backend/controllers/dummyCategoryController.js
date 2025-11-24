@@ -225,6 +225,17 @@ exports.createCategory = async (req, res) => {
         },
       };
 
+      categoryData.contact = {
+        heading: req.body.contactHeading || "",
+        description: req.body.contactDescription || "",
+        footerHeading: req.body.contactFooterHeading || "",
+        footerDescription: req.body.contactFooterDescription || "",
+        footerHeading1: req.body.contactFooterHeading1 || "",
+        footerHeading2: req.body.contactFooterHeading2 || "",
+        footerHeading3: req.body.contactFooterHeading3 || "",
+        footerHeading4: req.body.contactFooterHeading4 || "",
+      };
+
       // arrays may arrive as JSON or string
       [
         "categoryVisibility",
@@ -473,6 +484,18 @@ exports.updateCategory = async (req, res) => {
       if (req.body.aboutCardTitle !== undefined) doc.about.card.title = req.body.aboutCardTitle;
       if (req.body.aboutCardDescription !== undefined) doc.about.card.description = req.body.aboutCardDescription;
       if (req.body.aboutCardButtonLabel !== undefined) doc.about.card.buttonLabel = req.body.aboutCardButtonLabel;
+
+      if (!doc.contact) {
+        doc.contact = { heading: "", description: "", footerHeading: "", footerDescription: "", footerHeading1: "", footerHeading2: "", footerHeading3: "", footerHeading4: "" };
+      }
+      if (req.body.contactHeading !== undefined) doc.contact.heading = req.body.contactHeading;
+      if (req.body.contactDescription !== undefined) doc.contact.description = req.body.contactDescription;
+      if (req.body.contactFooterHeading !== undefined) doc.contact.footerHeading = req.body.contactFooterHeading;
+      if (req.body.contactFooterDescription !== undefined) doc.contact.footerDescription = req.body.contactFooterDescription;
+      if (req.body.contactFooterHeading1 !== undefined) doc.contact.footerHeading1 = req.body.contactFooterHeading1;
+      if (req.body.contactFooterHeading2 !== undefined) doc.contact.footerHeading2 = req.body.contactFooterHeading2;
+      if (req.body.contactFooterHeading3 !== undefined) doc.contact.footerHeading3 = req.body.contactFooterHeading3;
+      if (req.body.contactFooterHeading4 !== undefined) doc.contact.footerHeading4 = req.body.contactFooterHeading4;
 
       [
         "categoryVisibility",

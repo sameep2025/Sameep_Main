@@ -43,6 +43,7 @@ export default function PreviewPage() {
   const [homePopup, setHomePopup] = useState(null);
   const [whyUs, setWhyUs] = useState(null);
   const [about, setAbout] = useState(null);
+  const [contact, setContact] = useState(null);
   const [vendorAddonTitle, setVendorAddonTitle] = useState(null);
   const [vendorAddonDescription, setVendorAddonDescription] = useState(null);
   const [activeServiceKey, setActiveServiceKey] = useState(null); // which service/card should animate
@@ -139,6 +140,11 @@ export default function PreviewPage() {
             } else {
               setAbout(null);
             }
+            if (wmJson?.contact && typeof wmJson.contact === 'object') {
+              setContact(wmJson.contact);
+            } else {
+              setContact(null);
+            }
             // Derive nav label from categoryType
             const rawType = (wmJson?.categoryType || "").toString();
             let lbl = "Our Services";
@@ -152,6 +158,7 @@ export default function PreviewPage() {
             setHomePopup(null);
             setWhyUs(null);
             setAbout(null);
+            setContact(null);
           }
         }
       } catch {
@@ -160,6 +167,7 @@ export default function PreviewPage() {
         setHomePopup(null);
         setWhyUs(null);
         setAbout(null);
+        setContact(null);
       }
 
       const forceDummy = String(mode || '').toLowerCase() === 'dummy';
@@ -3021,6 +3029,7 @@ export default function PreviewPage() {
             location={location}
             vendorId={vendorId}
             businessHours={vendor?.businessHours || []}
+            contact={contact}
             onLocationUpdate={(newLoc) => {
               setLocation(newLoc);
               setVendor((prev) => ({ ...prev, location: newLoc }));
@@ -3072,6 +3081,7 @@ export default function PreviewPage() {
               hours: (vendor?.businessHours && vendor.businessHours[0]?.hours) ||
                 "Mon-Fri: 8:00 AM - 8:00 PM",
             }}
+            contact={contact}
           />
         </>
       )}

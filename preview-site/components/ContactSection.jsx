@@ -13,6 +13,7 @@ export default function ContactSection({
   vendorId,
   businessHours = [], // ✅ accept from parent
   onLocationUpdate,
+  contact,
 }) {
   const [areaCity, setAreaCity] = useState("");
   const [isOpenNow, setIsOpenNow] = useState({ open: false, closes: "", nextOpen: "" });
@@ -213,6 +214,14 @@ export default function ContactSection({
     }
   };
 
+  const hasContact = contact && typeof contact === "object";
+  const heading = hasContact && contact.heading && String(contact.heading).trim().length
+    ? String(contact.heading).trim()
+    : "Get In Touch";
+  const subText = hasContact && contact.description && String(contact.description).trim().length
+    ? String(contact.description).trim()
+    : "Have questions or ready to book your first lesson? Reach out to us today!";
+
   return (
     <section
       id="contact"
@@ -237,7 +246,7 @@ export default function ContactSection({
             margin: "0 0 16px 0",
           }}
         >
-          Get In Touch
+          {heading}
         </h2>
         <p
           style={{
@@ -247,7 +256,7 @@ export default function ContactSection({
             margin: "0 auto",
           }}
         >
-          Have questions or ready to book your first lesson? Reach out to us today!
+          {subText}
         </p>
       </div>
 

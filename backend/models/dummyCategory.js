@@ -67,6 +67,16 @@ const DummyCategorySchema = new mongoose.Schema({
       iconUrl: { type: String, default: '' },
     },
   },
+  contact: {
+    heading: { type: String, default: '' },
+    description: { type: String, default: '' },
+    footerHeading: { type: String, default: '' },
+    footerDescription: { type: String, default: '' },
+    footerHeading1: { type: String, default: '' },
+    footerHeading2: { type: String, default: '' },
+    footerHeading3: { type: String, default: '' },
+    footerHeading4: { type: String, default: '' },
+  },
 
   signupLevels: [
     {
