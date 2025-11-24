@@ -172,7 +172,7 @@ export default function HomeSection({ businessName, profilePictures = [], heroTi
               onMouseEnter={() => setPrimaryHover(true)}
               onMouseLeave={() => setPrimaryHover(false)}
               style={{
-                padding: "12px 28px",
+                padding: "12px 24px",
                 backgroundColor: "#16a34a",
                 color: "#ffffff",
                 border: "none",
@@ -185,7 +185,8 @@ export default function HomeSection({ businessName, profilePictures = [], heroTi
                 alignItems: "center",
                 justifyContent: "center",
                 gap: 10,
-                whiteSpace: "nowrap",
+                whiteSpace: "normal",
+                maxWidth: isMobile ? "100%" : 260,
                 fontFamily: "Poppins, sans-serif",
                 textAlign: "center",
                 transform: primaryHover ? "translateY(-7px)" : "translateY(0)",
@@ -195,7 +196,7 @@ export default function HomeSection({ businessName, profilePictures = [], heroTi
               }}
             >
 
-              <span style={{ display: "inline-flex", alignItems: "center", whiteSpace: "nowrap", fontFamily: "Poppins, sans-serif" }}>
+              <span style={{ display: "inline-flex", alignItems: "center", flexShrink: 0, fontFamily: "Poppins, sans-serif" }}>
                 {primaryIconUrl ? (
                   <img
                     src={primaryIconUrl}
@@ -222,7 +223,16 @@ export default function HomeSection({ businessName, profilePictures = [], heroTi
                   </svg>
                 )}
               </span>
-              <span>{primaryLabel}</span>
+              <span
+                style={{
+                  display: "inline-block",
+                  textAlign: "center",
+                  lineHeight: 1.3,
+                  wordBreak: "break-word",
+                }}
+              >
+                {primaryLabel}
+              </span>
             </button>
 
             <button
@@ -230,7 +240,7 @@ export default function HomeSection({ businessName, profilePictures = [], heroTi
               onMouseEnter={() => setSecondaryHover(true)}
               onMouseLeave={() => setSecondaryHover(false)}
               style={{
-                padding: "12px 28px",
+                padding: "12px 24px",
                 backgroundColor: "#ffffff",
                 color: "#16a34a",
                 border: "2px solid #16a34a",
@@ -242,9 +252,10 @@ export default function HomeSection({ businessName, profilePictures = [], heroTi
                 display: "inline-flex",
                 alignItems: "center",
                 gap: 10,
-                whiteSpace: "nowrap",
+                whiteSpace: "normal",
                 fontFamily: "Poppins, sans-serif",
                 justifyContent: "center",
+                maxWidth: isMobile ? "100%" : 260,
                 transform: secondaryHover ? "translateY(-7px)" : "translateY(0)",
                 opacity: secondaryHover ? 1 : 0.9,
                 transition: "transform 250ms ease, box-shadow 250ms ease, opacity 250ms ease",
@@ -275,7 +286,16 @@ export default function HomeSection({ businessName, profilePictures = [], heroTi
                   </svg>
                 )}
               </span>
-              <span>{secondaryLabel}</span>
+              <span
+                style={{
+                  display: "inline-block",
+                  textAlign: "center",
+                  lineHeight: 1.3,
+                  wordBreak: "break-word",
+                }}
+              >
+                {secondaryLabel}
+              </span>
             </button>
           </div>
         </div>

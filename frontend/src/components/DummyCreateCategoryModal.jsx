@@ -188,6 +188,15 @@ function DummyCreateCategoryModal({
   const [whyUsCards, setWhyUsCards] = useState(
     Array.from({ length: 6 }, () => ({ title: "", description: "", iconFile: null }))
   );
+  const [showAboutPopup, setShowAboutPopup] = useState(false);
+  const [aboutHeading, setAboutHeading] = useState("");
+  const [aboutMainText, setAboutMainText] = useState("");
+  const [aboutMission, setAboutMission] = useState("");
+  const [aboutVision, setAboutVision] = useState("");
+  const [aboutCardTitle, setAboutCardTitle] = useState("");
+  const [aboutCardDescription, setAboutCardDescription] = useState("");
+  const [aboutCardButtonLabel, setAboutCardButtonLabel] = useState("");
+  const [aboutCardIconFile, setAboutCardIconFile] = useState(null);
 const [selectedMasterIndex, setSelectedMasterIndex] = useState(0);
 // Subcategory linking modal state (dummy)
 const [showSubcatSelector, setShowSubcatSelector] = useState(false);
@@ -330,6 +339,25 @@ const [subcategoryNameById, setSubcategoryNameById] = useState({});
           Array.from({ length: 6 }, () => ({ title: "", description: "", iconFile: null }))
         );
       }
+      if (initialData.about && typeof initialData.about === "object") {
+        setAboutHeading(initialData.about.heading || "");
+        setAboutMainText(initialData.about.mainText || "");
+        setAboutMission(initialData.about.mission || "");
+        setAboutVision(initialData.about.vision || "");
+        const card = initialData.about.card && typeof initialData.about.card === "object" ? initialData.about.card : {};
+        setAboutCardTitle(card.title || "");
+        setAboutCardDescription(card.description || "");
+        setAboutCardButtonLabel(card.buttonLabel || "");
+      } else {
+        setAboutHeading("");
+        setAboutMainText("");
+        setAboutMission("");
+        setAboutVision("");
+        setAboutCardTitle("");
+        setAboutCardDescription("");
+        setAboutCardButtonLabel("");
+      }
+      setAboutCardIconFile(null);
       if (Array.isArray(initialData.signupLevels)) {
         const levels = [];
         const details = {};
@@ -387,6 +415,14 @@ const [subcategoryNameById, setSubcategoryNameById] = useState({});
       setWhyUsCards(
         Array.from({ length: 6 }, () => ({ title: "", description: "", iconFile: null }))
       );
+      setAboutHeading("");
+      setAboutMainText("");
+      setAboutMission("");
+      setAboutVision("");
+      setAboutCardTitle("");
+      setAboutCardDescription("");
+      setAboutCardButtonLabel("");
+      setAboutCardIconFile(null);
     }
   }, [show, initialData, parentId, parentCategoryType, parentEnableFreeText]);
 
@@ -665,6 +701,16 @@ const [subcategoryNameById, setSubcategoryNameById] = useState({});
           }
         });
       }
+      formData.append("aboutHeading", aboutHeading || "");
+      formData.append("aboutMainText", aboutMainText || "");
+      formData.append("aboutMission", aboutMission || "");
+      formData.append("aboutVision", aboutVision || "");
+      formData.append("aboutCardTitle", aboutCardTitle || "");
+      formData.append("aboutCardDescription", aboutCardDescription || "");
+      formData.append("aboutCardButtonLabel", aboutCardButtonLabel || "");
+      if (aboutCardIconFile) {
+        formData.append("aboutCardIcon", aboutCardIconFile);
+      }
       if (!parentId) {
         const levelsPayload = (signupLevels || []).map((lvl, idx) => ({
           levelName: lvl,
@@ -854,12 +900,17 @@ const [subcategoryNameById, setSubcategoryNameById] = useState({});
               const hasHomeNow = arr.includes("Home");
               const hadWhyUsBefore = Array.isArray(webMenuItems) && webMenuItems.includes("Why Us");
               const hasWhyUsNow = arr.includes("Why Us");
+              const hadAboutBefore = Array.isArray(webMenuItems) && webMenuItems.includes("About");
+              const hasAboutNow = arr.includes("About");
               setWebMenuItems(arr);
               if (!hadHomeBefore && hasHomeNow) {
                 setShowHomePopup(true);
               }
               if (!hadWhyUsBefore && hasWhyUsNow) {
                 setShowWhyUsPopup(true);
+              }
+              if (!hadAboutBefore && hasAboutNow) {
+                setShowAboutPopup(true);
               }
             }}
             placeholder="Select menu items"
@@ -1899,6 +1950,169 @@ const [subcategoryNameById, setSubcategoryNameById] = useState({});
                 <button
                   type="button"
                   onClick={() => setShowHomePopup(false)}
+                  style={{
+                    padding: "8px 12px",
+                    borderRadius: 8,
+                    border: "none",
+                    background: "#0078d7",
+                    color: "#fff",
+                    fontWeight: 600,
+                    cursor: "pointer",
+                  }}
+                >
+                  Save
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showAboutPopup && (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            zIndex: 4000,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            background: "rgba(0,0,0,0.45)",
+          }}
+        >
+          <div
+            style={{
+              background: "#fff",
+              borderRadius: 12,
+              width: 650,
+              maxWidth: "95vw",
+              maxHeight: "85vh",
+              overflow: "hidden",
+              display: "flex",
+              flexDirection: "column",
+            }}
+          >
+            <div
+              style={{
+                padding: 14,
+                borderBottom: "1px solid #eee",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+              }}
+            >
+              <h3 style={{ margin: 0, color: "#0078d7" }}>About Configuration</h3>
+              <button
+                type="button"
+                onClick={() => setShowAboutPopup(false)}
+                style={{
+                  border: "none",
+                  background: "transparent",
+                  fontSize: 20,
+                  cursor: "pointer",
+                }}
+              >
+                ×
+              </button>
+            </div>
+            <div style={{ padding: 16, overflowY: "auto" }}>
+              <div style={{ marginBottom: 12 }}>
+                <h4 style={labelStyle}>Heading</h4>
+                <input
+                  type="text"
+                  value={aboutHeading}
+                  onChange={(e) => setAboutHeading(e.target.value)}
+                  style={inputStyle}
+                  placeholder="Enter heading"
+                />
+              </div>
+              <div style={{ marginBottom: 12 }}>
+                <h4 style={labelStyle}>Main Text</h4>
+                <textarea
+                  value={aboutMainText}
+                  onChange={(e) => setAboutMainText(e.target.value)}
+                  style={{ ...inputStyle, minHeight: 80, resize: "vertical" }}
+                  placeholder="Enter main text"
+                />
+              </div>
+              <div style={{ marginBottom: 12 }}>
+                <h4 style={labelStyle}>Mission</h4>
+                <input
+                  type="text"
+                  value={aboutMission}
+                  onChange={(e) => setAboutMission(e.target.value)}
+                  style={inputStyle}
+                  placeholder="Enter mission"
+                />
+              </div>
+              <div style={{ marginBottom: 12 }}>
+                <h4 style={labelStyle}>Vision</h4>
+                <input
+                  type="text"
+                  value={aboutVision}
+                  onChange={(e) => setAboutVision(e.target.value)}
+                  style={inputStyle}
+                  placeholder="Enter vision"
+                />
+              </div>
+              <div style={{ marginBottom: 12 }}>
+                <h4 style={labelStyle}>Card Section</h4>
+                <div
+                  style={{
+                    border: "1px solid #e5e7eb",
+                    borderRadius: 10,
+                    padding: 10,
+                    background: "#f9fafb",
+                  }}
+                >
+                  <input
+                    type="text"
+                    value={aboutCardTitle}
+                    onChange={(e) => setAboutCardTitle(e.target.value)}
+                    placeholder="Title"
+                    style={{ ...inputStyle, marginBottom: 6 }}
+                  />
+                  <textarea
+                    value={aboutCardDescription}
+                    onChange={(e) => setAboutCardDescription(e.target.value)}
+                    placeholder="Description"
+                    style={{ ...inputStyle, minHeight: 60, marginBottom: 6 }}
+                  />
+                  <input
+                    type="text"
+                    value={aboutCardButtonLabel}
+                    onChange={(e) => setAboutCardButtonLabel(e.target.value)}
+                    placeholder="Button label"
+                    style={{ ...inputStyle, marginBottom: 6 }}
+                  />
+                  <input
+                    type="file"
+                    accept="image/*"
+                    onChange={(e) => {
+                      const file = e.target.files && e.target.files[0] ? e.target.files[0] : null;
+                      setAboutCardIconFile(file);
+                    }}
+                    style={inputStyle}
+                  />
+                </div>
+              </div>
+              <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 8 }}>
+                <button
+                  type="button"
+                  onClick={() => setShowAboutPopup(false)}
+                  style={{
+                    padding: "8px 12px",
+                    borderRadius: 8,
+                    border: "1px solid #e2e8f0",
+                    background: "#fff",
+                    cursor: "pointer",
+                  }}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowAboutPopup(false)}
                   style={{
                     padding: "8px 12px",
                     borderRadius: 8,

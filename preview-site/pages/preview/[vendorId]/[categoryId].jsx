@@ -42,6 +42,7 @@ export default function PreviewPage() {
   const [heroDescription, setHeroDescription] = useState(null);
   const [homePopup, setHomePopup] = useState(null);
   const [whyUs, setWhyUs] = useState(null);
+  const [about, setAbout] = useState(null);
   const [vendorAddonTitle, setVendorAddonTitle] = useState(null);
   const [vendorAddonDescription, setVendorAddonDescription] = useState(null);
   const [activeServiceKey, setActiveServiceKey] = useState(null); // which service/card should animate
@@ -133,6 +134,11 @@ export default function PreviewPage() {
             } else {
               setWhyUs(null);
             }
+            if (wmJson?.about && typeof wmJson.about === 'object') {
+              setAbout(wmJson.about);
+            } else {
+              setAbout(null);
+            }
             // Derive nav label from categoryType
             const rawType = (wmJson?.categoryType || "").toString();
             let lbl = "Our Services";
@@ -143,11 +149,17 @@ export default function PreviewPage() {
           } else {
             setWebMenu([]);
             setServicesNavLabel("Our Services");
+            setHomePopup(null);
+            setWhyUs(null);
+            setAbout(null);
           }
         }
       } catch {
         setWebMenu([]);
         setServicesNavLabel("Our Services");
+        setHomePopup(null);
+        setWhyUs(null);
+        setAbout(null);
       }
 
       const forceDummy = String(mode || '').toLowerCase() === 'dummy';
@@ -3002,6 +3014,7 @@ export default function PreviewPage() {
           <AboutSection
             categoryName={String(categoryTree?.name || "").toLowerCase()}
             businessName={vendor?.businessName}
+            about={about}
           />
           <ContactSection
             contactNumber={vendor?.customerId?.fullNumber || vendor?.phone || "-"}

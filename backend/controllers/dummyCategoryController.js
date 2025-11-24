@@ -103,6 +103,7 @@ exports.createCategory = async (req, res) => {
     const iconFile = req.files && Array.isArray(req.files.icon) && req.files.icon[0];
     const homeBtn1File = req.files && Array.isArray(req.files.homeButton1Icon) && req.files.homeButton1Icon[0];
     const homeBtn2File = req.files && Array.isArray(req.files.homeButton2Icon) && req.files.homeButton2Icon[0];
+    const aboutCardFile = req.files && Array.isArray(req.files.aboutCardIcon) && req.files.aboutCardIcon[0];
     const whyUsCardFiles = [];
     for (let i = 1; i <= 6; i++) {
       const key = `whyUsCard${i}Icon`;
@@ -114,13 +115,15 @@ exports.createCategory = async (req, res) => {
     let iconUrl = undefined;
     let homeButton1IconUrl = undefined;
     let homeButton2IconUrl = undefined;
+    let aboutCardIconUrl = undefined;
     const whyUsCardIconUrls = Array(6).fill("");
     if (
       (imageFile && imageFile.buffer && imageFile.mimetype) ||
       (iconFile && iconFile.buffer && iconFile.mimetype) ||
       (homeBtn1File && homeBtn1File.buffer && homeBtn1File.mimetype) ||
       (homeBtn2File && homeBtn2File.buffer && homeBtn2File.mimetype) ||
-      whyUsCardFiles.some((f) => f && f.buffer && f.mimetype)
+      whyUsCardFiles.some((f) => f && f.buffer && f.mimetype) ||
+      (aboutCardFile && aboutCardFile.buffer && aboutCardFile.mimetype)
     ) {
       try {
         if (imageFile && imageFile.buffer && imageFile.mimetype) {
@@ -146,6 +149,12 @@ exports.createCategory = async (req, res) => {
           const segs = await buildDummySegmentsForCreate(parentId, name);
           const { url } = await uploadBufferToS3WithLabel(homeBtn2File.buffer, homeBtn2File.mimetype, "newcategory", uuidv4(), { segments: segs });
           homeButton2IconUrl = url;
+        }
+        if (aboutCardFile && aboutCardFile.buffer && aboutCardFile.mimetype) {
+          if (aboutCardIconUrl) { try { await deleteS3ObjectByUrl(aboutCardIconUrl); } catch {} }
+          const segs = await buildDummySegmentsForCreate(parentId, name);
+          const { url } = await uploadBufferToS3WithLabel(aboutCardFile.buffer, aboutCardFile.mimetype, "newcategory", uuidv4(), { segments: segs });
+          aboutCardIconUrl = url;
         }
         for (let i = 0; i < whyUsCardFiles.length; i++) {
           const f = whyUsCardFiles[i];
@@ -201,6 +210,19 @@ exports.createCategory = async (req, res) => {
           description: req.body[`whyUsCard${idx + 1}Description`] || "",
           iconUrl: whyUsCardIconUrls[idx] || "",
         })),
+      };
+
+      categoryData.about = {
+        heading: req.body.aboutHeading || "",
+        mainText: req.body.aboutMainText || "",
+        mission: req.body.aboutMission || "",
+        vision: req.body.aboutVision || "",
+        card: {
+          title: req.body.aboutCardTitle || "",
+          description: req.body.aboutCardDescription || "",
+          buttonLabel: req.body.aboutCardButtonLabel || "",
+          iconUrl: aboutCardIconUrl || "",
+        },
       };
 
       // arrays may arrive as JSON or string
@@ -317,6 +339,7 @@ exports.updateCategory = async (req, res) => {
     const iconFile = req.files && Array.isArray(req.files.icon) && req.files.icon[0];
     const homeBtn1File = req.files && Array.isArray(req.files.homeButton1Icon) && req.files.homeButton1Icon[0];
     const homeBtn2File = req.files && Array.isArray(req.files.homeButton2Icon) && req.files.homeButton2Icon[0];
+    const aboutCardFile = req.files && Array.isArray(req.files.aboutCardIcon) && req.files.aboutCardIcon[0];
     const whyUsCardFiles = [];
     for (let i = 1; i <= 6; i++) {
       const key = `whyUsCard${i}Icon`;
@@ -372,6 +395,21 @@ exports.updateCategory = async (req, res) => {
       }
     }
 
+    if (isTopLevelDummy && aboutCardFile && aboutCardFile.buffer && aboutCardFile.mimetype) {
+      try {
+        if (doc.about && doc.about.card && doc.about.card.iconUrl) {
+          try { await deleteS3ObjectByUrl(doc.about.card.iconUrl); } catch {}
+        }
+        const segs = await buildDummySegmentsForExisting(doc, name);
+        const { url } = await uploadBufferToS3WithLabel(aboutCardFile.buffer, aboutCardFile.mimetype, "newcategory", uuidv4(), { segments: segs });
+        if (!doc.about) doc.about = { heading: "", mainText: "", mission: "", vision: "", card: { title: "", description: "", buttonLabel: "", iconUrl: "" } };
+        if (!doc.about.card) doc.about.card = { title: "", description: "", buttonLabel: "", iconUrl: "" };
+        doc.about.card.iconUrl = url;
+      } catch (e) {
+        return res.status(500).json({ message: "Failed to upload aboutCardIcon to S3", error: e.message });
+      }
+    }
+
     if (inventoryLabelName !== undefined) doc.inventoryLabelName = inventoryLabelName;
 
     // top-level specific updates
@@ -421,6 +459,20 @@ exports.updateCategory = async (req, res) => {
           }
         }
       }
+
+      if (!doc.about) {
+        doc.about = { heading: "", mainText: "", mission: "", vision: "", card: { title: "", description: "", buttonLabel: "", iconUrl: "" } };
+      }
+      if (!doc.about.card) {
+        doc.about.card = { title: "", description: "", buttonLabel: "", iconUrl: "" };
+      }
+      if (req.body.aboutHeading !== undefined) doc.about.heading = req.body.aboutHeading;
+      if (req.body.aboutMainText !== undefined) doc.about.mainText = req.body.aboutMainText;
+      if (req.body.aboutMission !== undefined) doc.about.mission = req.body.aboutMission;
+      if (req.body.aboutVision !== undefined) doc.about.vision = req.body.aboutVision;
+      if (req.body.aboutCardTitle !== undefined) doc.about.card.title = req.body.aboutCardTitle;
+      if (req.body.aboutCardDescription !== undefined) doc.about.card.description = req.body.aboutCardDescription;
+      if (req.body.aboutCardButtonLabel !== undefined) doc.about.card.buttonLabel = req.body.aboutCardButtonLabel;
 
       [
         "categoryVisibility",

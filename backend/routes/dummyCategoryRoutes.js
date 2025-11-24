@@ -15,6 +15,7 @@ const uploadFields = upload.fields([
   { name: "whyUsCard4Icon", maxCount: 1 },
   { name: "whyUsCard5Icon", maxCount: 1 },
   { name: "whyUsCard6Icon", maxCount: 1 },
+  { name: "aboutCardIcon", maxCount: 1 },
 ]);
 
 const ctrl = require("../controllers/dummyCategoryController");
