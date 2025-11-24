@@ -41,6 +41,20 @@ const DummyCategorySchema = new mongoose.Schema({
     button2Label: { type: String, default: '' },
     button2IconUrl: { type: String, default: '' },
   },
+  whyUs: {
+    heading: { type: String, default: '' },
+    subHeading: { type: String, default: '' },
+    cards: {
+      type: [
+        {
+          title: { type: String, default: '' },
+          description: { type: String, default: '' },
+          iconUrl: { type: String, default: '' },
+        },
+      ],
+      default: Array(6).fill({}).map(() => ({ title: '', description: '', iconUrl: '' })),
+    },
+  },
 
   signupLevels: [
     {

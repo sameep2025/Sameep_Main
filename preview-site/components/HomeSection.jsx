@@ -46,8 +46,23 @@ export default function HomeSection({ businessName, profilePictures = [], heroTi
   const isMobile = vw <= 768;
   const isTablet = vw > 768 && vw <= 1024;
 
-  const resolvedTitle = (homePopup?.tagline && String(homePopup.tagline).trim()) || heroTitle || businessName || "";
-  const resolvedDescription = (homePopup?.description && String(homePopup.description).trim()) || heroDescription || "";
+  const trimOrNull = (v) => {
+    const s = String(v ?? "").trim();
+    return s || null;
+  };
+
+  const resolvedTitle =
+    trimOrNull(vendorAddonTitle) ||
+    (homePopup?.tagline && String(homePopup.tagline).trim()) ||
+    heroTitle ||
+    businessName ||
+    "";
+
+  const resolvedDescription =
+    trimOrNull(vendorAddonDescription) ||
+    (homePopup?.description && String(homePopup.description).trim()) ||
+    heroDescription ||
+    "";
 
   const primaryLabel = (homePopup?.button1Label && String(homePopup.button1Label).trim()) || "Explore Courses";
   const secondaryLabel = (homePopup?.button2Label && String(homePopup.button2Label).trim()) || "Get a Quote";

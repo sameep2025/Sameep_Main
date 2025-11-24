@@ -41,6 +41,7 @@ export default function PreviewPage() {
   const [heroTitle, setHeroTitle] = useState(null);
   const [heroDescription, setHeroDescription] = useState(null);
   const [homePopup, setHomePopup] = useState(null);
+  const [whyUs, setWhyUs] = useState(null);
   const [vendorAddonTitle, setVendorAddonTitle] = useState(null);
   const [vendorAddonDescription, setVendorAddonDescription] = useState(null);
   const [activeServiceKey, setActiveServiceKey] = useState(null); // which service/card should animate
@@ -126,6 +127,11 @@ export default function PreviewPage() {
               setHomePopup(wmJson.homePopup);
             } else {
               setHomePopup(null);
+            }
+            if (wmJson?.whyUs && typeof wmJson.whyUs === 'object') {
+              setWhyUs(wmJson.whyUs);
+            } else {
+              setWhyUs(null);
             }
             // Derive nav label from categoryType
             const rawType = (wmJson?.categoryType || "").toString();
@@ -2991,6 +2997,7 @@ export default function PreviewPage() {
           <BenefitsSection
             categoryName={String(categoryTree?.name || "").toLowerCase()}
             businessName={vendor?.businessName}
+            whyUs={whyUs}
           />
           <AboutSection
             categoryName={String(categoryTree?.name || "").toLowerCase()}

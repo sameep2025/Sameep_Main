@@ -2,21 +2,35 @@
 import React from "react";
 import { Zap, Award, ShieldCheck, CalendarCheck2, Handshake, Gem } from "lucide-react";
 
-export default function BenefitsSection({ categoryName, businessName }) {
+export default function BenefitsSection({ categoryName, businessName, whyUs }) {
   const isDriving = String(categoryName || "").toLowerCase() === "driving school";
   const trimmedBusiness = String(businessName || "").trim();
 
-  const heading = trimmedBusiness
+  const hasWhyUs =
+    whyUs && typeof whyUs === "object" &&
+    ((whyUs.heading && String(whyUs.heading).trim()) ||
+      (whyUs.subHeading && String(whyUs.subHeading).trim()) ||
+      (Array.isArray(whyUs.cards) && whyUs.cards.length));
+
+  const baseHeading = trimmedBusiness
     ? `Why Choose ${trimmedBusiness}?`
     : isDriving
     ? "Why Choose Driving School?"
     : "Why Choose Us";
 
-  const subText = isDriving
+  const heading = hasWhyUs && whyUs.heading && String(whyUs.heading).trim()
+    ? String(whyUs.heading).trim()
+    : baseHeading;
+
+  const baseSubText = isDriving
     ? "Experience the difference with our commitment to excellence, safety, and customer satisfaction."
     : "We provide top-notch services and products that help you achieve the best results. Our commitment to quality and customer satisfaction is unmatched.";
 
-  const benefitsData = isDriving
+  const subText = hasWhyUs && whyUs.subHeading && String(whyUs.subHeading).trim()
+    ? String(whyUs.subHeading).trim()
+    : baseSubText;
+
+  const fallbackBenefits = isDriving
     ? [
         {
           title: "Efficient Learning",
@@ -51,6 +65,20 @@ export default function BenefitsSection({ categoryName, businessName }) {
         { title: "Trusted Service", desc: "We value long-term customer relationships." },
         { title: "Special Offers", desc: "Exciting deals and discounts regularly." },
       ];
+
+  const benefitsData = (() => {
+    if (!hasWhyUs || !Array.isArray(whyUs.cards)) return fallbackBenefits;
+    const cleaned = whyUs.cards
+      .map((c) => c || {})
+      .map((c) => ({
+        title: String(c.title || "").trim(),
+        desc: String(c.description || "").trim(),
+        iconUrl: c.iconUrl || "",
+      }))
+      .filter((c) => c.title || c.desc || c.iconUrl);
+    return cleaned.length ? cleaned : fallbackBenefits;
+  })();
+
   const icons = [Zap, Award, ShieldCheck, CalendarCheck2, Handshake, Gem];
 
   return (
@@ -140,9 +168,18 @@ export default function BenefitsSection({ categoryName, businessName }) {
                     justifyContent: "center",
                     color: "#059669", // icon color
                     marginBottom: 16,
+                    overflow: "hidden",
                   }}
                 >
-                  <Icon style={{ width: 28, height: 28 }} />
+                  {item.iconUrl ? (
+                    <img
+                      src={item.iconUrl}
+                      alt={item.title || "Icon"}
+                      style={{ width: "100%", height: "100%", objectFit: "cover" }}
+                    />
+                  ) : (
+                    <Icon style={{ width: 28, height: 28 }} />
+                  )}
                 </div>
                 <h3
                   style={{

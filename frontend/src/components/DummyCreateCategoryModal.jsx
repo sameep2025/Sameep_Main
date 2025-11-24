@@ -182,6 +182,12 @@ function DummyCreateCategoryModal({
   const [homeButton2Label, setHomeButton2Label] = useState("");
   const [homeButton1Icon, setHomeButton1Icon] = useState(null);
   const [homeButton2Icon, setHomeButton2Icon] = useState(null);
+  const [showWhyUsPopup, setShowWhyUsPopup] = useState(false);
+  const [whyUsHeading, setWhyUsHeading] = useState("");
+  const [whyUsSubHeading, setWhyUsSubHeading] = useState("");
+  const [whyUsCards, setWhyUsCards] = useState(
+    Array.from({ length: 6 }, () => ({ title: "", description: "", iconFile: null }))
+  );
 const [selectedMasterIndex, setSelectedMasterIndex] = useState(0);
 // Subcategory linking modal state (dummy)
 const [showSubcatSelector, setShowSubcatSelector] = useState(false);
@@ -304,6 +310,26 @@ const [subcategoryNameById, setSubcategoryNameById] = useState({});
       }
       setHomeButton1Icon(null);
       setHomeButton2Icon(null);
+      if (initialData.whyUs && typeof initialData.whyUs === "object") {
+        setWhyUsHeading(initialData.whyUs.heading || "");
+        setWhyUsSubHeading(initialData.whyUs.subHeading || "");
+        const cards = Array.isArray(initialData.whyUs.cards) ? initialData.whyUs.cards : [];
+        const nextCards = Array.from({ length: 6 }, (_, idx) => {
+          const c = cards[idx] || {};
+          return {
+            title: c.title || "",
+            description: c.description || "",
+            iconFile: null,
+          };
+        });
+        setWhyUsCards(nextCards);
+      } else {
+        setWhyUsHeading("");
+        setWhyUsSubHeading("");
+        setWhyUsCards(
+          Array.from({ length: 6 }, () => ({ title: "", description: "", iconFile: null }))
+        );
+      }
       if (Array.isArray(initialData.signupLevels)) {
         const levels = [];
         const details = {};
@@ -356,6 +382,11 @@ const [subcategoryNameById, setSubcategoryNameById] = useState({});
       setHomeButton2Label("");
       setHomeButton1Icon(null);
       setHomeButton2Icon(null);
+      setWhyUsHeading("");
+      setWhyUsSubHeading("");
+      setWhyUsCards(
+        Array.from({ length: 6 }, () => ({ title: "", description: "", iconFile: null }))
+      );
     }
   }, [show, initialData, parentId, parentCategoryType, parentEnableFreeText]);
 
@@ -621,6 +652,19 @@ const [subcategoryNameById, setSubcategoryNameById] = useState({});
       formData.append("homeButton2Label", homeButton2Label || "");
       if (homeButton1Icon) formData.append("homeButton1Icon", homeButton1Icon);
       if (homeButton2Icon) formData.append("homeButton2Icon", homeButton2Icon);
+      formData.append("whyUsHeading", whyUsHeading || "");
+      formData.append("whyUsSubHeading", whyUsSubHeading || "");
+      if (Array.isArray(whyUsCards)) {
+        whyUsCards.forEach((card, idx) => {
+          const index = idx + 1;
+          const safe = card || {};
+          formData.append(`whyUsCard${index}Title`, safe.title || "");
+          formData.append(`whyUsCard${index}Description`, safe.description || "");
+          if (safe.iconFile) {
+            formData.append(`whyUsCard${index}Icon`, safe.iconFile);
+          }
+        });
+      }
       if (!parentId) {
         const levelsPayload = (signupLevels || []).map((lvl, idx) => ({
           levelName: lvl,
@@ -677,6 +721,11 @@ const [subcategoryNameById, setSubcategoryNameById] = useState({});
       setHomeButton2Label("");
       setHomeButton1Icon(null);
       setHomeButton2Icon(null);
+      setWhyUsHeading("");
+      setWhyUsSubHeading("");
+      setWhyUsCards(
+        Array.from({ length: 6 }, () => ({ title: "", description: "", iconFile: null }))
+      );
       onCreated?.();
       onClose?.();
     } catch (err) {
@@ -803,9 +852,14 @@ const [subcategoryNameById, setSubcategoryNameById] = useState({});
               // Only open popup when Home is newly added (was not selected before)
               const hadHomeBefore = Array.isArray(webMenuItems) && webMenuItems.includes("Home");
               const hasHomeNow = arr.includes("Home");
+              const hadWhyUsBefore = Array.isArray(webMenuItems) && webMenuItems.includes("Why Us");
+              const hasWhyUsNow = arr.includes("Why Us");
               setWebMenuItems(arr);
               if (!hadHomeBefore && hasHomeNow) {
                 setShowHomePopup(true);
+              }
+              if (!hadWhyUsBefore && hasWhyUsNow) {
+                setShowWhyUsPopup(true);
               }
             }}
             placeholder="Select menu items"
@@ -1845,6 +1899,159 @@ const [subcategoryNameById, setSubcategoryNameById] = useState({});
                 <button
                   type="button"
                   onClick={() => setShowHomePopup(false)}
+                  style={{
+                    padding: "8px 12px",
+                    borderRadius: 8,
+                    border: "none",
+                    background: "#0078d7",
+                    color: "#fff",
+                    fontWeight: 600,
+                    cursor: "pointer",
+                  }}
+                >
+                  Save
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showWhyUsPopup && (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            zIndex: 4000,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            background: "rgba(0,0,0,0.45)",
+          }}
+        >
+          <div
+            style={{
+              background: "#fff",
+              borderRadius: 12,
+              width: 700,
+              maxWidth: "95vw",
+              maxHeight: "85vh",
+              overflow: "hidden",
+              display: "flex",
+              flexDirection: "column",
+            }}
+          >
+            <div
+              style={{
+                padding: 14,
+                borderBottom: "1px solid #eee",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+              }}
+            >
+              <h3 style={{ margin: 0, color: "#0078d7" }}>Why Us Configuration</h3>
+              <button
+                type="button"
+                onClick={() => setShowWhyUsPopup(false)}
+                style={{
+                  border: "none",
+                  background: "transparent",
+                  fontSize: 20,
+                  cursor: "pointer",
+                }}
+              >
+                ×
+              </button>
+            </div>
+            <div style={{ padding: 16, overflowY: "auto" }}>
+              <div style={{ marginBottom: 12 }}>
+                <h4 style={labelStyle}>Heading</h4>
+                <input
+                  type="text"
+                  value={whyUsHeading}
+                  onChange={(e) => setWhyUsHeading(e.target.value)}
+                  style={inputStyle}
+                  placeholder="Enter heading"
+                />
+              </div>
+              <div style={{ marginBottom: 12 }}>
+                <h4 style={labelStyle}>Sub-Heading</h4>
+                <input
+                  type="text"
+                  value={whyUsSubHeading}
+                  onChange={(e) => setWhyUsSubHeading(e.target.value)}
+                  style={inputStyle}
+                  placeholder="Enter sub-heading"
+                />
+              </div>
+              <div style={{ marginBottom: 12 }}>
+                <h4 style={labelStyle}>Card Section (1 - 6)</h4>
+                <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                  {whyUsCards.map((card, idx) => (
+                    <div
+                      key={idx}
+                      style={{
+                        border: "1px solid #e5e7eb",
+                        borderRadius: 10,
+                        padding: 10,
+                        background: "#f9fafb",
+                      }}
+                    >
+                      <div style={{ fontWeight: 600, marginBottom: 6 }}>Card {idx + 1}</div>
+                      <input
+                        type="text"
+                        value={card.title}
+                        onChange={(e) => {
+                          const next = [...whyUsCards];
+                          next[idx] = { ...next[idx], title: e.target.value };
+                          setWhyUsCards(next);
+                        }}
+                        placeholder="Title"
+                        style={{ ...inputStyle, marginBottom: 6 }}
+                      />
+                      <textarea
+                        value={card.description}
+                        onChange={(e) => {
+                          const next = [...whyUsCards];
+                          next[idx] = { ...next[idx], description: e.target.value };
+                          setWhyUsCards(next);
+                        }}
+                        placeholder="Description"
+                        style={{ ...inputStyle, minHeight: 60, marginBottom: 6 }}
+                      />
+                      <input
+                        type="file"
+                        accept="image/*"
+                        onChange={(e) => {
+                          const file = e.target.files && e.target.files[0] ? e.target.files[0] : null;
+                          const next = [...whyUsCards];
+                          next[idx] = { ...next[idx], iconFile: file };
+                          setWhyUsCards(next);
+                        }}
+                        style={inputStyle}
+                      />
+                    </div>
+                  ))}
+                </div>
+              </div>
+              <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 8 }}>
+                <button
+                  type="button"
+                  onClick={() => setShowWhyUsPopup(false)}
+                  style={{
+                    padding: "8px 12px",
+                    borderRadius: 8,
+                    border: "1px solid #e2e8f0",
+                    background: "#fff",
+                    cursor: "pointer",
+                  }}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowWhyUsPopup(false)}
                   style={{
                     padding: "8px 12px",
                     borderRadius: 8,
