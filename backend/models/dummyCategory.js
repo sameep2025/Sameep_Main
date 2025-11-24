@@ -32,6 +32,15 @@ const DummyCategorySchema = new mongoose.Schema({
   categoryPricing: { type: [String], default: [] },
   socialHandle: { type: [String], default: [] },
   displayType: { type: [String], default: [] },
+  webMenu: { type: [String], default: [] },
+  homePopup: {
+    tagline: { type: String, default: '' },
+    description: { type: String, default: '' },
+    button1Label: { type: String, default: '' },
+    button1IconUrl: { type: String, default: '' },
+    button2Label: { type: String, default: '' },
+    button2IconUrl: { type: String, default: '' },
+  },
 
   signupLevels: [
     {

@@ -161,6 +161,7 @@ function DummyCreateCategoryModal({
   const [socialHandle, setSocialHandle] = useState([]);
   const [displayType, setDisplayType] = useState([]);
   const [allMasters, setAllMasters] = useState([]);
+  const [webMenuItems, setWebMenuItems] = useState([]);
   const [linkedAttributes, setLinkedAttributes] = useState({});
   const [inventoryLabelName, setInventoryLabelName] = useState("");
   const [showInventoryLabelSection, setShowInventoryLabelSection] = useState(false);
@@ -174,6 +175,13 @@ function DummyCreateCategoryModal({
   const [signupLevels, setSignupLevels] = useState([]);
   const [signupLevelDetails, setSignupLevelDetails] = useState({});
   const [showMasterSelector, setShowMasterSelector] = useState(false);
+  const [showHomePopup, setShowHomePopup] = useState(false);
+  const [homeTagline, setHomeTagline] = useState("");
+  const [homeDescription, setHomeDescription] = useState("");
+  const [homeButton1Label, setHomeButton1Label] = useState("");
+  const [homeButton2Label, setHomeButton2Label] = useState("");
+  const [homeButton1Icon, setHomeButton1Icon] = useState(null);
+  const [homeButton2Icon, setHomeButton2Icon] = useState(null);
 const [selectedMasterIndex, setSelectedMasterIndex] = useState(0);
 // Subcategory linking modal state (dummy)
 const [showSubcatSelector, setShowSubcatSelector] = useState(false);
@@ -282,6 +290,20 @@ const [subcategoryNameById, setSubcategoryNameById] = useState({});
       setCategoryPricing(Array.isArray(initialData.categoryPricing) ? initialData.categoryPricing : initialData.categoryPricing ? [initialData.categoryPricing] : []);
       setSocialHandle(Array.isArray(initialData.socialHandle) ? initialData.socialHandle : initialData.socialHandle ? [initialData.socialHandle] : []);
       setDisplayType(Array.isArray(initialData.displayType) ? initialData.displayType : initialData.displayType ? [initialData.displayType] : []);
+      setWebMenuItems(Array.isArray(initialData.webMenu) ? initialData.webMenu : initialData.webMenu ? [initialData.webMenu] : []);
+      if (initialData.homePopup && typeof initialData.homePopup === 'object') {
+        setHomeTagline(initialData.homePopup.tagline || "");
+        setHomeDescription(initialData.homePopup.description || "");
+        setHomeButton1Label(initialData.homePopup.button1Label || "");
+        setHomeButton2Label(initialData.homePopup.button2Label || "");
+      } else {
+        setHomeTagline("");
+        setHomeDescription("");
+        setHomeButton1Label("");
+        setHomeButton2Label("");
+      }
+      setHomeButton1Icon(null);
+      setHomeButton2Icon(null);
       if (Array.isArray(initialData.signupLevels)) {
         const levels = [];
         const details = {};
@@ -325,10 +347,24 @@ const [subcategoryNameById, setSubcategoryNameById] = useState({});
       setCategoryPricing([]);
       setSocialHandle([]);
       setDisplayType([]);
+      setWebMenuItems([]);
       setInventoryLabelName("");
       setLinkedAttributes({});
+      setHomeTagline("");
+      setHomeDescription("");
+      setHomeButton1Label("");
+      setHomeButton2Label("");
+      setHomeButton1Icon(null);
+      setHomeButton2Icon(null);
     }
   }, [show, initialData, parentId, parentCategoryType, parentEnableFreeText]);
+
+  // Whenever the modal is open and Web Menu contains Home, ensure Home popup is visible
+  // Do not auto-open the Home popup when the modal is shown.
+  // The popup is explicitly opened only when the user newly adds "Home" in Web Menu.
+  useEffect(() => {
+    if (!show) return;
+  }, [show]);
 
   useEffect(() => {
     if (!show) return;
@@ -578,6 +614,13 @@ const [subcategoryNameById, setSubcategoryNameById] = useState({});
       formData.append("categoryPricing", JSON.stringify(categoryPricing || []));
       formData.append("socialHandle", JSON.stringify(socialHandle || []));
       formData.append("displayType", JSON.stringify(displayType || []));
+      formData.append("webMenu", JSON.stringify(webMenuItems || []));
+      formData.append("homeTagline", homeTagline || "");
+      formData.append("homeDescription", homeDescription || "");
+      formData.append("homeButton1Label", homeButton1Label || "");
+      formData.append("homeButton2Label", homeButton2Label || "");
+      if (homeButton1Icon) formData.append("homeButton1Icon", homeButton1Icon);
+      if (homeButton2Icon) formData.append("homeButton2Icon", homeButton2Icon);
       if (!parentId) {
         const levelsPayload = (signupLevels || []).map((lvl, idx) => ({
           levelName: lvl,
@@ -628,6 +671,12 @@ const [subcategoryNameById, setSubcategoryNameById] = useState({});
       setLinkAttributesPricing(false);
       setFreeTexts(Array(10).fill(""));
       setInventoryLabelName("");
+      setHomeTagline("");
+      setHomeDescription("");
+      setHomeButton1Label("");
+      setHomeButton2Label("");
+      setHomeButton1Icon(null);
+      setHomeButton2Icon(null);
       onCreated?.();
       onClose?.();
     } catch (err) {
@@ -744,6 +793,23 @@ const [subcategoryNameById, setSubcategoryNameById] = useState({});
             value={seoKeywords}
             onChange={(e) => setSeoKeywords(e.target.value)}
             style={inputStyle}
+          />
+          <ChipSelect
+            label="Web Menu"
+            options={["Home", "Categories", "Why Us", "About", "Contact"]}
+            value={webMenuItems}
+            onChange={(vals) => {
+              const arr = Array.isArray(vals) ? vals : [];
+              // Only open popup when Home is newly added (was not selected before)
+              const hadHomeBefore = Array.isArray(webMenuItems) && webMenuItems.includes("Home");
+              const hasHomeNow = arr.includes("Home");
+              setWebMenuItems(arr);
+              if (!hadHomeBefore && hasHomeNow) {
+                setShowHomePopup(true);
+              }
+            }}
+            placeholder="Select menu items"
+            multi
           />
           {!parentId && (
             <>
@@ -1089,8 +1155,6 @@ const [subcategoryNameById, setSubcategoryNameById] = useState({});
           </div>
         </form>
       </div>
-
-
 
       {showMasterSelector && (
         <div
@@ -1664,6 +1728,140 @@ const [subcategoryNameById, setSubcategoryNameById] = useState({});
           </div>
         </div>
       ) : null}
+
+      {showHomePopup && (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            zIndex: 4000,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            background: "rgba(0,0,0,0.45)",
+          }}
+        >
+          <div
+            style={{
+              background: "#fff",
+              borderRadius: 12,
+              width: 600,
+              maxWidth: "95vw",
+              maxHeight: "85vh",
+              overflow: "hidden",
+              display: "flex",
+              flexDirection: "column",
+            }}
+          >
+            <div
+              style={{
+                padding: 14,
+                borderBottom: "1px solid #eee",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+              }}
+            >
+              <h3 style={{ margin: 0, color: "#0078d7" }}>Home Popup Configuration</h3>
+              <button
+                type="button"
+                onClick={() => setShowHomePopup(false)}
+                style={{
+                  border: "none",
+                  background: "transparent",
+                  fontSize: 20,
+                  cursor: "pointer",
+                }}
+              >
+                ×
+              </button>
+            </div>
+            <div style={{ padding: 16, overflowY: "auto" }}>
+              <div style={{ marginBottom: 12 }}>
+                <h4 style={labelStyle}>Tagline</h4>
+                <input
+                  type="text"
+                  value={homeTagline}
+                  onChange={(e) => setHomeTagline(e.target.value)}
+                  style={inputStyle}
+                  placeholder="Enter tagline"
+                />
+              </div>
+              <div style={{ marginBottom: 12 }}>
+                <h4 style={labelStyle}>Description</h4>
+                <textarea
+                  value={homeDescription}
+                  onChange={(e) => setHomeDescription(e.target.value)}
+                  style={{ ...inputStyle, minHeight: 80, resize: "vertical" }}
+                  placeholder="Enter description"
+                />
+              </div>
+              <div style={{ marginBottom: 12 }}>
+                <h4 style={labelStyle}>Button Label 1 (Icon + Text)</h4>
+                <input
+                  type="file"
+                  accept="image/*"
+                  onChange={(e) => setHomeButton1Icon(e.target.files[0] || null)}
+                  style={inputStyle}
+                />
+                <input
+                  type="text"
+                  value={homeButton1Label}
+                  onChange={(e) => setHomeButton1Label(e.target.value)}
+                  style={inputStyle}
+                  placeholder="Enter button label 1"
+                />
+              </div>
+              <div style={{ marginBottom: 12 }}>
+                <h4 style={labelStyle}>Button Label 2 (Icon + Text)</h4>
+                <input
+                  type="file"
+                  accept="image/*"
+                  onChange={(e) => setHomeButton2Icon(e.target.files[0] || null)}
+                  style={inputStyle}
+                />
+                <input
+                  type="text"
+                  value={homeButton2Label}
+                  onChange={(e) => setHomeButton2Label(e.target.value)}
+                  style={inputStyle}
+                  placeholder="Enter button label 2"
+                />
+              </div>
+              <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 8 }}>
+                <button
+                  type="button"
+                  onClick={() => setShowHomePopup(false)}
+                  style={{
+                    padding: "8px 12px",
+                    borderRadius: 8,
+                    border: "1px solid #e2e8f0",
+                    background: "#fff",
+                    cursor: "pointer",
+                  }}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowHomePopup(false)}
+                  style={{
+                    padding: "8px 12px",
+                    borderRadius: 8,
+                    border: "none",
+                    background: "#0078d7",
+                    color: "#fff",
+                    fontWeight: 600,
+                    cursor: "pointer",
+                  }}
+                >
+                  Save
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
     </div>
   );

@@ -101,22 +101,46 @@ exports.createCategory = async (req, res) => {
     // handle files from multer.single or multer.fields
     const imageFile = req.file || (req.files && Array.isArray(req.files.image) && req.files.image[0]);
     const iconFile = req.files && Array.isArray(req.files.icon) && req.files.icon[0];
+    const homeBtn1File = req.files && Array.isArray(req.files.homeButton1Icon) && req.files.homeButton1Icon[0];
+    const homeBtn2File = req.files && Array.isArray(req.files.homeButton2Icon) && req.files.homeButton2Icon[0];
 
     let imageUrl = undefined;
     let iconUrl = undefined;
-    if ((imageFile && imageFile.buffer && imageFile.mimetype) || (iconFile && iconFile.buffer && iconFile.mimetype)) {
+    let homeButton1IconUrl = undefined;
+    let homeButton2IconUrl = undefined;
+    if (
+      (imageFile && imageFile.buffer && imageFile.mimetype) ||
+      (iconFile && iconFile.buffer && iconFile.mimetype) ||
+      (homeBtn1File && homeBtn1File.buffer && homeBtn1File.mimetype) ||
+      (homeBtn2File && homeBtn2File.buffer && homeBtn2File.mimetype)
+    ) {
       try {
-        const segments = await buildDummySegmentsForCreate(parentId, name);
         if (imageFile && imageFile.buffer && imageFile.mimetype) {
-          const up = await uploadBufferToS3WithLabel(imageFile.buffer, imageFile.mimetype, "newcategory", uuidv4(), { segments });
-          imageUrl = up.url;
+          if (imageUrl) { try { await deleteS3ObjectByUrl(imageUrl); } catch {} }
+          const segs = await buildDummySegmentsForCreate(parentId, name);
+          const { url } = await uploadBufferToS3WithLabel(imageFile.buffer, imageFile.mimetype, "newcategory", uuidv4(), { segments: segs });
+          imageUrl = url;
         }
         if (iconFile && iconFile.buffer && iconFile.mimetype) {
-          const up = await uploadBufferToS3WithLabel(iconFile.buffer, iconFile.mimetype, "newcategory", uuidv4(), { segments });
-          iconUrl = up.url;
+          if (iconUrl) { try { await deleteS3ObjectByUrl(iconUrl); } catch {} }
+          const segs = await buildDummySegmentsForCreate(parentId, name);
+          const { url } = await uploadBufferToS3WithLabel(iconFile.buffer, iconFile.mimetype, "newcategory", uuidv4(), { segments: segs });
+          iconUrl = url;
+        }
+        if (homeBtn1File && homeBtn1File.buffer && homeBtn1File.mimetype) {
+          if (homeButton1IconUrl) { try { await deleteS3ObjectByUrl(homeButton1IconUrl); } catch {} }
+          const segs = await buildDummySegmentsForCreate(parentId, name);
+          const { url } = await uploadBufferToS3WithLabel(homeBtn1File.buffer, homeBtn1File.mimetype, "newcategory", uuidv4(), { segments: segs });
+          homeButton1IconUrl = url;
+        }
+        if (homeBtn2File && homeBtn2File.buffer && homeBtn2File.mimetype) {
+          if (homeButton2IconUrl) { try { await deleteS3ObjectByUrl(homeButton2IconUrl); } catch {} }
+          const segs = await buildDummySegmentsForCreate(parentId, name);
+          const { url } = await uploadBufferToS3WithLabel(homeBtn2File.buffer, homeBtn2File.mimetype, "newcategory", uuidv4(), { segments: segs });
+          homeButton2IconUrl = url;
         }
       } catch (e) {
-        return res.status(500).json({ message: "Failed to upload image to S3", error: e.message });
+        return res.status(500).json({ message: "Failed to upload files to S3", error: e.message });
       }
     }
 
@@ -144,6 +168,15 @@ exports.createCategory = async (req, res) => {
         linkAttributesPricing: req.body.linkAttributesPricing === "true",
       };
 
+      categoryData.homePopup = {
+        tagline: req.body.homeTagline || "",
+        description: req.body.homeDescription || "",
+        button1Label: req.body.homeButton1Label || "",
+        button1IconUrl: homeButton1IconUrl || "",
+        button2Label: req.body.homeButton2Label || "",
+        button2IconUrl: homeButton2IconUrl || "",
+      };
+
       // arrays may arrive as JSON or string
       [
         "categoryVisibility",
@@ -151,6 +184,7 @@ exports.createCategory = async (req, res) => {
         "categoryPricing",
         "socialHandle",
         "displayType",
+        "webMenu",
       ].forEach((key) => {
         if (req.body[key] !== undefined) {
           try {
@@ -255,6 +289,9 @@ exports.updateCategory = async (req, res) => {
 
     const imageFile = req.file || (req.files && Array.isArray(req.files.image) && req.files.image[0]);
     const iconFile = req.files && Array.isArray(req.files.icon) && req.files.icon[0];
+    const homeBtn1File = req.files && Array.isArray(req.files.homeButton1Icon) && req.files.homeButton1Icon[0];
+    const homeBtn2File = req.files && Array.isArray(req.files.homeButton2Icon) && req.files.homeButton2Icon[0];
+
     if (imageFile && imageFile.buffer && imageFile.mimetype) {
       try {
         if (doc.imageUrl) { try { await deleteS3ObjectByUrl(doc.imageUrl); } catch {} }
@@ -263,6 +300,7 @@ exports.updateCategory = async (req, res) => {
         doc.imageUrl = url;
       } catch (e) { return res.status(500).json({ message: "Failed to upload image to S3", error: e.message }); }
     }
+
     if (iconFile && iconFile.buffer && iconFile.mimetype) {
       try {
         if (doc.iconUrl) { try { await deleteS3ObjectByUrl(doc.iconUrl); } catch {} }
@@ -270,6 +308,36 @@ exports.updateCategory = async (req, res) => {
         const { url } = await uploadBufferToS3WithLabel(iconFile.buffer, iconFile.mimetype, "newcategory", uuidv4(), { segments: segs });
         doc.iconUrl = url;
       } catch (e) { return res.status(500).json({ message: "Failed to upload icon to S3", error: e.message }); }
+    }
+
+    // Handle home popup button icons for top-level dummy categories
+    const isTopLevelDummy = !doc.category && !doc.parent;
+    if (isTopLevelDummy && homeBtn1File && homeBtn1File.buffer && homeBtn1File.mimetype) {
+      try {
+        if (doc.homePopup && doc.homePopup.button1IconUrl) {
+          try { await deleteS3ObjectByUrl(doc.homePopup.button1IconUrl); } catch {}
+        }
+        const segs = await buildDummySegmentsForExisting(doc, name);
+        const { url } = await uploadBufferToS3WithLabel(homeBtn1File.buffer, homeBtn1File.mimetype, "newcategory", uuidv4(), { segments: segs });
+        if (!doc.homePopup) doc.homePopup = {};
+        doc.homePopup.button1IconUrl = url;
+      } catch (e) {
+        return res.status(500).json({ message: "Failed to upload homeButton1Icon to S3", error: e.message });
+      }
+    }
+
+    if (isTopLevelDummy && homeBtn2File && homeBtn2File.buffer && homeBtn2File.mimetype) {
+      try {
+        if (doc.homePopup && doc.homePopup.button2IconUrl) {
+          try { await deleteS3ObjectByUrl(doc.homePopup.button2IconUrl); } catch {}
+        }
+        const segs = await buildDummySegmentsForExisting(doc, name);
+        const { url } = await uploadBufferToS3WithLabel(homeBtn2File.buffer, homeBtn2File.mimetype, "newcategory", uuidv4(), { segments: segs });
+        if (!doc.homePopup) doc.homePopup = {};
+        doc.homePopup.button2IconUrl = url;
+      } catch (e) {
+        return res.status(500).json({ message: "Failed to upload homeButton2Icon to S3", error: e.message });
+      }
     }
 
     if (inventoryLabelName !== undefined) doc.inventoryLabelName = inventoryLabelName;
@@ -284,12 +352,19 @@ exports.updateCategory = async (req, res) => {
       if (req.body.loyaltyPoints !== undefined) doc.loyaltyPoints = req.body.loyaltyPoints === "true";
       if (req.body.linkAttributesPricing !== undefined) doc.linkAttributesPricing = req.body.linkAttributesPricing === "true";
 
+      if (!doc.homePopup) doc.homePopup = {};
+      if (req.body.homeTagline !== undefined) doc.homePopup.tagline = req.body.homeTagline;
+      if (req.body.homeDescription !== undefined) doc.homePopup.description = req.body.homeDescription;
+      if (req.body.homeButton1Label !== undefined) doc.homePopup.button1Label = req.body.homeButton1Label;
+      if (req.body.homeButton2Label !== undefined) doc.homePopup.button2Label = req.body.homeButton2Label;
+
       [
         "categoryVisibility",
         "categoryModel",
         "categoryPricing",
         "socialHandle",
         "displayType",
+        "webMenu",
       ].forEach((key) => {
         if (req.body[key] !== undefined) {
           try {

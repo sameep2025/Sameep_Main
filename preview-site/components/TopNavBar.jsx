@@ -3,11 +3,17 @@
 import React, { useState, useEffect } from "react";
 import { Menu, ChevronDown } from "lucide-react";
 
-export default function TopNavBar({ businessName, services = [
-  "Driving Packages",
-  "Individual Courses",
-  "Commercial Training",
-] , hasPackages = false }) {
+export default function TopNavBar({
+  businessName,
+  services = [
+    "Driving Packages",
+    "Individual Courses",
+    "Commercial Training",
+  ],
+  hasPackages = false,
+  webMenu = null,
+  servicesNavLabel = "Our Services",
+}) {
   const [mobile, setMobile] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [hoverKey, setHoverKey] = useState(null);
@@ -37,6 +43,40 @@ export default function TopNavBar({ businessName, services = [
       const targetY = window.scrollY + rect.top - HEADER_OFFSET;
       window.scrollTo({ top: targetY, behavior: "smooth" });
     } catch {}
+  };
+
+  const normalizeMenu = (items) => {
+    const base = Array.isArray(items) ? items : [];
+    const cleaned = base
+      .map((v) => (v == null ? "" : String(v).trim()))
+      .filter(Boolean)
+      .map((label) => {
+        const key = String(label || "").toLowerCase();
+        return key === "categories" ? (servicesNavLabel || "Our Services") : label;
+      });
+    if (cleaned.length === 0) {
+      return ["Home", servicesNavLabel || "Our Services", "Why Us", "About", "Contact"];
+    }
+    return cleaned;
+  };
+
+  const menuItems = normalizeMenu(webMenu);
+
+  const getTargetForLabel = (label) => {
+    const key = String(label || "").toLowerCase();
+    const servicesKey = String(servicesNavLabel || "").toLowerCase();
+    if (key === "home") return "home";
+    if (
+      key === "categories" ||
+      key === servicesKey ||
+      key === "ourservices" ||
+      key === "our-services"
+    )
+      return "products";
+    if (key === "why us" || key === "whyus" || key === "why-us") return "benefits";
+    if (key === "about") return "about";
+    if (key === "contact") return "contact";
+    return "home";
   };
 
   useEffect(() => {
@@ -107,254 +147,174 @@ export default function TopNavBar({ businessName, services = [
         {/* Desktop Menu */}
         {!mobile && (
           <nav
-  style={{
-    display: "flex",
-    alignItems: "center",
-    gap: 32,
-    marginLeft: "auto",
-    background: "transparent",
-    backgroundColor: "transparent",
-    boxShadow: "none",
-    border: "none",
-  }}
->
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 32,
+              marginLeft: "auto",
+              background: "transparent",
+              backgroundColor: "transparent",
+              boxShadow: "none",
+              border: "none",
+            }}
+          >
 
+            {/* Render menu items dynamically. "Categories" controls the services dropdown. */}
+            {menuItems.map((label) => {
+              const key = String(label).toLowerCase();
+              const servicesKey = String(servicesNavLabel || "").toLowerCase();
 
-            {/* Home */}
-            <div
-              style={{
-                position: "relative",
-                cursor: "pointer",
-                fontSize: 18,
-                fontWeight: 500,
-                color: hoverKey === "home" ? "#059669" : "#111827",
-                paddingBottom: 4,
-                background: "transparent",
-                backgroundColor: "transparent",
-              }}
-              onMouseEnter={() => setHoverKey("home")}
-              onMouseLeave={() => setHoverKey(null)}
-              onClick={() => scrollToSection("home")}
-            >
-              Home
-              <div
-                style={{
-                  position: "absolute",
-                  left: 0,
-                  right: 0,
-                  bottom: 0,
-                  height: 2,
-                  background: "#22c55e",
-                  transformOrigin: "left",
-                  transform: hoverKey === "home" ? "scaleX(1)" : "scaleX(0)",
-                  transition: "transform 0.2s ease",
-                }}
-              />
-            </div>
-
-            {/* Our Services dropdown (desktop) */}
-            <div
-              style={{ position: "relative", background: "transparent", backgroundColor: "transparent" }}
-              onMouseEnter={() => {
-                setHoverKey("services");
-              }}
-              onMouseLeave={() => {
-                setHoverKey(null);
-              }}
-            >
-              <div
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 4,
-                  cursor: "pointer",
-                  fontSize: 18,
-                  fontWeight: 500,
-                  color: hoverKey === "services" ? "#059669" : "#111827",
-                  paddingBottom: 4,
-                  position: "relative",
-                  background: "transparent",
-                  backgroundColor: "transparent",
-                }}
-              >
-                {/* Clicking label just scrolls to products */}
-                <span onClick={() => scrollToSection("products")}>
-                  Our Services
-                </span>
-                {/* Only the arrow toggles dropdown open/close */}
-                <ChevronDown
-                  style={{ width: 16, height: 16, cursor: "pointer" }}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setServicesOpen((open) => !open);
-                  }}
-                />
-                <div
-                  style={{
-                    position: "absolute",
-                    left: 0,
-                    right: 0,
-                    bottom: 0,
-                    height: 2,
-                    background: "#22c55e",
-                    transformOrigin: "left",
-                    transform: hoverKey === "services" ? "scaleX(1)" : "scaleX(0)",
-                    transition: "transform 0.2s ease",
-                  }}
-                />
-              </div>
-
-              {/* Dropdown */}
-              {servicesOpen && (
-                <div
-                  style={{
-                    position: "absolute",
-                    top: "100%",
-                    left: 0,
-                    marginTop: 8,
-                    width: 240,
-                    background: "#ffffff",
-                    borderRadius: 12,
-                    boxShadow: "0 10px 25px rgba(0,0,0,0.15)",
-                    padding: 8,
-                  }}
-                >
-                  {effectiveServices.map((label, index) => (
+              // Categories / Our Services item controls the services dropdown
+              if (
+                key === "categories" ||
+                key === servicesKey ||
+                key === "ourservices" ||
+                key === "our-services"
+              ) {
+                return (
+                  <div
+                    key={label}
+                    style={{ position: "relative", background: "transparent", backgroundColor: "transparent" }}
+                    onMouseEnter={() => {
+                      setHoverKey("services");
+                    }}
+                    onMouseLeave={() => {
+                      setHoverKey(null);
+                    }}
+                  >
                     <div
-                      key={index}
                       style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 4,
                         cursor: "pointer",
                         fontSize: 18,
                         fontWeight: 500,
-                        color: "#111827",
-                        padding: "10px 12px",
-                        borderBottom: index === effectiveServices.length - 1 ? "none" : "1px solid #e5e7eb",
-                      }}
-                      onClick={() => {
-                        try {
-                          const raw = String(label || "");
-                          const key = raw
-                            .toLowerCase()
-                            .replace(/[^a-z0-9]+/g, "-")
-                            .replace(/(^-|-$)/g, "");
-                          // Scroll to products section so the card is visible
-                          scrollToSection("products");
-                          // Close the dropdown
-                          setServicesOpen(false);
-                          // Notify preview page which service/card was chosen
-                          if (typeof window !== "undefined" && key) {
-                            const evt = new CustomEvent("preview:service-click", {
-                              detail: { label: raw, key },
-                            });
-                            window.dispatchEvent(evt);
-                          }
-                        } catch {}
+                        color: hoverKey === "services" ? "#059669" : "#111827",
+                        paddingBottom: 4,
+                        position: "relative",
+                        background: "transparent",
+                        backgroundColor: "transparent",
                       }}
                     >
-                      {label}
+                      <span onClick={() => scrollToSection("products")}>
+                        {label}
+                      </span>
+                      <ChevronDown
+                        style={{ width: 16, height: 16, cursor: "pointer" }}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setServicesOpen((open) => !open);
+                        }}
+                      />
+                      <div
+                        style={{
+                          position: "absolute",
+                          left: 0,
+                          right: 0,
+                          bottom: 0,
+                          height: 2,
+                          background: "#22c55e",
+                          transformOrigin: "left",
+                          transform: hoverKey === "services" ? "scaleX(1)" : "scaleX(0)",
+                          transition: "transform 0.2s ease",
+                        }}
+                      />
                     </div>
-                  ))}
+
+                    {servicesOpen && (
+                      <div
+                        style={{
+                          position: "absolute",
+                          top: "100%",
+                          left: 0,
+                          marginTop: 8,
+                          width: 240,
+                          background: "#ffffff",
+                          borderRadius: 12,
+                          boxShadow: "0 10px 25px rgba(0,0,0,0.15)",
+                          padding: 8,
+                        }}
+                      >
+                        {effectiveServices.map((svc, index) => (
+                          <div
+                            key={index}
+                            style={{
+                              cursor: "pointer",
+                              fontSize: 18,
+                              fontWeight: 500,
+                              color: "#111827",
+                              padding: "10px 12px",
+                              borderBottom:
+                                index === effectiveServices.length - 1
+                                  ? "none"
+                                  : "1px solid #e5e7eb",
+                            }}
+                            onClick={() => {
+                              try {
+                                const raw = String(svc || "");
+                                const skey = raw
+                                  .toLowerCase()
+                                  .replace(/[^a-z0-9]+/g, "-")
+                                  .replace(/(^-|-$)/g, "");
+                                scrollToSection("products");
+                                setServicesOpen(false);
+                                if (typeof window !== "undefined" && skey) {
+                                  const evt = new CustomEvent("preview:service-click", {
+                                    detail: { label: raw, key: skey },
+                                  });
+                                  window.dispatchEvent(evt);
+                                }
+                              } catch {}
+                            }}
+                          >
+                            {svc}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                );
+              }
+
+              const target = getTargetForLabel(label);
+              const hoverId = target === "home" ? "home" : target;
+
+              // All other labels (Home, Why Us, About, Contact, etc.) become simple nav items
+              return (
+                <div
+                  key={label}
+                  style={{
+                    position: "relative",
+                    cursor: "pointer",
+                    fontSize: 18,
+                    fontWeight: 500,
+                    color: hoverKey === hoverId ? "#059669" : "#111827",
+                    paddingBottom: 4,
+                    background: "transparent",
+                    backgroundColor: "transparent",
+                  }}
+                  onMouseEnter={() => setHoverKey(hoverId)}
+                  onMouseLeave={() => setHoverKey(null)}
+                  onClick={() => scrollToSection(target)}
+                >
+                  {label}
+                  <div
+                    style={{
+                      position: "absolute",
+                      left: 0,
+                      right: 0,
+                      bottom: 0,
+                      height: 2,
+                      background: "#22c55e",
+                      transformOrigin: "left",
+                      transform: hoverKey === hoverId ? "scaleX(1)" : "scaleX(0)",
+                      transition: "transform 0.2s ease",
+                    }}
+                  />
                 </div>
-              )}
-            </div>
-
-            {/* Why Us */}
-            <div
-              style={{
-                position: "relative",
-                cursor: "pointer",
-                fontSize: 18,
-                fontWeight: 500,
-                color: hoverKey === "why-us" ? "#059669" : "#111827",
-                paddingBottom: 4,
-                background: "transparent",
-                backgroundColor: "transparent",
-              }}
-              onMouseEnter={() => setHoverKey("why-us")}
-              onMouseLeave={() => setHoverKey(null)}
-              onClick={() => scrollToSection("benefits")}
-            >
-              Why Us
-              <div
-                style={{
-                  position: "absolute",
-                  left: 0,
-                  right: 0,
-                  bottom: 0,
-                  height: 2,
-                  background: "#22c55e",
-                  transformOrigin: "left",
-                  transform: hoverKey === "why-us" ? "scaleX(1)" : "scaleX(0)",
-                  transition: "transform 0.2s ease",
-                  background: "transparent",
-                }}
-              />
-            </div>
-
-            {/* About */}
-            <div
-              style={{
-                position: "relative",
-                cursor: "pointer",
-                fontSize: 18,
-                fontWeight: 500,
-                color: hoverKey === "about" ? "#059669" : "#111827",
-                paddingBottom: 4,
-                background: "transparent",
-                backgroundColor: "transparent",
-              }}
-              onMouseEnter={() => setHoverKey("about")}
-              onMouseLeave={() => setHoverKey(null)}
-              onClick={() => scrollToSection("about")}
-            >
-              About
-              <div
-                style={{
-                  position: "absolute",
-                  left: 0,
-                  right: 0,
-                  bottom: 0,
-                  height: 2,
-                  background: "#22c55e",
-                  transformOrigin: "left",
-                  transform: hoverKey === "about" ? "scaleX(1)" : "scaleX(0)",
-                  transition: "transform 0.2s ease",
-                  background: "transparent",
-                }}
-              />
-            </div>
-
-            {/* Contact */}
-            <div
-              style={{
-                position: "relative",
-                cursor: "pointer",
-                fontSize: 18,
-                fontWeight: 500,
-                color: hoverKey === "contact" ? "#059669" : "#111827",
-                paddingBottom: 4,
-                background: "transparent",
-                backgroundColor: "transparent",
-              }}
-              onMouseEnter={() => setHoverKey("contact")}
-              onMouseLeave={() => setHoverKey(null)}
-              onClick={() => scrollToSection("contact")}
-            >
-              Contact
-              <div
-                style={{
-                  position: "absolute",
-                  left: 0,
-                  right: 0,
-                  bottom: 0,
-                  height: 2,
-                  background: "#22c55e",
-                  transformOrigin: "left",
-                  transform: hoverKey === "contact" ? "scaleX(1)" : "scaleX(0)",
-                  transition: "transform 0.2s ease",
-                }}
-              />
-            </div>
+              );
+            })}
           </nav>
         )}
 
@@ -429,46 +389,113 @@ export default function TopNavBar({ businessName, services = [
               overflowY: "auto",
             }}
           >
-            <div
-              style={{
-                padding: "10px 4px",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "space-between",
-                fontSize: 18,
-                fontWeight: 600,
-                cursor: "pointer",
-                borderBottom: "1px solid #e5e7eb",
-              }}
-              onClick={() => {
-                scrollToSection("home");
-                setMenuOpen(false);
-              }}
-            >
-              <span>Home</span>
-            </div>
+            {menuItems.map((label) => {
+              const key = String(label).toLowerCase();
+              const servicesKey = String(servicesNavLabel || "").toLowerCase();
 
-            <div
-              style={{
-                padding: "10px 4px",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "space-between",
-                fontSize: 18,
-                fontWeight: 600,
-                cursor: "pointer",
-                borderBottom: servicesOpen ? "none" : "1px solid #e5e7eb",
-              }}
-              onClick={() => {
-                setServicesOpen((open) => !open);
-                scrollToSection("products");
-              }}
-            >
-              <span>Our Services</span>
-              <span style={{ fontSize: 18 }}>{servicesOpen ? "↑" : "↗"}</span>
-            </div>
+              if (
+                key === "categories" ||
+                key === servicesKey ||
+                key === "ourservices" ||
+                key === "our-services"
+              ) {
+                return (
+                  <React.Fragment key={label}>
+                    <div
+                      style={{
+                        padding: "10px 4px",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "space-between",
+                        fontSize: 18,
+                        fontWeight: 600,
+                        cursor: "pointer",
+                        borderBottom: servicesOpen ? "none" : "1px solid #e5e7eb",
+                      }}
+                      onClick={() => {
+                        setServicesOpen((open) => !open);
+                        scrollToSection("products");
+                      }}
+                    >
+                      <span>{label}</span>
+                      <span style={{ fontSize: 18 }}>{servicesOpen ? "↑" : "↗"}</span>
+                    </div>
 
-            {servicesOpen && (
+                    {servicesOpen && (
+                      <div
+                        style={{
+                          paddingTop: 8,
+                          paddingBottom: 10,
+                          borderBottom: "1px solid #e5e7eb",
+                        }}
+                      >
+                        {effectiveServices.map((svc, index) => (
+                          <div
+                            key={index}
+                            style={{
+                              padding: "8px 4px",
+                              display: "flex",
+                              alignItems: "center",
+                              justifyContent: "space-between",
+                              fontSize: 15,
+                              cursor: "pointer",
+                            }}
+                            onClick={() => {
+                              try {
+                                const raw = String(svc || "");
+                                const skey = raw
+                                  .toLowerCase()
+                                  .replace(/[^a-z0-9]+/g, "-")
+                                  .replace(/(^-|-$)/g, "");
+                                scrollToSection("products");
+                                setMenuOpen(false);
+                                if (typeof window !== "undefined" && skey) {
+                                  const evt = new CustomEvent("preview:service-click", {
+                                    detail: { label: raw, key: skey },
+                                  });
+                                  window.dispatchEvent(evt);
+                                }
+                              } catch {}
+                            }}
+                          >
+                            <span>{svc}</span>
+                            <span style={{ fontSize: 16 }}>›</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </React.Fragment>
+                );
+              }
+
+              const target = getTargetForLabel(label);
+
+              return (
+                <div
+                  key={label}
+                  style={{
+                    padding: "10px 4px",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    fontSize: 18,
+                    fontWeight: 600,
+                    cursor: "pointer",
+                    borderBottom: "1px solid #e5e7eb",
+                  }}
+                  onClick={() => {
+                    scrollToSection(target);
+                    setMenuOpen(false);
+                  }}
+                >
+                  <span>{label}</span>
+                </div>
+              );
+            })}
+
+            {/* Services submenu (already rendered above for Categories) */}
+
+            {false && servicesOpen && (
               <div
                 style={{
                   paddingTop: 8,
@@ -511,62 +538,6 @@ export default function TopNavBar({ businessName, services = [
                 ))}
               </div>
             )}
-
-            <div
-              style={{
-                padding: "10px 4px",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "space-between",
-                fontSize: 18,
-                fontWeight: 600,
-                cursor: "pointer",
-                borderBottom: "1px solid #e5e7eb",
-              }}
-              onClick={() => {
-                scrollToSection("benefits");
-                setMenuOpen(false);
-              }}
-            >
-              <span>Why Us</span>
-            </div>
-
-            <div
-              style={{
-                padding: "10px 4px",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "space-between",
-                fontSize: 18,
-                fontWeight: 600,
-                cursor: "pointer",
-                borderBottom: "1px solid #e5e7eb",
-              }}
-              onClick={() => {
-                scrollToSection("about");
-                setMenuOpen(false);
-              }}
-            >
-              <span>About</span>
-            </div>
-
-            <div
-              style={{
-                padding: "10px 4px 6px",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "space-between",
-                fontSize: 18,
-                fontWeight: 600,
-                cursor: "pointer",
-              }}
-              onClick={() => {
-                scrollToSection("contact");
-                setMenuOpen(false);
-              }}
-            >
-              <span>Contact</span>
-            </div>
           </div>
         </div>
       )}

@@ -2,22 +2,24 @@ import { useRouter } from "next/router";
 import { useState, useMemo, useEffect } from "react";
 import API_BASE_URL, { ASSET_BASE_URL } from "../config";
 
-export default function HomeSection({ businessName, profilePictures = [], heroTitle, heroDescription }) {
+export default function HomeSection({ businessName, profilePictures = [], heroTitle, heroDescription, homePopup, vendorAddonTitle, vendorAddonDescription }) {
   const router = useRouter();
   const [currentIdx, setCurrentIdx] = useState(0);
   const [vw, setVw] = useState(typeof window !== 'undefined' ? window.innerWidth : 1200);
   const [primaryHover, setPrimaryHover] = useState(false);
   const [secondaryHover, setSecondaryHover] = useState(false);
 
+  const normalizeAssetUrl = (raw) => {
+    const str = String(raw || "");
+    if (!str) return null;
+    if (str.startsWith("http://") || str.startsWith("https://") || str.startsWith("data:")) return str;
+    if (str.startsWith("/")) return `${ASSET_BASE_URL}${str}`;
+    return `${ASSET_BASE_URL}/${str}`;
+  };
+
   const normalizedPics = useMemo(() => {
     return (Array.isArray(profilePictures) ? profilePictures : [])
-      .map((s) => {
-        const str = String(s || "");
-        if (!str) return null;
-        if (str.startsWith("http://") || str.startsWith("https://") || str.startsWith("data:")) return str;
-        if (str.startsWith("/")) return `${ASSET_BASE_URL}${str}`;
-        return `${ASSET_BASE_URL}/${str}`;
-      })
+      .map((s) => normalizeAssetUrl(s))
       .filter(Boolean);
   }, [profilePictures]);
 
@@ -44,7 +46,16 @@ export default function HomeSection({ businessName, profilePictures = [], heroTi
   const isMobile = vw <= 768;
   const isTablet = vw > 768 && vw <= 1024;
 
-  const titleSource = heroTitle || businessName || "";
+  const resolvedTitle = (homePopup?.tagline && String(homePopup.tagline).trim()) || heroTitle || businessName || "";
+  const resolvedDescription = (homePopup?.description && String(homePopup.description).trim()) || heroDescription || "";
+
+  const primaryLabel = (homePopup?.button1Label && String(homePopup.button1Label).trim()) || "Explore Courses";
+  const secondaryLabel = (homePopup?.button2Label && String(homePopup.button2Label).trim()) || "Get a Quote";
+
+  const primaryIconUrl = normalizeAssetUrl(homePopup?.button1IconUrl);
+  const secondaryIconUrl = normalizeAssetUrl(homePopup?.button2IconUrl);
+
+  const titleSource = resolvedTitle;
   const titleWords = String(titleSource).trim().split(/\s+/).filter(Boolean);
   const lastWord = titleWords.length > 1 ? titleWords[titleWords.length - 1] : titleWords[0] || "";
   const firstPart = titleWords.length > 1 ? titleWords.slice(0, -1).join(" ") : titleWords[0] || "";
@@ -104,7 +115,7 @@ export default function HomeSection({ businessName, profilePictures = [], heroTi
               margin: isMobile ? "0 auto 16px" : "0 0 16px",
             }}
           >
-            {heroDescription || ""}
+            {resolvedDescription}
           </p>
 
           <div
@@ -139,56 +150,64 @@ export default function HomeSection({ businessName, profilePictures = [], heroTi
             }}
           >
             <button
-  onClick={() => {
-    const el = document.getElementById("products");
-    if (el) el.scrollIntoView({ behavior: "smooth" });
-  }}
-  onMouseEnter={() => setPrimaryHover(true)}
-  onMouseLeave={() => setPrimaryHover(false)}
-  style={{
-    padding: "12px 28px",
-    backgroundColor: "#16a34a",
-    color: "#ffffff",
-    border: "none",
-    borderRadius: 999,
-    cursor: "pointer",
-    fontWeight: 600,
-    fontSize: 15,
-    boxShadow: "0 8px 20px rgba(22,163,74,0.35)",
-    display: "flex",                  // ⬅ FIX
-    alignItems: "center",             // ⬅ FIX
-    justifyContent: "center",         // ⬅ FIX
-    gap: 10,
-    whiteSpace: "nowrap",
-    fontFamily: "Poppins, sans-serif",
-    textAlign: "center",
-    transform: primaryHover ? "translateY(-7px)" : "translateY(0)",
-    opacity: primaryHover ? 1 : 0.9,
-    transition: "transform 250ms ease, box-shadow 250ms ease, opacity 250ms ease",
-    
-  }}
->
+              onClick={() => {
+                const el = document.getElementById("products");
+                if (el) el.scrollIntoView({ behavior: "smooth" });
+              }}
+              onMouseEnter={() => setPrimaryHover(true)}
+              onMouseLeave={() => setPrimaryHover(false)}
+              style={{
+                padding: "12px 28px",
+                backgroundColor: "#16a34a",
+                color: "#ffffff",
+                border: "none",
+                borderRadius: 999,
+                cursor: "pointer",
+                fontWeight: 600,
+                fontSize: 15,
+                boxShadow: "0 8px 20px rgba(22,163,74,0.35)",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: 10,
+                whiteSpace: "nowrap",
+                fontFamily: "Poppins, sans-serif",
+                textAlign: "center",
+                transform: primaryHover ? "translateY(-7px)" : "translateY(0)",
+                opacity: primaryHover ? 1 : 0.9,
+                transition: "transform 250ms ease, box-shadow 250ms ease, opacity 250ms ease",
+
+              }}
+            >
 
               <span style={{ display: "inline-flex", alignItems: "center", whiteSpace: "nowrap", fontFamily: "Poppins, sans-serif" }}>
-                <svg
-                  xmlns="http://www.w3.org/2000/svg"
-                  width="18"
-                  height="18"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  style={{ color: "#ffffff" }}
-                >
-                  <rect x="3" y="11" width="18" height="5" rx="2" ry="2" />
-                  <path d="M5 11V9a3 3 0 0 1 3-3h4.5a3 3 0 0 1 2.7 1.7L17 11" />
-                  <circle cx="7" cy="17" r="1.2" />
-                  <circle cx="17" cy="17" r="1.2" />
-                </svg>
+                {primaryIconUrl ? (
+                  <img
+                    src={primaryIconUrl}
+                    alt={primaryLabel}
+                    style={{ width: 20, height: 20, objectFit: "contain" }}
+                  />
+                ) : (
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    width="18"
+                    height="18"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    style={{ color: "#ffffff" }}
+                  >
+                    <rect x="3" y="11" width="18" height="5" rx="2" ry="2" />
+                    <path d="M5 11V9a3 3 0 0 1 3-3h4.5a3 3 0 0 1 2.7 1.7L17 11" />
+                    <circle cx="7" cy="17" r="1.2" />
+                    <circle cx="17" cy="17" r="1.2" />
+                  </svg>
+                )}
               </span>
-              <span>Explore Courses</span>
+              <span>{primaryLabel}</span>
             </button>
 
             <button
@@ -218,22 +237,30 @@ export default function HomeSection({ businessName, profilePictures = [], heroTi
               }}
             >
               <span style={{ display: "inline-flex", alignItems: "center" }}>
-                <svg
-                  xmlns="http://www.w3.org/2000/svg"
-                  width="18"
-                  height="18"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  style={{ color: "#16a34a" }}
-                >
-                  <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6A19.79 19.79 0 0 1 2.08 4.18 2 2 0 0 1 4.06 2h3a2 2 0 0 1 2 1.72c.12.9.37 1.77.72 2.6a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.48-1.24a2 2 0 0 1 2.11-.45c.83.35 1.7.6 2.6.72A2 2 0 0 1 22 16.92z" />
-                </svg>
+                {secondaryIconUrl ? (
+                  <img
+                    src={secondaryIconUrl}
+                    alt={secondaryLabel}
+                    style={{ width: 20, height: 20, objectFit: "contain" }}
+                  />
+                ) : (
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    width="18"
+                    height="18"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    style={{ color: "#16a34a" }}
+                  >
+                    <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6A19.79 19.79 0 0 1 2.08 4.18 2 2 0 0 1 4.06 2h3a2 2 0 0 1 2 1.72c.12.9.37 1.77.72 2.6a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.48-1.24a2 2 0 0 1 2.11-.45c.83.35 1.7.6 2.6.72A2 2 0 0 1 22 16.92z" />
+                  </svg>
+                )}
               </span>
-              <span>Get a Quote</span>
+              <span>{secondaryLabel}</span>
             </button>
           </div>
         </div>

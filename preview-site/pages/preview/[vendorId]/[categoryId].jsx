@@ -34,10 +34,15 @@ export default function PreviewPage() {
   const [pairSelections, setPairSelections] = useState({}); // { index: "A|B" }
   const [taxiSelections, setTaxiSelections] = useState({}); // { [lvl1Id]: { lvl2, lvl3, bodySeats: "body|seats", fuelType: string, modelBrand: "model|brand" } }
   const [combos, setCombos] = useState([]);
+  const [webMenu, setWebMenu] = useState([]);
+  const [servicesNavLabel, setServicesNavLabel] = useState("Our Services");
   const [packageSelections, setPackageSelections] = useState({}); // { [idx]: { size: string|null } }
   const [invImgIdx, setInvImgIdx] = useState({}); // { [targetId]: number }
   const [heroTitle, setHeroTitle] = useState(null);
   const [heroDescription, setHeroDescription] = useState(null);
+  const [homePopup, setHomePopup] = useState(null);
+  const [vendorAddonTitle, setVendorAddonTitle] = useState(null);
+  const [vendorAddonDescription, setVendorAddonDescription] = useState(null);
   const [activeServiceKey, setActiveServiceKey] = useState(null); // which service/card should animate
 
   const loading = loadingVendor || loadingCategories;
@@ -109,6 +114,36 @@ export default function PreviewPage() {
     setLoadingVendor(true);
     setLoadingCategories(true);
     try {
+      // Try to read webMenu and categoryType from dummy category config (if it exists)
+      try {
+        if (categoryId) {
+          const wmRes = await fetch(`${API_BASE_URL}/api/dummy-categories/${categoryId}?t=${Date.now()}`, { cache: 'no-store' });
+          if (wmRes.ok) {
+            const wmJson = await wmRes.json().catch(() => null);
+            const arr = Array.isArray(wmJson?.webMenu) ? wmJson.webMenu : [];
+            setWebMenu(arr);
+            if (wmJson?.homePopup && typeof wmJson.homePopup === 'object') {
+              setHomePopup(wmJson.homePopup);
+            } else {
+              setHomePopup(null);
+            }
+            // Derive nav label from categoryType
+            const rawType = (wmJson?.categoryType || "").toString();
+            let lbl = "Our Services";
+            if (rawType === "Products") lbl = "Our Products";
+            else if (rawType === "Services") lbl = "Our Services";
+            else if (rawType === "Products & Services") lbl = "Our Products & Services";
+            setServicesNavLabel(lbl);
+          } else {
+            setWebMenu([]);
+            setServicesNavLabel("Our Services");
+          }
+        }
+      } catch {
+        setWebMenu([]);
+        setServicesNavLabel("Our Services");
+      }
+
       const forceDummy = String(mode || '').toLowerCase() === 'dummy';
       if (forceDummy) {
         // Dummy vendor flow (forced by query)
@@ -156,6 +191,8 @@ export default function PreviewPage() {
             const descFromCategory = trimOrNull(catFT[1]) || firstNonEmpty(catFT);
             const titleFromVendor = trimOrNull(dvVendor?.customFields?.freeText1) || trimOrNull(venFT[0]) || trimOrNull(dvVendor?.ui?.heroTitle) || firstNonEmpty(venFT);
             const descFromVendor = trimOrNull(dvVendor?.customFields?.freeText2) || trimOrNull(venFT[1]) || trimOrNull(dvVendor?.ui?.heroDescription) || firstNonEmpty(venFT);
+            setVendorAddonTitle(trimOrNull(dvVendor?.customFields?.freeText1) || null);
+            setVendorAddonDescription(trimOrNull(dvVendor?.customFields?.freeText2) || null);
             const q = router?.query || {};
             const title = trimOrNull(q.ft1) || titleFromVendor || titleFromCategory || null;
             const desc = trimOrNull(q.ft2) || descFromVendor || descFromCategory || null;
@@ -229,6 +266,8 @@ export default function PreviewPage() {
               const descFromCategory = trimOrNull(catFT[1]) || firstNonEmpty(catFT);
               const titleFromVendor = trimOrNull(venFT[0]) || trimOrNull(dvVendor?.customFields?.freeText1) || trimOrNull(dvVendor?.ui?.heroTitle) || firstNonEmpty(venFT);
               const descFromVendor = trimOrNull(venFT[1]) || trimOrNull(dvVendor?.customFields?.freeText2) || trimOrNull(dvVendor?.ui?.heroDescription) || firstNonEmpty(venFT);
+              setVendorAddonTitle(trimOrNull(dvVendor?.customFields?.freeText1) || null);
+              setVendorAddonDescription(trimOrNull(dvVendor?.customFields?.freeText2) || null);
               const q = router?.query || {};
               const title = trimOrNull(q.ft1) || titleFromCategory || titleFromVendor || null;
               const desc = trimOrNull(q.ft2) || descFromCategory || descFromVendor || null;
@@ -2536,12 +2575,23 @@ export default function PreviewPage() {
             selectedLeaf={selectedLeaf}
             onLeafSelect={setSelectedLeaf}
             hasPackages={Array.isArray(combos) && combos.length > 0}
+            webMenu={webMenu}
+            servicesNavLabel={servicesNavLabel}
           />
           <HomeSection
             businessName={vendor?.businessName || "Loading..."}
             profilePictures={vendor?.profilePictures || []}
             heroTitle={heroTitle || router?.query?.ft1 || vendor?.freeTexts?.[0] || vendor?.customFields?.freeText1 || vendor?.ui?.heroTitle}
-            heroDescription={heroDescription || router?.query?.ft2 || vendor?.freeTexts?.[1] || vendor?.customFields?.freeText2 || vendor?.ui?.heroDescription}
+            heroDescription={
+              heroDescription ||
+              router?.query?.ft2 ||
+              vendor?.freeTexts?.[1] ||
+              vendor?.customFields?.freeText2 ||
+              vendor?.ui?.heroDescription
+            }
+            homePopup={homePopup}
+            vendorAddonTitle={vendorAddonTitle}
+            vendorAddonDescription={vendorAddonDescription}
           />
           <main id="products" style={{ padding: "20px", marginTop: "10px" }}>
             {Array.isArray(combos) && combos.length > 0 ? (
