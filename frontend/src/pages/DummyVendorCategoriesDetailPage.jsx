@@ -44,6 +44,10 @@ export default function DummyVendorCategoriesDetailPage() {
   const [combosLoading, setCombosLoading] = useState(false);
   const [combosError, setCombosError] = useState("");
   const [categoryInfoCache, setCategoryInfoCache] = useState({}); // id -> { name, parentId, parentName }
+  const [isInventoryModelCategory, setIsInventoryModelCategory] = useState(false);
+  const [attributesHeading, setAttributesHeading] = useState("");
+  const [showAttrHeadingPopup, setShowAttrHeadingPopup] = useState(false);
+  const [attrHeadingInput, setAttrHeadingInput] = useState("");
 
   const fetchTree = async () => {
     try {
@@ -174,18 +178,39 @@ export default function DummyVendorCategoriesDetailPage() {
     })();
   }, [vendorId]);
 
-  // Fetch dummy category meta for showing inventory label buttons
+  // Fetch dummy category meta for showing inventory label buttons and attributes heading
   useEffect(() => {
     (async () => {
       try {
-        if (!categoryId) { setInventoryLabelName(""); setLinkedAttributes({}); return; }
+        if (!categoryId) {
+          setInventoryLabelName("");
+          setLinkedAttributes({});
+          setIsInventoryModelCategory(false);
+          setAttributesHeading("");
+          return;
+        }
         const res = await axios.get(`${API_BASE_URL}/api/dummy-categories/${categoryId}`);
         const c = res.data || {};
         setInventoryLabelName(c.inventoryLabelName || "");
         setLinkedAttributes(c.linkedAttributes || {});
+        const rawModels = Array.isArray(c.categoryModel)
+          ? c.categoryModel
+          : c.categoryModel
+          ? [c.categoryModel]
+          : [];
+        const hasInv = rawModels
+          .map((m) => (m == null ? "" : String(m)))
+          .map((s) => s.trim().toLowerCase())
+          .includes("inventory");
+        setIsInventoryModelCategory(hasInv);
+        setAttributesHeading(
+          typeof c.attributesHeading === "string" ? c.attributesHeading : ""
+        );
       } catch {
         setInventoryLabelName("");
         setLinkedAttributes({});
+        setIsInventoryModelCategory(false);
+        setAttributesHeading("");
       }
     })();
   }, [categoryId]);
@@ -527,6 +552,19 @@ export default function DummyVendorCategoriesDetailPage() {
               ));
             } catch { return null; }
           })()}
+          {isInventoryModelCategory && (
+            <button
+              onClick={() => {
+                if (!previewCategoryId) return;
+                setAttrHeadingInput(attributesHeading || "");
+                setShowAttrHeadingPopup(true);
+              }}
+              disabled={!previewCategoryId}
+              style={{ padding: "8px 12px", borderRadius: 8, background: "#4b5563", color: "#fff", textDecoration: "none", opacity: previewCategoryId ? 1 : 0.6, pointerEvents: previewCategoryId ? "auto" : "none", border: 'none' }}
+            >
+              Attributes heading
+            </button>
+          )}
           <button
             onClick={() => {
               if (!previewCategoryId) return;
@@ -838,6 +876,47 @@ export default function DummyVendorCategoriesDetailPage() {
         </table>
       )}
       </div>
+
+      {showAttrHeadingPopup && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1400 }}>
+          <div style={{ background: '#fff', padding: 16, borderRadius: 10, minWidth: 320, maxWidth: '90vw' }}>
+            <h3 style={{ marginTop: 0, marginBottom: 12 }}>Attributes heading</h3>
+            <input
+              type="text"
+              value={attrHeadingInput}
+              onChange={(e) => setAttrHeadingInput(e.target.value)}
+              placeholder="e.g., Select model"
+              style={{ width: '100%', padding: 8, borderRadius: 6, border: '1px solid #cbd5e1', marginBottom: 12 }}
+            />
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+              <button
+                type="button"
+                onClick={() => setShowAttrHeadingPopup(false)}
+                style={{ padding: '6px 10px', borderRadius: 6, border: '1px solid #e5e7eb', background: '#fff' }}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={async () => {
+                  try {
+                    if (!previewCategoryId) return;
+                    const val = String(attrHeadingInput || "");
+                    await axios.put(`${API_BASE_URL}/api/dummy-categories/${previewCategoryId}`, { attributesHeading: val });
+                    setAttributesHeading(val);
+                    setShowAttrHeadingPopup(false);
+                  } catch (e) {
+                    alert(e?.response?.data?.message || 'Failed to save attributes heading');
+                  }
+                }}
+                style={{ padding: '6px 10px', borderRadius: 6, border: 'none', background: '#16a34a', color: '#fff' }}
+              >
+                Save
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {showLinkedModal && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1200 }}>

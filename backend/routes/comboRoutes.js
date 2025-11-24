@@ -75,7 +75,7 @@ async function getCategoryPathSegments(categoryId) {
 // Create combo
 router.post("/", uploadAny, async (req, res) => {
   try {
-    let { name, iconUrl = "", imageUrl = "", parentCategoryId, type, items = [], basePrice = null, terms = "", sizes = [] } = req.body;
+    let { name, heading = "", iconUrl = "", imageUrl = "", parentCategoryId, type, items = [], basePrice = null, terms = "", sizes = [] } = req.body;
 
     if (typeof items === "string") {
       try { items = JSON.parse(items); } catch { items = []; }
@@ -146,6 +146,7 @@ router.post("/", uploadAny, async (req, res) => {
     const summaryForCreate = await buildComboSummary({ name, items, sizes, basePrice });
     const combo = await Combo.create({
       name,
+      heading,
       iconUrl,
       imageUrl,
       parentCategoryId,
@@ -222,7 +223,7 @@ router.put("/:comboId", uploadAny, async (req, res) => {
       return res.status(400).json({ message: "Invalid comboId" });
     }
 
-    let { name, iconUrl, imageUrl, type, items, basePrice, terms, sizes } = req.body;
+    let { name, heading, iconUrl, imageUrl, type, items, basePrice, terms, sizes } = req.body;
 
     if (typeof items === "string") {
       try { items = JSON.parse(items); } catch { /* ignore */ }
@@ -279,7 +280,7 @@ router.put("/:comboId", uploadAny, async (req, res) => {
       }
     }
 
-    const setPayload = { name, type, items, basePrice, terms, sizes };
+    const setPayload = { name, heading, type, items, basePrice, terms, sizes };
     // compute denormalized fields based on latest values
     try {
       // Build a temp combo-like object with latest values for summary

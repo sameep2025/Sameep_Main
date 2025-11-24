@@ -14,6 +14,9 @@ function DummyCategoryPage() {
   const [editingCombo, setEditingCombo] = useState(null);
   const [viewMode, setViewMode] = useState("individual"); // 'individual' | 'packages'
   const [isTopParentSubcategory, setIsTopParentSubcategory] = useState(false);
+  const [parentSelectorLabel, setParentSelectorLabel] = useState("");
+  const [showLabelPopup, setShowLabelPopup] = useState(false);
+  const [labelInput, setLabelInput] = useState("");
 
   const toAbs = (u) => {
     if (!u) return "";
@@ -79,8 +82,10 @@ function DummyCategoryPage() {
         const data = await res.json();
         const hasParent = Boolean(data?.parent || data?.parentId);
         setIsTopParentSubcategory(!hasParent);
+        setParentSelectorLabel(typeof data.parentSelectorLabel === 'string' ? data.parentSelectorLabel : "");
       } catch {
         setIsTopParentSubcategory(false);
+        setParentSelectorLabel("");
       }
     };
     checkTop();
@@ -139,6 +144,23 @@ function DummyCategoryPage() {
                 Packages
               </button>
             </div>
+            <button
+              type="button"
+              onClick={() => {
+                setLabelInput(parentSelectorLabel || "");
+                setShowLabelPopup(true);
+              }}
+              style={{
+                padding: "6px 10px",
+                borderRadius: 6,
+                border: "none",
+                background: "#4b5563",
+                color: "#fff",
+                fontWeight: 600,
+              }}
+            >
+              Add Label
+            </button>
           </div>
         </div>
       )}
@@ -290,6 +312,86 @@ function DummyCategoryPage() {
         initialEditingCombo={editingCombo}
         onSaved={() => loadCombos()}
       />
+
+      {showLabelPopup && (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(0,0,0,0.5)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 1400,
+          }}
+        >
+          <div
+            style={{
+              background: "#fff",
+              padding: 16,
+              borderRadius: 10,
+              minWidth: 320,
+              maxWidth: "90vw",
+            }}
+          >
+            <h3 style={{ marginTop: 0, marginBottom: 12 }}>Parent selector label</h3>
+            <input
+              type="text"
+              value={labelInput}
+              onChange={(e) => setLabelInput(e.target.value)}
+              placeholder="e.g., Select course type"
+              style={{
+                width: "100%",
+                padding: 8,
+                borderRadius: 6,
+                border: "1px solid #cbd5e1",
+                marginBottom: 12,
+              }}
+            />
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
+              <button
+                type="button"
+                onClick={() => setShowLabelPopup(false)}
+                style={{
+                  padding: "6px 10px",
+                  borderRadius: 6,
+                  border: "1px solid #e5e7eb",
+                  background: "#fff",
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={async () => {
+                  try {
+                    if (!parentId) return;
+                    const val = String(labelInput || "");
+                    await fetch(`${API_BASE_URL}/api/dummy-categories/${parentId}`, {
+                      method: "PUT",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({ parentSelectorLabel: val }),
+                    });
+                    setParentSelectorLabel(val);
+                    setShowLabelPopup(false);
+                  } catch (e) {
+                    alert(e?.message || "Failed to save label");
+                  }
+                }}
+                style={{
+                  padding: "6px 10px",
+                  borderRadius: 6,
+                  border: "none",
+                  background: "#16a34a",
+                  color: "#fff",
+                }}
+              >
+                Save
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
     </div>
   );

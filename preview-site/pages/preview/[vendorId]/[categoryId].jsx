@@ -36,6 +36,7 @@ export default function PreviewPage() {
   const [combos, setCombos] = useState([]);
   const [webMenu, setWebMenu] = useState([]);
   const [servicesNavLabel, setServicesNavLabel] = useState("Our Services");
+  const [isInventoryModel, setIsInventoryModel] = useState(false);
   const [packageSelections, setPackageSelections] = useState({}); // { [idx]: { size: string|null } }
   const [invImgIdx, setInvImgIdx] = useState({}); // { [targetId]: number }
   const [heroTitle, setHeroTitle] = useState(null);
@@ -47,6 +48,8 @@ export default function PreviewPage() {
   const [vendorAddonTitle, setVendorAddonTitle] = useState(null);
   const [vendorAddonDescription, setVendorAddonDescription] = useState(null);
   const [activeServiceKey, setActiveServiceKey] = useState(null); // which service/card should animate
+  const [attributesHeading, setAttributesHeading] = useState(null);
+  const [parentSelectorLabel, setParentSelectorLabel] = useState(null);
 
   const loading = loadingVendor || loadingCategories;
 
@@ -145,6 +148,41 @@ export default function PreviewPage() {
             } else {
               setContact(null);
             }
+            // Derive Inventory model flag from categoryModel array on dummy category
+            try {
+              const rawModels = Array.isArray(wmJson?.categoryModel)
+                ? wmJson.categoryModel
+                : wmJson?.categoryModel
+                ? [wmJson.categoryModel]
+                : [];
+              const norm = rawModels
+                .map((m) => (m == null ? "" : String(m)))
+                .map((s) => s.trim().toLowerCase())
+                .filter(Boolean);
+              setIsInventoryModel(norm.includes("inventory"));
+            } catch {
+              setIsInventoryModel(false);
+            }
+            try {
+              const rawAttr =
+                wmJson && typeof wmJson.attributesHeading === "string"
+                  ? wmJson.attributesHeading
+                  : "";
+              const trimmed = rawAttr.trim();
+              setAttributesHeading(trimmed || null);
+            } catch {
+              setAttributesHeading(null);
+            }
+            try {
+              const rawParentLabel =
+                wmJson && typeof wmJson.parentSelectorLabel === "string"
+                  ? wmJson.parentSelectorLabel
+                  : "";
+              const trimmedParent = rawParentLabel.trim();
+              setParentSelectorLabel(trimmedParent || null);
+            } catch {
+              setParentSelectorLabel(null);
+            }
             // Derive nav label from categoryType
             const rawType = (wmJson?.categoryType || "").toString();
             let lbl = "Our Services";
@@ -159,6 +197,7 @@ export default function PreviewPage() {
             setWhyUs(null);
             setAbout(null);
             setContact(null);
+            setIsInventoryModel(false);
           }
         }
       } catch {
@@ -168,6 +207,7 @@ export default function PreviewPage() {
         setWhyUs(null);
         setAbout(null);
         setContact(null);
+        setIsInventoryModel(false);
       }
 
       const forceDummy = String(mode || '').toLowerCase() === 'dummy';
@@ -1180,9 +1220,9 @@ export default function PreviewPage() {
 
                   attributeDropdown = (
                     <div style={{ marginTop: 8, marginBottom: 15, display: 'flex', flexDirection: 'column', gap: 4 }}>
-                      <div style={{ fontSize: 11, fontWeight: 400, color: 'black', marginLeft: 2 }}>
-                        Select Model 
-                      </div>
+                          <div style={{ fontSize: 11, fontWeight: 400, color: 'black', marginLeft: 2 }}>
+      {attributesHeading || "Select Model"}
+    </div>
                       {/* <div style={{ fontSize: 11, fontWeight: 500, color: '#e5e7eb', marginLeft: 2 }}>
                         Select model:
                       </div> */}
@@ -1316,11 +1356,9 @@ export default function PreviewPage() {
           {node.children?.length > 0 && (
             parentSelectorMode === "buttons" ? (
               <>
-                {isDriving && (
-                  <div style={{ fontSize: 11, fontWeight: 400, color: "#111827", marginLeft: 2, marginBottom: -14 }}>
-                    Select course type 
-                  </div>
-                )}
+                <div style={{ fontSize: 11, fontWeight: 400, color: "#111827", marginLeft: 2, marginBottom: -14 }}>
+                  {parentSelectorLabel || "Select course type"}
+                </div>
               <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 10 }}>
                 {node.children.map((opt) => {
                   const leaf = getDeepestFirstChild(opt);
@@ -2704,19 +2742,33 @@ export default function PreviewPage() {
                         return names.join(', ');
                       } catch { return ''; }
                     })();
-                    const sizes = (() => {
+                    const rawSizes = (() => {
                       try {
                         const set = new Set();
                         items.forEach((it) => {
                           const vs = Array.isArray(it?.variants) ? it.variants : [];
-                          if (vs.length === 0) set.add('—');
-                          vs.forEach((v) => set.add(v?.size || '—'));
+                          if (vs.length === 0) {
+                            set.add('—');
+                          }
+                          vs.forEach((v) => {
+                            const s = v?.size || '—';
+                            set.add(s);
+                          });
                         });
                         return Array.from(set);
                       } catch { return []; }
                     })();
+                    // Treat only non-placeholder entries as real combo types for the UI selector
+                    const sizes = rawSizes.filter((s) => {
+                      const v = String(s || '').trim();
+                      if (!v) return false;
+                      if (v === '—' || v.toLowerCase() === 'na' || v.toLowerCase() === 'n/a') return false;
+                      return true;
+                    });
                     const base = (combo && combo.basePrice != null && combo.basePrice !== '') ? Number(combo.basePrice) : null;
-                    const selectedSize = (packageSelections[idx]?.size != null) ? packageSelections[idx].size : (sizes[0] ?? null);
+                    const selectedSize = (packageSelections[idx]?.size != null)
+                      ? packageSelections[idx].size
+                      : (sizes[0] ?? null);
                     const priceBySize = (() => {
                       try {
                         if (!selectedSize) return null;
@@ -2857,127 +2909,174 @@ export default function PreviewPage() {
                               ))}
                             </ul>
                           ) : null}
-                          {/* Size selector */}
+                          {/* Size selector: only show when there are real combo types */}
                           {sizes && sizes.length ? (
                             <div>
-                              <div style={{ fontSize: 11, fontWeight: 400, color: "#111827", marginBottom: 6, fontFamily: 'Poppins' }}>
-                                {isDrivingSchool && idx === 0
-                                  ? 'Select vehicle type'
-                                  : isDrivingSchool && idx === 1
-                                  ? 'Select combo type'
-                                  : 'Size'}
-                              </div>
-                              <div style={{ position: 'relative', display: 'inline-block', width: '100%' }}>
-                                <button
-                                  type="button"
-                                  onClick={() =>
-                                    setComboSizeDropdownOpen((prev) => {
-                                      const current = prev && prev[idx];
-                                      return { ...(prev || {}), [idx]: !current };
-                                    })
-                                  }
-                                  style={{
-                                    display: 'flex',
-                                    alignItems: 'center',
-                                    justifyContent: 'space-between',
-                                    gap: 8,
-                                    minWidth: 220,
-                                    padding: '10px 16px',
-                                    borderRadius: 999,
-                                    border: '1px solid rgba(148, 163, 184, 0.9)',
-                                    background: '#ffffff',
-                                    color: '#111827',
-                                    boxShadow: '0 6px 18px rgba(15, 23, 42, 0.18)',
-                                    cursor: 'pointer',
-                                    fontSize: 13,
-                                    fontWeight: 600,
-                                    letterSpacing: 0.2,
-                                    transition: 'transform 160ms ease, box-shadow 160ms ease, background 160ms ease',
-                                  }}
-                                  onMouseEnter={(e) => {
-                                    e.currentTarget.style.transform = 'translateY(-1px)';
-                                    e.currentTarget.style.boxShadow = '0 10px 24px rgba(15, 23, 42, 0.28)';
-                                  }}
-                                  onMouseLeave={(e) => {
-                                    e.currentTarget.style.transform = 'translateY(0)';
-                                    e.currentTarget.style.boxShadow = '0 6px 18px rgba(15, 23, 42, 0.18)';
-                                  }}
-                                >
-                                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                                    {selectedSize || 'Select size'}
-                                  </span>
-                                  <span style={{ fontSize: 20, lineHeight: 1 }}>▾</span>
-                                </button>
-
-                                {!!comboSizeDropdownOpen?.[idx] && (
-                                  <div
+                              {(() => {
+                                const raw = combo && typeof combo.heading === 'string' ? combo.heading : '';
+                                const trimmed = raw.trim();
+                                const fallback =
+                                  isDrivingSchool && idx === 0
+                                    ? 'Select vehicle type'
+                                    : isDrivingSchool && idx === 1
+                                    ? 'Select combo type'
+                                    : 'Size';
+                                const label = trimmed.length ? trimmed : fallback;
+                                return (
+                                  <div style={{ fontSize: 11, fontWeight: 400, color: "#111827", marginBottom: 6, fontFamily: 'Poppins' }}>
+                                    {label}
+                                  </div>
+                                );
+                              })()}
+                              {isInventoryModel ? (
+                                // Inventory model: keep dropdown UX
+                                <div style={{ position: 'relative', display: 'inline-block', width: '100%' }}>
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      setComboSizeDropdownOpen((prev) => {
+                                        const current = prev && prev[idx];
+                                        return { ...(prev || {}), [idx]: !current };
+                                      })
+                                    }
                                     style={{
-                                      marginTop: 8,
-                                      zIndex: 1,
-                                      width: '100%',
-                                      maxHeight: '45vh',
-                                      overflowY: 'auto',
-                                      padding: 8,
-                                      borderRadius: 14,
-                                      background: 'rgba(255, 255, 255, 0.98)',
-                                      boxShadow: '0 20px 45px rgba(15, 23, 42, 0.25)',
-                                      overscrollBehavior: 'contain',
+                                      display: 'flex',
+                                      alignItems: 'center',
+                                      justifyContent: 'space-between',
+                                      gap: 8,
+                                      minWidth: 220,
+                                      padding: '10px 16px',
+                                      borderRadius: 999,
+                                      border: '1px solid rgba(148, 163, 184, 0.9)',
+                                      background: '#ffffff',
+                                      color: '#111827',
+                                      boxShadow: '0 6px 18px rgba(15, 23, 42, 0.18)',
+                                      cursor: 'pointer',
+                                      fontSize: 13,
+                                      fontWeight: 600,
+                                      letterSpacing: 0.2,
+                                      transition: 'transform 160ms ease, box-shadow 160ms ease, background 160ms ease',
+                                    }}
+                                    onMouseEnter={(e) => {
+                                      e.currentTarget.style.transform = 'translateY(-1px)';
+                                      e.currentTarget.style.boxShadow = '0 10px 24px rgba(15, 23, 42, 0.28)';
+                                    }}
+                                    onMouseLeave={(e) => {
+                                      e.currentTarget.style.transform = 'translateY(0)';
+                                      e.currentTarget.style.boxShadow = '0 6px 18px rgba(15, 23, 42, 0.18)';
                                     }}
                                   >
-                                    {sizes.map((s) => {
-                                      const value = String(s || '');
-                                      return (
-                                        <button
-                                          key={value}
-                                          type="button"
-                                          onClick={() => {
-                                            setPackageSelections((prev) => ({
-                                              ...prev,
-                                              [idx]: { ...(prev[idx] || {}), size: value },
-                                            }));
-                                            setComboSizeDropdownOpen((prev) => ({ ...(prev || {}), [idx]: false }));
-                                          }}
-                                          style={{
-                                            width: '100%',
-                                            textAlign: 'left',
-                                            padding: '8px 10px',
-                                            marginBottom: 4,
-                                            borderRadius: 10,
-                                            border: '1px solid rgba(148, 163, 184, 0.8)',
-                                            background: value === String(selectedSize || '') ? '#e5f0ff' : '#ffffff',
-                                            color: '#0f172a',
-                                            cursor: 'pointer',
-                                            fontSize: 12,
-                                            transition: 'background 140ms ease, transform 140ms ease, box-shadow 140ms ease',
-                                          }}
-                                          onMouseEnter={(e) => {
-                                            e.currentTarget.style.background = '#e5f0ff';
-                                            e.currentTarget.style.boxShadow = '0 4px 12px rgba(15, 23, 42, 0.18)';
-                                            e.currentTarget.style.transform = 'translateY(-1px)';
-                                          }}
-                                          onMouseLeave={(e) => {
-                                            e.currentTarget.style.background = value === String(selectedSize || '') ? '#e5f0ff' : '#ffffff';
-                                            e.currentTarget.style.boxShadow = 'none';
-                                            e.currentTarget.style.transform = 'translateY(0)';
-                                          }}
-                                        >
-                                          <span
+                                    <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                      {selectedSize || 'Select size'}
+                                    </span>
+                                    <span style={{ fontSize: 20, lineHeight: 1 }}>▾</span>
+                                  </button>
+
+                                  {!!comboSizeDropdownOpen?.[idx] && (
+                                    <div
+                                      style={{
+                                        marginTop: 8,
+                                        zIndex: 1,
+                                        width: '100%',
+                                        maxHeight: '45vh',
+                                        overflowY: 'auto',
+                                        padding: 8,
+                                        borderRadius: 14,
+                                        background: 'rgba(255, 255, 255, 0.98)',
+                                        boxShadow: '0 20px 45px rgba(15, 23, 42, 0.25)',
+                                        overscrollBehavior: 'contain',
+                                      }}
+                                    >
+                                      {sizes.map((s) => {
+                                        const value = String(s || '');
+                                        return (
+                                          <button
+                                            key={value}
+                                            type="button"
+                                            onClick={() => {
+                                              setPackageSelections((prev) => ({
+                                                ...prev,
+                                                [idx]: { ...(prev[idx] || {}), size: value },
+                                              }));
+                                              setComboSizeDropdownOpen((prev) => ({ ...(prev || {}), [idx]: false }));
+                                            }}
                                             style={{
-                                              display: 'block',
-                                              whiteSpace: 'nowrap',
-                                              overflow: 'hidden',
-                                              textOverflow: 'ellipsis',
-                                              fontWeight: 600,
+                                              width: '100%',
+                                              textAlign: 'left',
+                                              padding: '8px 10px',
+                                              marginBottom: 4,
+                                              borderRadius: 10,
+                                              border: '1px solid rgba(148, 163, 184, 0.8)',
+                                              background: value === String(selectedSize || '') ? '#e5f0ff' : '#ffffff',
+                                              color: '#0f172a',
+                                              cursor: 'pointer',
+                                              fontSize: 12,
+                                              transition: 'background 140ms ease, transform 140ms ease, box-shadow 140ms ease',
+                                            }}
+                                            onMouseEnter={(e) => {
+                                              e.currentTarget.style.background = '#e5f0ff';
+                                              e.currentTarget.style.boxShadow = '0 4px 12px rgba(15, 23, 42, 0.18)';
+                                              e.currentTarget.style.transform = 'translateY(-1px)';
+                                            }}
+                                            onMouseLeave={(e) => {
+                                              e.currentTarget.style.background = value === String(selectedSize || '') ? '#e5f0ff' : '#ffffff';
+                                              e.currentTarget.style.boxShadow = 'none';
+                                              e.currentTarget.style.transform = 'translateY(0)';
                                             }}
                                           >
-                                            {s}
-                                          </span>
-                                        </button>
-                                      );
-                                    })}
-                                  </div>
-                                )}
-                              </div>
+                                            <span
+                                              style={{
+                                                display: 'block',
+                                                whiteSpace: 'nowrap',
+                                                overflow: 'hidden',
+                                                textOverflow: 'ellipsis',
+                                                fontWeight: 600,
+                                              }}
+                                            >
+                                              {s}
+                                            </span>
+                                          </button>
+                                        );
+                                      })}
+                                    </div>
+                                  )}
+                                </div>
+                              ) : (
+                                // Non-inventory model: render size options as inline selectable buttons (chips)
+                                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                                  {sizes.map((s) => {
+                                    const value = String(s || '');
+                                    const active = value === String(selectedSize || '');
+                                    return (
+                                      <button
+                                        key={value}
+                                        type="button"
+                                        onClick={() => {
+                                          setPackageSelections((prev) => ({
+                                            ...prev,
+                                            [idx]: { ...(prev[idx] || {}), size: value },
+                                          }));
+                                        }}
+                                        style={{
+                                          padding: '6px 16px',
+                                          borderRadius: 999,
+                                          border: active ? '1px solid #00b060' : '1px solid #e5e7eb',
+                                          background: active ? '#00b060' : '#ffffff',
+                                          color: active ? '#ffffff' : '#111827',
+                                          cursor: 'pointer',
+                                          fontSize: 12,
+                                          fontWeight: 600,
+                                          fontFamily: 'Poppins, sans-serif',
+                                          minWidth: 70,
+                                          boxShadow: active ? '0 2px 6px rgba(0,176,96,0.25)' : 'none',
+                                        }}
+                                      >
+                                        {s}
+                                      </button>
+                                    );
+                                  })}
+                                </div>
+                              )}
                             </div>
                           ) : null}
                           <button

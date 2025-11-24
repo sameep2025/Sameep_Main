@@ -30,6 +30,7 @@ const ComboItemSchema = new mongoose.Schema(
 const ComboSchema = new mongoose.Schema(
   {
     name: { type: String, required: true },
+    heading: { type: String, default: "" },
     iconUrl: { type: String, default: "" },
     imageUrl: { type: String, default: "" },
     parentCategoryId: { type: mongoose.Schema.Types.ObjectId, ref: "Category", required: true },

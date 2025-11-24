@@ -20,6 +20,7 @@ export default function DummyManageCombosModal({ show, onClose, subcategoryId, i
   const [type, setType] = useState("Standard");
   const [basePrice, setBasePrice] = useState("");
   const [terms, setTerms] = useState("");
+  const [heading, setHeading] = useState("");
   const [selectedLeafIds, setSelectedLeafIds] = useState([]);
   const [customItems, setCustomItems] = useState([]);
   const [variantOverrides, setVariantOverrides] = useState({});
@@ -108,6 +109,7 @@ export default function DummyManageCombosModal({ show, onClose, subcategoryId, i
       setType("Standard");
       setBasePrice("");
       setTerms("");
+      setHeading("");
       setItemSizesOverride({});
       setSelectedLeafIds([]);
       setCustomItems([]);
@@ -294,6 +296,7 @@ return out;
     setType(combo?.type || "Standard");
     setBasePrice(combo?.basePrice ?? "");
     setTerms(combo?.terms || "");
+    setHeading(combo?.heading || "");
     setSelectedLeafIds([]);
     const customs = (combo?.items || [])
       .filter((it) => it.kind === "custom")
@@ -384,6 +387,7 @@ return out;
       fd.append("name", name);
       fd.append("parentCategoryId", subcategoryId);
       fd.append("type", type);
+      fd.append("heading", heading || "");
 
       const itemsWithVariants = builtItems.map((it, i) => {
         if (enableComboTypes) {
@@ -726,6 +730,14 @@ return out;
                   <div style={{ fontSize: 12, color: '#111827' }}>Includes: <b>{includedItemsPreview || '(none)'}</b></div>
                 </div>
               </div>
+
+              <label style={label}>Heading (for combo types selector)</label>
+              <input
+                value={heading}
+                onChange={(e) => setHeading(e.target.value)}
+                placeholder="e.g., Select vehicle type"
+                style={input}
+              />
 
               <label style={{ display: 'inline-flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
                 <input type="checkbox" checked={enableComboTypes} onChange={(e) => setEnableComboTypes(e.target.checked)} />

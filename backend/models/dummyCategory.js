@@ -87,6 +87,8 @@ const DummyCategorySchema = new mongoose.Schema({
   ],
 
   inventoryLabelName: { type: String, default: '' },
+  attributesHeading: { type: String, default: '' },
+  parentSelectorLabel: { type: String, default: '' },
   linkedAttributes: { type: Object, default: {} },
 
   colorSchemes: [

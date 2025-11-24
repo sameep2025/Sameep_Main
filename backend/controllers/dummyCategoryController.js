@@ -184,6 +184,8 @@ exports.createCategory = async (req, res) => {
         visibleToVendor: String(visibleToVendor) === "true" || visibleToVendor === true,
         sequence: parsedSequence,
         inventoryLabelName: req.body.inventoryLabelName || "",
+        attributesHeading: req.body.attributesHeading || "",
+        parentSelectorLabel: req.body.parentSelectorLabel || "",
         enableFreeText: req.body.enableFreeText === "true" || req.body.enableFreeText === true,
         categoryType: req.body.categoryType || "Products",
         availableForCart: req.body.availableForCart === "true" || req.body.availableForCart === true || req.body.availableForCart === "on",
@@ -429,6 +431,8 @@ exports.updateCategory = async (req, res) => {
       if (req.body.categoryType !== undefined) doc.categoryType = req.body.categoryType;
       if (req.body.availableForCart !== undefined) doc.availableForCart = req.body.availableForCart === "true" || req.body.availableForCart === true || req.body.availableForCart === "on";
       if (req.body.seoKeywords !== undefined) doc.seoKeywords = req.body.seoKeywords;
+      if (req.body.attributesHeading !== undefined) doc.attributesHeading = req.body.attributesHeading;
+      if (req.body.parentSelectorLabel !== undefined) doc.parentSelectorLabel = req.body.parentSelectorLabel;
       if (req.body.postRequestsDeals !== undefined) doc.postRequestsDeals = req.body.postRequestsDeals === "true";
       if (req.body.loyaltyPoints !== undefined) doc.loyaltyPoints = req.body.loyaltyPoints === "true";
       if (req.body.linkAttributesPricing !== undefined) doc.linkAttributesPricing = req.body.linkAttributesPricing === "true";
