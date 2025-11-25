@@ -7,6 +7,7 @@ const upload = multer({ storage: multer.memoryStorage() });
 const uploadFields = upload.fields([
   { name: "image", maxCount: 1 },
   { name: "icon", maxCount: 1 },
+  { name: "profilePictures", maxCount: 5 },
   { name: "homeButton1Icon", maxCount: 1 },
   { name: "homeButton2Icon", maxCount: 1 },
   { name: "whyUsCard1Icon", maxCount: 1 },

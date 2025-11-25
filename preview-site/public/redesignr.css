@@ -798,6 +798,13 @@ div[style*="display:flex"][style*="flex-wrap:wrap"][style*="gap:16px"] {
   box-shadow: 0 2px 0 rgba(0,0,0,0.02) inset !important;
   text-align-last: center !important; /* center selected text in most browsers */
 }
+/* Force equal gaps for all chip rows (green + blue) in product cards */
+#preview-page main#products [style*="flex-wrap: wrap"][style*="gap: 8px"],
+#preview-page main#products [style*="flex-wrap: wrap"][style*="gap: 6px 8px"] {
+  gap: 6px 8px !important;    /* row-gap 6, column-gap 8 */
+  row-gap: 6px !important;
+  column-gap: 8px !important;
+}
 
 /* Combos size dropdown: force left alignment and full width */
 #preview-page main#products .combo-size-select {

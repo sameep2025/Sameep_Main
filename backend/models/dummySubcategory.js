@@ -11,6 +11,7 @@ const DummySubcategorySchema = new mongoose.Schema({
   terms: { type: String, default: '' },
   freeText: { type: String, default: '' },
   inventoryLabelName: { type: String, default: '' },
+  parentSelectorLabel: { type: String, default: '' },
   visibleToUser: { type: Boolean, default: false },
   visibleToVendor: { type: Boolean, default: false },
   sequence: { type: Number, default: 0 },

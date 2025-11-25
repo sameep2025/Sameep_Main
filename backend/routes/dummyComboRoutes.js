@@ -1,7 +1,7 @@
 const express = require("express");
 const mongoose = require("mongoose");
 const multer = require("multer");
-const { uploadBufferToS3 } = require("../utils/s3Upload");
+const { uploadBufferToS3, uploadBufferToS3WithLabel } = require("../utils/s3Upload");
 const DummyCombo = require("../models/dummyCombo");
 const DummyCategory = require("../models/dummyCategory");
 
@@ -75,14 +75,27 @@ router.post("/", uploadAny, async (req, res) => {
     const findFile = (field) => files.find((f) => f.fieldname === field);
     const iconFile = findFile('icon');
     const imageFile = findFile('image');
+
     if (iconFile && iconFile.buffer && iconFile.mimetype) {
       const segs = await getDummyCategoryPathSegments(parentCategoryId);
-      const uploaded = await uploadBufferToS3(iconFile.buffer, iconFile.mimetype, 'newcategory', { segments: segs });
+      const uploaded = await uploadBufferToS3WithLabel(
+        iconFile.buffer,
+        iconFile.mimetype,
+        'newcategory',
+        `${name || 'combo'}-icon`,
+        { segments: segs }
+      );
       iconUrl = uploaded.url;
     }
     if (imageFile && imageFile.buffer && imageFile.mimetype) {
       const segs = await getDummyCategoryPathSegments(parentCategoryId);
-      const uploaded = await uploadBufferToS3(imageFile.buffer, imageFile.mimetype, 'newcategory', { segments: segs });
+      const uploaded = await uploadBufferToS3WithLabel(
+        imageFile.buffer,
+        imageFile.mimetype,
+        'newcategory',
+        `${name || 'combo'}-image`,
+        { segments: segs }
+      );
       imageUrl = uploaded.url;
     }
 
@@ -214,10 +227,28 @@ router.put("/:comboId", uploadAny, async (req, res) => {
 
     const files = Array.isArray(req.files) ? req.files : [];
     const findFile = (field) => files.find((f) => f.fieldname === field);
+
+    // Load current combo once so we can derive parentCategoryId for S3 paths
+    const current = await DummyCombo.findById(comboId).lean();
+    if (!current) {
+      return res.status(404).json({ message: "Combo not found" });
+    }
+    const parentCategoryId = current.parentCategoryId;
+
     const iconFile = findFile('icon');
     const imageFile = findFile('image');
-    if (iconFile) iconUrl = `/uploads/${iconFile.filename}`;
-    if (imageFile) imageUrl = `/uploads/${imageFile.filename}`;
+
+    // Mirror POST behaviour: upload updated icon/image to S3 when provided
+    if (iconFile && iconFile.buffer && iconFile.mimetype) {
+      const segs = await getDummyCategoryPathSegments(parentCategoryId);
+      const uploaded = await uploadBufferToS3(iconFile.buffer, iconFile.mimetype, 'newcategory', { segments: segs });
+      iconUrl = uploaded.url;
+    }
+    if (imageFile && imageFile.buffer && imageFile.mimetype) {
+      const segs = await getDummyCategoryPathSegments(parentCategoryId);
+      const uploaded = await uploadBufferToS3(imageFile.buffer, imageFile.mimetype, 'newcategory', { segments: segs });
+      imageUrl = uploaded.url;
+    }
 
     if (items) {
       const ok = await validateAllowedCategoryItems(items);
@@ -231,22 +262,34 @@ router.put("/:comboId", uploadAny, async (req, res) => {
     }
 
     if (Array.isArray(items)) {
-      files.forEach((f) => {
-        if (!f.fieldname?.startsWith('variant_')) return;
+      for (const f of files) {
+        if (!f.fieldname?.startsWith('variant_')) continue;
         const parts = f.fieldname.split('_');
         const i = Number(parts[1]);
         const j = Number(parts[2]);
         if (Number.isInteger(i) && Number.isInteger(j) && items[i]) {
           if (!Array.isArray(items[i].variants)) items[i].variants = [];
-          if (!items[i].variants[j]) items[i].variants[j] = { size: (items[i].sizeOptions||[])[j] || '', price: null, terms: '', imageUrl: '' };
-          items[i].variants[j].imageUrl = `/uploads/${f.filename}`;
+          if (!items[i].variants[j]) {
+            items[i].variants[j] = { size: (items[i].sizeOptions || [])[j] || '', price: null, terms: '', imageUrl: '' };
+          }
+          if (f.buffer && f.mimetype) {
+            const segs = await getDummyCategoryPathSegments(parentCategoryId);
+            const sizeLabel = items[i].variants[j].size || `variant-${i}-${j}`;
+            const uploaded = await uploadBufferToS3WithLabel(
+              f.buffer,
+              f.mimetype,
+              'newcategory',
+              `${name || 'combo'}-${sizeLabel}`,
+              { segments: segs }
+            );
+            items[i].variants[j].imageUrl = uploaded.url;
+          }
         }
-      });
+      }
     }
 
     const setPayload = { name, heading, type, items, basePrice, terms, sizes };
     try {
-      const current = await DummyCombo.findById(comboId).lean();
       const temp = {
         ...(current || {}),
         name: typeof name !== 'undefined' ? name : current?.name,
@@ -386,24 +429,37 @@ async function buildDummyComboSummary(combo) {
   let perSize = [];
   let sizes = [];
 
-  if (variantSets.length > 0 && variantSets.every(vs => vs.length > 0)) {
-    const len = variantSets[0].length;
-    const sameLength = variantSets.every(vs => vs.length === len);
-    const sizes0 = sameLength ? variantSets[0].map(v => (v.size || null)) : [];
-    const sameSizes = sameLength && variantSets.every(vs => vs.map(v => (v.size || null)).every((sz, i) => sz === sizes0[i]));
-
-    if (sameSizes) {
-      const first = variantSets[0];
-      sizes = sizes0.filter(s => s !== null);
-      perSize = first.map(v => ({
-        size: v.size || null,
-        price: v.price,
-        terms: v.terms || '',
-        imageUrl: v.imageUrl || ''
-      }));
+  // Always recompute per-size summary from current variants, latest wins.
+  if (variantSets.length > 0) {
+    const bySize = new Map();
+    for (const vs of variantSets) {
+      for (const v of vs) {
+        const key = v.size || null;
+        if (!bySize.has(key)) {
+          bySize.set(key, { size: key, price: v.price ?? null, terms: v.terms || '', imageUrl: v.imageUrl || '' });
+        } else {
+          const cur = bySize.get(key);
+          // Always let newer non-empty values override older ones for that size
+          if (v.price != null && !Number.isNaN(v.price)) {
+            cur.price = v.price;
+          }
+          if (v.terms) {
+            cur.terms = v.terms;
+          }
+          if (v.imageUrl) {
+            cur.imageUrl = v.imageUrl;
+          }
+          bySize.set(key, cur);
+        }
+      }
+    }
+    if (bySize.size > 0) {
+      sizes = Array.from(bySize.keys()).filter(s => s !== null);
+      perSize = Array.from(bySize.values());
     }
   }
 
+  // If there are no variants at all, fall back to combo.sizes without images.
   if (perSize.length === 0 && Array.isArray(combo.sizes) && combo.sizes.length) {
     sizes = combo.sizes;
     perSize = combo.sizes.map(sz => ({ size: sz, price: null, terms: '', imageUrl: '' }));

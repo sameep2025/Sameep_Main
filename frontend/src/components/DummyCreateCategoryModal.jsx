@@ -205,6 +205,8 @@ function DummyCreateCategoryModal({
   const [contactFooterHeading2, setContactFooterHeading2] = useState("");
   const [contactFooterHeading3, setContactFooterHeading3] = useState("");
   const [contactFooterHeading4, setContactFooterHeading4] = useState("");
+  const [profilePictureFiles, setProfilePictureFiles] = useState([]);
+  const [existingProfilePictures, setExistingProfilePictures] = useState([]); // URLs saved in backend
 const [selectedMasterIndex, setSelectedMasterIndex] = useState(0);
 // Subcategory linking modal state (dummy)
 const [showSubcatSelector, setShowSubcatSelector] = useState(false);
@@ -301,6 +303,12 @@ const [subcategoryNameById, setSubcategoryNameById] = useState({});
           const shifted = [...arr.slice(1), ""];
           setFreeTexts(shifted);
         }
+      // Preload existing profile pictures (top-level categories)
+      try {
+        const pics = Array.isArray(initialData.profilePictures) ? initialData.profilePictures : [];
+        setExistingProfilePictures(pics.filter((u) => typeof u === 'string' && u.trim().length));
+        setProfilePictureFiles([]);
+      } catch {}
       } catch {}
       setInventoryLabelName(initialData.inventoryLabelName || "");
       setLinkedAttributes(
@@ -382,6 +390,8 @@ const [subcategoryNameById, setSubcategoryNameById] = useState({});
         setContactFooterHeading2("");
         setContactFooterHeading3("");
         setContactFooterHeading4("");
+      setProfilePictureFiles([]);
+      setExistingProfilePictures([]);
       }
       if (Array.isArray(initialData.signupLevels)) {
         const levels = [];
@@ -455,6 +465,7 @@ const [subcategoryNameById, setSubcategoryNameById] = useState({});
       setContactFooterHeading2("");
       setContactFooterHeading3("");
       setContactFooterHeading4("");
+      setProfilePictureFiles([]);
     }
   }, [show, initialData, parentId, parentCategoryType, parentEnableFreeText]);
 
@@ -743,6 +754,12 @@ const [subcategoryNameById, setSubcategoryNameById] = useState({});
       if (aboutCardIconFile) {
         formData.append("aboutCardIcon", aboutCardIconFile);
       }
+      // Upload up to 5 profile pictures
+      if (Array.isArray(profilePictureFiles) && profilePictureFiles.length) {
+        profilePictureFiles.slice(0, 5).forEach((file) => {
+          if (file) formData.append("profilePictures", file);
+        });
+      }
       formData.append("contactHeading", contactHeading || "");
       formData.append("contactDescription", contactDescription || "");
       formData.append("contactFooterHeading", contactFooterHeading || "");
@@ -899,6 +916,158 @@ const [subcategoryNameById, setSubcategoryNameById] = useState({});
                 className="max-h-24 rounded-lg object-contain mb-2"
               />
               <p style={{ fontSize: "0.85rem", color: "#28a745" }}>New Icon Selected</p>
+            </div>
+          )}
+          {/* Upload profile pictures (top-level only) */}
+          {!parentId && (
+            <div style={{ marginTop: 15 }}>
+              <h4 style={labelStyle}>
+                Upload Profile Picture (up to 5)
+                <span style={{ marginLeft: 8, fontSize: 12, color: "#6b7280" }}>
+                  ({Array.isArray(profilePictureFiles) ? profilePictureFiles.length : 0}/5)
+                </span>
+              </h4>
+
+              {/* Existing profile pictures from backend (with edit/delete) */}
+              {Array.isArray(existingProfilePictures) && existingProfilePictures.length > 0 && (
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 8 }}>
+                  {existingProfilePictures.map((url, idx) => (
+                    <div
+                      key={`existing-${idx}`}
+                      style={{
+                        position: "relative",
+                        width: 70,
+                        height: 70,
+                        borderRadius: 8,
+                        overflow: "hidden",
+                        border: "1px solid #ddd",
+                      }}
+                    >
+                      <img
+                        src={url.startsWith("http") ? url : `${process.env.NEXT_PUBLIC_BASE_URL || ""}${url}`}
+                        alt={`Existing profile ${idx + 1}`}
+                        style={{ width: "100%", height: "100%", objectFit: "cover" }}
+                      />
+                      {/* Delete existing image */}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setExistingProfilePictures((prev) =>
+                            (Array.isArray(prev) ? prev : []).filter((_, i) => i !== idx)
+                          );
+                        }}
+                        style={{
+                          position: "absolute",
+                          top: 2,
+                          right: 2,
+                          width: 18,
+                          height: 18,
+                          borderRadius: "999px",
+                          border: "none",
+                          background: "rgba(0,0,0,0.6)",
+                          color: "#fff",
+                          fontSize: 12,
+                          lineHeight: 1,
+                          cursor: "pointer",
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                        }}
+                      >
+                        ×
+                      </button>
+                      {/* Edit existing image: user deletes then adds a new one below */}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setExistingProfilePictures((prev) =>
+                            (Array.isArray(prev) ? prev : []).filter((_, i) => i !== idx)
+                          );
+                        }}
+                        style={{
+                          position: "absolute",
+                          bottom: 2,
+                          right: 2,
+                          padding: "0 4px",
+                          borderRadius: 4,
+                          border: "none",
+                          background: "rgba(0,0,0,0.6)",
+                          color: "#fff",
+                          fontSize: 10,
+                          lineHeight: 1.2,
+                          cursor: "pointer",
+                        }}
+                      >
+                        Edit
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+              <input
+                type="file"
+                accept="image/*"
+                multiple
+                onChange={(e) => {
+                  const incoming = Array.from(e.target.files || []);
+                  if (!incoming.length) return;
+                  setProfilePictureFiles((prev) => {
+                    const merged = [...(Array.isArray(prev) ? prev : []), ...incoming];
+                    return merged.slice(0, 5);
+                  });
+                }}
+                style={inputStyle}
+              />
+              {Array.isArray(profilePictureFiles) && profilePictureFiles.length > 0 && (
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 8 }}>
+                  {profilePictureFiles.slice(0, 5).map((file, idx) => (
+                    <div
+                      key={idx}
+                      style={{
+                        position: "relative",
+                        width: 70,
+                        height: 70,
+                        borderRadius: 8,
+                        overflow: "hidden",
+                        border: "1px solid #ddd",
+                      }}
+                    >
+                      <img
+                        src={URL.createObjectURL(file)}
+                        alt={`Profile ${idx + 1}`}
+                        style={{ width: "100%", height: "100%", objectFit: "cover" }}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setProfilePictureFiles((prev) =>
+                            (Array.isArray(prev) ? prev : []).filter((_, i) => i !== idx)
+                          );
+                        }}
+                        style={{
+                          position: "absolute",
+                          top: 2,
+                          right: 2,
+                          width: 18,
+                          height: 18,
+                          borderRadius: "999px",
+                          border: "none",
+                          background: "rgba(0,0,0,0.6)",
+                          color: "#fff",
+                          fontSize: 12,
+                          lineHeight: 1,
+                          cursor: "pointer",
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                        }}
+                      >
+                        ×
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           )}
           <div style={{ display: "flex", gap: "10px", justifyContent: "center" }}>

@@ -15,8 +15,17 @@ function DummyCategoryPage() {
   const [viewMode, setViewMode] = useState("individual"); // 'individual' | 'packages'
   const [isTopParentSubcategory, setIsTopParentSubcategory] = useState(false);
   const [parentSelectorLabel, setParentSelectorLabel] = useState("");
-  const [showLabelPopup, setShowLabelPopup] = useState(false);
-  const [labelInput, setLabelInput] = useState("");
+  const [showAddonPopup, setShowAddonPopup] = useState(false);
+  const [individualAddon, setIndividualAddon] = useState({ heading: "", description: "", buttonLabel: "" });
+  const [packagesAddon, setPackagesAddon] = useState({ heading: "", description: "", buttonLabel: "" });
+  const [addonForm, setAddonForm] = useState({
+    individualHeading: "",
+    individualDescription: "",
+    individualButtonLabel: "",
+    packagesHeading: "",
+    packagesDescription: "",
+    packagesButtonLabel: "",
+  });
 
   const toAbs = (u) => {
     if (!u) return "";
@@ -83,6 +92,24 @@ function DummyCategoryPage() {
         const hasParent = Boolean(data?.parent || data?.parentId);
         setIsTopParentSubcategory(!hasParent);
         setParentSelectorLabel(typeof data.parentSelectorLabel === 'string' ? data.parentSelectorLabel : "");
+        if (data.individualAddon && typeof data.individualAddon === 'object') {
+          setIndividualAddon({
+            heading: data.individualAddon.heading || "",
+            description: data.individualAddon.description || "",
+            buttonLabel: data.individualAddon.buttonLabel || "",
+          });
+        } else {
+          setIndividualAddon({ heading: "", description: "", buttonLabel: "" });
+        }
+        if (data.packagesAddon && typeof data.packagesAddon === 'object') {
+          setPackagesAddon({
+            heading: data.packagesAddon.heading || "",
+            description: data.packagesAddon.description || "",
+            buttonLabel: data.packagesAddon.buttonLabel || "",
+          });
+        } else {
+          setPackagesAddon({ heading: "", description: "", buttonLabel: "" });
+        }
       } catch {
         setIsTopParentSubcategory(false);
         setParentSelectorLabel("");
@@ -97,7 +124,7 @@ function DummyCategoryPage() {
         {parentId ? "Dummy Subcategories" : "Dummy Categories"}
       </h1>
 
-      {parentId && isTopParentSubcategory && (
+      {parentId && (
         <div
           style={{
             display: "flex",
@@ -107,60 +134,71 @@ function DummyCategoryPage() {
           }}
         >
           <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-            <div
-              style={{
-                display: "flex",
-                gap: 8,
-                alignItems: "center",
-                border: "1px solid #e5e7eb",
-                padding: 4,
-                borderRadius: 8,
-              }}
-            >
+            {isTopParentSubcategory && (
+              <div
+                style={{
+                  display: "flex",
+                  gap: 8,
+                  alignItems: "center",
+                  border: "1px solid #e5e7eb",
+                  padding: 4,
+                  borderRadius: 8,
+                }}
+              >
+                <button
+                  onClick={() => setViewMode("individual")}
+                  style={{
+                    padding: "6px 10px",
+                    borderRadius: 6,
+                    border: "none",
+                    background: viewMode === "individual" ? "#0ea5e9" : "transparent",
+                    color: viewMode === "individual" ? "#fff" : "#0f172a",
+                    fontWeight: 600,
+                  }}
+                >
+                  Individual
+                </button>
+                <button
+                  onClick={() => setViewMode("packages")}
+                  style={{
+                    padding: "6px 10px",
+                    borderRadius: 6,
+                    border: "none",
+                    background: viewMode === "packages" ? "#0ea5e9" : "transparent",
+                    color: viewMode === "packages" ? "#fff" : "#0f172a",
+                    fontWeight: 600,
+                  }}
+                >
+                  Packages
+                </button>
+              </div>
+            )}
+            {isTopParentSubcategory && (
               <button
-                onClick={() => setViewMode("individual")}
+                type="button"
+                onClick={() => {
+                  setAddonForm({
+                    individualHeading: individualAddon.heading || "",
+                    individualDescription: individualAddon.description || "",
+                    individualButtonLabel: individualAddon.buttonLabel || "",
+                    packagesHeading: packagesAddon.heading || "",
+                    packagesDescription: packagesAddon.description || "",
+                    packagesButtonLabel: packagesAddon.buttonLabel || "",
+                  });
+                  setShowAddonPopup(true);
+                }}
                 style={{
                   padding: "6px 10px",
                   borderRadius: 6,
                   border: "none",
-                  background: viewMode === "individual" ? "#0ea5e9" : "transparent",
-                  color: viewMode === "individual" ? "#fff" : "#0f172a",
+                  background: "#4b5563",
+                  color: "#fff",
                   fontWeight: 600,
                 }}
               >
-                Individual
+                Add On Text
               </button>
-              <button
-                onClick={() => setViewMode("packages")}
-                style={{
-                  padding: "6px 10px",
-                  borderRadius: 6,
-                  border: "none",
-                  background: viewMode === "packages" ? "#0ea5e9" : "transparent",
-                  color: viewMode === "packages" ? "#fff" : "#0f172a",
-                  fontWeight: 600,
-                }}
-              >
-                Packages
-              </button>
-            </div>
-            <button
-              type="button"
-              onClick={() => {
-                setLabelInput(parentSelectorLabel || "");
-                setShowLabelPopup(true);
-              }}
-              style={{
-                padding: "6px 10px",
-                borderRadius: 6,
-                border: "none",
-                background: "#4b5563",
-                color: "#fff",
-                fontWeight: 600,
-              }}
-            >
-              Add Label
-            </button>
+            )}
           </div>
         </div>
       )}
@@ -313,7 +351,7 @@ function DummyCategoryPage() {
         onSaved={() => loadCombos()}
       />
 
-      {showLabelPopup && (
+      {showAddonPopup && (
         <div
           style={{
             position: "fixed",
@@ -330,28 +368,129 @@ function DummyCategoryPage() {
               background: "#fff",
               padding: 16,
               borderRadius: 10,
-              minWidth: 320,
+              minWidth: 480,
               maxWidth: "90vw",
             }}
           >
-            <h3 style={{ marginTop: 0, marginBottom: 12 }}>Parent selector label</h3>
-            <input
-              type="text"
-              value={labelInput}
-              onChange={(e) => setLabelInput(e.target.value)}
-              placeholder="e.g., Select course type"
+            <h3 style={{ marginTop: 0, marginBottom: 12 }}>Add On Text</h3>
+            <div
               style={{
-                width: "100%",
-                padding: 8,
-                borderRadius: 6,
-                border: "1px solid #cbd5e1",
-                marginBottom: 12,
+                display: "grid",
+                gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+                gap: 16,
               }}
-            />
-            <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
+            >
+              <div>
+                <h4 style={{ margin: "0 0 8px 0", fontSize: 14 }}>Individual</h4>
+                <input
+                  type="text"
+                  value={addonForm.individualHeading}
+                  onChange={(e) =>
+                    setAddonForm({ ...addonForm, individualHeading: e.target.value })
+                  }
+                  placeholder="Heading"
+                  style={{
+                    width: "100%",
+                    padding: 8,
+                    borderRadius: 6,
+                    border: "1px solid #cbd5e1",
+                    marginBottom: 8,
+                  }}
+                />
+                <textarea
+                  value={addonForm.individualDescription}
+                  onChange={(e) =>
+                    setAddonForm({
+                      ...addonForm,
+                      individualDescription: e.target.value,
+                    })
+                  }
+                  placeholder="Description"
+                  rows={3}
+                  style={{
+                    width: "100%",
+                    padding: 8,
+                    borderRadius: 6,
+                    border: "1px solid #cbd5e1",
+                    marginBottom: 8,
+                  }}
+                />
+                <input
+                  type="text"
+                  value={addonForm.individualButtonLabel}
+                  onChange={(e) =>
+                    setAddonForm({
+                      ...addonForm,
+                      individualButtonLabel: e.target.value,
+                    })
+                  }
+                  placeholder="Button label"
+                  style={{
+                    width: "100%",
+                    padding: 8,
+                    borderRadius: 6,
+                    border: "1px solid #cbd5e1",
+                  }}
+                />
+              </div>
+              <div>
+                <h4 style={{ margin: "0 0 8px 0", fontSize: 14 }}>Packages</h4>
+                <input
+                  type="text"
+                  value={addonForm.packagesHeading}
+                  onChange={(e) =>
+                    setAddonForm({ ...addonForm, packagesHeading: e.target.value })
+                  }
+                  placeholder="Heading"
+                  style={{
+                    width: "100%",
+                    padding: 8,
+                    borderRadius: 6,
+                    border: "1px solid #cbd5e1",
+                    marginBottom: 8,
+                  }}
+                />
+                <textarea
+                  value={addonForm.packagesDescription}
+                  onChange={(e) =>
+                    setAddonForm({
+                      ...addonForm,
+                      packagesDescription: e.target.value,
+                    })
+                  }
+                  placeholder="Description"
+                  rows={3}
+                  style={{
+                    width: "100%",
+                    padding: 8,
+                    borderRadius: 6,
+                    border: "1px solid #cbd5e1",
+                    marginBottom: 8,
+                  }}
+                />
+                <input
+                  type="text"
+                  value={addonForm.packagesButtonLabel}
+                  onChange={(e) =>
+                    setAddonForm({
+                      ...addonForm,
+                      packagesButtonLabel: e.target.value,
+                    })
+                  }
+                  placeholder="Button label"
+                  style={{
+                    width: "100%",
+                    padding: 8,
+                    borderRadius: 6,
+                    border: "1px solid #cbd5e1",
+                  }}
+                />
+              </div>
+            </div>
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 12 }}>
               <button
                 type="button"
-                onClick={() => setShowLabelPopup(false)}
+                onClick={() => setShowAddonPopup(false)}
                 style={{
                   padding: "6px 10px",
                   borderRadius: 6,
@@ -364,18 +503,34 @@ function DummyCategoryPage() {
               <button
                 type="button"
                 onClick={async () => {
+                  if (!parentId) return;
                   try {
-                    if (!parentId) return;
-                    const val = String(labelInput || "");
+                    const fd = new FormData();
+                    fd.append("individualAddonHeading", addonForm.individualHeading || "");
+                    fd.append("individualAddonDescription", addonForm.individualDescription || "");
+                    fd.append("individualAddonButtonLabel", addonForm.individualButtonLabel || "");
+                    fd.append("packagesAddonHeading", addonForm.packagesHeading || "");
+                    fd.append("packagesAddonDescription", addonForm.packagesDescription || "");
+                    fd.append("packagesAddonButtonLabel", addonForm.packagesButtonLabel || "");
+
                     await fetch(`${API_BASE_URL}/api/dummy-categories/${parentId}`, {
                       method: "PUT",
-                      headers: { "Content-Type": "application/json" },
-                      body: JSON.stringify({ parentSelectorLabel: val }),
+                      body: fd,
                     });
-                    setParentSelectorLabel(val);
-                    setShowLabelPopup(false);
+
+                    setIndividualAddon({
+                      heading: addonForm.individualHeading || "",
+                      description: addonForm.individualDescription || "",
+                      buttonLabel: addonForm.individualButtonLabel || "",
+                    });
+                    setPackagesAddon({
+                      heading: addonForm.packagesHeading || "",
+                      description: addonForm.packagesDescription || "",
+                      buttonLabel: addonForm.packagesButtonLabel || "",
+                    });
+                    setShowAddonPopup(false);
                   } catch (e) {
-                    alert(e?.message || "Failed to save label");
+                    alert(e?.message || "Failed to save add-on text");
                   }
                 }}
                 style={{

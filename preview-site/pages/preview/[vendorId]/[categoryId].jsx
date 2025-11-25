@@ -45,8 +45,11 @@ export default function PreviewPage() {
   const [whyUs, setWhyUs] = useState(null);
   const [about, setAbout] = useState(null);
   const [contact, setContact] = useState(null);
+  const [individualAddon, setIndividualAddon] = useState(null);
+  const [packagesAddon, setPackagesAddon] = useState(null);
   const [vendorAddonTitle, setVendorAddonTitle] = useState(null);
   const [vendorAddonDescription, setVendorAddonDescription] = useState(null);
+  const [categoryProfilePictures, setCategoryProfilePictures] = useState([]); // fallback when vendor has no profile pictures
   const [activeServiceKey, setActiveServiceKey] = useState(null); // which service/card should animate
   const [attributesHeading, setAttributesHeading] = useState(null);
   const [parentSelectorLabel, setParentSelectorLabel] = useState(null);
@@ -114,6 +117,48 @@ export default function PreviewPage() {
     return () => window.removeEventListener("preview:service-click", handler);
   }, [makeServiceKey, scrollToServiceSection]);
 
+  // Hydrate preview category tree with per-node parentSelectorLabel from dummy-categories API
+  const augmentTreeWithDummyLabels = useCallback(async (root) => {
+    if (!root) return root;
+    const pickId = (n) => {
+      try { return String(n?.id || n?._id || ""); } catch { return ""; }
+    };
+    const visited = new Set();
+
+    const fetchLabel = async (id) => {
+      if (!id || visited.has(id)) return null;
+      visited.add(id);
+      try {
+        const res = await fetch(`${API_BASE_URL}/api/dummy-categories/${id}`, { cache: 'no-store' });
+        if (!res.ok) return null;
+        const json = await res.json().catch(() => null);
+        if (json && typeof json.parentSelectorLabel === 'string') {
+          const t = json.parentSelectorLabel.trim();
+          return t || "";
+        }
+      } catch {}
+      return null;
+    };
+
+    const visit = async (node) => {
+      if (!node) return;
+      const id = pickId(node);
+      const lbl = await fetchLabel(id);
+      if (lbl !== null && lbl !== undefined) {
+        node.parentSelectorLabel = lbl;
+      }
+      const children = Array.isArray(node.children) ? node.children : [];
+      // visit children sequentially to avoid flooding the API
+      for (const ch of children) {
+        // eslint-disable-next-line no-await-in-loop
+        await visit(ch);
+      }
+    };
+
+    await visit(root);
+    return root;
+  }, []);
+
   // ----------------- Fetch vendor & categories -----------------
   const fetchData = useCallback(async () => {
     if (!router.isReady || !vendorId) return;
@@ -128,6 +173,12 @@ export default function PreviewPage() {
             const wmJson = await wmRes.json().catch(() => null);
             const arr = Array.isArray(wmJson?.webMenu) ? wmJson.webMenu : [];
             setWebMenu(arr);
+            try {
+              const pics = Array.isArray(wmJson?.profilePictures) ? wmJson.profilePictures : [];
+              setCategoryProfilePictures(pics);
+            } catch {
+              setCategoryProfilePictures([]);
+            }
             if (wmJson?.homePopup && typeof wmJson.homePopup === 'object') {
               setHomePopup(wmJson.homePopup);
             } else {
@@ -147,6 +198,16 @@ export default function PreviewPage() {
               setContact(wmJson.contact);
             } else {
               setContact(null);
+            }
+            if (wmJson?.individualAddon && typeof wmJson.individualAddon === 'object') {
+              setIndividualAddon(wmJson.individualAddon);
+            } else {
+              setIndividualAddon(null);
+            }
+            if (wmJson?.packagesAddon && typeof wmJson.packagesAddon === 'object') {
+              setPackagesAddon(wmJson.packagesAddon);
+            } else {
+              setPackagesAddon(null);
             }
             // Derive Inventory model flag from categoryModel array on dummy category
             try {
@@ -198,6 +259,7 @@ export default function PreviewPage() {
             setAbout(null);
             setContact(null);
             setIsInventoryModel(false);
+            setCategoryProfilePictures([]);
           }
         }
       } catch {
@@ -208,6 +270,7 @@ export default function PreviewPage() {
         setAbout(null);
         setContact(null);
         setIsInventoryModel(false);
+        setCategoryProfilePictures([]);
       }
 
       const forceDummy = String(mode || '').toLowerCase() === 'dummy';
@@ -235,7 +298,10 @@ export default function PreviewPage() {
             }
           } catch {}
           setVendor(dvVendor);
-          const categoriesWithLinked = dv?.categories || null;
+          let categoriesWithLinked = dv?.categories || null;
+          if (categoriesWithLinked) {
+            try { categoriesWithLinked = await augmentTreeWithDummyLabels(categoriesWithLinked); } catch {}
+          }
           setCategoryTree(categoriesWithLinked);
           if (dvVendor?.location) setLocation(dvVendor.location);
           // Compute hero title/description from dummy category/vendor freeTexts
@@ -310,7 +376,10 @@ export default function PreviewPage() {
               }
             } catch {}
             setVendor(dvVendor);
-            const categoriesWithLinked = dv?.categories || null;
+            let categoriesWithLinked = dv?.categories || null;
+            if (categoriesWithLinked) {
+              try { categoriesWithLinked = await augmentTreeWithDummyLabels(categoriesWithLinked); } catch {}
+            }
             setCategoryTree(categoriesWithLinked);
             if (dvVendor?.location) setLocation(dvVendor.location);
             // Compute hero title/description for fallback dummy as well
@@ -670,10 +739,34 @@ export default function PreviewPage() {
     const rootNameForCard = String(categoryTree?.name || '').toLowerCase();
     const isDriving = rootNameForCard === 'driving school';
 
+    const specialName = String(node?.name).trim();
+    const isSpecialCard = specialName === "Face & Skin" || specialName === "Hand & Foot";
+
+    // Prefer a node-specific parentSelectorLabel if present; fall back to global label
+    const labelForCard = (() => {
+      try {
+        const raw = typeof node?.parentSelectorLabel === "string" ? node.parentSelectorLabel : parentSelectorLabel;
+        const trimmed = String(raw || "").trim();
+        return trimmed || "";
+      } catch {
+        return parentSelectorLabel || "";
+      }
+    })();
+
     const selectedParent = selection?.parent || node.children?.[0] || node;
     const selectedChild = selection?.child || getDeepestFirstChild(selectedParent);
 
     const displayNode = selectedChild || selectedParent;
+
+    const childLabelForCard = (() => {
+      try {
+        const raw = typeof selectedParent?.parentSelectorLabel === "string" ? selectedParent.parentSelectorLabel : "";
+        const trimmed = String(raw || "").trim();
+        return trimmed || "";
+      } catch {
+        return "";
+      }
+    })();
     let attributeDropdown = null;
 
     const getUiForLocal = (nodeOrId) => ({ mode: 'buttons', includeLeafChildren: true });
@@ -804,7 +897,7 @@ export default function PreviewPage() {
             boxShadow: "0 10px 20px rgba(0,0,0,0.06)",
             display: "flex",
             flexDirection: "column",
-            justifyContent: "space-between",
+            justifyContent: "flex-start",
             fontFamily: "Poppins, sans-serif",
           }}
         >
@@ -1356,10 +1449,10 @@ export default function PreviewPage() {
           {node.children?.length > 0 && (
             parentSelectorMode === "buttons" ? (
               <>
-                <div style={{ fontSize: 11, fontWeight: 400, color: "#111827", marginLeft: 2, marginBottom: -14 }}>
-                  {parentSelectorLabel || "Select course type"}
+                <div style={{ fontSize: 11, fontWeight: 400, color: "#111827", marginLeft: 2,  marginBottom: isSpecialCard ? -12 : 6, }}>
+                  {labelForCard || "Select course type"}
                 </div>
-              <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 10 }}>
+              <div style={{ display: "flex", flexWrap: "wrap", columnGap: 8, rowGap: 6, marginBottom: isSpecialCard ? -12 : 6, }}>
                 {node.children.map((opt) => {
                   const leaf = getDeepestFirstChild(opt);
                   const isSelectedParent = selectedParent?.id === opt.id;
@@ -1426,7 +1519,12 @@ export default function PreviewPage() {
           {includeLeafChildren && selectedParent?.children?.length > 0 && (
             childSelectorMode === "buttons" ? (
               <>
-                <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 12 }}>
+                {childLabelForCard && (
+                  <div style={{ fontSize: 11, fontWeight: 400, color: "#111827", marginLeft: 2, marginBottom: 4 }}>
+                    {childLabelForCard}
+                  </div>
+                )}
+                <div style={{ display: "flex", flexWrap: "wrap", columnGap: 8, rowGap: 6, marginBottom: 12 }}>
                   {selectedParent.children.map((child) => (
                     <button
                       key={child.id}
@@ -1486,7 +1584,9 @@ export default function PreviewPage() {
               fontFamily: "Poppins, sans-serif",
             }}
           >
-            Enroll Now
+            {(individualAddon && typeof individualAddon.buttonLabel === 'string' && individualAddon.buttonLabel.trim())
+              ? individualAddon.buttonLabel.trim()
+              : 'Enroll Now'}
           </button>
         </div>
       </section>
@@ -2177,7 +2277,9 @@ export default function PreviewPage() {
                 fontFamily: 'Poppins, sans-serif',
               }}
             >
-              Enroll Now
+              {(packagesAddon && typeof packagesAddon.buttonLabel === 'string' && packagesAddon.buttonLabel.trim())
+                ? packagesAddon.buttonLabel.trim()
+                : 'Enroll Now'}
             </button>
           </div>
         </section>
@@ -2438,7 +2540,9 @@ export default function PreviewPage() {
                           onClick={() => alert(`Booking ${child?.name}`)}
                           style={{ width: '100%', padding: '10px 14px', borderRadius: 28, border: 'none', background: 'rgb(245 158 11)', color: '#111827', fontWeight: 600, cursor: 'pointer', fontFamily: 'Poppins, sans-serif' }}
                         >
-                          Enroll Now
+                          {(individualAddon && typeof individualAddon.buttonLabel === 'string' && individualAddon.buttonLabel.trim())
+                            ? individualAddon.buttonLabel.trim()
+                            : 'Enroll Now'}
                         </button>
                       </div>
                     </div>
@@ -2558,7 +2662,9 @@ export default function PreviewPage() {
                           onClick={() => alert(`Booking ${enriched?.name}`)}
                           style={{ width: '100%', padding: '10px 14px', borderRadius: 28, border: 'none', background: 'rgb(245 158 11)', color: '#111827', fontWeight: 600, cursor: 'pointer', fontFamily: 'Poppins, sans-serif' }}
                         >
-                          Enroll Now
+                          {(packagesAddon && typeof packagesAddon.buttonLabel === 'string' && packagesAddon.buttonLabel.trim())
+                            ? packagesAddon.buttonLabel.trim()
+                            : 'Enroll Now'}
                         </button>
                       </div>
                     </div>
@@ -2644,7 +2750,11 @@ export default function PreviewPage() {
           />
           <HomeSection
             businessName={vendor?.businessName || "Loading..."}
-            profilePictures={vendor?.profilePictures || []}
+            profilePictures={
+              (Array.isArray(vendor?.profilePictures) && vendor.profilePictures.length
+                ? vendor.profilePictures
+                : categoryProfilePictures) || []
+            }
             heroTitle={heroTitle || router?.query?.ft1 || vendor?.freeTexts?.[0] || vendor?.customFields?.freeText1 || vendor?.ui?.heroTitle}
             heroDescription={
               heroDescription ||
@@ -2662,9 +2772,15 @@ export default function PreviewPage() {
               <section style={{ marginBottom: 8 }}>
                 {isDrivingSchool ? (
                   <div style={{ textAlign: "center", marginBottom: 16, fontFamily: "Poppins, sans-serif"   }}>
-                    <h2 style={{ margin: 0, fontSize: 30, fontWeight: 700 }}>Explore Our Driving Packages</h2>
+                    <h2 style={{ margin: 0, fontSize: 30, fontWeight: 700 }}>
+                      {(packagesAddon && typeof packagesAddon.heading === 'string' && packagesAddon.heading.trim())
+                        ? packagesAddon.heading.trim()
+                        : 'Explore Our Driving Packages'}
+                    </h2>
                     <p style={{ margin: "6px 0 0", fontSize: 18, color: "#4b5563" }}>
-                      Comprehensive bundles designed to give you the best value and a complete learning experience.
+                      {(packagesAddon && typeof packagesAddon.description === 'string' && packagesAddon.description.trim())
+                        ? packagesAddon.description.trim()
+                        : 'Comprehensive bundles designed to give you the best value and a complete learning experience.'}
                     </p>
                   </div>
                 ) : null}
@@ -2817,28 +2933,46 @@ export default function PreviewPage() {
 
                       const normalize = (val) => {
                         const s = String(val || '');
-                        if (s.startsWith('http://') || s.startsWith('https://') || s.startsWith('data:')) return s;
+                        // For absolute/S3 URLs, append a cache-buster so updated images are fetched fresh
+                        if (s.startsWith('http://') || s.startsWith('https://') || s.startsWith('data:')) {
+                          try {
+                            const url = new URL(s);
+                            // Use combo.updateAt/updatedAt or Date.now() as a cache buster
+                            const ts = combo?.updatedAt || combo?.updateAt || undefined;
+                            if (ts) {
+                              url.searchParams.set('t', String(ts));
+                            }
+                            return url.toString();
+                          } catch {
+                            return s;
+                          }
+                        }
                         if (s.startsWith('/')) return `${ASSET_BASE_URL}${s}`;
                         return `${ASSET_BASE_URL}/${s}`;
                       };
 
-                      // 1) Try perSize entry for the selected size
+                      // 1) If combo types/perSize exist, always use perSize image as single source of truth
                       try {
-                        if (selectedSize && perSizeArr.length) {
-                          const ps = perSizeArr.find((p) => String(p?.size || '') === String(selectedSize));
+                        if (perSizeArr && perSizeArr.length) {
+                          let ps = null;
+                          if (selectedSize) {
+                            ps = perSizeArr.find((p) => String(p?.size || '') === String(selectedSize)) || null;
+                          }
+                          if (!ps) {
+                            ps = perSizeArr[0] || null;
+                          }
                           if (ps && isValidImg(ps.imageUrl || ps.iconUrl)) {
                             return normalize(ps.imageUrl || ps.iconUrl);
                           }
                         }
                       } catch {}
 
-                      // 2) Try combo-level images (icon/image)
+                      // 2) Legacy fallback when no perSize images exist: combo-level then variants
                       try {
                         const direct = combo?.imageUrl || combo?.iconUrl;
                         if (isValidImg(direct)) return normalize(direct);
                       } catch {}
 
-                      // 3) Try any good variant/image on items, prioritising selectedSize
                       try {
                         const pickVariantImg = (preferSize) => {
                           for (const it of items) {
@@ -2852,18 +2986,15 @@ export default function PreviewPage() {
                           return null;
                         };
 
-                        // First: exact selected size
                         if (selectedSize) {
                           const fromSelected = pickVariantImg(selectedSize);
                           if (fromSelected) return fromSelected;
                         }
 
-                        // Then: any good variant image
                         const anyVariant = pickVariantImg(null);
                         if (anyVariant) return anyVariant;
                       } catch {}
 
-                      // 4) Fallback to any combo-level candidate (supports multiple uploads)
                       const cand = comboImageCandidates.find((v) => isValidImg(v)) || null;
                       if (!cand) return null;
                       return normalize(cand);
@@ -3093,7 +3224,9 @@ export default function PreviewPage() {
                               cursor: 'pointer',
                             }}
                           >
-                            Enroll Now
+                            {(packagesAddon && typeof packagesAddon.buttonLabel === 'string' && packagesAddon.buttonLabel.trim())
+                              ? packagesAddon.buttonLabel.trim()
+                              : 'Enroll Now'}
                           </button>
                         </div>
                       </section>
@@ -3105,9 +3238,15 @@ export default function PreviewPage() {
             {/* <h2 style={{ margin: '0', padding: '0 0 10px 0' }}>Individuals</h2> */}
             {isDrivingSchool ? (
               <div style={{ textAlign: "center", marginBottom: 20, fontFamily: "Poppins, sans-serif" }}>
-                <h2 style={{ margin: 0, fontSize: 30, fontWeight: 700 }}>Individual Driving Courses</h2>
+                <h2 style={{ margin: 0, fontSize: 30, fontWeight: 700 }}>
+                  {(individualAddon && typeof individualAddon.heading === 'string' && individualAddon.heading.trim())
+                    ? individualAddon.heading.trim()
+                    : 'Individual Driving Courses'}
+                </h2>
                 <p style={{ margin: "6px 0 0", fontSize: 18, color: "#4b5563" }}>
-                  Choose specialized training for specific vehicle types, with or without a license.
+                  {(individualAddon && typeof individualAddon.description === 'string' && individualAddon.description.trim())
+                    ? individualAddon.description.trim()
+                    : 'Choose specialized training for specific vehicle types, with or without a license.'}
                 </p>
               </div>
             ) : null}

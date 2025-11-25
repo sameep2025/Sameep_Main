@@ -315,20 +315,37 @@ return out;
         setEnableComboTypes(true);
         setComboSizes(sizes);
         const ov = {};
+        const perSizeArr = Array.isArray(combo?.perSize) ? combo.perSize : [];
         sizes.forEach((sz, j) => {
-          // pick a representative variant override for this size from first matching item
-          let rep = null;
-          for (const it of items) {
-            const vs = Array.isArray(it.variants) ? it.variants : [];
-            const found = vs.find((vv) => String(vv?.size || '') === String(sz));
-            if (found) { rep = found; break; }
-          }
           const key = `combo:${j}`;
-          ov[key] = {
-            price: (rep && rep.price != null && rep.price !== '') ? String(rep.price) : '',
-            terms: rep?.terms || '',
-            imageUrl: rep?.imageUrl || ''
-          };
+          let price = '';
+          let terms = '';
+          let imageUrl = '';
+
+          // 1) Prefer perSize entry from server summary (always up to date)
+          const ps = perSizeArr.find((p) => String(p?.size || '') === String(sz));
+          if (ps) {
+            if (ps.price != null && ps.price !== '') price = String(ps.price);
+            if (ps.terms) terms = ps.terms;
+            if (ps.imageUrl) imageUrl = ps.imageUrl;
+          }
+
+          // 2) Fallback: pick a representative variant override for this size from first matching item
+          if (!imageUrl || price === '' || !terms) {
+            let rep = null;
+            for (const it of items) {
+              const vs = Array.isArray(it.variants) ? it.variants : [];
+              const found = vs.find((vv) => String(vv?.size || '') === String(sz));
+              if (found) { rep = found; break; }
+            }
+            if (rep) {
+              if (price === '' && rep.price != null && rep.price !== '') price = String(rep.price);
+              if (!terms && rep.terms) terms = rep.terms;
+              if (!imageUrl && rep.imageUrl) imageUrl = rep.imageUrl;
+            }
+          }
+
+          ov[key] = { price, terms, imageUrl };
         });
         setComboVariantOverrides(ov);
       } else {
@@ -399,7 +416,9 @@ return out;
               size: sz,
               price: ov.price === "" || typeof ov.price === 'undefined' ? (typeof it.price === 'number' ? it.price : null) : Number(ov.price),
               terms: typeof ov.terms === 'string' && ov.terms.length ? ov.terms : (it.terms || ""),
-              imageUrl: ov.imageUrl || "",
+              // If a new file is selected for this combo type, do not send the old imageUrl;
+              // backend will set imageUrl from the uploaded variant file.
+              imageUrl: ov.file ? "" : (ov.imageUrl || ""),
             };
           });
           return { ...it, variants };

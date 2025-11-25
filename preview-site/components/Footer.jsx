@@ -31,8 +31,17 @@ export default function Footer({
 
   const titleName = (businessName && String(businessName).trim()) || categoryName || "Driving School";
   const hasContact = contact && typeof contact === "object";
+  const trimmedBusiness = (businessName && String(businessName).trim()) || "";
+  const applyBusinessName = (text) => {
+    const raw = text == null ? "" : String(text);
+    const base = raw.trim();
+    if (!base) return base;
+    if (!trimmedBusiness) return base.replace(/\{business name\}/gi, "").trim();
+    return base.replace(/\{business name\}/gi, trimmedBusiness);
+  };
+
   const column1Heading = hasContact && (contact.footerHeading1 || contact.footerHeading) && String((contact.footerHeading1 || contact.footerHeading)).trim().length
-    ? String(contact.footerHeading1 || contact.footerHeading).trim()
+    ? applyBusinessName(contact.footerHeading1 || contact.footerHeading)
     : titleName;
   const column1Description = hasContact && contact.footerDescription && String(contact.footerDescription).trim().length
     ? String(contact.footerDescription).trim()

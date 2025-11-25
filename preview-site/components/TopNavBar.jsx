@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useEffect } from "react";
-import { Menu, ChevronDown } from "lucide-react";
+import { Menu, ChevronDown, User } from "lucide-react";
 
 export default function TopNavBar({
   businessName,
@@ -315,6 +315,32 @@ export default function TopNavBar({
                 </div>
               );
             })}
+
+            {/* Login icon at the end */}
+            <button
+              type="button"
+              style={{
+                border: "none",
+                background: "transparent",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                cursor: "pointer",
+                padding: 0,
+              }}
+            >
+              <User size={22} color="#111827" />
+              <span
+                style={{
+                  marginLeft: 6,
+                  fontSize: 16,
+                  fontWeight: 500,
+                  color: "#111827",
+                }}
+              >
+                Log In
+              </span>
+            </button>
           </nav>
         )}
 

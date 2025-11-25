@@ -78,6 +78,21 @@ const DummyCategorySchema = new mongoose.Schema({
     footerHeading4: { type: String, default: '' },
   },
 
+  // Add-on texts for first-level subcategory page (Individual / Packages)
+  individualAddon: {
+    heading: { type: String, default: '' },
+    description: { type: String, default: '' },
+    buttonLabel: { type: String, default: '' },
+  },
+  packagesAddon: {
+    heading: { type: String, default: '' },
+    description: { type: String, default: '' },
+    buttonLabel: { type: String, default: '' },
+  },
+
+  // Up to 5 profile pictures for the dummy category (top-level usage)
+  profilePictures: { type: [String], default: Array(5).fill('') },
+
   signupLevels: [
     {
       levelName: { type: String, required: true },

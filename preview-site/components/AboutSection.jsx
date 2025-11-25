@@ -6,6 +6,14 @@ export default function AboutSection({ categoryName, businessName, about }) {
 
   const trimmedBusiness = String(businessName || "").trim();
 
+  const applyBusinessName = (text) => {
+    const raw = text == null ? "" : String(text);
+    const base = raw.trim();
+    if (!base) return base;
+    if (!trimmedBusiness) return base.replace(/\{business name\}/gi, "").trim();
+    return base.replace(/\{business name\}/gi, trimmedBusiness);
+  };
+
   const trimOrNull = (v) => {
     const s = v == null ? "" : String(v);
     const t = s.trim();
@@ -22,12 +30,14 @@ export default function AboutSection({ categoryName, businessName, about }) {
   const aboutCardButtonLabel = aboutCard ? trimOrNull(aboutCard.buttonLabel) : null;
   const aboutCardIconUrl = aboutCard ? trimOrNull(aboutCard.iconUrl) : null;
 
-  const heading = aboutHeading
-    || (trimmedBusiness
-      ? `About ${trimmedBusiness}`
-      : isDriving
-      ? "About Driving School"
-      : "About Our Business");
+  const heading = applyBusinessName(
+    aboutHeading
+      || (trimmedBusiness
+        ? `About ${trimmedBusiness}`
+        : isDriving
+        ? "About Driving School"
+        : "About Our Business")
+  );
 
   const mainText = aboutMainText
     || (trimmedBusiness || isDriving

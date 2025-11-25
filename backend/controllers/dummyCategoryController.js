@@ -4,6 +4,10 @@ const fs = require("fs");
 const { uploadBufferToS3, uploadBufferToS3WithLabel, deleteS3ObjectByUrl } = require("../utils/s3Upload");
 const { v4: uuidv4 } = require("uuid");
 
+// Fallback to avoid ReferenceError in any legacy path that might still reference profileFiles
+// before a local declaration. Current functions declare const profileFiles where needed.
+let profileFiles = [];
+
 function parseNumber(value, defaultNull = true) {
   if (value === undefined || value === null) return defaultNull ? null : 0;
   if (value === "") return defaultNull ? null : 0;
@@ -104,6 +108,7 @@ exports.createCategory = async (req, res) => {
     const homeBtn1File = req.files && Array.isArray(req.files.homeButton1Icon) && req.files.homeButton1Icon[0];
     const homeBtn2File = req.files && Array.isArray(req.files.homeButton2Icon) && req.files.homeButton2Icon[0];
     const aboutCardFile = req.files && Array.isArray(req.files.aboutCardIcon) && req.files.aboutCardIcon[0];
+    const profileFiles = (req.files && Array.isArray(req.files.profilePictures)) ? req.files.profilePictures : [];
     const whyUsCardFiles = [];
     for (let i = 1; i <= 6; i++) {
       const key = `whyUsCard${i}Icon`;
@@ -123,7 +128,8 @@ exports.createCategory = async (req, res) => {
       (homeBtn1File && homeBtn1File.buffer && homeBtn1File.mimetype) ||
       (homeBtn2File && homeBtn2File.buffer && homeBtn2File.mimetype) ||
       whyUsCardFiles.some((f) => f && f.buffer && f.mimetype) ||
-      (aboutCardFile && aboutCardFile.buffer && aboutCardFile.mimetype)
+      (aboutCardFile && aboutCardFile.buffer && aboutCardFile.mimetype) ||
+      profileFiles.some((f) => f && f.buffer && f.mimetype)
     ) {
       try {
         if (imageFile && imageFile.buffer && imageFile.mimetype) {
@@ -155,6 +161,17 @@ exports.createCategory = async (req, res) => {
           const segs = await buildDummySegmentsForCreate(parentId, name);
           const { url } = await uploadBufferToS3WithLabel(aboutCardFile.buffer, aboutCardFile.mimetype, "newcategory", uuidv4(), { segments: segs });
           aboutCardIconUrl = url;
+        }
+        // Upload up to 5 profile pictures for top-level categories on create
+        let profilePictureUrls = [];
+        if (!parentId && profileFiles.length) {
+          const segs = await buildDummySegmentsForCreate(parentId, name);
+          for (const f of profileFiles.slice(0, 5)) {
+            if (f && f.buffer && f.mimetype) {
+              const { url } = await uploadBufferToS3WithLabel(f.buffer, f.mimetype, "newcategory", uuidv4(), { segments: segs });
+              profilePictureUrls.push(url);
+            }
+          }
         }
         for (let i = 0; i < whyUsCardFiles.length; i++) {
           const f = whyUsCardFiles[i];
@@ -194,6 +211,23 @@ exports.createCategory = async (req, res) => {
         loyaltyPoints: req.body.loyaltyPoints === "true",
         linkAttributesPricing: req.body.linkAttributesPricing === "true",
       };
+
+      // Attach uploaded profile picture URLs (if any)
+      if (Array.isArray(profileFiles) && profileFiles.length) {
+        try {
+          const segs = await buildDummySegmentsForCreate(parentId, name);
+          const urls = [];
+          for (const f of profileFiles.slice(0, 5)) {
+            if (f && f.buffer && f.mimetype) {
+              const { url } = await uploadBufferToS3WithLabel(f.buffer, f.mimetype, "newcategory", uuidv4(), { segments: segs });
+              urls.push(url);
+            }
+          }
+          if (urls.length) categoryData.profilePictures = urls;
+        } catch (e) {
+          return res.status(500).json({ message: "Failed to upload profilePictures to S3", error: e.message });
+        }
+      }
 
       categoryData.homePopup = {
         tagline: req.body.homeTagline || "",
@@ -353,6 +387,7 @@ exports.updateCategory = async (req, res) => {
     const homeBtn1File = req.files && Array.isArray(req.files.homeButton1Icon) && req.files.homeButton1Icon[0];
     const homeBtn2File = req.files && Array.isArray(req.files.homeButton2Icon) && req.files.homeButton2Icon[0];
     const aboutCardFile = req.files && Array.isArray(req.files.aboutCardIcon) && req.files.aboutCardIcon[0];
+    const profileFiles = (req.files && Array.isArray(req.files.profilePictures)) ? req.files.profilePictures : [];
     const whyUsCardFiles = [];
     for (let i = 1; i <= 6; i++) {
       const key = `whyUsCard${i}Icon`;
@@ -423,7 +458,33 @@ exports.updateCategory = async (req, res) => {
       }
     }
 
+    // Replace profile pictures if new ones are provided for top-level dummy categories
+    if (isTopLevelDummy && profileFiles.length) {
+      try {
+        if (Array.isArray(doc.profilePictures)) {
+          for (const url of doc.profilePictures) {
+            try { await deleteS3ObjectByUrl(url); } catch {}
+          }
+        }
+        const segs = await buildDummySegmentsForExisting(doc, name);
+        const urls = [];
+        for (const f of profileFiles) {
+          if (f && f.buffer && f.mimetype) {
+            const { url } = await uploadBufferToS3WithLabel(f.buffer, f.mimetype, "newcategory", uuidv4(), { segments: segs });
+            urls.push(url);
+          }
+        }
+        doc.profilePictures = urls;
+      } catch (e) {
+        return res.status(500).json({ message: "Failed to upload profilePictures to S3", error: e.message });
+      }
+    }
+
     if (inventoryLabelName !== undefined) doc.inventoryLabelName = inventoryLabelName;
+    // Allow updating parentSelectorLabel for both top-level dummy categories and subcategories
+    if (req.body.parentSelectorLabel !== undefined) {
+      doc.parentSelectorLabel = req.body.parentSelectorLabel;
+    }
 
     // top-level specific updates
     if (!doc.category && !doc.parent) {
@@ -432,7 +493,6 @@ exports.updateCategory = async (req, res) => {
       if (req.body.availableForCart !== undefined) doc.availableForCart = req.body.availableForCart === "true" || req.body.availableForCart === true || req.body.availableForCart === "on";
       if (req.body.seoKeywords !== undefined) doc.seoKeywords = req.body.seoKeywords;
       if (req.body.attributesHeading !== undefined) doc.attributesHeading = req.body.attributesHeading;
-      if (req.body.parentSelectorLabel !== undefined) doc.parentSelectorLabel = req.body.parentSelectorLabel;
       if (req.body.postRequestsDeals !== undefined) doc.postRequestsDeals = req.body.postRequestsDeals === "true";
       if (req.body.loyaltyPoints !== undefined) doc.loyaltyPoints = req.body.loyaltyPoints === "true";
       if (req.body.linkAttributesPricing !== undefined) doc.linkAttributesPricing = req.body.linkAttributesPricing === "true";
@@ -500,6 +560,32 @@ exports.updateCategory = async (req, res) => {
       if (req.body.contactFooterHeading2 !== undefined) doc.contact.footerHeading2 = req.body.contactFooterHeading2;
       if (req.body.contactFooterHeading3 !== undefined) doc.contact.footerHeading3 = req.body.contactFooterHeading3;
       if (req.body.contactFooterHeading4 !== undefined) doc.contact.footerHeading4 = req.body.contactFooterHeading4;
+
+      // Add-on texts for first-level subcategory page (Individual / Packages)
+      if (!doc.individualAddon) {
+        doc.individualAddon = { heading: "", description: "", buttonLabel: "" };
+      }
+      if (!doc.packagesAddon) {
+        doc.packagesAddon = { heading: "", description: "", buttonLabel: "" };
+      }
+      if (req.body.individualAddonHeading !== undefined) {
+        doc.individualAddon.heading = req.body.individualAddonHeading;
+      }
+      if (req.body.individualAddonDescription !== undefined) {
+        doc.individualAddon.description = req.body.individualAddonDescription;
+      }
+      if (req.body.individualAddonButtonLabel !== undefined) {
+        doc.individualAddon.buttonLabel = req.body.individualAddonButtonLabel;
+      }
+      if (req.body.packagesAddonHeading !== undefined) {
+        doc.packagesAddon.heading = req.body.packagesAddonHeading;
+      }
+      if (req.body.packagesAddonDescription !== undefined) {
+        doc.packagesAddon.description = req.body.packagesAddonDescription;
+      }
+      if (req.body.packagesAddonButtonLabel !== undefined) {
+        doc.packagesAddon.buttonLabel = req.body.packagesAddonButtonLabel;
+      }
 
       [
         "categoryVisibility",

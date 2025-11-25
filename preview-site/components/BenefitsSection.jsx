@@ -6,6 +6,14 @@ export default function BenefitsSection({ categoryName, businessName, whyUs }) {
   const isDriving = String(categoryName || "").toLowerCase() === "driving school";
   const trimmedBusiness = String(businessName || "").trim();
 
+  const applyBusinessName = (text) => {
+    const raw = text == null ? "" : String(text);
+    const base = raw.trim();
+    if (!base) return base;
+    if (!trimmedBusiness) return base.replace(/\{business name\}/gi, "").trim();
+    return base.replace(/\{business name\}/gi, trimmedBusiness);
+  };
+
   const hasWhyUs =
     whyUs && typeof whyUs === "object" &&
     ((whyUs.heading && String(whyUs.heading).trim()) ||
@@ -19,8 +27,8 @@ export default function BenefitsSection({ categoryName, businessName, whyUs }) {
     : "Why Choose Us";
 
   const heading = hasWhyUs && whyUs.heading && String(whyUs.heading).trim()
-    ? String(whyUs.heading).trim()
-    : baseHeading;
+    ? applyBusinessName(whyUs.heading)
+    : applyBusinessName(baseHeading);
 
   const baseSubText = isDriving
     ? "Experience the difference with our commitment to excellence, safety, and customer satisfaction."
