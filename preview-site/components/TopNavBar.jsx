@@ -519,6 +519,42 @@ export default function TopNavBar({
               );
             })}
 
+            {/* Mobile Log In action */}
+            <div
+              style={{
+                marginTop: 16,
+                paddingTop: 12,
+                borderTop: "1px solid #e5e7eb",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                cursor: "pointer",
+              }}
+              onClick={() => {
+                // Placeholder: hook this to real login navigation when available
+                setMenuOpen(false);
+              }}
+            >
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 8,
+                }}
+              >
+                <User size={20} color="#111827" />
+                <span
+                  style={{
+                    fontSize: 18,
+                    fontWeight: 600,
+                    color: "#111827",
+                  }}
+                >
+                  Log In
+                </span>
+              </div>
+            </div>
+
             {/* Services submenu (already rendered above for Categories) */}
 
             {false && servicesOpen && (

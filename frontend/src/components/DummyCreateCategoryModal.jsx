@@ -754,12 +754,7 @@ const [subcategoryNameById, setSubcategoryNameById] = useState({});
       if (aboutCardIconFile) {
         formData.append("aboutCardIcon", aboutCardIconFile);
       }
-      // Upload up to 5 profile pictures
-      if (Array.isArray(profilePictureFiles) && profilePictureFiles.length) {
-        profilePictureFiles.slice(0, 5).forEach((file) => {
-          if (file) formData.append("profilePictures", file);
-        });
-      }
+      // Note: top-level profilePictures are no longer uploaded from this modal.
       formData.append("contactHeading", contactHeading || "");
       formData.append("contactDescription", contactDescription || "");
       formData.append("contactFooterHeading", contactFooterHeading || "");

@@ -174,8 +174,8 @@ export default function PreviewPage() {
             const arr = Array.isArray(wmJson?.webMenu) ? wmJson.webMenu : [];
             setWebMenu(arr);
             try {
-              const pics = Array.isArray(wmJson?.profilePictures) ? wmJson.profilePictures : [];
-              setCategoryProfilePictures(pics);
+              const img = wmJson && typeof wmJson.imageUrl === 'string' ? wmJson.imageUrl : '';
+              setCategoryProfilePictures(img && img.trim() ? [img.trim()] : []);
             } catch {
               setCategoryProfilePictures([]);
             }
@@ -1449,10 +1449,10 @@ export default function PreviewPage() {
           {node.children?.length > 0 && (
             parentSelectorMode === "buttons" ? (
               <>
-                <div style={{ fontSize: 11, fontWeight: 400, color: "#111827", marginLeft: 2,  marginBottom: isSpecialCard ? -12 : 6, }}>
+                <div style={{ fontSize: 11, fontWeight: 400, color: "#111827", marginLeft: 2, marginBottom: isSpecialCard ? -10 : 12 }}>
                   {labelForCard || "Select course type"}
                 </div>
-              <div style={{ display: "flex", flexWrap: "wrap", columnGap: 8, rowGap: 6, marginBottom: isSpecialCard ? -12 : 6, }}>
+                <div style={{ display: "flex", flexWrap: "wrap", columnGap: 8, rowGap: 6, marginBottom: isSpecialCard ? 4 : 14 }}>
                 {node.children.map((opt) => {
                   const leaf = getDeepestFirstChild(opt);
                   const isSelectedParent = selectedParent?.id === opt.id;
@@ -1520,11 +1520,11 @@ export default function PreviewPage() {
             childSelectorMode === "buttons" ? (
               <>
                 {childLabelForCard && (
-                  <div style={{ fontSize: 11, fontWeight: 400, color: "#111827", marginLeft: 2, marginBottom: 4 }}>
+                  <div style={{ fontSize: 11, fontWeight: 400, color: "#111827", marginLeft: 2, marginTop: 4, marginBottom: 6 }}>
                     {childLabelForCard}
                   </div>
                 )}
-                <div style={{ display: "flex", flexWrap: "wrap", columnGap: 8, rowGap: 6, marginBottom: 12 }}>
+                <div style={{ display: "flex", flexWrap: "wrap", columnGap: 8, rowGap: 6, marginBottom: 14 }}>
                   {selectedParent.children.map((child) => (
                     <button
                       key={child.id}
