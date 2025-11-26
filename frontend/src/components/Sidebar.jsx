@@ -56,9 +56,9 @@ function Sidebar() {
         👥 Customers
       </NavLink>
 
-      {/* <NavLink to="/app-configurations" style={linkStyle}>
+      <NavLink to="/app-configurations" style={linkStyle}>
         ⚙️ App Configurations
-      </NavLink> */}
+      </NavLink>
 
       
       

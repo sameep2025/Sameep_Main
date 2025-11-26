@@ -15,6 +15,9 @@ function CustomersPage() {
   const [selectedCustomer, setSelectedCustomer] = useState(null);
   const [loading, setLoading] = useState(false);
   const [dummyAvailable, setDummyAvailable] = useState(true);
+  const [loginHistory, setLoginHistory] = useState([]);
+  const [showHistory, setShowHistory] = useState(false);
+  const [historyLoading, setHistoryLoading] = useState(false);
 
   const fetchCustomers = async () => {
     try {
@@ -45,6 +48,22 @@ function CustomersPage() {
   const handleActivateDummyClick = (customer) => {
     setSelectedCustomer(customer);
     setOpenActivateDummy(true);
+  };
+
+  const handleLoginHistoryClick = async (customer) => {
+    try {
+      setSelectedCustomer(customer);
+      setShowHistory(true);
+      setHistoryLoading(true);
+      const res = await axios.get(`${API_BASE_URL}/api/customers/${customer._id}/login-history`);
+      setLoginHistory(Array.isArray(res.data) ? res.data : []);
+    } catch (err) {
+      console.error(err);
+      alert("Failed to load login history");
+      setLoginHistory([]);
+    } finally {
+      setHistoryLoading(false);
+    }
   };
 
   return (
@@ -120,7 +139,7 @@ function CustomersPage() {
                 <th>Select</th>
                 <th>Mobile</th>
                 <th>Added At</th>
-                <th>Action</th>
+                <th>Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -136,19 +155,35 @@ function CustomersPage() {
                   <td>{c.countryCode ? `+${c.countryCode}` : ""} {c.phone}</td>
                   <td>{new Date(c.createdAt).toLocaleString()}</td>
                   <td>
-                    <button
-                      onClick={() => handleActivateClick(c)}
-                      style={{
-                        padding:"6px 12px",
-                        borderRadius:6,
-                        border:"none",
-                        background:"#28a745",
-                        color:"#fff",
-                        cursor:"pointer"
-                      }}
-                    >
-                      Activate
-                    </button>
+                    <div style={{ display:"flex", gap:8 }}>
+                      <button
+                        onClick={() => handleActivateClick(c)}
+                        style={{
+                          padding:"6px 12px",
+                          borderRadius:6,
+                          border:"none",
+                          background:"#28a745",
+                          color:"#fff",
+                          cursor:"pointer"
+                        }}
+                      >
+                        Activate
+                      </button>
+                      <button
+                        onClick={() => handleLoginHistoryClick(c)}
+                        style={{
+                          padding:"6px 12px",
+                          borderRadius:6,
+                          border:"1px solid #6b7280",
+                          background:"#fff",
+                          color:"#374151",
+                          cursor:"pointer",
+                          fontSize:12
+                        }}
+                      >
+                        Login History
+                      </button>
+                    </div>
                   </td>
                 </tr>
               ))}
@@ -156,6 +191,140 @@ function CustomersPage() {
           </table>
         )}
       </div>
+
+      {showHistory && (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            backgroundColor: "rgba(0,0,0,0.4)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 1000,
+          }}
+        >
+          <div
+            style={{
+              background: "#fff",
+              padding: 20,
+              borderRadius: 10,
+              width: 720,
+              maxWidth: "90vw",
+              maxHeight: "70vh",
+              overflowY: "auto",
+              fontFamily: "system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
+            }}
+          >
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+              <h3 style={{ margin: 0 }}>Login History</h3>
+              <button
+                type="button"
+                onClick={() => { setShowHistory(false); setLoginHistory([]); }}
+                style={{ border: "none", background: "transparent", cursor: "pointer", fontSize: 16 }}
+              >
+                ×
+              </button>
+            </div>
+            {selectedCustomer && (
+              <div style={{ marginBottom: 8, fontSize: 13, color: "#4b5563" }}>
+                {selectedCustomer.countryCode ? `+${selectedCustomer.countryCode}` : ""} {selectedCustomer.phone}
+              </div>
+            )}
+            {historyLoading ? (
+              <div>Loading history...</div>
+            ) : loginHistory.length === 0 ? (
+              <div>No login history yet</div>
+            ) : (
+              <div
+                style={{
+                  border: "1px solid #e5e7eb",
+                  borderRadius: 8,
+                  overflow: "hidden",
+                  fontSize: 13,
+                }}
+              >
+                <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                  <thead>
+                    <tr style={{ backgroundColor: "#f3f4f6" }}>
+                      <th style={{ textAlign: "left", padding: "6px 8px", borderBottom: "1px solid #e5e7eb" }}>S.No</th>
+                      <th style={{ textAlign: "left", padding: "6px 8px", borderBottom: "1px solid #e5e7eb" }}>Mobile</th>
+                      <th style={{ textAlign: "left", padding: "6px 8px", borderBottom: "1px solid #e5e7eb" }}>Device / Browser</th>
+                      <th style={{ textAlign: "left", padding: "6px 8px", borderBottom: "1px solid #e5e7eb" }}>Login Time</th>
+                      <th style={{ textAlign: "left", padding: "6px 8px", borderBottom: "1px solid #e5e7eb" }}>Expiry Time</th>
+                      <th style={{ textAlign: "left", padding: "6px 8px", borderBottom: "1px solid #e5e7eb" }}>Status</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {loginHistory.map((h, idx) => {
+                      const status = h.status || (new Date(h.expiryTime) > new Date() ? "active" : "expired");
+                      const device = h.deviceInfo || "-";
+                      const mobile = selectedCustomer
+                        ? `${selectedCustomer.countryCode ? `+${selectedCustomer.countryCode}` : ""} ${selectedCustomer.phone}`
+                        : "";
+                      const isActive = status === "active";
+                      return (
+                        <tr
+                          key={h._id || `${h.loginTime}-${idx}`}
+                          style={{ backgroundColor: idx % 2 === 0 ? "#ffffff" : "#f9fafb" }}
+                        >
+                          <td style={{ padding: "6px 8px", borderBottom: "1px solid #e5e7eb" }}>{idx + 1}</td>
+                          <td style={{ padding: "6px 8px", borderBottom: "1px solid #e5e7eb" }}>{mobile}</td>
+                          <td
+                            style={{
+                              padding: "6px 8px",
+                              borderBottom: "1px solid #e5e7eb",
+                              maxWidth: 220,
+                              whiteSpace: "normal",
+                              wordBreak: "break-all",
+                              fontSize: 11,
+                            }}
+                          >
+                            {device}
+                          </td>
+                          <td
+                            style={{
+                              padding: "6px 8px",
+                              borderBottom: "1px solid #e5e7eb",
+                              whiteSpace: "nowrap",
+                            }}
+                          >
+                            {new Date(h.loginTime).toLocaleString()}
+                          </td>
+                          <td
+                            style={{
+                              padding: "6px 8px",
+                              borderBottom: "1px solid #e5e7eb",
+                              whiteSpace: "nowrap",
+                            }}
+                          >
+                            {new Date(h.expiryTime).toLocaleString()}
+                          </td>
+                          <td style={{ padding: "6px 8px", borderBottom: "1px solid #e5e7eb" }}>
+                            <span
+                              style={{
+                                display: "inline-block",
+                                padding: "2px 8px",
+                                borderRadius: 999,
+                                fontSize: 11,
+                                textTransform: "capitalize",
+                                backgroundColor: isActive ? "#dcfce7" : "#fee2e2",
+                                color: isActive ? "#166534" : "#991b1b",
+                              }}
+                            >
+                              {status}
+                            </span>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

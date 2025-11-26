@@ -15,6 +15,15 @@ const LoginHistorySchema = new mongoose.Schema(
       type: Date,
       required: true,
     },
+    deviceInfo: {
+      type: String,
+      default: "",
+    },
+    status: {
+      type: String,
+      enum: ["active", "expired"],
+      default: "expired",
+    },
   },
   { timestamps: true }
 );

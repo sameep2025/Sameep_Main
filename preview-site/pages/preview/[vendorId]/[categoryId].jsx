@@ -54,7 +54,204 @@ export default function PreviewPage() {
   const [attributesHeading, setAttributesHeading] = useState(null);
   const [parentSelectorLabel, setParentSelectorLabel] = useState(null);
 
+  // OTP flow state for preview booking (country code + mobile + OTP)
+  const [showOtpModal, setShowOtpModal] = useState(false);
+  const [otpStep, setOtpStep] = useState(1); // 1: phone, 2: otp
+  const [countries, setCountries] = useState([]);
+  const [countriesLoading, setCountriesLoading] = useState(false);
+  const [countryCode, setCountryCode] = useState("");
+  const [phone, setPhone] = useState("");
+  const [otp, setOtp] = useState("");
+  const [otpLoading, setOtpLoading] = useState(false);
+  const [otpError, setOtpError] = useState("");
+
   const loading = loadingVendor || loadingCategories;
+
+  const makePreviewSessionKey = useCallback((venId, catId) => {
+    try {
+      const v = venId || "";
+      const c = catId || "";
+      return `previewSession:${v}:${c}`;
+    } catch {
+      return "previewSession:unknown:unknown";
+    }
+  }, []);
+
+  const makePreviewTokenKey = useCallback((venId, catId) => {
+    try {
+      const v = venId || "";
+      const c = catId || "";
+      return `previewToken:${v}:${c}`;
+    } catch {
+      return "previewToken:unknown:unknown";
+    }
+  }, []);
+
+  const loginSubtitle = (() => {
+    try {
+      const raw = String(servicesNavLabel || "").toLowerCase();
+      if (raw.includes("product") && !raw.includes("service")) {
+        return "Explore our products with a quick login.";
+      }
+      if (raw.includes("service") && !raw.includes("product")) {
+        return "Explore our services with a quick login.";
+      }
+      if (raw.includes("product") && raw.includes("service")) {
+        return "Explore our products and services with a quick login.";
+      }
+    } catch {}
+    return "Explore our products and services with a quick login.";
+  })();
+
+  // Fetch country codes when OTP modal is opened the first time
+  useEffect(() => {
+    if (!showOtpModal) return;
+
+    if (countries.length > 0) return;
+
+    const fetchCountries = async () => {
+      try {
+        setCountriesLoading(true);
+        const res = await fetch(`${API_BASE_URL}/api/countries/codes`);
+        if (!res.ok) throw new Error("Failed to load country codes");
+        const json = await res.json();
+        const data = Array.isArray(json?.data) ? json.data : [];
+        const list = data
+          .map((c) => ({
+            name: c.name,
+            code: String(c.dial_code || "").replace("+", ""),
+          }))
+          .filter((c) => c.name && c.code)
+          .sort((a, b) => a.name.localeCompare(b.name));
+        setCountries(list);
+        if (list.length > 0) setCountryCode(list[0].code);
+      } catch (err) {
+        console.error("Failed to fetch countries for OTP modal", err);
+      } finally {
+        setCountriesLoading(false);
+      }
+    };
+
+    fetchCountries();
+  }, [showOtpModal, countries.length]);
+
+  const handleOpenOtpModal = async () => {
+    try {
+      if (typeof window !== "undefined") {
+        const tokenKey = makePreviewTokenKey(vendorId, categoryId);
+        const token = window.localStorage.getItem(tokenKey);
+        if (token) {
+          try {
+            const res = await fetch(`${API_BASE_URL}/api/customers/session-status-token`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ token }),
+            });
+            if (res.ok) {
+              const data = await res.json().catch(() => null);
+              if (data && data.status === "active") {
+                // Active token-based session: skip OTP, proceed directly to booking flow
+                console.log("Active token session", data);
+                // TODO: implement actual booking/enroll navigation here
+                return;
+              }
+              if (data && (data.status === "expired" || data.status === "invalid_token")) {
+                window.alert("Session expired. Please log in again.");
+              }
+            }
+          } catch (e) {
+            console.error("Failed to check token-based session before OTP", e);
+          }
+        }
+      }
+    } catch (e) {
+      console.error("Failed to check session status before OTP", e);
+    }
+
+    // No active session or check failed -> show OTP modal
+    setOtpError("");
+    setOtpStep(1);
+    setPhone("");
+    setOtp("");
+    setShowOtpModal(true);
+  };
+
+  const handleCloseOtpModal = () => {
+    setShowOtpModal(false);
+    setOtpError("");
+    setOtpStep(1);
+    setPhone("");
+    setOtp("");
+  };
+
+  const requestOtp = async () => {
+    const cleanPhone = phone.replace(/\D/g, "");
+    if (!countryCode || !cleanPhone || cleanPhone.length < 6) {
+      setOtpError("Enter a valid mobile number");
+      return;
+    }
+    try {
+      setOtpLoading(true);
+      setOtpError("");
+      const res = await fetch(`${API_BASE_URL}/api/customers/request-otp`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ countryCode, phone: cleanPhone }),
+      });
+      if (!res.ok) {
+        const errJson = await res.json().catch(() => ({}));
+        throw new Error(errJson?.message || "Failed to request OTP");
+      }
+      setOtpStep(2);
+    } catch (err) {
+      console.error("requestOtp error (preview)", err);
+      setOtpError(err.message || "Failed to request OTP");
+    } finally {
+      setOtpLoading(false);
+    }
+  };
+
+  const verifyOtp = async () => {
+    const cleanPhone = phone.replace(/\D/g, "");
+    if (!otp) {
+      setOtpError("Enter OTP");
+      return;
+    }
+    try {
+      setOtpLoading(true);
+      setOtpError("");
+      const res = await fetch(`${API_BASE_URL}/api/customers/verify-otp`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ countryCode, phone: cleanPhone, otp, vendorId, categoryId }),
+      });
+      if (!res.ok) {
+        const errJson = await res.json().catch(() => ({}));
+        throw new Error(errJson?.message || "OTP verify failed");
+      }
+      const json = await res.json().catch(() => null);
+      console.log("OTP verified (preview)", json);
+      try {
+        if (typeof window !== "undefined") {
+          if (json && json.customer && json.customer._id) {
+            const key = makePreviewSessionKey(vendorId, categoryId);
+            window.localStorage.setItem(key, json.customer._id);
+          }
+          if (json && json.token) {
+            const tokenKey = makePreviewTokenKey(vendorId, categoryId);
+            window.localStorage.setItem(tokenKey, json.token);
+          }
+        }
+      } catch {}
+      handleCloseOtpModal();
+      // TODO: proceed to booking flow using json.customer if needed
+    } catch (err) {
+      console.error("verifyOtp error (preview)", err);
+      setOtpError(err.message || "Failed to verify OTP");
+    } finally {
+      setOtpLoading(false);
+    }
+  };
 
   // Whenever the category tree changes, collect all image URLs from
   // the tree (root + all descendants) so HomeSection can show a
@@ -1597,7 +1794,7 @@ export default function PreviewPage() {
           {attributeDropdown}
 
           <button
-            onClick={() => alert(`Booking ${displayNode?.name}`)}
+            onClick={handleOpenOtpModal}
             style={{
               marginTop: "auto",
               width: "100%",
@@ -2290,7 +2487,7 @@ export default function PreviewPage() {
             )) : null}
 
             <button
-              onClick={() => alert(`Booking ${displayNode?.name}`)}
+              onClick={handleOpenOtpModal}
               style={{
                 marginTop: 'auto',
                 width: '100%',
@@ -3238,7 +3435,7 @@ export default function PreviewPage() {
                             </div>
                           ) : null}
                           <button
-                            onClick={() => alert(`Booking ${name}`)}
+                            onClick={handleOpenOtpModal}
                             style={{
                               marginTop: 'auto',
                               width: '100%',
@@ -3300,6 +3497,223 @@ export default function PreviewPage() {
               setVendor((prev) => ({ ...prev, location: newLoc }));
             }}
           />
+          {/* OTP Modal for preview booking (login dialog) */}
+          {showOtpModal && (
+            <div
+              style={{
+                position: "fixed",
+                inset: 0,
+                backgroundColor: "rgba(0,0,0,0.4)",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                zIndex: 1000,
+              }}
+            >
+              <div
+                style={{
+                  background: "#fff",
+                  padding: 24,
+                  borderRadius: 16,
+                  width: 380,
+                  fontFamily: "Poppins, sans-serif",
+                  boxShadow: "0 20px 40px rgba(0,0,0,0.2)",
+                }}
+              >
+                {otpStep === 1 && (
+                  <>
+                    <div style={{ marginBottom: 16 }}>
+                      <div style={{ fontSize: 14, fontWeight: 600, color: "#6b7280", marginBottom: 4 }}>
+                        Log in
+                      </div>
+                      <h2 style={{ margin: 0, fontSize: 20, fontWeight: 700, color: "#065f46" }}>
+                        Welcome to {vendor?.businessName || "our services"}
+                      </h2>
+                      <p style={{ margin: "6px 0 0", fontSize: 13, color: "#4b5563" }}>
+                        {loginSubtitle}
+                      </p>
+                    </div>
+
+                    {countriesLoading ? (
+                      <div>Loading country codes...</div>
+                    ) : (
+                      <>
+                        <div style={{ marginBottom: 12 }}>
+                          <label style={{ display: "block", marginBottom: 4, fontSize: 13, color: "#374151" }}>
+                            Mobile number
+                          </label>
+                          <div
+                            style={{
+                              display: "flex",
+                              alignItems: "center",
+                              borderRadius: 999,
+                              border: "1px solid #e5e7eb",
+                              padding: "4px 10px",
+                              background: "#f9fafb",
+                            }}
+                          >
+                            <select
+                              value={countryCode}
+                              onChange={(e) => setCountryCode(e.target.value)}
+                              style={{
+                                border: "none",
+                                background: "transparent",
+                                fontSize: 13,
+                                paddingRight: 6,
+                                outline: "none",
+                              }}
+                            >
+                              {countries.map((c) => (
+                                <option key={c.code} value={c.code}>
+                                  +{c.code}
+                                </option>
+                              ))}
+                            </select>
+                            <span style={{ color: "#d1d5db", margin: "0 6px" }}>|</span>
+                            <input
+                              type="text"
+                              value={phone}
+                              onChange={(e) => setPhone(e.target.value)}
+                              placeholder="Mobile number"
+                              style={{
+                                flex: 1,
+                                border: "none",
+                                outline: "none",
+                                background: "transparent",
+                                fontSize: 14,
+                              }}
+                            />
+                          </div>
+                        </div>
+
+                        {otpError && (
+                          <div style={{ color: "#b91c1c", marginBottom: 8, fontSize: 13 }}>{otpError}</div>
+                        )}
+
+                        <button
+                          type="button"
+                          onClick={requestOtp}
+                          style={{
+                            width: "100%",
+                            marginTop: 8,
+                            padding: 10,
+                            borderRadius: 999,
+                            border: "none",
+                            background: "#059669",
+                            color: "#fff",
+                            fontWeight: 600,
+                            cursor: "pointer",
+                            fontSize: 14,
+                          }}
+                          disabled={otpLoading}
+                        >
+                          {otpLoading ? "Sending..." : "Continue"}
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={handleCloseOtpModal}
+                          style={{
+                            width: "100%",
+                            marginTop: 8,
+                            padding: 8,
+                            borderRadius: 999,
+                            border: "none",
+                            background: "transparent",
+                            color: "#6b7280",
+                            fontSize: 12,
+                            cursor: "pointer",
+                          }}
+                        >
+                          Cancel
+                        </button>
+                      </>
+                    )}
+                  </>
+                )}
+
+                {otpStep === 2 && (
+                  <>
+                    <div style={{ marginBottom: 16 }}>
+                      <div style={{ fontSize: 14, fontWeight: 600, color: "#6b7280", marginBottom: 4 }}>
+                        Verify OTP
+                      </div>
+                      <p style={{ marginTop: 0, marginBottom: 4, fontSize: 13, color: "#4b5563" }}>
+                        We sent a one-time password to
+                      </p>
+                      <p style={{ margin: 0, fontSize: 14, fontWeight: 600, color: "#065f46" }}>
+                        +{countryCode}
+                        {phone.replace(/\D/g, "")}
+                      </p>
+                    </div>
+
+                    <input
+                      type="text"
+                      value={otp}
+                      onChange={(e) => setOtp(e.target.value)}
+                      placeholder="Enter OTP"
+                      style={{
+                        width: "100%",
+                        padding: 10,
+                        borderRadius: 999,
+                        border: "1px solid #e5e7eb",
+                        marginBottom: 12,
+                        textAlign: "center",
+                        letterSpacing: 4,
+                        fontSize: 16,
+                      }}
+                    />
+
+                    {otpError && (
+                      <div style={{ color: "#b91c1c", marginBottom: 8, fontSize: 13 }}>{otpError}</div>
+                    )}
+
+                    <button
+                      type="button"
+                      onClick={verifyOtp}
+                      style={{
+                        width: "100%",
+                        padding: 10,
+                        borderRadius: 999,
+                        border: "none",
+                        background: "#059669",
+                        color: "#fff",
+                        fontWeight: 600,
+                        cursor: "pointer",
+                        fontSize: 14,
+                        marginBottom: 8,
+                      }}
+                      disabled={otpLoading}
+                    >
+                      {otpLoading ? "Verifying..." : "Verify & Continue"}
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setOtpStep(1);
+                        setOtp("");
+                        setOtpError("");
+                      }}
+                      style={{
+                        width: "100%",
+                        padding: 8,
+                        borderRadius: 999,
+                        border: "none",
+                        background: "transparent",
+                        color: "#6b7280",
+                        fontSize: 12,
+                        cursor: "pointer",
+                      }}
+                    >
+                      Back
+                    </button>
+                  </>
+                )}
+              </div>
+            </div>
+          )}
+
           <Footer
             businessName={vendor?.businessName}
             categoryName={categoryTree?.name || "Driving School"}

@@ -7,6 +7,18 @@ const SessionSchema = new mongoose.Schema(
       required: true,
       ref: "Customer", // adjust if you use a different user model
     },
+    vendorId: {
+      type: String,
+      default: "",
+    },
+    categoryId: {
+      type: String,
+      default: "",
+    },
+    token: {
+      type: String,
+      default: "",
+    },
     loginTime: {
       type: Date,
       required: true,
@@ -19,6 +31,10 @@ const SessionSchema = new mongoose.Schema(
     isActive: {
       type: Boolean,
       default: true,
+    },
+    deviceInfo: {
+      type: String,
+      default: "",
     },
   },
   { timestamps: true }
