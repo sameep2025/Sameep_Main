@@ -15,7 +15,7 @@ function AddCustomerModal({ show, onClose, onAdded }) {
   const fetchCountries = async () => {
     try {
       const res = await axios.get(
-        "https://countriesnow.space/api/v0.1/countries/codes"
+        `${API_BASE_URL}/api/countries/codes`
       );
 
       const data = res.data.data;
@@ -37,7 +37,7 @@ function AddCustomerModal({ show, onClose, onAdded }) {
         setCountryCode(countryList[0].code);
       }
     } catch (err) {
-      console.error("Failed to fetch countries:", err.message);
+      console.error("Failed to fetch countries:", err);
       alert("Failed to load country codes");
     } finally {
       setCountriesLoading(false);

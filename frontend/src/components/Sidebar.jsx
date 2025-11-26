@@ -35,26 +35,33 @@ function Sidebar() {
       <NavLink to="/master" style={linkStyle}>
         📁 Master Data
       </NavLink>
-      <NavLink to="/categories" end style={linkStyle}>
+      {/* <NavLink to="/categories" end style={linkStyle}>
         📂 Categories
+      </NavLink> */}
+
+      <NavLink to="/dummy-categories" end style={linkStyle}>
+        🧪 Categories
       </NavLink>
       <NavLink to="/questions" style={linkStyle}>
         ❓ Questions
       </NavLink>
-      <NavLink to="/vendors" style={linkStyle}>
+      {/* <NavLink to="/vendors" style={linkStyle}>
         👥 Vendors
+      </NavLink> */}
+
+      <NavLink to="/dummy-vendors" style={linkStyle}>
+        🧑‍🔧 Vendor
       </NavLink>
       <NavLink to="/customers" style={linkStyle}>
         👥 Customers
       </NavLink>
 
-      {/* ✅ Added dummy links */}
-      <NavLink to="/dummy-categories" end style={linkStyle}>
-        🧪 Dummy Categories
-      </NavLink>
-      <NavLink to="/dummy-vendors" style={linkStyle}>
-        🧑‍🔧 Dummy Vendor
-      </NavLink>
+      {/* <NavLink to="/app-configurations" style={linkStyle}>
+        ⚙️ App Configurations
+      </NavLink> */}
+
+      
+      
     </div>
   );
 }

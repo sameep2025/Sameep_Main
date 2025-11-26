@@ -4,6 +4,7 @@ const cors = require('cors');
 const path = require('path');
 const fs = require('fs');
 const mongoose = require('mongoose');
+const axios = require('axios');
 
 const connectDB = require('./config/db');
 const categoryRoutes = require('./routes/categoryRoutes');
@@ -17,6 +18,7 @@ const modelRoutes = require('./routes/modelRoutes');
 const dummyCategoryRoutes = require('./routes/dummyCategoryRoutes');
 const dummyVendorRoutes = require('./routes/dummyVendorRoutes');
 const uploadRoutes = require('./routes/uploadRoutes');
+const appConfigRoutes = require('./routes/appConfigRoutes');
 
 const app = express();
 
@@ -91,6 +93,40 @@ app.use('/uploads', express.static(uploadsDir));
 // Routes
 app.get('/', (req, res) => res.json({ ok: true }));
 app.get('/api/health', (req, res) => res.status(200).json({ status: 'ok' }));
+// Proxy route to fetch country codes without CORS issues on the frontend
+// Uses restcountries.com and derives dial codes dynamically (no hardcoded list)
+app.get('/api/countries/codes', async (req, res, next) => {
+    try {
+        const response = await axios.get('https://restcountries.com/v3.1/all?fields=name,idd');
+        const countries = Array.isArray(response.data) ? response.data : [];
+
+        const data = countries
+            .map(c => {
+                const name = c?.name?.common;
+                const root = c?.idd?.root || '';
+                const suffixes = Array.isArray(c?.idd?.suffixes) ? c.idd.suffixes : [];
+
+                if (!name || !root || !suffixes.length) return null;
+
+                const dial_code = `${root}${suffixes[0]}`;
+                return { name, dial_code };
+            })
+            .filter(Boolean)
+            .sort((a, b) => a.name.localeCompare(b.name));
+
+        res.json({ data });
+    } catch (err) {
+        console.error('Failed to fetch countries from restcountries.com:', {
+            message: err.message,
+            code: err.code,
+            status: err.response?.status,
+        });
+
+        res.status(502).json({
+            message: 'Failed to fetch countries data',
+        });
+    }
+});
 app.use('/api/categories', categoryRoutes);
 app.use('/api/vendors', vendorRoutes);
 app.use('/api/masters', masterRoutes);
@@ -102,6 +138,7 @@ app.use('/api/models', modelRoutes);
 app.use('/api/dummy-categories', dummyCategoryRoutes);
 app.use('/api/dummy-vendors', dummyVendorRoutes);
 app.use('/api', uploadRoutes);
+app.use('/api/app-config', appConfigRoutes);
 
 // Debug: DB connection info
 app.get('/api/_debug/db', (req, res) => {

@@ -40,7 +40,7 @@ function CustomersPage() {
 
   const handleActivateClick = (customer) => {
     setSelectedCustomer(customer);
-    setOpenActivate(true);
+    setOpenActivateDummy(true);
   };
   const handleActivateDummyClick = (customer) => {
     setSelectedCustomer(customer);
@@ -58,12 +58,12 @@ function CustomersPage() {
           >
             + Add Customer
           </button>
-          <button
+          {/* <button
             onClick={() => selectedCustomer ? handleActivateDummyClick(selectedCustomer) : alert("Select a customer first")}
             style={{ padding:"8px 14px", borderRadius:8, background:"#6b7280", color:"#fff", border:"none", cursor:"pointer" }}
           >
             Activate Dummy
-          </button>
+          </button> */}
         </div>
       </div>
 

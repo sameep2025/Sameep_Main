@@ -56,6 +56,33 @@ export default function PreviewPage() {
 
   const loading = loadingVendor || loadingCategories;
 
+  // Whenever the category tree changes, collect all image URLs from
+  // the tree (root + all descendants) so HomeSection can show a
+  // gallery of category/subcategory images when the vendor has
+  // no explicit profilePictures.
+  useEffect(() => {
+    try {
+      const out = [];
+      const norm = (v) => {
+        const s = (v == null) ? '' : String(v);
+        const t = s.trim();
+        if (!t) return null;
+        return t;
+      };
+      const visit = (node) => {
+        if (!node) return;
+        const img = norm(node.imageUrl || node.iconUrl || node.image);
+        if (img) out.push(img);
+        const kids = Array.isArray(node.children) ? node.children : [];
+        kids.forEach(visit);
+      };
+      if (categoryTree) visit(categoryTree);
+      setCategoryProfilePictures(out);
+    } catch {
+      setCategoryProfilePictures([]);
+    }
+  }, [categoryTree]);
+
   // Build dynamic service labels from top-level category children (product card sections)
   const serviceLabels = useMemo(() => {
     try {
