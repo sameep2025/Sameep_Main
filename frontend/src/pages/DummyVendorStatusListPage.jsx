@@ -6,6 +6,14 @@ import DummyBusinessHoursModal from "../components/DummyBusinessHoursModal";
 import DummyBusinessLocationModal from "../components/DummyBusinessLocationModal";
 import DummyLocationPickerModal from "../components/DummyLocationPickerModal";
 
+const STATUSES = [
+  "Accepted",
+  "Pending",
+  "Rejected",
+  "Waiting for Approval",
+  "Registered",
+];
+
 export default function DummyVendorStatusListPage() {
   const { categoryId, status } = useParams();
   const navigate = useNavigate();
@@ -24,6 +32,10 @@ export default function DummyVendorStatusListPage() {
   const [addHeading, setAddHeading] = useState("");
   const [addDescription, setAddDescription] = useState("");
   const [uploads, setUploads] = useState({}); // { [vendorId]: File[] }
+  const [statusCounts, setStatusCounts] = useState({}); // { status: count }
+  const [showStatusModal, setShowStatusModal] = useState(false);
+  const [statusSaving, setStatusSaving] = useState(false);
+  const [newStatus, setNewStatus] = useState("Waiting for Approval");
 
   const applyLocalLocation = (vendorId, location) => {
     setVendors((list) =>
@@ -229,7 +241,21 @@ export default function DummyVendorStatusListPage() {
     }
   };
 
+  const fetchStatusCounts = async () => {
+    if (!categoryId) return;
+    try {
+      const res = await axios.get(`${API_PREFIX}/api/dummy-vendors/categories/counts`, {
+        params: { categoryId },
+      });
+      const counts = res.data?.[0]?.statusCounts || {};
+      setStatusCounts(counts);
+    } catch {
+      setStatusCounts({});
+    }
+  };
+
   useEffect(() => { fetchVendors(); }, [status, categoryId]);
+  useEffect(() => { fetchStatusCounts(); }, [categoryId]);
 
   return (
     <div>
@@ -269,6 +295,15 @@ export default function DummyVendorStatusListPage() {
           }}
           style={{ padding: '6px 12px', borderRadius: 6, background: '#7c3aed', color: '#fff', border: 'none' }}
         >Business Hours</button>
+        <button
+          onClick={() => {
+            const v = vendors.find((x) => x._id === selectedVendorId);
+            if (!v) return alert('Please select a vendor first');
+            setNewStatus(v.status || "Waiting for Approval");
+            setShowStatusModal(true);
+          }}
+          style={{ padding: '6px 12px', borderRadius: 6, background: '#f97316', color: '#fff', border: 'none' }}
+        >Change Status</button>
         <button
           onClick={() => {
             const v = vendors.find(x => x._id === selectedVendorId);
@@ -381,6 +416,102 @@ export default function DummyVendorStatusListPage() {
             ))}
           </tbody>
         </table>
+      )}
+      {showStatusModal && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(0,0,0,0.45)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 1400,
+          }}
+        >
+          <div
+            style={{
+              background: '#fff',
+              padding: 16,
+              borderRadius: 10,
+              minWidth: 320,
+              maxWidth: 480,
+              width: '90%',
+            }}
+          >
+            <h3 style={{ marginTop: 0, marginBottom: 8 }}>Change Vendor Status</h3>
+            <div style={{ fontSize: 13, color: '#4b5563', marginBottom: 12 }}>
+              You can move this vendor to any status. Counts below match the
+              Dummy Vendor Status page.
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr', rowGap: 8, marginBottom: 12 }}>
+              {STATUSES.map((st) => (
+                <label
+                  key={st}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    padding: '6px 10px',
+                    borderRadius: 6,
+                    border: newStatus === st ? '1px solid #16a34a' : '1px solid #e5e7eb',
+                    background: newStatus === st ? '#ecfdf5' : '#f9fafb',
+                    cursor: 'pointer',
+                    fontSize: 13,
+                  }}
+                >
+                  <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <input
+                      type="radio"
+                      name="vendorStatus"
+                      checked={newStatus === st}
+                      onChange={() => setNewStatus(st)}
+                    />
+                    <span>{st}</span>
+                  </span>
+                  <span style={{ fontSize: 12, color: '#6b7280' }}>
+                    {statusCounts[st] || 0} vendors
+                  </span>
+                </label>
+              ))}
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 8 }}>
+              <button
+                onClick={() => setShowStatusModal(false)}
+                style={{ padding: '6px 10px', borderRadius: 6, background: '#e5e7eb', border: 'none' }}
+                disabled={statusSaving}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={async () => {
+                  const v = vendors.find((x) => x._id === selectedVendorId);
+                  if (!v) {
+                    alert('Please select a vendor first');
+                    return;
+                  }
+                  setStatusSaving(true);
+                  try {
+                    await axios.put(`${API_PREFIX}/api/dummy-vendors/${v._id}`, {
+                      status: newStatus,
+                    });
+                    setShowStatusModal(false);
+                    await fetchVendors();
+                    await fetchStatusCounts();
+                  } catch (e) {
+                    alert(e?.response?.data?.message || 'Failed to update status');
+                  } finally {
+                    setStatusSaving(false);
+                  }
+                }}
+                style={{ padding: '6px 10px', borderRadius: 6, background: '#16a34a', color: '#fff', border: 'none' }}
+                disabled={statusSaving}
+              >
+                {statusSaving ? 'Saving...' : 'Save'}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
       {showAddText && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1200 }}>

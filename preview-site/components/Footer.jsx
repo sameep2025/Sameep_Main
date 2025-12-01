@@ -160,7 +160,7 @@ export default function Footer({
               display: isMobile ? "inline-block" : "block",
             }}
           >
-            {popularCourses.length > 0
+            {Array.isArray(popularCourses) && popularCourses.length > 0
               ? popularCourses.map((label, idx) => (
                   <li key={idx} style={{ fontSize: 16 }}>
                     <button
@@ -185,30 +185,7 @@ export default function Footer({
                     </button>
                   </li>
                 ))
-              : ["Special Combo Package", "Two Wheeler Training", "Four Wheeler Training", "Commercial Vehicle Course"].map((label) => (
-                  <li key={label} style={{ fontSize: 16 }}>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        if (typeof document === "undefined") return;
-                        const el = document.getElementById("products");
-                        if (el) el.scrollIntoView({ behavior: "smooth" });
-                      }}
-                      style={{
-                        background: "transparent",
-                        border: "none",
-                        padding: 0,
-                        margin: 0,
-                        color: "#e5e7eb",
-                        cursor: "pointer",
-                        fontSize: 16,
-                        textAlign: isMobile ? "center" : "left",
-                      }}
-                    >
-                      {label}
-                    </button>
-                  </li>
-                ))}
+              : null}
           </ul>
         </div>
 

@@ -196,6 +196,7 @@ exports.createCategory = async (req, res) => {
         imageUrl,
         iconUrl,
         price: parsedPrice,
+        pricingStatus: req.body.pricingStatus || 'Inactive',
         terms,
         visibleToUser: String(visibleToUser) === "true" || visibleToUser === true,
         visibleToVendor: String(visibleToVendor) === "true" || visibleToVendor === true,
@@ -323,6 +324,7 @@ exports.createCategory = async (req, res) => {
         category: parentId,
         parentSubcategory: null,
         price: parsedPrice,
+        pricingStatus: req.body.pricingStatus || 'Inactive',
         terms,
         freeText: req.body.freeText || "",
         visibleToUser: String(visibleToUser) === "true" || visibleToUser === true,
@@ -344,6 +346,7 @@ exports.createCategory = async (req, res) => {
         category: topCategoryId,
         parentSubcategory: parentId,
         price: parsedPrice,
+        pricingStatus: req.body.pricingStatus || 'Inactive',
         terms,
         freeText: req.body.freeText || "",
         visibleToUser: String(visibleToUser) === "true" || visibleToUser === true,
@@ -376,6 +379,12 @@ exports.updateCategory = async (req, res) => {
 
     if (name !== undefined) doc.name = name;
     doc.price = parseNumber(price, true);
+    if (req.body.pricingStatus !== undefined) {
+      const ps = String(req.body.pricingStatus || '').trim();
+      if (ps === 'Active' || ps === 'Inactive') {
+        doc.pricingStatus = ps;
+      }
+    }
     if (terms !== undefined) doc.terms = terms;
     if (req.body.freeText !== undefined) doc.freeText = req.body.freeText;
     if (visibleToUser !== undefined) doc.visibleToUser = String(visibleToUser) === "true" || visibleToUser === true;

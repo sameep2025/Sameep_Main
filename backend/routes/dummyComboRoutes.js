@@ -216,13 +216,16 @@ router.put("/:comboId", uploadAny, async (req, res) => {
       return res.status(400).json({ message: "Invalid comboId" });
     }
 
-    let { name, heading, iconUrl, imageUrl, type, items, basePrice, terms, sizes } = req.body;
+    let { name, heading, iconUrl, imageUrl, type, items, basePrice, terms, sizes, pricingStatusPerSize } = req.body;
 
     if (typeof items === "string") {
       try { items = JSON.parse(items); } catch { /* ignore */ }
     }
     if (typeof sizes === "string") {
       try { sizes = JSON.parse(sizes); } catch { /* ignore */ }
+    }
+    if (typeof pricingStatusPerSize === "string") {
+      try { pricingStatusPerSize = JSON.parse(pricingStatusPerSize); } catch { /* ignore */ }
     }
 
     const files = Array.isArray(req.files) ? req.files : [];
@@ -305,6 +308,9 @@ router.put("/:comboId", uploadAny, async (req, res) => {
     }
     if (typeof iconUrl !== "undefined") setPayload.iconUrl = iconUrl;
     if (typeof imageUrl !== "undefined") setPayload.imageUrl = imageUrl;
+    if (pricingStatusPerSize && typeof pricingStatusPerSize === 'object') {
+      setPayload.pricingStatusPerSize = pricingStatusPerSize;
+    }
 
     const updated = await DummyCombo.findByIdAndUpdate(comboId, { $set: setPayload }, { new: true });
     if (!updated) return res.status(404).json({ message: "Combo not found" });

@@ -14,6 +14,7 @@ function flattenTree(node, rows = [], parentLevels = [], parentIds = []) {
       levelIds: ids,
       price: typeof node.vendorPrice === "number" ? node.vendorPrice : node.price ?? "-",
       categoryId: node._id ?? node.id,
+      pricingStatus: node.pricingStatus,
     });
   } else {
     node.children.forEach((child) => flattenTree(child, rows, levels, ids));
@@ -48,6 +49,8 @@ export default function DummyVendorCategoriesDetailPage() {
   const [attributesHeading, setAttributesHeading] = useState("");
   const [showAttrHeadingPopup, setShowAttrHeadingPopup] = useState(false);
   const [attrHeadingInput, setAttrHeadingInput] = useState("");
+  const [pricingStatusByRow, setPricingStatusByRow] = useState({}); // { [categoryId]: 'Active' | 'Inactive' }
+  const [comboPricingStatusByRow, setComboPricingStatusByRow] = useState({}); // { [comboId|size]: 'Active' | 'Inactive' }
 
   const fetchTree = async () => {
     try {
@@ -609,6 +612,7 @@ export default function DummyVendorCategoriesDetailPage() {
                 <th style={{ border: '1px solid #ccc', padding: 8 }}>Combo Includes</th>
                 <th style={{ border: '1px solid #ccc', padding: 8 }}>Size</th>
                 <th style={{ border: '1px solid #ccc', padding: 8 }}>Price</th>
+                <th style={{ border: '1px solid #ccc', padding: 8 }}>Pricing Status</th>
                 <th style={{ border: '1px solid #ccc', padding: 8 }}>Action</th>
               </tr>
             </thead>
@@ -650,12 +654,46 @@ export default function DummyVendorCategoriesDetailPage() {
                   const base = (combo && combo.basePrice != null && combo.basePrice !== '') ? Number(combo.basePrice) : null;
                   const priceValue = (repPrice != null && !Number.isNaN(repPrice)) ? repPrice : (base != null && !Number.isNaN(base) ? base : null);
                   const priceText = (priceValue != null) ? `₹${priceValue}` : '—';
+                  const comboId = combo._id?.$oid || combo._id || combo.id;
+                  const sizeKey = sz || 'default';
+                  const mapKey = `${comboId}|${sizeKey}`;
+                  const baseStatus = (combo.pricingStatusPerSize && combo.pricingStatusPerSize[sizeKey]) || 'Inactive';
+                  const comboStatus = comboPricingStatusByRow[mapKey] || baseStatus;
                   return (
-                    <tr key={`${(combo._id?.$oid || combo._id || combo.id || comboName)}-${idx}`}>
+                    <tr key={`${(comboId || comboName)}-${idx}`}>
                       <td style={{ border: '1px solid #ccc', padding: 8 }}>{comboName}</td>
                       <td style={{ border: '1px solid #ccc', padding: 8 }}>{allItemsLabel}</td>
                       <td style={{ border: '1px solid #ccc', padding: 8 }}>{sz || '—'}</td>
                       <td style={{ border: '1px solid #ccc', padding: 8 }}>{priceText}</td>
+                      <td style={{ border: '1px solid #ccc', padding: 8 }}>
+                        <select
+                          value={comboStatus}
+                          onChange={async (e) => {
+                            const val = e.target.value === 'Active' ? 'Active' : 'Inactive';
+                            setComboPricingStatusByRow((prev) => ({ ...prev, [mapKey]: val }));
+                            try {
+                              const currentMap = (combo.pricingStatusPerSize && typeof combo.pricingStatusPerSize === 'object') ? combo.pricingStatusPerSize : {};
+                              const nextMap = { ...currentMap, [sizeKey]: val };
+                              await axios.put(`${API_BASE_URL}/api/dummy-combos/${comboId}`, {
+                                pricingStatusPerSize: nextMap,
+                              }, { headers: { 'Content-Type': 'application/json' } });
+                              setCombos((prev) =>
+                                (Array.isArray(prev) ? prev : []).map((c) =>
+                                  String(c._id || c.id) === String(comboId)
+                                    ? { ...c, pricingStatusPerSize: nextMap }
+                                    : c
+                                )
+                              );
+                            } catch (e2) {
+                              alert(e2?.response?.data?.message || 'Failed to update pricing status');
+                            }
+                          }}
+                          style={{ padding: 4, borderRadius: 4, border: '1px solid #d1d5db', fontSize: 13 }}
+                        >
+                          <option value="Inactive">Inactive</option>
+                          <option value="Active">Active</option>
+                        </select>
+                      </td>
                       <td style={{ border: '1px solid #ccc', padding: 8 }}>
                         <button
                           onClick={async () => {
@@ -721,6 +759,7 @@ export default function DummyVendorCategoriesDetailPage() {
                 <th style={{ border: '1px solid #ccc', padding: 8 }}>Images</th>
               ) : null}
               <th style={{ border: "1px solid #ccc", padding: "8px" }}>Price</th>
+              <th style={{ border: "1px solid #ccc", padding: "8px" }}>Pricing Status</th>
               <th style={{ border: "1px solid #ccc", padding: "8px" }}>Action</th>
             </tr>
           </thead>
@@ -843,6 +882,69 @@ export default function DummyVendorCategoriesDetailPage() {
                       <span>{row.price === undefined || row.price === null || row.price === '-' ? '-' : row.price}</span>
                     )
                   )}
+                </td>
+                <td style={{ border: '1px solid #ccc', padding: 8 }}>
+                  {(() => {
+                    const isInventoryRow = Boolean(match);
+                    const rowKey = Array.isArray(row.levelIds) && row.levelIds.length ? row.levelIds.map(String).join('|') : String(row.id);
+                    const key = isInventoryRow
+                      ? `inv:${String(match._id || match.at)}|${rowKey}`
+                      : `cat:${row.categoryId}`;
+                    const baseStatus = (() => {
+                      if (!isInventoryRow) {
+                        try {
+                          const map = (vendor && vendor.nodePricingStatus && typeof vendor.nodePricingStatus === 'object') ? vendor.nodePricingStatus : {};
+                          const v = map[row.categoryId] || map[row.id];
+                          return v || row.pricingStatus || 'Inactive';
+                        } catch {
+                          return row.pricingStatus || 'Inactive';
+                        }
+                      }
+                      const map = (match.pricingStatusByRow && typeof match.pricingStatusByRow === 'object') ? match.pricingStatusByRow : {};
+                      return map[rowKey] || 'Inactive';
+                    })();
+                    const current = pricingStatusByRow[key] || baseStatus || 'Inactive';
+                    return (
+                      <select
+                        value={current}
+                        onChange={async (e) => {
+                          const val = e.target.value === 'Active' ? 'Active' : 'Inactive';
+                          setPricingStatusByRow((prev) => ({ ...prev, [key]: val }));
+                          if (isInventoryRow) {
+                            try {
+                              const entryId = String(match._id || match.at);
+                              const topCatId = (vendor && (vendor.categoryId || vendor.category?._id)) || categoryId;
+                              const items = Array.isArray(invItems)
+                                ? invItems.map((it) => {
+                                    if (String(it._id || it.at) !== entryId) return it;
+                                    const map = (it.pricingStatusByRow && typeof it.pricingStatusByRow === 'object') ? it.pricingStatusByRow : {};
+                                    return { ...it, pricingStatusByRow: { ...map, [rowKey]: val } };
+                                  })
+                                : [];
+                              await saveDummyInventorySelections(vendorId, topCatId, items);
+                              setInvItems(items);
+                            } catch (err) {
+                              alert(err?.response?.data?.message || 'Failed to update pricing status');
+                            }
+                          } else {
+                            try {
+                              const nodeId = String(row.categoryId || row.id);
+                              const existing = (vendor && vendor.nodePricingStatus && typeof vendor.nodePricingStatus === 'object') ? vendor.nodePricingStatus : {};
+                              const nextMap = { ...existing, [nodeId]: val };
+                              await axios.put(`${API_BASE_URL}/api/dummy-vendors/${vendorId}`, { nodePricingStatus: nextMap });
+                              setVendor((prev) => ({ ...(prev || {}), nodePricingStatus: nextMap }));
+                            } catch (err) {
+                              alert(err?.response?.data?.message || 'Failed to update pricing status');
+                            }
+                          }
+                        }}
+                        style={{ padding: 4, borderRadius: 4, border: '1px solid #d1d5db', fontSize: 13 }}
+                      >
+                        <option value="Inactive">Inactive</option>
+                        <option value="Active">Active</option>
+                      </select>
+                    );
+                  })()}
                 </td>
                 <td style={{ border: '1px solid #ccc', padding: 8 }}>
                   {match ? (

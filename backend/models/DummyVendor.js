@@ -37,6 +37,9 @@ const dummyVendorSchema = new mongoose.Schema({
   profilePictures: { type: [String], default: [] },
   rowImages: { type: Object, default: {} },
   inventorySelections: { type: Object, default: {} },
+  // Per-vendor pricing visibility overrides for category / subcategory nodes
+  // { [nodeId: string]: 'Active' | 'Inactive' }
+  nodePricingStatus: { type: Object, default: {} },
 
   // Custom fields for preview Home section (Add-On Text)
   customFields: {

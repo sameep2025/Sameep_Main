@@ -2,9 +2,24 @@
 
 import React, { useState, useEffect } from "react";
 import { Menu, ChevronDown, User } from "lucide-react";
+import VendorMenuDropdown from "./VendorMenuDropdown";
 
 export default function TopNavBar({
   businessName,
+  identityRole = "guest",
+  identityDisplayName = "Guest",
+  identityLoggedIn = false,
+  vendor = null,
+  hasCombos = false,
+  inventoryLabel = null,
+  inventoryLabels = [],
+  isInventoryModel = false,
+  onNavigateMyPricesCombos,
+  onNavigateMyPricesNonCombos,
+  onNavigateHomeLocation,
+  onNavigateBusinessLocation,
+  onNavigateBusinessHours,
+  onNavigateInventory,
   services = [
     "Driving Packages",
     "Individual Courses",
@@ -18,6 +33,31 @@ export default function TopNavBar({
   const [menuOpen, setMenuOpen] = useState(false);
   const [hoverKey, setHoverKey] = useState(null);
   const [servicesOpen, setServicesOpen] = useState(false);
+
+  const isVendor = identityLoggedIn && identityRole === "vendor";
+  const avatarLetter = (() => {
+    try {
+      // For vendors, always prefer the business name for the avatar letter
+      const source = isVendor
+        ? (businessName || identityDisplayName || "V")
+        : "G";
+      const t = String(source || "").trim();
+      return t ? t.charAt(0).toUpperCase() : (isVendor ? "V" : "G");
+    } catch {
+      return isVendor ? "V" : "G";
+    }
+  })();
+  const identityLabel = (() => {
+    try {
+      if (isVendor) {
+        const t = String(identityDisplayName || businessName || "Vendor").trim();
+        return t || "Vendor";
+      }
+      return "Guest";
+    } catch {
+      return isVendor ? "Vendor" : "Guest";
+    }
+  })();
 
   const effectiveServices = hasPackages
     ? ["Packages", ...services]
@@ -316,31 +356,72 @@ export default function TopNavBar({
               );
             })}
 
-            {/* Login icon at the end */}
-            <button
-              type="button"
-              style={{
-                border: "none",
-                background: "transparent",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                cursor: "pointer",
-                padding: 0,
-              }}
-            >
-              <User size={22} color="#111827" />
-              <span
+            {/* Identity display at the end.
+               - Not logged in: Log In icon + text
+               - Logged-in guest: User icon + text "Guest"
+               - Logged-in vendor: vendor menu dropdown */}
+            {!identityLoggedIn ? (
+              <button
+                type="button"
                 style={{
-                  marginLeft: 6,
-                  fontSize: 16,
-                  fontWeight: 500,
-                  color: "#111827",
+                  border: "none",
+                  background: "transparent",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  cursor: "pointer",
+                  padding: 0,
                 }}
               >
-                Log In
-              </span>
-            </button>
+                <User size={22} color="#111827" />
+                <span
+                  style={{
+                    marginLeft: 6,
+                    fontSize: 16,
+                    fontWeight: 500,
+                    color: "#111827",
+                  }}
+                >
+                  Log In
+                </span>
+              </button>
+            ) : identityRole === "guest" ? (
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 8,
+                }}
+              >
+                <User size={22} color="#111827" />
+                <span
+                  style={{
+                    marginLeft: 6,
+                    fontSize: 16,
+                    fontWeight: 500,
+                    color: "#111827",
+                  }}
+                >
+                  Guest
+                </span>
+              </div>
+            ) : (
+              <VendorMenuDropdown
+                vendor={vendor}
+                hasCombos={hasPackages || hasCombos}
+                inventoryLabel={inventoryLabel}
+                inventoryLabels={inventoryLabels}
+                isInventoryModel={isInventoryModel}
+                avatarLetter={avatarLetter}
+                onNavigateMyPricesCombos={onNavigateMyPricesCombos}
+                onNavigateMyPricesNonCombos={onNavigateMyPricesNonCombos}
+                onNavigateHomeLocation={onNavigateHomeLocation}
+                onNavigateBusinessLocation={onNavigateBusinessLocation}
+                onNavigateBusinessHours={onNavigateBusinessHours}
+                onNavigateInventory={onNavigateInventory}
+                servicesForMyPrices={effectiveServices}
+              />
+            )}
           </nav>
         )}
 
@@ -519,7 +600,7 @@ export default function TopNavBar({
               );
             })}
 
-            {/* Mobile Log In action */}
+            {/* Mobile identity display with same rules as desktop */}
             <div
               style={{
                 marginTop: 16,
@@ -531,28 +612,73 @@ export default function TopNavBar({
                 cursor: "pointer",
               }}
               onClick={() => {
-                // Placeholder: hook this to real login navigation when available
                 setMenuOpen(false);
               }}
             >
-              <div
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 8,
-                }}
-              >
-                <User size={20} color="#111827" />
-                <span
+              {!identityLoggedIn ? (
+                <div
                   style={{
-                    fontSize: 18,
-                    fontWeight: 600,
-                    color: "#111827",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 8,
                   }}
                 >
-                  Log In
-                </span>
-              </div>
+                  <User size={20} color="#111827" />
+                  <span
+                    style={{
+                      fontSize: 18,
+                      fontWeight: 600,
+                      color: "#111827",
+                    }}
+                  >
+                    Log In
+                  </span>
+                </div>
+              ) : identityRole === "guest" ? (
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 8,
+                  }}
+                >
+                  <User size={20} color="#111827" />
+                  <span
+                    style={{
+                      fontSize: 18,
+                      fontWeight: 600,
+                      color: "#111827",
+                    }}
+                  >
+                    Guest
+                  </span>
+                </div>
+              ) : (
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 8,
+                  }}
+                >
+                  <div
+                    style={{
+                      width: 30,
+                      height: 30,
+                      borderRadius: "999px",
+                      backgroundColor: "#0EA5E9",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      fontSize: 15,
+                      fontWeight: 700,
+                      color: "#FFFFFF",
+                    }}
+                  >
+                    {avatarLetter}
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* Services submenu (already rendered above for Categories) */}

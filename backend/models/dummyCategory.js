@@ -10,6 +10,7 @@ const DummyCategorySchema = new mongoose.Schema({
 
   // pricing/content
   price: { type: Number, default: null },
+  pricingStatus: { type: String, enum: ['Active', 'Inactive'], default: 'Inactive' },
   freeText: { type: String, default: '' },
   terms: { type: String, default: '' },
   enableFreeText: { type: Boolean, default: false },

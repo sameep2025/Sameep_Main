@@ -13,6 +13,7 @@ import FullPageShimmer from "../../../components/FullPageShimmer";
 import API_BASE_URL, { ASSET_BASE_URL } from "../../../config";
 
 export default function PreviewPage() {
+  console.log("DRIVING PREVIEW PAGE LOADED (TOP)");
   const router = useRouter();
   const { vendorId, categoryId, lat, lng, homeLocs, mode } = router.query;
 
@@ -53,17 +54,20 @@ export default function PreviewPage() {
   const [activeServiceKey, setActiveServiceKey] = useState(null); // which service/card should animate
   const [attributesHeading, setAttributesHeading] = useState(null);
   const [parentSelectorLabel, setParentSelectorLabel] = useState(null);
+  const [inventoryLabelName, setInventoryLabelName] = useState(null);
+  const [inventoryLabelsList, setInventoryLabelsList] = useState([]);
 
   // OTP flow state for preview booking (country code + mobile + OTP)
   const [showOtpModal, setShowOtpModal] = useState(false);
   const [otpStep, setOtpStep] = useState(1); // 1: phone, 2: otp
   const [countries, setCountries] = useState([]);
   const [countriesLoading, setCountriesLoading] = useState(false);
-  const [countryCode, setCountryCode] = useState("");
+  const [countryCode, setCountryCode] = useState("91");
   const [phone, setPhone] = useState("");
   const [otp, setOtp] = useState("");
   const [otpLoading, setOtpLoading] = useState(false);
   const [otpError, setOtpError] = useState("");
+  const [navIdentity, setNavIdentity] = useState({ role: "guest", displayName: "Guest", loggedIn: false });
 
   const loading = loadingVendor || loadingCategories;
 
@@ -84,6 +88,16 @@ export default function PreviewPage() {
       return `previewToken:${v}:${c}`;
     } catch {
       return "previewToken:unknown:unknown";
+    }
+  }, []);
+
+   const makePreviewIdentityKey = useCallback((venId, catId) => {
+    try {
+      const v = venId || "";
+      const c = catId || "";
+      return `previewIdentity:${v}:${c}`;
+    } catch {
+      return "previewIdentity:unknown:unknown";
     }
   }, []);
 
@@ -124,7 +138,14 @@ export default function PreviewPage() {
           .filter((c) => c.name && c.code)
           .sort((a, b) => a.name.localeCompare(b.name));
         setCountries(list);
-        if (list.length > 0) setCountryCode(list[0].code);
+        // Prefer India (+91) if available, otherwise first in list
+        try {
+          const preferred = list.find((c) => String(c.code) === "91");
+          if (preferred) setCountryCode(preferred.code);
+          else if (list.length > 0) setCountryCode(list[0].code);
+        } catch {
+          if (list.length > 0) setCountryCode(list[0].code);
+        }
       } catch (err) {
         console.error("Failed to fetch countries for OTP modal", err);
       } finally {
@@ -134,6 +155,25 @@ export default function PreviewPage() {
 
     fetchCountries();
   }, [showOtpModal, countries.length]);
+
+  // Load any stored identity for this vendor/category into navIdentity
+  useEffect(() => {
+    try {
+      if (typeof window === "undefined") return;
+      const key = makePreviewIdentityKey(vendorId, categoryId);
+      const raw = window.localStorage.getItem(key);
+      if (!raw) return;
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed === "object") {
+        const role = parsed.role === "vendor" ? "vendor" : "guest";
+        const displayName = typeof parsed.displayName === "string" && parsed.displayName.trim()
+          ? parsed.displayName.trim()
+          : role === "vendor" ? "Vendor" : "Guest";
+        const loggedIn = !!parsed.loggedIn;
+        setNavIdentity({ role, displayName, loggedIn });
+      }
+    } catch {}
+  }, [vendorId, categoryId, makePreviewIdentityKey]);
 
   const handleOpenOtpModal = async () => {
     try {
@@ -157,6 +197,14 @@ export default function PreviewPage() {
               }
               if (data && (data.status === "expired" || data.status === "invalid_token")) {
                 window.alert("Session expired. Please log in again.");
+                try {
+                  const sessionKey = makePreviewSessionKey(vendorId, categoryId);
+                  const identityKey = makePreviewIdentityKey(vendorId, categoryId);
+                  window.localStorage.removeItem(tokenKey);
+                  window.localStorage.removeItem(sessionKey);
+                  window.localStorage.removeItem(identityKey);
+                } catch {}
+                setNavIdentity({ role: "guest", displayName: "Guest", loggedIn: false });
               }
             }
           } catch (e) {
@@ -241,6 +289,18 @@ export default function PreviewPage() {
             const tokenKey = makePreviewTokenKey(vendorId, categoryId);
             window.localStorage.setItem(tokenKey, json.token);
           }
+          if (json) {
+            const role = json.role === "vendor" ? "vendor" : "guest";
+            const displayName = typeof json.displayName === "string" && json.displayName.trim()
+              ? json.displayName.trim()
+              : role === "vendor" ? (vendor?.businessName || "Vendor") : "Guest";
+            const identity = { role, displayName, loggedIn: true };
+            const identityKey = makePreviewIdentityKey(vendorId, categoryId);
+            try {
+              window.localStorage.setItem(identityKey, JSON.stringify(identity));
+            } catch {}
+            setNavIdentity(identity);
+          }
         }
       } catch {}
       handleCloseOtpModal();
@@ -280,18 +340,136 @@ export default function PreviewPage() {
     }
   }, [categoryTree]);
 
-  // Build dynamic service labels from top-level category children (product card sections)
+  const hasActiveLeaf = useCallback((node) => {
+    try {
+      if (!node) return false;
+      const children = Array.isArray(node.children) ? node.children : [];
+      if (children.length === 0) {
+        const selfStatus = String(node?.pricingStatus || "").trim().toLowerCase();
+        return selfStatus === "active".toLowerCase();
+      }
+      return children.some((ch) => hasActiveLeaf(ch));
+    } catch {
+      return false;
+    }
+  }, []);
+
+  const hasActivePricingForNode = useCallback((node) => {
+    try {
+      const rootId = (() => {
+        try { return String(node?.id || node?._id || ""); } catch { return ""; }
+      })();
+      if (!rootId) return false;
+
+      // Collect this node's id plus all descendant ids so that a parent
+      // category is treated as active when any child inventory row is active.
+      const idsToMatch = new Set();
+      const collectIds = (n) => {
+        if (!n) return;
+        try {
+          const nid = String(n.id || n._id || "");
+          if (nid) idsToMatch.add(nid);
+        } catch {}
+        const kids = Array.isArray(n.children) ? n.children : [];
+        kids.forEach(collectIds);
+      };
+      collectIds(node);
+
+      const allInv = vendor && vendor.inventorySelections && typeof vendor.inventorySelections === 'object'
+        ? vendor.inventorySelections
+        : {};
+      const lists = Object.values(allInv);
+      for (const listRaw of lists) {
+        const inv = Array.isArray(listRaw) ? listRaw : [];
+        for (const entry of inv) {
+          const pbr =
+            entry && entry.pricesByRow && typeof entry.pricesByRow === "object"
+              ? entry.pricesByRow
+              : null;
+          if (!pbr) continue;
+          const statusMap =
+            entry && entry.pricingStatusByRow && typeof entry.pricingStatusByRow === "object"
+              ? entry.pricingStatusByRow
+              : {};
+          for (const key of Object.keys(pbr)) {
+            const keyIds = String(key).split('|');
+            if (!keyIds.some((id) => idsToMatch.has(String(id)))) continue;
+            const rawStatus = String(statusMap[key] || '').trim().toLowerCase();
+            if (rawStatus === 'active') return true;
+          }
+        }
+      }
+      return false;
+    } catch {
+      return false;
+    }
+  }, [vendor]);
+
+  // Build dynamic service labels from top-level category children (product card sections).
+  // For accepted vendors, filter by isNodePricingActive so dropdown and cards share the
+  // same active/inactive logic (including inventory rows via hasActivePricingForNode).
+  // For non-accepted vendors, include all top-level services.
   const serviceLabels = useMemo(() => {
     try {
+      const isVendorAcceptedLocal =
+        String(vendor?.status || "").trim().toLowerCase() === "accepted".toLowerCase();
       const children = Array.isArray(categoryTree?.children) ? categoryTree.children : [];
-      const labels = children
+
+      const source = (() => {
+        if (!isVendorAcceptedLocal) return children; // no filtering before acceptance
+        return children.filter((n) => {
+          try {
+            return isNodePricingActive(n);
+          } catch {
+            return false;
+          }
+        });
+      })();
+
+      const labels = source
         .map((n) => (n && typeof n.name === "string" ? n.name.trim() : ""))
         .filter((name) => !!name);
       if (labels.length > 0) return labels;
+
+      // If vendor is accepted and no active services were found, return empty so
+      // Our Services dropdown is hidden.
+      if (isVendorAcceptedLocal) return [];
     } catch {}
-    // Fallback to default static labels if we cannot derive from tree
-    return ["Driving Packages", "Individual Courses", "Commercial Training"];
-  }, [categoryTree]);
+
+    // Fallback for non-accepted or error cases: derive labels from top-level names.
+    try {
+      const children = Array.isArray(categoryTree?.children) ? categoryTree.children : [];
+      const out = [];
+      const seen = new Set();
+      children.forEach((n) => {
+        const name = (n && typeof n.name === "string" ? n.name.trim() : "") || "";
+        const key = name.toLowerCase();
+        if (name && !seen.has(key)) {
+          seen.add(key);
+          out.push(name);
+        }
+      });
+      return out;
+    } catch {
+      return [];
+    }
+  }, [categoryTree, vendor, categoryId]);
+
+  const hasActiveIndividualsForNav = useMemo(() => {
+    try {
+      const isVendorAcceptedLocal =
+        String(vendor?.status || "").trim().toLowerCase() === "accepted".toLowerCase();
+      const children = Array.isArray(categoryTree?.children) ? categoryTree.children : [];
+      // Before acceptance: if there is any L1 child at all, keep heading visible
+      if (!isVendorAcceptedLocal) return children.length > 0;
+
+      // After acceptance: reuse isNodePricingActive so heading visibility matches
+      // the same logic used for the actual cards (including inventory rows).
+      return children.some((n) => isNodePricingActive(n));
+    } catch {
+      return false;
+    }
+  }, [categoryTree, vendor]);
 
   const makeServiceKey = useCallback((name) => {
     try {
@@ -432,6 +610,33 @@ export default function PreviewPage() {
               setPackagesAddon(wmJson.packagesAddon);
             } else {
               setPackagesAddon(null);
+            }
+            try {
+              const rawInvLabel = typeof wmJson?.inventoryLabelName === 'string' ? wmJson.inventoryLabelName : '';
+              const invTrim = rawInvLabel.trim();
+              setInventoryLabelName(invTrim || null);
+            } catch {
+              setInventoryLabelName(null);
+            }
+            try {
+              const la = (wmJson && wmJson.linkedAttributes && typeof wmJson.linkedAttributes === 'object')
+                ? wmJson.linkedAttributes
+                : {};
+              const labels = [];
+              const push = (v) => {
+                if (!v) return;
+                const t = String(v).trim();
+                if (!t) return;
+                if (!labels.includes(t)) labels.push(t);
+              };
+              Object.entries(la).forEach(([k, v]) => {
+                if (!String(k || '').endsWith(':inventoryLabels')) return;
+                if (!Array.isArray(v)) return;
+                v.forEach(push);
+              });
+              setInventoryLabelsList(labels);
+            } catch {
+              setInventoryLabelsList([]);
             }
             // Derive Inventory model flag from categoryModel array on dummy category
             try {
@@ -953,6 +1158,80 @@ export default function PreviewPage() {
     return node.children?.some((c) => containsId(c, id)) || false;
   };
 
+  const isDummyMode = String(mode || "").trim().toLowerCase() === "dummy";
+
+  const isVendorAccepted =
+    String(vendor?.status || "").trim().toLowerCase() === "accepted".toLowerCase();
+
+  const hasPackagesForNav = useMemo(() => {
+    try {
+      if (!Array.isArray(combos) || combos.length === 0) return false;
+      // For non-accepted vendors, keep showing Packages as long as there is any combo.
+      if (!isVendorAccepted) return true;
+
+      // For accepted vendors, require at least one combo with Active pricing status
+      // across any defined size key.
+      const hasAnyActive = combos.some((combo) => {
+        try {
+          const statusMap =
+            combo && combo.pricingStatusPerSize && typeof combo.pricingStatusPerSize === "object"
+              ? combo.pricingStatusPerSize
+              : {};
+          return Object.values(statusMap).some((v) =>
+            String(v || "").trim().toLowerCase() === "active"
+          );
+        } catch {
+          return false;
+        }
+      });
+      return hasAnyActive;
+    } catch {
+      return Array.isArray(combos) && combos.length > 0;
+    }
+  }, [combos, isVendorAccepted]);
+
+  const hasVendorActiveForNode = (node) => {
+    try {
+      const id = (() => {
+        try { return String(node?.id || node?._id || ""); } catch { return ""; }
+      })();
+      if (!id) return false;
+      const map = (vendor && vendor.nodePricingStatus && typeof vendor.nodePricingStatus === 'object') ? vendor.nodePricingStatus : {};
+      const raw = String(map[id] || "").trim().toLowerCase();
+      return raw === 'active';
+    } catch {
+      return false;
+    }
+  };
+
+  function isNodePricingActive(node) {
+    try {
+      const nodeId = (() => {
+        try { return String(node?.id || node?._id || ""); } catch { return ""; }
+      })();
+      // Per-vendor override from DummyVendor.nodePricingStatus, if present
+      try {
+        const map = (vendor && vendor.nodePricingStatus && typeof vendor.nodePricingStatus === 'object') ? vendor.nodePricingStatus : {};
+        const v = nodeId ? String(map[nodeId] || "").trim().toLowerCase() : "";
+        if (v === 'active') return true;
+        if (v === 'inactive') return false;
+      } catch {}
+      const self = String(node?.pricingStatus || "").trim().toLowerCase();
+      const children = Array.isArray(node?.children) ? node.children : [];
+      const hasTreeActive = (self === "active".toLowerCase()) ||
+        children.some((ch) => isNodePricingActive(ch));
+      if (hasTreeActive) return true;
+      // Fall back to inventorySelections: if any row for this node or its
+      // descendants has pricingStatusByRow === "Active", treat node as active.
+      if (typeof hasActivePricingForNode === "function") {
+        return hasActivePricingForNode(node);
+      }
+      return false;
+    } catch {
+      return false;
+    }
+  }
+
   // ----------------- Card Component -----------------
   const ParentWithSizesCard = ({ node, selection, onSelectionChange, onLeafSelect, mode = "buttons", includeLeafChildren = true }) => {
     if (!node) return null;
@@ -977,7 +1256,29 @@ export default function PreviewPage() {
       }
     })();
 
-    const selectedParent = selection?.parent || node.children?.[0] || node;
+    const rawChildren = Array.isArray(node.children) ? node.children : [];
+    const isVendorAcceptedLocal = String(vendor?.status || "")
+      .trim()
+      .toLowerCase() === "accepted".toLowerCase();
+
+    const parentCandidates = (() => {
+      try {
+        if (!isVendorAcceptedLocal) return rawChildren;
+        const filtered = rawChildren.filter((ch) => {
+          try {
+            return isNodePricingActive(ch);
+          } catch {
+            return false;
+          }
+        });
+        // If everything is inactive, fall back to original list so vendor can still preview configuration.
+        return filtered.length > 0 ? filtered : rawChildren;
+      } catch {
+        return rawChildren;
+      }
+    })();
+
+    const selectedParent = selection?.parent || parentCandidates?.[0] || node;
     const selectedChild = selection?.child || getDeepestFirstChild(selectedParent);
 
     const displayNode = selectedChild || selectedParent;
@@ -1205,17 +1506,17 @@ export default function PreviewPage() {
                         let sel = sels[fam] || sels.cars || sels.bikes || {};
                         if (!sel || typeof sel !== 'object') sel = {};
                         if (fam === 'bikes') {
-                          const brand = sel.bikeBrand != null ? String(sel.bikeBrand) : (sel.brand != null ? String(sel.brand) : '');
-                          const transmission = sel.bikeTransmission != null ? String(sel.bikeTransmission) : (sel.transmission != null ? String(sel.transmission) : '');
-                          const model = sel.model != null ? String(sel.model) : '';
+                          const brand = sel.bikeBrand != null ? String(sel.bikeBrand).trim() : (sel.brand != null ? String(sel.brand).trim() : '');
+                          const transmission = sel.bikeTransmission != null ? String(sel.bikeTransmission).trim() : (sel.transmission != null ? String(sel.transmission).trim() : '');
+                          const model = sel.model != null ? String(sel.model).trim() : '';
                           if (brand || model || transmission) {
                             normalized.push({ family: fam, brand, model, transmission, bodyType: null, entry });
                           }
                         } else if (fam === 'cars') {
-                          const brand = sel.brand != null ? String(sel.brand) : '';
-                          const transmission = sel.transmission != null ? String(sel.transmission) : '';
-                          const model = sel.model != null ? String(sel.model) : '';
-                          const bodyType = sel.bodyType != null ? String(sel.bodyType) : '';
+                          const brand = sel.brand != null ? String(sel.brand).trim() : '';
+                          const transmission = sel.transmission != null ? String(sel.transmission).trim() : '';
+                          const model = sel.model != null ? String(sel.model).trim() : '';
+                          const bodyType = sel.bodyType != null ? String(sel.bodyType).trim() : '';
                           if (brand || model || transmission || bodyType) {
                             normalized.push({ family: fam, brand, model, transmission, bodyType, entry });
                           }
@@ -1274,19 +1575,6 @@ export default function PreviewPage() {
                   if (resolvedPrice == null) return null;
                   return (<p className="unified-price">₹ {resolvedPrice}</p>);
                 } catch { return null; }
-              })()}
-              {(() => {
-                const resolvedTerms = displayNode.terms || selectedParent?.terms || node.terms || "";
-                if (!resolvedTerms) return null;
-                return (
-                  <ul style={{ marginTop: 4, paddingLeft: 18 }}>
-                    {resolvedTerms.split(",").map((t, i) => (
-                      <li key={i} style={{ fontSize: 13, color: "#4b5563" }}>
-                        {t.trim()}
-                      </li>
-                    ))}
-                  </ul>
-                );
               })()}
               {(() => {
                 try {
@@ -1352,20 +1640,42 @@ export default function PreviewPage() {
                     if (Array.isArray(linked[specificKey]) && linked[specificKey].length) mapped = String(linked[specificKey][0] || '');
                     else if (Array.isArray(linked[genericLabelKey]) && linked[genericLabelKey].length) mapped = String(linked[genericLabelKey][0] || '');
                     else if (Array.isArray(linked[familyKey]) && linked[familyKey].length) mapped = String(linked[familyKey][0] || '');
-                    if (mapped === 'ALL') return true;
                     if (!mapped) return false; // require explicit mapping to show
-                    return targetIdsLinkedAttrs.some((tid) => tid && String(mapped) === String(tid));
+                    const matchesSub = mapped === 'ALL' || targetIdsLinkedAttrs.some((tid) => tid && String(mapped) === String(tid));
+                    if (!matchesSub) return false;
+
+                    // Require at least one Active row for this card's node ids.
+                    try {
+                      const pbr = e && e.pricesByRow && typeof e.pricesByRow === 'object' ? e.pricesByRow : null;
+                      const statusMap = e && e.pricingStatusByRow && typeof e.pricingStatusByRow === 'object' ? e.pricingStatusByRow : {};
+                      if (!pbr) return false;
+                      for (const [rk] of Object.entries(pbr)) {
+                        const parts = String(rk).split('|');
+                        const hitsThisCard = targetIdsLinkedAttrs.some((tid) => tid && parts.some((id) => String(id) === tid));
+                        if (!hitsThisCard) continue;
+                        const raw = String(statusMap[rk] || '').trim().toLowerCase();
+                        if (raw === 'active') return true;
+                      }
+                      return false;
+                    } catch {
+                      return false;
+                    }
                   });
 
                   if (entriesAll.length === 0 && invPriceList.length > 0) {
-                    // Fallback: any inventory entry that has pricesByRow targeting this card's node ids.
+                    // Fallback: any inventory entry that has an Active pricesByRow
+                    // targeting this card's node ids.
                     entriesAll = invPriceList.filter((e) => {
                       try {
                         const pbr = e && e.pricesByRow && typeof e.pricesByRow === 'object' ? e.pricesByRow : null;
+                        const statusMap = e && e.pricingStatusByRow && typeof e.pricingStatusByRow === 'object' ? e.pricingStatusByRow : {};
                         if (!pbr) return false;
                         for (const [rk] of Object.entries(pbr)) {
                           const parts = String(rk).split('|');
-                          if (targetIdsLinkedAttrs.some((tid) => tid && parts.some((id) => String(id) === tid))) return true;
+                          const hitsThisCard = targetIdsLinkedAttrs.some((tid) => tid && parts.some((id) => String(id) === tid));
+                          if (!hitsThisCard) continue;
+                          const raw = String(statusMap[rk] || '').trim().toLowerCase();
+                          if (raw === 'active') return true;
                         }
                         return false;
                       } catch { return false; }
@@ -1670,14 +1980,14 @@ export default function PreviewPage() {
           )}
 
           {/* Parent Buttons / Dropdown (resolved per node) */}
-          {node.children?.length > 0 && (
+          {parentCandidates.length > 0 && (
             parentSelectorMode === "buttons" ? (
               <>
-                <div style={{ fontSize: 11, fontWeight: 400, color: "#111827", marginLeft: 2, marginBottom: isSpecialCard ? -10 : 12 }}>
+                <div style={{ fontSize: 11, fontWeight: 400, color: "#111827", marginLeft: 2, marginBottom: isSpecialCard ? -6 : -10 }}>
                   {labelForCard || "Select course type"}
                 </div>
-                <div style={{ display: "flex", flexWrap: "wrap", columnGap: 8, rowGap: 6, marginBottom: isSpecialCard ? 4 : 14 }}>
-                {node.children.map((opt) => {
+                <div style={{ display: "flex", flexWrap: "wrap", columnGap: 8, rowGap: 6, marginTop: 2, marginBottom: isSpecialCard ? 4 : 10 }}>
+                {parentCandidates.map((opt) => {
                   const leaf = getDeepestFirstChild(opt);
                   const isSelectedParent = selectedParent?.id === opt.id;
                   return (
@@ -1714,7 +2024,7 @@ export default function PreviewPage() {
                 <select
                   value={selectedParent?.id || ""}
                   onChange={(e) => {
-                    const next = node.children.find((c) => String(c.id) === e.target.value) || node.children[0];
+                    const next = parentCandidates.find((c) => String(c.id) === e.target.value) || parentCandidates[0];
                     const leaf = getDeepestFirstChild(next);
                     onSelectionChange?.(next, leaf);
                     onLeafSelect?.(leaf);
@@ -1731,7 +2041,7 @@ export default function PreviewPage() {
                     textAlign: "left",
                   }}
                 >
-                  {node.children.map((opt) => (
+                  {parentCandidates.map((opt) => (
                     <option key={opt.id} value={opt.id}>{opt.name}</option>
                   ))}
                 </select>
@@ -1792,6 +2102,20 @@ export default function PreviewPage() {
           )}
 
           {attributeDropdown}
+
+          {(() => {
+            const resolvedTerms = displayNode.terms || selectedParent?.terms || node.terms || "";
+            if (!resolvedTerms) return null;
+            return (
+              <ul style={{ marginTop: 8, marginBottom: 10, paddingLeft: 18 }}>
+                {resolvedTerms.split(",").map((t, i) => (
+                  <li key={i} style={{ fontSize: 13, color: "#4b5563" }}>
+                    {t.trim()}
+                  </li>
+                ))}
+              </ul>
+            );
+          })()}
 
           <button
             onClick={handleOpenOtpModal}
@@ -2013,7 +2337,8 @@ export default function PreviewPage() {
       </div>
     );
 
-    // Compute minimum price from a list of normalized entries for a target node id
+    // Compute minimum price from a list of normalized entries for a target node id,
+    // considering only rows with Active pricing status.
     const minPriceForListTarget = (list, targetId) => {
       try {
         const prices = [];
@@ -2022,10 +2347,10 @@ export default function PreviewPage() {
           if (!pbr) return;
           for (const [key, value] of Object.entries(pbr)) {
             const ids = String(key).split('|');
-            if (ids.some((id) => String(id) === String(targetId))) {
-              const num = Number(value);
-              if (!Number.isNaN(num)) prices.push(num);
-            }
+            if (!ids.some((id) => String(id) === String(targetId))) continue;
+            if (!rowPricingIsActive(n.entry, key)) continue;
+            const num = Number(value);
+            if (!Number.isNaN(num)) prices.push(num);
           }
         });
         if (prices.length === 0) return null;
@@ -2073,7 +2398,10 @@ export default function PreviewPage() {
         if (!pbr) continue;
         for (const [key, value] of Object.entries(pbr)) {
           const ids = String(key).split('|');
-          if (ids.some((id) => String(id) === String(node?.id))) { livePrice = Number(value); break; }
+          if (!ids.some((id) => String(id) === String(node?.id))) continue;
+          if (!rowPricingIsActive(entry, key)) continue;
+          livePrice = Number(value);
+          break;
         }
         if (livePrice != null) break;
       }
@@ -2081,6 +2409,57 @@ export default function PreviewPage() {
         livePrice = vendor?.pricing?.[node?.id] ?? vendor?.pricing?.[parentNode?.id] ?? node?.vendorPrice ?? node?.price ?? null;
       }
       return livePrice;
+    };
+
+    const hasActivePricingForNode = (node) => {
+      try {
+        const rootId = (() => {
+          try { return String(node?.id || node?._id || ""); } catch { return ""; }
+        })();
+        if (!rootId) return false;
+
+        // Collect this node's id plus all descendant ids so that a parent
+        // category is treated as active when any child inventory row is active.
+        const idsToMatch = new Set();
+        const collectIds = (n) => {
+          if (!n) return;
+          try {
+            const nid = String(n.id || n._id || "");
+            if (nid) idsToMatch.add(nid);
+          } catch {}
+          const kids = Array.isArray(n.children) ? n.children : [];
+          kids.forEach(collectIds);
+        };
+        collectIds(node);
+
+        const allInv = vendor && vendor.inventorySelections && typeof vendor.inventorySelections === 'object'
+          ? vendor.inventorySelections
+          : {};
+        const lists = Object.values(allInv);
+        for (const listRaw of lists) {
+          const inv = Array.isArray(listRaw) ? listRaw : [];
+          for (const entry of inv) {
+            const pbr =
+              entry && entry.pricesByRow && typeof entry.pricesByRow === "object"
+                ? entry.pricesByRow
+                : null;
+            if (!pbr) continue;
+            const statusMap =
+              entry && entry.pricingStatusByRow && typeof entry.pricingStatusByRow === "object"
+                ? entry.pricingStatusByRow
+                : {};
+            for (const key of Object.keys(pbr)) {
+              const keyIds = String(key).split('|');
+              if (!keyIds.some((id) => idsToMatch.has(String(id)))) continue;
+              const rawStatus = String(statusMap[key] || '').trim().toLowerCase();
+              if (rawStatus === 'active') return true;
+            }
+          }
+        }
+        return false;
+      } catch {
+        return false;
+      }
     };
 
     return (
@@ -2111,18 +2490,7 @@ export default function PreviewPage() {
       const belongsToLvl1 = (entry) => {
         try {
           const lvl1Id = String(lvl1?.id || '');
-          const fam = String(entry?.scopeFamily || '');
-          const famSetForLvl1 = familiesByTarget.get(lvl1Id);
-          const famSetAll = familiesByTarget.get('ALL');
-
-          // Require explicit mapping: either mapped to this lvl1 or mapped via ALL
-          const isExplicitlyAllowed = (
-            (famSetForLvl1 && famSetForLvl1.has(fam)) ||
-            (famSetAll && famSetAll.has(fam))
-          );
-          if (!isExplicitlyAllowed) return false;
-
-          // Additionally, if pricesByRow targets this lvl1, keep it. If pricesByRow exists but doesn't target, exclude.
+          if (!lvl1Id) return false;
           const pbr = entry?.pricesByRow;
           if (pbr && typeof pbr === 'object') {
             for (const key of Object.keys(pbr)) {
@@ -2131,15 +2499,22 @@ export default function PreviewPage() {
             }
             return false;
           }
+          // If no pricesByRow, allow it by default
           return true;
         } catch { return false; }
       };
 
-      const normalizedForLvl1 = normalized.filter((n) => belongsToLvl1(n.entry));
+      // In dummy inventory preview, do not partition inventory rows by lvl1.
+      // Use all normalized rows so categories like Two Wheeler always see data.
+      const normalizedForLvl1 = (isInventoryModel && isDummyMode)
+        ? normalized
+        : normalized.filter((n) => belongsToLvl1(n.entry));
       const bodySeatsOptions = Array.from(new Set(normalizedForLvl1
         .filter((n) => n.body && n.seats)
         .map((n) => `${n.body}|${n.seats}`)));
       const filterByBodySeats = (pair) => {
+        // If any inventory pricing is active, do not filter by body/seats at all.
+        if (hasInventoryActive) return normalizedForLvl1;
         if (!pair) return normalizedForLvl1;
         const [b, s] = String(pair).split('|');
         return normalizedForLvl1.filter((n) => String(n.body) === String(b ?? '') && String(n.seats) === String(s ?? ''));
@@ -2208,10 +2583,10 @@ export default function PreviewPage() {
             if (!pbr) return;
             for (const [key, value] of Object.entries(pbr)) {
               const ids = String(key).split('|');
-              if (ids.some((id) => String(id) === targetId)) {
-                const num = Number(value);
-                if (!Number.isNaN(num)) prices.push(num);
-              }
+              if (!ids.some((id) => String(id) === targetId)) continue;
+              if (!rowPricingIsActive(n.entry, key)) continue;
+              const num = Number(value);
+              if (!Number.isNaN(num)) prices.push(num);
             }
           });
           if (prices.length === 0) return livePrice;
@@ -2221,6 +2596,15 @@ export default function PreviewPage() {
         }
       })();
 
+      const hasCategoryActive = isNodePricingActive(displayNode);
+      const hasInventoryActive = hasActivePricingForNode(displayNode);
+      console.log("[preview] node", {
+  id: displayNode?.id,
+  name: displayNode?.name,
+  pricingStatus: displayNode?.pricingStatus,
+  hasCategoryActive,
+  hasInventoryActive,
+});
       return (
         <section key={lvl1.id} style={{
       marginBottom: 16,
@@ -2537,23 +2921,36 @@ export default function PreviewPage() {
         const parts = Object.values(sel).filter((v) => v != null && String(v).trim() !== "");
         const name = parts.join(" ") || "Item";
         let leafPrice = null;
+        let hasRowForSubNode = false;
         try {
           const pbr = (entry && entry.pricesByRow && typeof entry.pricesByRow === 'object') ? entry.pricesByRow : null;
           if (pbr && subNodeId != null) {
             for (const [rk, val] of Object.entries(pbr)) {
               const ids = String(rk).split('|');
               if (ids.some((id) => String(id) === String(subNodeId))) {
-                const n = Number(val);
-                if (!Number.isNaN(n)) { leafPrice = n; break; }
+                hasRowForSubNode = true;
+                // Only consider rows whose pricingStatusByRow is Active
+                if (rowPricingIsActive(entry, rk)) {
+                  const n = Number(val);
+                  if (!Number.isNaN(n)) { leafPrice = n; break; }
+                }
               }
             }
           }
         } catch {}
-        if (leafPrice == null && entry && entry.price != null && entry.price !== '') {
-          const n = Number(entry.price);
-          if (!Number.isNaN(n)) leafPrice = n;
+        // If there are explicit rows for this subNodeId but none are Active,
+        // skip this entry entirely so inactive items do not appear in preview.
+        if (hasRowForSubNode && leafPrice == null) return;
+
+        // Backward compatibility: if there is no row specifically targeting this
+        // subNodeId, fall back to entry.price / priceSeed as before.
+        if (!hasRowForSubNode) {
+          if (leafPrice == null && entry && entry.price != null && entry.price !== '') {
+            const n = Number(entry.price);
+            if (!Number.isNaN(n)) leafPrice = n;
+          }
+          if (leafPrice == null) leafPrice = priceSeed ?? null;
         }
-        if (leafPrice == null) leafPrice = priceSeed ?? null;
 
         // Build attribute key for grouping: stable key order
         try {
@@ -2598,6 +2995,19 @@ export default function PreviewPage() {
     }
   }
 
+  const rowPricingIsActive = (entry, key) => {
+    try {
+      const map =
+        entry && entry.pricingStatusByRow && typeof entry.pricingStatusByRow === 'object'
+          ? entry.pricingStatusByRow
+          : {};
+      const raw = String(map[key] || '').trim().toLowerCase();
+      return raw === 'active';
+    } catch {
+      return false;
+    }
+  };
+
   // Helper: deepest first child
   const deepestFirstChild = (n) => (!n?.children?.length ? n : deepestFirstChild(n.children[0]));
 
@@ -2624,11 +3034,27 @@ export default function PreviewPage() {
     return { ...node, children: newChildren };
   };
 
-  // 🧠 First-level headings only (but hide heading if lvl1 has only flat children-as-cards)
+  // First-level headings only (but hide heading if lvl1 has only flat children-as-cards)
   const renderedTree = root.children.map((lvl1) => {
     const enriched = enrichNode(lvl1);
     const children = Array.isArray(enriched?.children) ? enriched.children : [];
     const hasDeeperLevels = children.some((c) => Array.isArray(c?.children) && c.children.length > 0);
+    console.log("LVL1:", lvl1.name);
+    console.log("LVL1:", lvl1.name, "childrenCount:", children.length);
+    let hasCategoryActive = false;
+    let hasInventoryActive = false;
+    try {
+      const displayNode = enriched;
+      hasCategoryActive = isNodePricingActive(displayNode);
+      hasInventoryActive = hasActivePricingForNode(displayNode);
+      console.log("[preview] node", {
+        id: displayNode?.id,
+        name: displayNode?.name,
+        pricingStatus: displayNode?.pricingStatus,
+        hasCategoryActive,
+        hasInventoryActive,
+      });
+    } catch {}
 
     const serviceKey = makeServiceKey(lvl1?.name);
     return (
@@ -2840,6 +3266,8 @@ export default function PreviewPage() {
             const kidsTop = Array.isArray(enriched.children) ? enriched.children : [];
             if (kidsTop.length === 0) {
               // Render the first-level node itself as a card (leaf L1)
+              const hasCategoryActiveLeaf = isNodePricingActive(enriched);
+              const hasInventoryActiveLeaf = hasInventoryActive;
               let livePrice = null;
               try {
                 const priceRows = vendor?.inventorySelections?.[categoryId] || [];
@@ -2856,6 +3284,8 @@ export default function PreviewPage() {
               if (livePrice == null) {
                 livePrice = vendor?.pricing?.[enriched.id] ?? vendor?.pricing?.[root?.id] ?? enriched.vendorPrice ?? enriched.price ?? null;
               }
+              // If vendor is accepted and there is no active pricing flag and no price, hide the card; otherwise show it.
+              if (isVendorAccepted && !hasCategoryActiveLeaf && !hasInventoryActiveLeaf && livePrice == null) return null;
               const imgSrc = (() => {
                 const s = String(enriched?.imageUrl || '');
                 if (!s) return null;
@@ -2864,8 +3294,12 @@ export default function PreviewPage() {
                 return `${ASSET_BASE_URL}/${s}`;
               })();
               const termsRaw = enriched?.terms || '';
-              const termsArr = Array.isArray(termsRaw) ? termsRaw : String(termsRaw || '')
-                .split(/\r?\n|,|;|\u2022/g).map((s) => s.trim()).filter(Boolean);
+              const termsArr = Array.isArray(termsRaw)
+                ? termsRaw
+                : String(termsRaw || '')
+                    .split(/\r?\n|,|;|\u2022/g)
+                    .map((s) => s.trim())
+                    .filter(Boolean);
               const terms = termsArr.join(', ');
               return [
                 (
@@ -2898,24 +3332,41 @@ export default function PreviewPage() {
             }
             
             // If ALL children are leaves, render a single parent card with inline buttons (sizes)
-            const allKidsAreLeaves = kidsTop.length > 0 && kidsTop.every((k) => !Array.isArray(k.children) || k.children.length === 0);
+            const allKidsAreLeaves =
+              kidsTop.length > 0 &&
+              kidsTop.every((k) => !Array.isArray(k.children) || k.children.length === 0);
             if (allKidsAreLeaves) {
+              const hasCategoryActiveLeaf = isNodePricingActive(enriched);
+              const hasInventoryActiveLeaf = hasInventoryActive;
               let livePrice = null;
               try {
                 const priceRows = vendor?.inventorySelections?.[categoryId] || [];
                 for (const entry of priceRows) {
-                  const pbr = (entry && entry.pricesByRow && typeof entry.pricesByRow === 'object') ? entry.pricesByRow : null;
+                  const pbr =
+                    entry && entry.pricesByRow && typeof entry.pricesByRow === 'object'
+                      ? entry.pricesByRow
+                      : null;
                   if (!pbr) continue;
                   for (const [key, value] of Object.entries(pbr)) {
                     const ids = String(key).split('|');
-                    if (ids.some((id) => String(id) === String(enriched.id))) { livePrice = Number(value); break; }
+                    if (!ids.some((id) => String(id) === String(enriched.id))) continue;
+                    if (!rowPricingIsActive(entry, key)) continue;
+                    livePrice = Number(value);
+                    break;
                   }
                   if (livePrice != null) break;
                 }
               } catch {}
               if (livePrice == null) {
-                livePrice = vendor?.pricing?.[enriched.id] ?? vendor?.pricing?.[root?.id] ?? enriched.vendorPrice ?? enriched.price ?? null;
+                livePrice =
+                  vendor?.pricing?.[enriched.id] ??
+                  vendor?.pricing?.[root?.id] ??
+                  enriched.vendorPrice ??
+                  enriched.price ??
+                  null;
               }
+              // If vendor is accepted and there is no active pricing flag and no price, hide the card; otherwise show it.
+              if (isVendorAccepted && !hasCategoryActiveLeaf && !hasInventoryActiveLeaf && livePrice == null) return null;
               const nodeWithLivePrice = { ...enriched, vendorPrice: livePrice, price: livePrice };
               return (
                 <ParentWithSizesCard
@@ -2952,6 +3403,87 @@ export default function PreviewPage() {
 
   const isDrivingSchool = String(categoryTree?.name || "").toLowerCase() === "driving school";
 
+  const inventoryLabelsFromMeta = (() => {
+    try {
+      if (Array.isArray(inventoryLabelsList) && inventoryLabelsList.length) {
+        return inventoryLabelsList;
+      }
+      const out = [];
+      const push = (v) => {
+        if (v == null) return;
+        const t = String(v).trim();
+        if (!t) return;
+        if (!out.includes(t)) out.push(t);
+      };
+
+      // Gather labels from linkedAttributes *:inventoryLabels arrays
+      const linked = (categoryTree && categoryTree.linkedAttributes && typeof categoryTree.linkedAttributes === "object")
+        ? categoryTree.linkedAttributes
+        : {};
+      Object.entries(linked).forEach(([k, v]) => {
+        if (!String(k || "").endsWith(":inventoryLabels")) return;
+        if (!Array.isArray(v)) return;
+        v.forEach(push);
+      });
+
+      // Fallbacks: inventoryLabel on tree, ui.inventoryLabel, and inventoryLabelName from wmJson
+      push(categoryTree?.inventoryLabel);
+      push(categoryTree?.ui?.inventoryLabel);
+      push(inventoryLabelName);
+
+      return out;
+    } catch {
+      return [];
+    }
+  })();
+
+  const inventoryLabelFromMeta = inventoryLabelsFromMeta.length > 0 ? inventoryLabelsFromMeta[0] : null;
+
+  const handleOpenVendorPricingNonCombos = () => {
+    try {
+      if (!vendorId || typeof window === "undefined") return;
+      const url = `${window.location.origin.replace(/\/$/, "")}/dummy-vendors/${vendorId}/pricing`;
+      window.open(url, "_blank", "noopener,noreferrer");
+    } catch {}
+  };
+
+  const handleOpenVendorPricingCombos = () => {
+    try {
+      if (!vendorId || typeof window === "undefined") return;
+      const url = `${window.location.origin.replace(/\/$/, "")}/dummy-vendors/${vendorId}/pricing?tab=combos`;
+      window.open(url, "_blank", "noopener,noreferrer");
+    } catch {}
+  };
+
+  const handleNavHomeLocation = () => {
+    try {
+      if (!Array.isArray(parsedHomeLocations) || !parsedHomeLocations.length) return;
+      const first = parsedHomeLocations[0];
+      console.log("Home Location clicked", first);
+    } catch {}
+  };
+
+  const handleNavBusinessLocation = () => {
+    try {
+      if (!location) return;
+      console.log("Business Location clicked", location);
+    } catch {}
+  };
+
+  const handleNavBusinessHours = () => {
+    try {
+      const hours = vendor?.businessHours || vendor?.timings || null;
+      console.log("Business Hours clicked", hours);
+    } catch {}
+  };
+
+  const handleNavInventory = () => {
+    try {
+      if (!isInventoryModel) return;
+      console.log("Inventory clicked for vendor", vendorId);
+    } catch {}
+  };
+
   return (
     <div id="preview-page" style={{ padding: 0, background: "#F0FDF4" }}>
       <Head>
@@ -2964,11 +3496,25 @@ export default function PreviewPage() {
         <>
           <TopNavBar
             businessName={vendor?.businessName || "Loading..."}
+            identityRole={navIdentity.role}
+            identityDisplayName={navIdentity.displayName}
+            identityLoggedIn={navIdentity.loggedIn}
+            vendor={vendor}
+            hasCombos={hasPackagesForNav}
+            inventoryLabel={inventoryLabelFromMeta}
+            inventoryLabels={inventoryLabelsFromMeta}
+            isInventoryModel={isInventoryModel}
+            onNavigateMyPricesCombos={handleOpenVendorPricingCombos}
+            onNavigateMyPricesNonCombos={handleOpenVendorPricingNonCombos}
+            onNavigateHomeLocation={handleNavHomeLocation}
+            onNavigateBusinessLocation={handleNavBusinessLocation}
+            onNavigateBusinessHours={handleNavBusinessHours}
+            onNavigateInventory={handleNavInventory}
             services={serviceLabels}
             categoryTree={categoryTree}
             selectedLeaf={selectedLeaf}
             onLeafSelect={setSelectedLeaf}
-            hasPackages={Array.isArray(combos) && combos.length > 0}
+            hasPackages={hasPackagesForNav}
             webMenu={webMenu}
             servicesNavLabel={servicesNavLabel}
           />
@@ -2992,7 +3538,7 @@ export default function PreviewPage() {
             vendorAddonDescription={vendorAddonDescription}
           />
           <main id="products" style={{ padding: "20px", marginTop: "10px" }}>
-            {Array.isArray(combos) && combos.length > 0 ? (
+            {hasPackagesForNav && Array.isArray(combos) && combos.length > 0 ? (
               <section style={{ marginBottom: 8 }}>
                 {isDrivingSchool ? (
                   <div style={{ textAlign: "center", marginBottom: 16, fontFamily: "Poppins, sans-serif"   }}>
@@ -3109,6 +3655,12 @@ export default function PreviewPage() {
                     const selectedSize = (packageSelections[idx]?.size != null)
                       ? packageSelections[idx].size
                       : (sizes[0] ?? null);
+                    const sizeKey = selectedSize || 'default';
+                    const statusMap =
+                      combo && combo.pricingStatusPerSize && typeof combo.pricingStatusPerSize === 'object'
+                        ? combo.pricingStatusPerSize
+                        : {};
+                    const comboStatus = String(statusMap[sizeKey] || 'Inactive').trim().toLowerCase();
                     const priceBySize = (() => {
                       try {
                         if (!selectedSize) return null;
@@ -3223,6 +3775,7 @@ export default function PreviewPage() {
                       if (!cand) return null;
                       return normalize(cand);
                     })();
+                    if (isVendorAccepted && comboStatus !== 'active') return null;
                     return (
                       <section key={`pkg-${idx}`} style={{ flex: '1 1 320px', minWidth: 300, marginBottom: 0 }}>
                         <div
@@ -3460,7 +4013,7 @@ export default function PreviewPage() {
               </section>
             ) : null}
             {/* <h2 style={{ margin: '0', padding: '0 0 10px 0' }}>Individuals</h2> */}
-            {isDrivingSchool ? (
+            {isDrivingSchool && hasActiveIndividualsForNav ? (
               <div style={{ textAlign: "center", marginBottom: 20, fontFamily: "Poppins, sans-serif" }}>
                 <h2 style={{ margin: 0, fontSize: 30, fontWeight: 700 }}>
                   {(individualAddon && typeof individualAddon.heading === 'string' && individualAddon.heading.trim())
@@ -3559,6 +4112,7 @@ export default function PreviewPage() {
                                 border: "none",
                                 background: "transparent",
                                 fontSize: 13,
+                                color: "#6b7280",
                                 paddingRight: 6,
                                 outline: "none",
                               }}

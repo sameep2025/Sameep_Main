@@ -57,6 +57,8 @@ const DummyComboSchema = new mongoose.Schema(
       ],
       default: [],
     },
+    // Pricing status per size label (or 'default') for Packages table
+    pricingStatusPerSize: { type: Object, default: {} },
   },
   { timestamps: true }
 );

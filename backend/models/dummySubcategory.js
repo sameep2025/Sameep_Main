@@ -8,6 +8,7 @@ const DummySubcategorySchema = new mongoose.Schema({
   // optional: allow nesting under another subcategory
   parentSubcategory: { type: mongoose.Schema.Types.ObjectId, ref: 'DummySubcategory', default: null },
   price: { type: Number, default: null },
+  pricingStatus: { type: String, enum: ['Active', 'Inactive'], default: 'Inactive' },
   terms: { type: String, default: '' },
   freeText: { type: String, default: '' },
   inventoryLabelName: { type: String, default: '' },

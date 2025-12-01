@@ -4,6 +4,7 @@ const jwt = require("jsonwebtoken");
 const Customer = require("../models/Customer");
 const Session = require("../models/Session");
 const LoginHistory = require("../models/LoginHistory");
+const DummyVendor = require("../models/DummyVendor");
 const { getSessionValidityHours } = require("../utils/sessionConfig");
 
 const router = express.Router();
@@ -165,6 +166,29 @@ router.post("/verify-otp", async (req, res) => {
         await customer.save();
       }
 
+      // Determine role based on DummyVendor linkage (business account),
+      // scoped to the current category when available so that a vendor
+      // from another category does not appear as vendor here.
+      let role = "guest";
+      let displayName = "Guest";
+      try {
+        const vendorQuery = { customerId: customer._id };
+        if (categoryId) {
+          vendorQuery.categoryId = categoryId;
+        }
+        const dummyVendor = await DummyVendor.findOne(vendorQuery).lean();
+        if (dummyVendor && dummyVendor.businessName) {
+          role = "vendor";
+          displayName = dummyVendor.businessName;
+        }
+      } catch (roleErr) {
+        console.error(
+          "Failed to resolve vendor role for customer",
+          customer._id.toString(),
+          roleErr?.message || roleErr
+        );
+      }
+
       // Session management: create a new session using app-config validity
       try {
         const hours = await getSessionValidityHours(4); // default 4h if not configured
@@ -229,11 +253,11 @@ router.post("/verify-otp", async (req, res) => {
           console.error("Failed to generate JWT token after OTP verify:", jwtErr?.message || jwtErr);
         }
 
-        return res.json({ message: "verified", customer, session, token });
+        return res.json({ message: "verified", customer, session, token, role, displayName });
       } catch (sessionErr) {
         console.error("Session creation error after OTP verify:", sessionErr?.message || sessionErr);
         // Still return verified customer even if session logic fails
-        return res.json({ message: "verified", customer });
+        return res.json({ message: "verified", customer, role, displayName });
       }
     }
 
