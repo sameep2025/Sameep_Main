@@ -3949,13 +3949,6 @@ export default function PreviewPage() {
                               <span>{includesLabel}</span>
                             </div>
                           ) : null}
-                          {termsArr.length ? (
-                            <ul style={{ margin: 0, paddingLeft: 18, color: '#6b7280', fontSize: 12 }}>
-                              {termsArr.map((t, i) => (
-                                <li key={i}>{t}</li>
-                              ))}
-                            </ul>
-                          ) : null}
                           {/* Size selector: only show when there are real combo types */}
                           {sizes && sizes.length ? (
                             <div>
@@ -4125,6 +4118,13 @@ export default function PreviewPage() {
                                 </div>
                               )}
                             </div>
+                          ) : null}
+                          {termsArr.length ? (
+                            <ul style={{ margin: 8, marginTop: 10, paddingLeft: 18, color: '#6b7280', fontSize: 12 }}>
+                              {termsArr.map((t, i) => (
+                                <li key={i}>{t}</li>
+                              ))}
+                            </ul>
                           ) : null}
                           <button
                             onClick={handleOpenOtpModal}
