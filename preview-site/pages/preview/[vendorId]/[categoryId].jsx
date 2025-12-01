@@ -2129,9 +2129,128 @@ export default function PreviewPage() {
               fontFamily: "Poppins, sans-serif",
             }}
           >
-            {(individualAddon && typeof individualAddon.buttonLabel === 'string' && individualAddon.buttonLabel.trim())
-              ? individualAddon.buttonLabel.trim()
-              : 'Enroll Now'}
+            {(() => {
+              try {
+                const catKey = String(categoryId || '');
+                const inv = Array.isArray(vendor?.inventorySelections?.[catKey])
+                  ? vendor.inventorySelections[catKey]
+                  : [];
+                const ids = [displayNode?.id, selectedParent?.id, node?.id]
+                  .map((x) => String(x || ''))
+                  .filter(Boolean);
+                const rootName = String(categoryTree?.name || '').toLowerCase();
+                const isDriving = rootName === 'driving school';
+
+                const pickBaselinePrice = () => {
+                  let invPrice = null;
+                  inv.forEach((entry) => {
+                    if (invPrice != null) return;
+                    const pbr = (entry && entry.pricesByRow && typeof entry.pricesByRow === 'object') ? entry.pricesByRow : null;
+                    if (!pbr) return;
+                    ids.forEach((target) => {
+                      if (!target || invPrice != null) return;
+                      for (const [rk, val] of Object.entries(pbr)) {
+                        const parts = String(rk).split('|');
+                        if (parts.some((id) => String(id) === target)) {
+                          const num = Number(val);
+                          if (!Number.isNaN(num)) { invPrice = num; break; }
+                        }
+                      }
+                    });
+                  });
+                  const nodePrice =
+                    (displayNode?.vendorPrice ?? displayNode?.price) ??
+                    (selectedParent?.vendorPrice ?? selectedParent?.price) ??
+                    (node?.vendorPrice ?? node?.price) ?? null;
+                  return (invPrice != null) ? invPrice : nodePrice;
+                };
+
+                let resolvedPrice = null;
+                if (isDriving && inv.length > 0) {
+                  const targetId = String((displayNode?.id || selectedParent?.id || node?.id || ''));
+                  const normalized = [];
+                  inv.forEach((entry) => {
+                    try {
+                      const fam = String(entry?.scopeFamily || '').toLowerCase();
+                      const sels = entry?.selections || {};
+                      let sel = sels[fam] || sels.cars || sels.bikes || {};
+                      if (!sel || typeof sel !== 'object') sel = {};
+                      if (fam === 'bikes') {
+                        const brand = sel.bikeBrand != null ? String(sel.bikeBrand).trim() : (sel.brand != null ? String(sel.brand).trim() : '');
+                        const transmission = sel.bikeTransmission != null ? String(sel.bikeTransmission).trim() : (sel.transmission != null ? String(sel.transmission).trim() : '');
+                        const model = sel.model != null ? String(sel.model).trim() : '';
+                        if (brand || model || transmission) {
+                          normalized.push({ family: fam, brand, model, transmission, bodyType: null, entry });
+                        }
+                      } else if (fam === 'cars') {
+                        const brand = sel.brand != null ? String(sel.brand).trim() : '';
+                        const transmission = sel.transmission != null ? String(sel.transmission).trim() : '';
+                        const model = sel.model != null ? String(sel.model).trim() : '';
+                        const bodyType = sel.bodyType != null ? String(sel.bodyType).trim() : '';
+                        if (brand || model || transmission || bodyType) {
+                          normalized.push({ family: fam, brand, model, transmission, bodyType, entry });
+                        }
+                      }
+                    } catch {}
+                  });
+
+                  const minPriceForList = (list) => {
+                    try {
+                      const prices = [];
+                      list.forEach((n) => {
+                        const pbr = (n.entry && n.entry.pricesByRow && typeof n.entry.pricesByRow === 'object') ? n.entry.pricesByRow : null;
+                        if (!pbr) return;
+                        for (const [key, value] of Object.entries(pbr)) {
+                          const rowIds = String(key).split('|');
+                          if (rowIds.some((id) => String(id) === targetId)) {
+                            const num = Number(value);
+                            if (!Number.isNaN(num)) prices.push(num);
+                          }
+                        }
+                      });
+                      if (!prices.length) return null;
+                      return Math.min(...prices);
+                    } catch { return null; }
+                  };
+
+                  const carBrand = String(attrSelections?.brand ?? '').trim() || null;
+                  const carModel = String(attrSelections?.model ?? '').trim() || null;
+                  const carTrans = String(attrSelections?.transmission ?? '').trim() || null;
+                  const carBody = String(attrSelections?.bodyType ?? '').trim() || null;
+                  const bikeBrand = String(attrSelections?.bikeBrand ?? '').trim() || null;
+                  const bikeModel = String(attrSelections?.bikeModel ?? '').trim() || null;
+                  const bikeTrans = String(attrSelections?.bikeTransmission ?? '').trim() || null;
+
+                  const refined = normalized.filter((n) => {
+                    const fam = String(n.family || '').toLowerCase();
+                    const effBrand = fam === 'bikes' ? bikeBrand : carBrand;
+                    const effModel = fam === 'bikes' ? bikeModel : carModel;
+                    const effTrans = fam === 'bikes' ? bikeTrans : carTrans;
+                    const effBody = fam === 'cars' ? carBody : null;
+                    if (effBrand && String(n.brand) !== String(effBrand)) return false;
+                    if (effModel && String(n.model) !== String(effModel)) return false;
+                    if (effTrans && String(n.transmission) !== String(effTrans)) return false;
+                    if (effBody && n.bodyType && String(n.bodyType) !== String(effBody)) return false;
+                    return true;
+                  });
+
+                  const attrAwarePrice = refined.length ? minPriceForList(refined) : null;
+                  const fallback = pickBaselinePrice();
+                  resolvedPrice = (attrAwarePrice != null) ? attrAwarePrice : fallback;
+                } else {
+                  resolvedPrice = pickBaselinePrice();
+                }
+
+                const num = resolvedPrice == null ? NaN : Number(resolvedPrice);
+                if (!Number.isNaN(num) && num > 0) {
+                  return (individualAddon && typeof individualAddon.buttonLabel === 'string' && individualAddon.buttonLabel.trim())
+                    ? individualAddon.buttonLabel.trim()
+                    : 'Enroll Now';
+                }
+                return 'Contact for Price';
+              } catch {}
+              return 'Contact for Price';
+            })()}
           </button>
         </div>
       </section>
@@ -2882,9 +3001,17 @@ export default function PreviewPage() {
                 fontFamily: 'Poppins, sans-serif',
               }}
             >
-              {(packagesAddon && typeof packagesAddon.buttonLabel === 'string' && packagesAddon.buttonLabel.trim())
-                ? packagesAddon.buttonLabel.trim()
-                : 'Enroll Now'}
+              {(() => {
+                try {
+                  const basePrice = attrAwarePrice != null ? Number(attrAwarePrice) : Number(livePrice);
+                  if (!Number.isNaN(basePrice) && basePrice > 0) {
+                    return (packagesAddon && typeof packagesAddon.buttonLabel === 'string' && packagesAddon.buttonLabel.trim())
+                      ? packagesAddon.buttonLabel.trim()
+                      : 'Enroll Now';
+                  }
+                } catch {}
+                return 'Contact for Price';
+              })()}
             </button>
           </div>
         </section>
@@ -3187,9 +3314,18 @@ export default function PreviewPage() {
                           onClick={() => alert(`Booking ${child?.name}`)}
                           style={{ width: '100%', padding: '10px 14px', borderRadius: 28, border: 'none', background: 'rgb(245 158 11)', color: '#111827', fontWeight: 600, cursor: 'pointer', fontFamily: 'Poppins, sans-serif' }}
                         >
-                          {(individualAddon && typeof individualAddon.buttonLabel === 'string' && individualAddon.buttonLabel.trim())
-                            ? individualAddon.buttonLabel.trim()
-                            : 'Enroll Now'}
+                          {(() => {
+                            try {
+                              const num = Number(livePrice);
+                              if (!Number.isNaN(num) && num > 0) {
+                                if (individualAddon && typeof individualAddon.buttonLabel === 'string' && individualAddon.buttonLabel.trim()) {
+                                  return individualAddon.buttonLabel.trim();
+                                }
+                                return 'Enroll Now';
+                              }
+                            } catch {}
+                            return 'Contact for Price';
+                          })()}
                         </button>
                       </div>
                     </div>
@@ -3319,7 +3455,13 @@ export default function PreviewPage() {
                         >
                           {(packagesAddon && typeof packagesAddon.buttonLabel === 'string' && packagesAddon.buttonLabel.trim())
                             ? packagesAddon.buttonLabel.trim()
-                            : 'Enroll Now'}
+                            : (() => {
+                                try {
+                                  const num = Number(livePrice);
+                                  if (!Number.isNaN(num) && num > 0) return 'Enroll Now';
+                                } catch {}
+                                return 'Contact for Price';
+                              })()}
                         </button>
                       </div>
                     </div>
@@ -3998,9 +4140,17 @@ export default function PreviewPage() {
                               cursor: 'pointer',
                             }}
                           >
-                            {(packagesAddon && typeof packagesAddon.buttonLabel === 'string' && packagesAddon.buttonLabel.trim())
-                              ? packagesAddon.buttonLabel.trim()
-                              : 'Enroll Now'}
+                            {(() => {
+                              try {
+                                const num = Number(price);
+                                if (!Number.isNaN(num) && num > 0) {
+                                  return (packagesAddon && typeof packagesAddon.buttonLabel === 'string' && packagesAddon.buttonLabel.trim())
+                                    ? packagesAddon.buttonLabel.trim()
+                                    : 'Enroll Now';
+                                }
+                              } catch {}
+                              return 'Contact for Price';
+                            })()}
                           </button>
                         </div>
                       </section>
