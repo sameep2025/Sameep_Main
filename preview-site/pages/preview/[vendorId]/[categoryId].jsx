@@ -1579,6 +1579,9 @@ export default function PreviewPage() {
               {(() => {
                 try {
                   const linked = (categoryTree && categoryTree.linkedAttributes && typeof categoryTree.linkedAttributes === 'object') ? categoryTree.linkedAttributes : {};
+                  const isVendorAcceptedLocal = String(vendor?.status || '')
+                    .trim()
+                    .toLowerCase() === 'accepted';
                   // Build case-insensitive index of families from linkedAttributes
                   const famIndex = new Map(); // famLower -> { base, fields, modelFields, linkedSub, specificSubs: Set }
                   Object.keys(linked).forEach((k) => {
@@ -1644,7 +1647,9 @@ export default function PreviewPage() {
                     const matchesSub = mapped === 'ALL' || targetIdsLinkedAttrs.some((tid) => tid && String(mapped) === String(tid));
                     if (!matchesSub) return false;
 
-                    // Require at least one Active row for this card's node ids.
+                    // Require at least one matching row for this card's node ids.
+                    // If vendor is accepted, the row must be Active; otherwise any matching row is allowed
+                    // so that non-accepted vendors can still preview attribute dropdowns.
                     try {
                       const pbr = e && e.pricesByRow && typeof e.pricesByRow === 'object' ? e.pricesByRow : null;
                       const statusMap = e && e.pricingStatusByRow && typeof e.pricingStatusByRow === 'object' ? e.pricingStatusByRow : {};
@@ -1653,8 +1658,12 @@ export default function PreviewPage() {
                         const parts = String(rk).split('|');
                         const hitsThisCard = targetIdsLinkedAttrs.some((tid) => tid && parts.some((id) => String(id) === tid));
                         if (!hitsThisCard) continue;
-                        const raw = String(statusMap[rk] || '').trim().toLowerCase();
-                        if (raw === 'active') return true;
+                        if (isVendorAcceptedLocal) {
+                          const raw = String(statusMap[rk] || '').trim().toLowerCase();
+                          if (raw === 'active') return true;
+                        } else {
+                          return true;
+                        }
                       }
                       return false;
                     } catch {
@@ -1663,8 +1672,8 @@ export default function PreviewPage() {
                   });
 
                   if (entriesAll.length === 0 && invPriceList.length > 0) {
-                    // Fallback: any inventory entry that has an Active pricesByRow
-                    // targeting this card's node ids.
+                    // Fallback: any inventory entry that has a pricesByRow targeting this card's node ids.
+                    // Again, for accepted vendors require Active; for others, allow any matching row.
                     entriesAll = invPriceList.filter((e) => {
                       try {
                         const pbr = e && e.pricesByRow && typeof e.pricesByRow === 'object' ? e.pricesByRow : null;
@@ -1674,8 +1683,12 @@ export default function PreviewPage() {
                           const parts = String(rk).split('|');
                           const hitsThisCard = targetIdsLinkedAttrs.some((tid) => tid && parts.some((id) => String(id) === tid));
                           if (!hitsThisCard) continue;
-                          const raw = String(statusMap[rk] || '').trim().toLowerCase();
-                          if (raw === 'active') return true;
+                          if (isVendorAcceptedLocal) {
+                            const raw = String(statusMap[rk] || '').trim().toLowerCase();
+                            if (raw === 'active') return true;
+                          } else {
+                            return true;
+                          }
                         }
                         return false;
                       } catch { return false; }
@@ -1804,15 +1817,13 @@ export default function PreviewPage() {
                   const activeCombo = activeIndex >= 0 ? combos[activeIndex] : null;
 
                   const buildLabel = (c) => {
-                    const hasTrans = !!c.transmission;
-                    const hasBody = !!c.bodyType;
-                    const row1 = hasTrans
-                      ? [c.transmission, hasBody ? ` · ${c.bodyType}` : '']
-                      : [c.bodyType, ''];
-                    const row2 = [c.brand, c.model].filter(Boolean).join(' · ');
-                    if (!row1[0] && !row2) return 'Select Vehicle';
-                    if (!row1[0]) return row2;
-                    return `${row1.filter(Boolean).join('') } / ${row2}`;
+                    const parts = [];
+                    if (c.brand) parts.push(c.brand);
+                    if (c.model) parts.push(c.model);
+                    if (c.transmission) parts.push(c.transmission);
+                    if (!c.isBike && c.bodyType) parts.push(c.bodyType);
+                    if (!parts.length) return 'Select Vehicle';
+                    return parts.join(' ');
                   };
 
                   const triggerLabel = activeCombo ? buildLabel(activeCombo) : 'Select Vehicle';
@@ -1911,21 +1922,7 @@ export default function PreviewPage() {
                             }}
                           >
                             {combos.map((combo) => {
-                              const hasTrans = !!combo.transmission;
-                              const hasBody = !!combo.bodyType;
-                              const row1Left = hasTrans ? combo.transmission : combo.bodyType;
-                              const row1Right = hasTrans && hasBody ? combo.bodyType : '';
-                              const row2Left = combo.brand;
-                              const row2Right = combo.model;
-
-                              const lineParts = [
-                                row1Left,
-                                row1Right,
-                                row2Left,
-                                row2Right,
-                              ].filter((p) => p && String(p).trim() !== '');
-                              const lineText = lineParts.join(' · ');
-
+                              const lineText = buildLabel(combo);
                               return (
                                 <button
                                   key={combo.key}
