@@ -135,7 +135,14 @@ export default function Level2SelectorPage() {
       <div style={{ display: "flex", alignItems: "center", marginBottom: 16 }}>
         <button
           type="button"
-          onClick={() => router.back()}
+          onClick={() => {
+            try {
+              if (!vendorId || !categoryId) return;
+              router.push(`/preview/${vendorId}/${categoryId}`);
+            } catch {
+              router.push("/");
+            }
+          }}
           style={{
             border: "none",
             background: "transparent",
