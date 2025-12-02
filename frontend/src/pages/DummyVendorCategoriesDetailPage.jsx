@@ -888,7 +888,7 @@ export default function DummyVendorCategoriesDetailPage() {
                     const isInventoryRow = Boolean(match);
                     const rowKey = Array.isArray(row.levelIds) && row.levelIds.length ? row.levelIds.map(String).join('|') : String(row.id);
                     const key = isInventoryRow
-                      ? `inv:${String(match._id || match.at)}|${rowKey}`
+                      ? `inv:${String(match._id || match.at)}|${rowKey}` 
                       : `cat:${row.categoryId}`;
                     const baseStatus = (() => {
                       if (!isInventoryRow) {
@@ -921,8 +921,25 @@ export default function DummyVendorCategoriesDetailPage() {
                                     return { ...it, pricingStatusByRow: { ...map, [rowKey]: val } };
                                   })
                                 : [];
+                              // Persist per-row status inside inventorySelections
                               await saveDummyInventorySelections(vendorId, topCatId, items);
                               setInvItems(items);
+
+                              // Also mirror this status at node level so preview, which
+                              // primarily reads vendor.nodePricingStatus, reflects
+                              // inventory rows as Active/Inactive for this category node.
+                              const nodeId = String(row.categoryId || row.id);
+                              const existingNodeMap =
+                                vendor &&
+                                vendor.nodePricingStatus &&
+                                typeof vendor.nodePricingStatus === 'object'
+                                  ? vendor.nodePricingStatus
+                                  : {};
+                              const nextNodeMap = { ...existingNodeMap, [nodeId]: val };
+                              await axios.put(`${API_BASE_URL}/api/dummy-vendors/${vendorId}`, {
+                                nodePricingStatus: nextNodeMap,
+                              });
+                              setVendor((prev) => ({ ...(prev || {}), nodePricingStatus: nextNodeMap }));
                             } catch (err) {
                               alert(err?.response?.data?.message || 'Failed to update pricing status');
                             }

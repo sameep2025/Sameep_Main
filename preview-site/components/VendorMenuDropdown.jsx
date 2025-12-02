@@ -350,7 +350,7 @@ export default function VendorMenuDropdown({
                       cursor: clickable ? "pointer" : "default",
                       color: "#111827",
                     }}
-                    onClick={clickable ? handle : undefined}
+                    onClick={clickable ? () => handle(label) : undefined}
                   >
                     <span style={{ fontSize: 16, fontWeight: 400 }}>{label}</span>
                   </div>

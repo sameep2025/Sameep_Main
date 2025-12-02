@@ -2164,6 +2164,48 @@ export default function PreviewPage() {
                   });
                   const activeCombo = activeIndex >= 0 ? combos[activeIndex] : null;
 
+                  // If nothing is selected yet but we have combos, auto-select
+                  // the first combo so that both the label and price reflect a
+                  // concrete vehicle instead of the generic placeholder.
+                  if (
+                    !activeCombo &&
+                    Array.isArray(combos) &&
+                    combos.length &&
+                    !current.brand &&
+                    !current.model &&
+                    !current.transmission &&
+                    !current.bodyType &&
+                    !current.bikeBrand &&
+                    !current.bikeModel &&
+                    !current.bikeTransmission
+                  ) {
+                    const first = combos[0];
+                    try {
+                      // Reuse the same mapping logic as handleSelectCombo
+                      setAttrSelections((prev) => {
+                        const next = { ...(prev || {}) };
+                        if (first.isBike) {
+                          next.bikeBrand = first.brand || undefined;
+                          next.bikeModel = first.model || undefined;
+                          next.bikeTransmission = first.transmission || undefined;
+                          delete next.brand;
+                          delete next.model;
+                          delete next.transmission;
+                          delete next.bodyType;
+                        } else {
+                          next.brand = first.brand || undefined;
+                          next.model = first.model || undefined;
+                          next.transmission = first.transmission || undefined;
+                          next.bodyType = first.bodyType || undefined;
+                          delete next.bikeBrand;
+                          delete next.bikeModel;
+                          delete next.bikeTransmission;
+                        }
+                        return next;
+                      });
+                    } catch {}
+                  }
+
                   const buildLabel = (c) => {
                     const parts = [];
                     if (c.brand) parts.push(c.brand);
@@ -2174,7 +2216,11 @@ export default function PreviewPage() {
                     return parts.join(' ');
                   };
 
-                  const triggerLabel = activeCombo ? buildLabel(activeCombo) : 'Select Vehicle';
+                  const triggerLabel = activeCombo
+                    ? buildLabel(activeCombo)
+                    : (Array.isArray(combos) && combos.length
+                        ? buildLabel(combos[0])
+                        : 'Select Vehicle');
 
                   const handleSelectCombo = (combo) => {
                     setAttrSelections((prev) => {
@@ -3062,7 +3108,37 @@ export default function PreviewPage() {
       })();
 
       const hasCategoryActive = isNodePricingActive(displayNode);
-      const hasInventoryActive = hasActivePricingForNode(displayNode);
+      // For inventory categories (like Two Wheeler), treat the card as active
+      // only if the CURRENTLY SELECTED inventory row is active. We reuse the
+      // same refined list used for attrAwarePrice and rowPricingIsActive.
+      const hasInventoryActive = (() => {
+        try {
+          if (!isComplete) return false;
+          const targetId = String((selectedLvl3 || selectedLvl2 || lvl1)?.id || '');
+          const refined = (() => {
+            if (!selState.modelBrand) return filteredByFuel;
+            const [m, b] = String(selState.modelBrand).split('|');
+            return filteredByFuel.filter((n) => String(n.model) === String(m || '') && String(n.brand) === String(b || ''));
+          })();
+          for (const n of refined) {
+            const pbr =
+              n.entry &&
+              n.entry.pricesByRow &&
+              typeof n.entry.pricesByRow === 'object'
+                ? n.entry.pricesByRow
+                : null;
+            if (!pbr) continue;
+            for (const key of Object.keys(pbr)) {
+              const ids = String(key).split('|');
+              if (!ids.some((id) => String(id) === targetId)) continue;
+              if (rowPricingIsActive(n.entry, key)) return true;
+            }
+          }
+          return false;
+        } catch {
+          return false;
+        }
+      })();
       console.log("[preview] node", {
   id: displayNode?.id,
   name: displayNode?.name,
@@ -3927,18 +4003,26 @@ export default function PreviewPage() {
 
   const inventoryLabelFromMeta = inventoryLabelsFromMeta.length > 0 ? inventoryLabelsFromMeta[0] : null;
 
-  const handleOpenVendorPricingNonCombos = () => {
+  const handleOpenVendorPricingNonCombos = (labelFromDropdown) => {
     try {
-      if (!vendorId || typeof window === "undefined") return;
-      const url = `${window.location.origin.replace(/\/$/, "")}/dummy-vendors/${vendorId}/pricing`;
+      if (!vendorId || !categoryId || typeof window === "undefined") return;
+      const base = window.location.origin.replace(/\/$/, "");
+      const safeLabel = encodeURIComponent(String(labelFromDropdown || "").trim());
+      const url = safeLabel
+        ? `${base}/preview/${vendorId}/${categoryId}/my-prices/${safeLabel}`
+        : `${base}/preview/${vendorId}/${categoryId}/my-prices`;
       window.open(url, "_blank", "noopener,noreferrer");
     } catch {}
   };
 
-  const handleOpenVendorPricingCombos = () => {
+  const handleOpenVendorPricingCombos = (labelFromDropdown) => {
     try {
-      if (!vendorId || typeof window === "undefined") return;
-      const url = `${window.location.origin.replace(/\/$/, "")}/dummy-vendors/${vendorId}/pricing?tab=combos`;
+      if (!vendorId || !categoryId || typeof window === "undefined") return;
+      const base = window.location.origin.replace(/\/$/, "");
+      // For combos, open the dedicated packages flow; the label from the
+      // dropdown is not needed here because the list page will show all
+      // relevant packages.
+      const url = `${base}/preview/${vendorId}/${categoryId}/my-prices-packages`;
       window.open(url, "_blank", "noopener,noreferrer");
     } catch {}
   };

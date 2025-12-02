@@ -412,21 +412,38 @@ export default function TopNavBar({
                 </span>
               </div>
             ) : (
-              <VendorMenuDropdown
-                vendor={vendor}
-                hasCombos={hasPackages || hasCombos}
-                inventoryLabel={inventoryLabel}
-                inventoryLabels={inventoryLabels}
-                isInventoryModel={isInventoryModel}
-                avatarLetter={avatarLetter}
-                onNavigateMyPricesCombos={onNavigateMyPricesCombos}
-                onNavigateMyPricesNonCombos={onNavigateMyPricesNonCombos}
-                onNavigateHomeLocation={onNavigateHomeLocation}
-                onNavigateBusinessLocation={onNavigateBusinessLocation}
-                onNavigateBusinessHours={onNavigateBusinessHours}
-                onNavigateInventory={onNavigateInventory}
-                servicesForMyPrices={effectiveServices}
-              />
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 6,
+                }}
+              >
+                <VendorMenuDropdown
+                  vendor={vendor}
+                  hasCombos={hasPackages || hasCombos}
+                  inventoryLabel={inventoryLabel}
+                  inventoryLabels={inventoryLabels}
+                  isInventoryModel={isInventoryModel}
+                  avatarLetter={avatarLetter}
+                  onNavigateMyPricesCombos={onNavigateMyPricesCombos}
+                  onNavigateMyPricesNonCombos={onNavigateMyPricesNonCombos}
+                  onNavigateHomeLocation={onNavigateHomeLocation}
+                  onNavigateBusinessLocation={onNavigateBusinessLocation}
+                  onNavigateBusinessHours={onNavigateBusinessHours}
+                  onNavigateInventory={onNavigateInventory}
+                  servicesForMyPrices={effectiveServices}
+                />
+                <span
+                  style={{
+                    fontSize: 12,
+                    fontWeight: 500,
+                    color: "#6b7280",
+                  }}
+                >
+                  My Profile
+                </span>
+              </div>
             )}
           </nav>
         )}
@@ -502,6 +519,50 @@ export default function TopNavBar({
               overflowY: "auto",
             }}
           >
+            {identityLoggedIn && identityRole === "vendor" && (
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  marginBottom: 12,
+                }}
+              >
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 8,
+                  }}
+                >
+                  <VendorMenuDropdown
+                    vendor={vendor}
+                    hasCombos={hasPackages || hasCombos}
+                    inventoryLabel={inventoryLabel}
+                    inventoryLabels={inventoryLabels}
+                    isInventoryModel={isInventoryModel}
+                    avatarLetter={avatarLetter}
+                    onNavigateMyPricesCombos={onNavigateMyPricesCombos}
+                    onNavigateMyPricesNonCombos={onNavigateMyPricesNonCombos}
+                    onNavigateHomeLocation={onNavigateHomeLocation}
+                    onNavigateBusinessLocation={onNavigateBusinessLocation}
+                    onNavigateBusinessHours={onNavigateBusinessHours}
+                    onNavigateInventory={onNavigateInventory}
+                    servicesForMyPrices={effectiveServices}
+                  />
+                  <span
+                    style={{
+                      fontSize: 14,
+                      fontWeight: 500,
+                      color: "#111827",
+                    }}
+                  >
+                    My Profile
+                  </span>
+                </div>
+              </div>
+            )}
+
             {menuItems.map((label) => {
               const key = String(label).toLowerCase();
               const servicesKey = String(servicesNavLabel || "").toLowerCase();
@@ -661,23 +722,7 @@ export default function TopNavBar({
                     Guest
                   </span>
                 </div>
-              ) : (
-                <VendorMenuDropdown
-                  vendor={vendor}
-                  hasCombos={hasPackages || hasCombos}
-                  inventoryLabel={inventoryLabel}
-                  inventoryLabels={inventoryLabels}
-                  isInventoryModel={isInventoryModel}
-                  avatarLetter={avatarLetter}
-                  onNavigateMyPricesCombos={onNavigateMyPricesCombos}
-                  onNavigateMyPricesNonCombos={onNavigateMyPricesNonCombos}
-                  onNavigateHomeLocation={onNavigateHomeLocation}
-                  onNavigateBusinessLocation={onNavigateBusinessLocation}
-                  onNavigateBusinessHours={onNavigateBusinessHours}
-                  onNavigateInventory={onNavigateInventory}
-                  servicesForMyPrices={effectiveServices}
-                />
-              )}
+              ) : null}
             </div>
 
             {/* Services submenu (already rendered above for Categories) */}
