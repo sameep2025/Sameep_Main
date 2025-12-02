@@ -56,6 +56,13 @@ export default function PreviewPage() {
   const [parentSelectorLabel, setParentSelectorLabel] = useState(null);
   const [inventoryLabelName, setInventoryLabelName] = useState(null);
   const [inventoryLabelsList, setInventoryLabelsList] = useState([]);
+  const [linkedAttributes, setLinkedAttributes] = useState({}); // dummy category linkedAttributes (for inventory scopes)
+  const [modelsByFamily, setModelsByFamily] = useState({}); // cache of master models per family (cars, bikes, etc.)
+  const [invItems, setInvItems] = useState([]); // dummy vendor inventory selections for this category
+  const [activeInvScope, setActiveInvScope] = useState(null); // { family, label }
+  const [showLinkedModal, setShowLinkedModal] = useState(false); // inventory popup visibility
+  const [draftSelections, setDraftSelections] = useState({}); // cascade selector draft per family
+  const [editingItemKey, setEditingItemKey] = useState(null); // currently edited inventory row key
 
   // OTP flow state for preview booking (country code + mobile + OTP)
   const [showOtpModal, setShowOtpModal] = useState(false);
@@ -67,6 +74,7 @@ export default function PreviewPage() {
   const [otp, setOtp] = useState("");
   const [otpLoading, setOtpLoading] = useState(false);
   const [otpError, setOtpError] = useState("");
+  const [loginAsVendor, setLoginAsVendor] = useState(false);
   const [navIdentity, setNavIdentity] = useState({ role: "guest", displayName: "Guest", loggedIn: false });
 
   const loading = loadingVendor || loadingCategories;
@@ -177,6 +185,11 @@ export default function PreviewPage() {
 
   const handleOpenOtpModal = async () => {
     try {
+      if (navIdentity && navIdentity.role === "vendor" && navIdentity.loggedIn) {
+        console.log("Vendor already logged in for this preview, bypassing OTP modal");
+        return;
+      }
+
       if (typeof window !== "undefined") {
         const tokenKey = makePreviewTokenKey(vendorId, categoryId);
         const token = window.localStorage.getItem(tokenKey);
@@ -230,6 +243,7 @@ export default function PreviewPage() {
     setOtpStep(1);
     setPhone("");
     setOtp("");
+    setLoginAsVendor(false);
   };
 
   const requestOtp = async () => {
@@ -241,6 +255,26 @@ export default function PreviewPage() {
     try {
       setOtpLoading(true);
       setOtpError("");
+      if (loginAsVendor) {
+        // Bypass OTP and treat as vendor login for this preview page only
+        try {
+          if (typeof window !== "undefined") {
+            const role = "vendor";
+            const displayName = (vendor?.businessName && String(vendor.businessName).trim())
+              ? String(vendor.businessName).trim()
+              : "Vendor";
+            const identity = { role, displayName, loggedIn: true };
+            const identityKey = makePreviewIdentityKey(vendorId, categoryId);
+            try {
+              window.localStorage.setItem(identityKey, JSON.stringify(identity));
+            } catch {}
+            setNavIdentity(identity);
+          }
+        } catch {}
+        handleCloseOtpModal();
+        return;
+      }
+
       const res = await fetch(`${API_BASE_URL}/api/customers/request-otp`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -404,6 +438,318 @@ export default function PreviewPage() {
       return false;
     }
   }, [vendor]);
+
+  // ----------------- Inventory helpers (dummy vendors) -----------------
+
+  const loadDummyInventorySelections = useCallback(async (vid, cid) => {
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/dummy-vendors/${vid}`, { cache: "no-store" });
+      if (!res.ok) return [];
+      const json = await res.json().catch(() => ({}));
+      const map = json && typeof json.inventorySelections === "object" ? json.inventorySelections : {};
+      const list = Array.isArray(map?.[cid]) ? map[cid] : [];
+      return list;
+    } catch {
+      return [];
+    }
+  }, []);
+
+  const saveDummyInventorySelections = useCallback(async (vid, cid, items) => {
+    const payload = { inventorySelections: { [cid]: items } };
+    await fetch(`${API_BASE_URL}/api/dummy-vendors/${vid}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    return true;
+  }, []);
+
+  const ensureLinkedSubcategoryForScope = useCallback(
+    async (cid, fam, label) => {
+      try {
+        const keySpecific = `${fam}:${label}:linkedSubcategory`;
+        const keyGeneric = `${fam}:inventoryLabels:linkedSubcategory`;
+        const la = linkedAttributes || {};
+        const hasSpecific = Array.isArray(la[keySpecific]) && la[keySpecific].length > 0;
+        const hasGeneric = Array.isArray(la[keyGeneric]) && la[keyGeneric].length > 0;
+        if (hasSpecific || hasGeneric) return;
+        const next = { ...la, [keySpecific]: ["ALL"] };
+        await fetch(`${API_BASE_URL}/api/dummy-categories/${cid}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ linkedAttributes: next }),
+        });
+        setLinkedAttributes(next);
+      } catch {}
+    },
+    [linkedAttributes]
+  );
+
+  const fetchModelsForFamily = useCallback(
+    async (familyKey) => {
+      try {
+        const orig = String(familyKey || "").trim();
+        if (!orig) return [];
+        const cached = modelsByFamily[orig];
+        if (Array.isArray(cached) && cached.length > 0) return cached;
+        const lower = orig.toLowerCase();
+        const singular = lower.endsWith("s") ? lower.slice(0, -1) : lower;
+        const noSpaces = lower.replace(/\s+/g, "");
+        const extras = [];
+        if (
+          noSpaces === "tempobus" ||
+          lower === "tempo bus" ||
+          lower.includes("tempo mini") ||
+          noSpaces.includes("tempomini") ||
+          lower.includes("minibus") ||
+          lower.includes("minibuses")
+        ) {
+          extras.push("tempoBus");
+        }
+        const candidates = Array.from(new Set([orig, lower, singular, noSpaces, ...extras]));
+        let models = [];
+        // try sequential candidates until one returns data
+        // eslint-disable-next-line no-restricted-syntax
+        for (const c of candidates) {
+          try {
+            // eslint-disable-next-line no-await-in-loop
+            const res = await fetch(`${API_BASE_URL}/api/models?category=${encodeURIComponent(c)}`, {
+              cache: "no-store",
+            });
+            if (!res.ok) continue;
+            // eslint-disable-next-line no-await-in-loop
+            const data = await res.json().catch(() => []);
+            const arr = Array.isArray(data) ? data : [];
+            if (arr.length) {
+              models = arr.map((d) => ({ _id: d._id || d.id, name: d.name || d.model || "", raw: d }));
+              break;
+            }
+          } catch {}
+        }
+        setModelsByFamily((prev) => ({ ...prev, [orig]: models }));
+        return models;
+      } catch {
+        return [];
+      }
+    },
+    [modelsByFamily]
+  );
+
+  const getCascadeLists = useCallback(
+    (familyKey) => {
+      const norm = (s) => String(s || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+      let models = modelsByFamily[familyKey] || [];
+      if (!models.length) {
+        const orig = String(familyKey || "");
+        const lower = orig.toLowerCase();
+        const singular = lower.endsWith("s") ? lower.slice(0, -1) : lower;
+        const noSpaces = lower.replace(/\s+/g, "");
+        const keys = [orig, lower, singular, noSpaces];
+        for (let i = 0; i < keys.length; i += 1) {
+          const k = keys[i];
+          const m = modelsByFamily[k];
+          if (Array.isArray(m) && m.length) {
+            models = m;
+            break;
+          }
+        }
+      }
+
+      let selectedFields = Array.isArray(linkedAttributes[familyKey])
+        ? linkedAttributes[familyKey]
+        : [];
+      const famLower = String(familyKey || "").toLowerCase();
+      const brandFieldForFamily = famLower === "bikes" ? "bikeBrand" : "brand";
+      const modelFieldsKey = `${familyKey}:modelFields`;
+      const modelFields = Array.isArray(linkedAttributes[modelFieldsKey])
+        ? linkedAttributes[modelFieldsKey]
+        : [];
+      if (modelFields.length) {
+        const canon = (s) => String(s).trim();
+        const set = new Set((selectedFields || []).map((f) => canon(f)));
+        modelFields.forEach((mf) => {
+          const c = canon(mf);
+          if (c && !set.has(c)) {
+            set.add(c);
+            selectedFields.push(c);
+          }
+        });
+      }
+
+      const keysInFirst = models.length ? Object.keys(models[0].raw || models[0]) : [];
+      if (!selectedFields || selectedFields.length === 0) {
+        const candidates = [
+          "brand",
+          "model",
+          "variant",
+          "transmission",
+          "fuelType",
+          "bodyType",
+          "seats",
+        ];
+        selectedFields = candidates.filter((k) => keysInFirst.includes(k));
+        if (
+          !selectedFields.includes(brandFieldForFamily) &&
+          (keysInFirst.includes("brand") || keysInFirst.includes("bikeBrand"))
+        )
+          selectedFields.unshift(brandFieldForFamily);
+        if (
+          !selectedFields.includes("model") &&
+          (keysInFirst.includes("model") || keysInFirst.includes("modelName"))
+        )
+          selectedFields.splice(1, 0, "model");
+      } else {
+        const low = selectedFields.map((s) => String(s).toLowerCase());
+        if (!low.includes(String(brandFieldForFamily).toLowerCase()))
+          selectedFields.unshift(brandFieldForFamily);
+        if (!low.includes("model")) selectedFields.splice(1, 0, "model");
+      }
+
+      const curr = draftSelections[familyKey] || {};
+      const pickFirst = (obj, arr) => {
+        for (let i = 0; i < arr.length; i += 1) {
+          const k = arr[i];
+          if (obj && obj[k] != null && String(obj[k]).trim() !== "") return String(obj[k]);
+        }
+        return "";
+      };
+      const selectedBrand = pickFirst(
+        curr,
+        famLower === "bikes"
+          ? ["bikeBrand", "brand", "Brand", "make", "Make"]
+          : ["brand", "Brand", "make", "Make"]
+      );
+      const selectedModel = pickFirst(curr, [
+        "model",
+        "Model",
+        "modelName",
+        "model_name",
+        "name",
+      ]);
+
+      const listsByField = {};
+      if (famLower === "bikes") {
+        const lowSet = new Set((selectedFields || []).map((s) => String(s).toLowerCase()));
+        if (lowSet.has("bikebrand") && lowSet.has("brand")) {
+          selectedFields = selectedFields.filter((s) => String(s).toLowerCase() !== "brand");
+        }
+      }
+      const fields = selectedFields
+        .filter(Boolean)
+        .sort((a, b) => {
+          const order = ["brand", "model"];
+          const pa = order.indexOf(String(a).toLowerCase());
+          const pb = order.indexOf(String(b).toLowerCase());
+          if (pa !== -1 || pb !== -1)
+            return (pa === -1 ? 99 : pa) - (pb === -1 ? 99 : pb);
+          return 0;
+        });
+
+      const buildValues = (field) => {
+        const fieldNorm = String(field).toLowerCase().replace(/[^a-z0-9]/g, "");
+        const canonicalJsKey =
+          fieldNorm.endsWith("bodytype")
+            ? "bodyType"
+            : fieldNorm.endsWith("fueltype")
+            ? "fuelType"
+            : fieldNorm.endsWith("seats")
+            ? "seats"
+            : fieldNorm.endsWith("transmission")
+            ? "transmission"
+            : fieldNorm;
+        const keyCandidates = (() => {
+          const f = canonicalJsKey;
+          if (f === "brand" || (famLower === "bikes" && f === "bikebrand"))
+            return ["brand", "bikeBrand", "make", "Brand", "Make"];
+          if (f === "model")
+            return ["model", "modelName", "Model", "model_name", "name"];
+          if (f === "variant") return ["variant", "Variant", "trim", "Trim"];
+          if (f === "transmission")
+            return [
+              "transmission",
+              "Transmission",
+              "gearbox",
+              "gear_type",
+              "gearType",
+            ];
+          if (f === "bodyType")
+            return ["bodyType", "BodyType", "body_type", "type"];
+          if (f === "fuelType")
+            return ["fuelType", "FuelType", "fueltype", "Fuel", "fuel_type"];
+          if (f === "seats")
+            return [
+              "seats",
+              "Seats",
+              "seatCapacity",
+              "SeatCapacity",
+              "seatingCapacity",
+              "SeatingCapacity",
+            ];
+          return [field];
+        })();
+        const vals = new Set();
+        models.forEach((m) => {
+          const raw = m.raw || m;
+          const nselBrand = norm(selectedBrand);
+          const nrawBrand = norm(
+            raw?.brand || raw?.bikeBrand || raw?.make || raw?.Brand || raw?.Make || ""
+          );
+          if (selectedBrand && nrawBrand !== nselBrand) return;
+          if (
+            canonicalJsKey !== "brand" &&
+            !(famLower === "bikes" && canonicalJsKey === "bikebrand")
+          ) {
+            const nselModel = norm(selectedModel);
+            const nrawModel = norm(
+              raw?.model ||
+                raw?.modelName ||
+                raw?.Model ||
+                raw?.model_name ||
+                raw?.name ||
+                ""
+            );
+            if (canonicalJsKey !== "model" && selectedModel && nrawModel !== nselModel)
+              return;
+          }
+          let v;
+          for (let i = 0; i < keyCandidates.length; i += 1) {
+            const k = keyCandidates[i];
+            if (raw && raw[k] !== undefined && raw[k] !== null) {
+              v = raw[k];
+              break;
+            }
+          }
+          if (v !== undefined && v !== null && String(v).trim() !== "")
+            vals.add(String(v));
+        });
+        const arr = Array.from(vals);
+        if (canonicalJsKey === "model" && !selectedBrand) return [];
+        return arr;
+      };
+
+      fields.forEach((field) => {
+        listsByField[field] = buildValues(field);
+      });
+      return { fields, listsByField };
+    },
+    [draftSelections, linkedAttributes, modelsByFamily]
+  );
+
+  // Load inventory selections whenever vendor/category changes in dummy preview mode
+  useEffect(() => {
+    (async () => {
+      try {
+        if (!vendorId || !categoryId) {
+          setInvItems([]);
+          return;
+        }
+        const list = await loadDummyInventorySelections(vendorId, categoryId);
+        setInvItems(Array.isArray(list) ? list : []);
+      } catch {
+        setInvItems([]);
+      }
+    })();
+  }, [vendorId, categoryId, loadDummyInventorySelections]);
 
   // Build dynamic service labels from top-level category children (product card sections).
   // For accepted vendors, filter by isNodePricingActive so dropdown and cards share the
@@ -622,6 +968,7 @@ export default function PreviewPage() {
               const la = (wmJson && wmJson.linkedAttributes && typeof wmJson.linkedAttributes === 'object')
                 ? wmJson.linkedAttributes
                 : {};
+              setLinkedAttributes(la);
               const labels = [];
               const push = (v) => {
                 if (!v) return;
@@ -636,6 +983,7 @@ export default function PreviewPage() {
               });
               setInventoryLabelsList(labels);
             } catch {
+              setLinkedAttributes({});
               setInventoryLabelsList([]);
             }
             // Derive Inventory model flag from categoryModel array on dummy category
@@ -2579,6 +2927,7 @@ export default function PreviewPage() {
     };
 
     return (
+      // <div style={{ display: 'flex', flexWrap: 'wrap', gap: 30, alignItems: 'stretch', justifyContent: 'center' }}>
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 30, alignItems: 'stretch' }}>
         {root.children.map((lvl1) => {
           const serviceKey = makeServiceKey(lvl1?.name || "");
@@ -3616,10 +3965,38 @@ export default function PreviewPage() {
     } catch {}
   };
 
-  const handleNavInventory = () => {
+  const handleNavInventory = (labelFromDropdown) => {
     try {
-      if (!isInventoryModel) return;
-      console.log("Inventory clicked for vendor", vendorId);
+      // Even if isInventoryModel flag is false, if there are inventory labels configured
+      // we still want to open the popup so the vendor can see existing data.
+      const la = linkedAttributes || {};
+      const normLabel = (v) => String(v || "").trim().toLowerCase();
+      let foundScope = null;
+      Object.entries(la).forEach(([key, value]) => {
+        if (foundScope) return;
+        if (!String(key || "").endsWith(":inventoryLabels")) return;
+        const fam = String(key).split(":")[0];
+        const arr = Array.isArray(value) ? value : [];
+        arr.forEach((lbl) => {
+          if (foundScope) return;
+          if (normLabel(lbl) === normLabel(labelFromDropdown)) {
+            foundScope = { family: fam, label: lbl };
+          }
+        });
+      });
+      if (!foundScope && inventoryLabelName) {
+        foundScope = { family: "inventory", label: inventoryLabelName };
+      }
+      // If still nothing, fall back to a generic "inventory" family using the clicked label
+      if (!foundScope) {
+        const safeLabel = String(labelFromDropdown || inventoryLabelName || "Inventory").trim() || "Inventory";
+        foundScope = { family: "inventory", label: safeLabel };
+      }
+      setActiveInvScope(foundScope);
+      setShowLinkedModal(true);
+      try {
+        fetchModelsForFamily(foundScope.family);
+      } catch {}
     } catch {}
   };
 
@@ -3649,6 +4026,7 @@ export default function PreviewPage() {
             onNavigateBusinessLocation={handleNavBusinessLocation}
             onNavigateBusinessHours={handleNavBusinessHours}
             onNavigateInventory={handleNavInventory}
+            onOpenLogin={handleOpenOtpModal}
             services={serviceLabels}
             categoryTree={categoryTree}
             selectedLeaf={selectedLeaf}
@@ -3680,7 +4058,7 @@ export default function PreviewPage() {
             {hasPackagesForNav && Array.isArray(combos) && combos.length > 0 ? (
               <section style={{ marginBottom: 8 }}>
                 {isDrivingSchool ? (
-                  <div style={{ textAlign: "center", marginBottom: 16, fontFamily: "Poppins, sans-serif"   }}>
+                  <div style={{ textAlign: "center", marginBottom: 16, fontFamily: "Poppins, sans-serif" }}>
                     <h2 style={{ margin: 0, fontSize: 30, fontWeight: 700 }}>
                       {(packagesAddon && typeof packagesAddon.heading === 'string' && packagesAddon.heading.trim())
                         ? packagesAddon.heading.trim()
@@ -4234,102 +4612,116 @@ export default function PreviewPage() {
                       </p>
                     </div>
 
-                    {countriesLoading ? (
-                      <div>Loading country codes...</div>
-                    ) : (
-                      <>
-                        <div style={{ marginBottom: 12 }}>
-                          <label style={{ display: "block", marginBottom: 4, fontSize: 13, color: "#374151" }}>
-                            Mobile number
-                          </label>
-                          <div
-                            style={{
-                              display: "flex",
-                              alignItems: "center",
-                              borderRadius: 999,
-                              border: "1px solid #e5e7eb",
-                              padding: "4px 10px",
-                              background: "#f9fafb",
-                            }}
-                          >
-                            <select
-                              value={countryCode}
-                              onChange={(e) => setCountryCode(e.target.value)}
-                              style={{
-                                border: "none",
-                                background: "transparent",
-                                fontSize: 13,
-                                color: "#6b7280",
-                                paddingRight: 6,
-                                outline: "none",
-                              }}
-                            >
-                              {countries.map((c) => (
-                                <option key={c.code} value={c.code}>
-                                  +{c.code}
-                                </option>
-                              ))}
-                            </select>
-                            <span style={{ color: "#d1d5db", margin: "0 6px" }}>|</span>
-                            <input
-                              type="text"
-                              value={phone}
-                              onChange={(e) => setPhone(e.target.value)}
-                              placeholder="Mobile number"
-                              style={{
-                                flex: 1,
-                                border: "none",
-                                outline: "none",
-                                background: "transparent",
-                                fontSize: 14,
-                              }}
-                            />
-                          </div>
-                        </div>
-
-                        {otpError && (
-                          <div style={{ color: "#b91c1c", marginBottom: 8, fontSize: 13 }}>{otpError}</div>
-                        )}
-
-                        <button
-                          type="button"
-                          onClick={requestOtp}
+                    <div style={{ marginBottom: 12 }}>
+                      <label style={{ display: "block", marginBottom: 4, fontSize: 13, color: "#374151" }}>
+                        Mobile number
+                      </label>
+                      <div
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          borderRadius: 999,
+                          border: "1px solid #e5e7eb",
+                          padding: "4px 10px",
+                          background: "#f9fafb",
+                        }}
+                      >
+                        <select
+                          value={countryCode}
+                          onChange={(e) => setCountryCode(e.target.value)}
                           style={{
-                            width: "100%",
-                            marginTop: 8,
-                            padding: 10,
-                            borderRadius: 999,
-                            border: "none",
-                            background: "#059669",
-                            color: "#fff",
-                            fontWeight: 600,
-                            cursor: "pointer",
-                            fontSize: 14,
-                          }}
-                          disabled={otpLoading}
-                        >
-                          {otpLoading ? "Sending..." : "Continue"}
-                        </button>
-
-                        <button
-                          type="button"
-                          onClick={handleCloseOtpModal}
-                          style={{
-                            width: "100%",
-                            marginTop: 8,
-                            padding: 8,
-                            borderRadius: 999,
                             border: "none",
                             background: "transparent",
+                            fontSize: 13,
                             color: "#6b7280",
-                            fontSize: 12,
-                            cursor: "pointer",
+                            paddingRight: 6,
+                            outline: "none",
                           }}
                         >
-                          Cancel
-                        </button>
-                      </>
+                          {countries.length === 0 ? (
+                            <option value={countryCode}>+{countryCode}</option>
+                          ) : (
+                            countries.map((c) => (
+                              <option key={c.code} value={c.code}>
+                                +{c.code}
+                              </option>
+                            ))
+                          )}
+                        </select>
+                        <span style={{ color: "#d1d5db", margin: "0 6px" }}>|</span>
+                        <input
+                          type="text"
+                          value={phone}
+                          onChange={(e) => setPhone(e.target.value)}
+                          placeholder="Mobile number"
+                          style={{
+                            flex: 1,
+                            border: "none",
+                            outline: "none",
+                            background: "transparent",
+                            fontSize: 14,
+                          }}
+                        />
+                      </div>
+                    </div>
+
+                    <div style={{ marginTop: 4, marginBottom: 8, display: "flex", alignItems: "center", gap: 8 }}>
+                      <input
+                        id="login-as-vendor-checkbox"
+                        type="checkbox"
+                        checked={loginAsVendor}
+                        onChange={(e) => setLoginAsVendor(e.target.checked)}
+                        style={{ width: 14, height: 14 }}
+                      />
+                      <label
+                        htmlFor="login-as-vendor-checkbox"
+                        style={{ fontSize: 12, color: "#374151", cursor: "pointer" }}
+                      >
+                        Login as vendor 
+                      </label>
+                    </div>
+
+                    {otpError && (
+                      <div style={{ color: "#b91c1c", marginBottom: 8, fontSize: 13 }}>{otpError}</div>
                     )}
+
+                    <button
+                      type="button"
+                      onClick={requestOtp}
+                      style={{
+                        width: "100%",
+                        marginTop: 8,
+                        padding: 10,
+                        borderRadius: 999,
+                        border: "none",
+                        background: "#059669",
+                        color: "#fff",
+                        fontWeight: 600,
+                        cursor: "pointer",
+                        fontSize: 14,
+                      }}
+                      disabled={otpLoading}
+                    >
+                      {otpLoading ? "Sending..." : "Continue"}
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={handleCloseOtpModal}
+                      style={{
+                        width: "100%",
+                        marginTop: 8,
+                        padding: 8,
+                        borderRadius: 999,
+                        border: "none",
+                        background: "transparent",
+                        color: "#6b7280",
+                        fontSize: 12,
+                        cursor: "pointer",
+                      }}
+                    >
+                      Cancel
+                    </button>
                   </>
                 )}
 
@@ -4463,6 +4855,770 @@ export default function PreviewPage() {
             }}
             contact={contact}
           />
+
+          {showLinkedModal && (
+            <div
+              style={{
+                position: "fixed",
+                inset: 0,
+                background: "rgba(0,0,0,0.45)",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                zIndex: 2200,
+              }}
+            >
+              <div
+                style={{
+                  background: "#ffffff",
+                  padding: 16,
+                  borderRadius: 10,
+                  width: "95vw",
+                  maxWidth: 800,
+                  maxHeight: "85vh",
+                  overflow: "auto",
+                  fontFamily:
+                    "Poppins, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif",
+                }}
+              >
+                <h3 style={{ marginTop: 0 }}>
+                  {activeInvScope?.label || inventoryLabelName || "Inventory"}
+                </h3>
+
+                <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                  {(() => {
+                    if (!activeInvScope) return null;
+                    const familyKey = String(activeInvScope.family);
+                    const { fields, listsByField } = getCascadeLists(familyKey);
+                    const curr = draftSelections[familyKey] || {};
+                    return (
+                      <div
+                        style={{
+                          border: "1px solid #e5e7eb",
+                          borderRadius: 8,
+                          padding: 10,
+                        }}
+                      >
+                        <div style={{ fontWeight: 700, marginBottom: 6 }}>
+                          {familyKey}
+                        </div>
+                        <div
+                          style={{
+                            display: "grid",
+                            gridTemplateColumns:
+                              "repeat(auto-fill, minmax(220px, 1fr))",
+                            gap: 10,
+                          }}
+                        >
+                          {fields.map((heading) => {
+                            const values = Array.isArray(listsByField[heading])
+                              ? listsByField[heading]
+                              : [];
+                            const val = curr[heading] || "";
+                            const hLower = String(heading)
+                              .toLowerCase()
+                              .replace(/[^a-z0-9]/g, "");
+                            const isBrand = hLower.endsWith("brand");
+                            const isModel = hLower.endsWith("model");
+                            const brandSelected = Boolean(
+                              curr.bikeBrand ||
+                                curr.brand ||
+                                curr.Brand ||
+                                curr.make ||
+                                curr.Make
+                            );
+                            const isDisabled = isModel && !brandSelected;
+                            return (
+                              <label
+                                key={`${familyKey}:${heading}`}
+                                style={{
+                                  display: "flex",
+                                  flexDirection: "column",
+                                  gap: 6,
+                                }}
+                              >
+                                <span
+                                  style={{ fontSize: 12, color: "#475569" }}
+                                >
+                                  {heading}
+                                </span>
+                                <select
+                                  value={val}
+                                  disabled={isDisabled}
+                                  onChange={(e) => {
+                                    const v = e.target.value;
+                                    setDraftSelections((prev) => {
+                                      const nextFam = {
+                                        ...(prev[familyKey] || {}),
+                                        [heading]: v,
+                                      };
+                                      if (isBrand) {
+                                        delete nextFam.model;
+                                        delete nextFam.Model;
+                                        delete nextFam.modelName;
+                                        delete nextFam.model_name;
+                                        delete nextFam.name;
+                                        delete nextFam.variant;
+                                        delete nextFam.Variant;
+                                        delete nextFam.trim;
+                                        delete nextFam.Trim;
+                                        delete nextFam.transmission;
+                                        delete nextFam.Transmission;
+                                        delete nextFam.gearbox;
+                                        delete nextFam.gear_type;
+                                        delete nextFam.gearType;
+                                        delete nextFam.fuelType;
+                                        delete nextFam.FuelType;
+                                        delete nextFam.fueltype;
+                                        delete nextFam.Fuel;
+                                        delete nextFam.fuel_type;
+                                        delete nextFam.bodyType;
+                                        delete nextFam.BodyType;
+                                        delete nextFam.body_type;
+                                        delete nextFam.type;
+                                        delete nextFam.seats;
+                                        delete nextFam.Seats;
+                                        delete nextFam.seatCapacity;
+                                        delete nextFam.SeatCapacity;
+                                        delete nextFam.seatingCapacity;
+                                        delete nextFam.SeatingCapacity;
+                                      } else if (isModel) {
+                                        delete nextFam.variant;
+                                        delete nextFam.Variant;
+                                        delete nextFam.trim;
+                                        delete nextFam.Trim;
+                                        delete nextFam.transmission;
+                                        delete nextFam.Transmission;
+                                        delete nextFam.gearbox;
+                                        delete nextFam.gear_type;
+                                        delete nextFam.gearType;
+                                        delete nextFam.fuelType;
+                                        delete nextFam.FuelType;
+                                        delete nextFam.fueltype;
+                                        delete nextFam.Fuel;
+                                        delete nextFam.fuel_type;
+                                        delete nextFam.bodyType;
+                                        delete nextFam.BodyType;
+                                        delete nextFam.body_type;
+                                        delete nextFam.type;
+                                        delete nextFam.seats;
+                                        delete nextFam.Seats;
+                                        delete nextFam.seatCapacity;
+                                        delete nextFam.SeatCapacity;
+                                        delete nextFam.seatingCapacity;
+                                        delete nextFam.SeatingCapacity;
+                                      }
+                                      return { ...prev, [familyKey]: nextFam };
+                                    });
+                                    if (isBrand) {
+                                      try {
+                                        fetchModelsForFamily(familyKey);
+                                      } catch {}
+                                    }
+                                  }}
+                                  style={{
+                                    padding: 8,
+                                    border: "1px solid #ddd",
+                                    borderRadius: 6,
+                                  }}
+                                >
+                                  <option value="">Select</option>
+                                  {values.map((v) => (
+                                    <option
+                                      key={`${familyKey}:${heading}:${v}`}
+                                      value={v}
+                                    >
+                                      {v}
+                                    </option>
+                                  ))}
+                                </select>
+                              </label>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    );
+                  })()}
+                </div>
+
+                <div style={{ marginTop: 12 }}>
+                  <div style={{ fontWeight: 700, marginBottom: 6 }}>
+                    Selected Data
+                  </div>
+                  {(() => {
+                    const list = Array.isArray(invItems) ? invItems : [];
+                    const filtered = activeInvScope
+                      ? list.filter(
+                          (it) =>
+                            String(it.scopeFamily) ===
+                              String(activeInvScope.family) &&
+                            String(it.scopeLabel) ===
+                              String(activeInvScope.label)
+                        )
+                      : list;
+
+                    const allKeys = new Set();
+                    filtered.forEach((item) => {
+                      Object.values(item.selections || {}).forEach((fields) => {
+                        Object.keys(fields || {}).forEach((key) => {
+                          const fn = String(key)
+                            .toLowerCase()
+                            .replace(/[^a-z0-9]/g, "");
+                          if (fn !== "modelfields") allKeys.add(key);
+                        });
+                      });
+                    });
+                    let dynamicHeadings = Array.from(allKeys);
+                    if (
+                      activeInvScope &&
+                      String(activeInvScope.family).toLowerCase() === "bikes"
+                    ) {
+                      const hasBikeBrand = dynamicHeadings.some(
+                        (h) => String(h).toLowerCase() === "bikebrand"
+                      );
+                      if (hasBikeBrand)
+                        dynamicHeadings = dynamicHeadings.filter(
+                          (h) => String(h).toLowerCase() !== "brand"
+                        );
+                    }
+
+                    if (filtered.length === 0) {
+                      return (
+                        <div
+                          style={{
+                            fontSize: 13,
+                            color: "#64748b",
+                            padding: "20px",
+                            textAlign: "center",
+                            background: "#f8fafc",
+                            borderRadius: 8,
+                          }}
+                        >
+                          No items added yet. Use the selectors above and click
+                          Add Data to add.
+                        </div>
+                      );
+                    }
+
+                    return (
+                      <div style={{ overflowX: "auto" }}>
+                        <table
+                          style={{
+                            borderCollapse: "collapse",
+                            width: "100%",
+                            minWidth: "720px",
+                          }}
+                        >
+                          <thead>
+                            <tr style={{ background: "#f1f5f9" }}>
+                              <th
+                                style={{
+                                  border: "1px solid #e2e8f0",
+                                  padding: "10px 12px",
+                                  textAlign: "left",
+                                  fontWeight: 600,
+                                }}
+                              >
+                                No
+                              </th>
+                              <th
+                                style={{
+                                  border: "1px solid #e2e8f0",
+                                  padding: "10px 12px",
+                                  textAlign: "left",
+                                  fontWeight: 600,
+                                }}
+                              >
+                                Scope
+                              </th>
+                              {dynamicHeadings.map((heading) => (
+                                <th
+                                  key={heading}
+                                  style={{
+                                    border: "1px solid #e2e8f0",
+                                    padding: "10px 12px",
+                                    textAlign: "left",
+                                    fontWeight: 600,
+                                  }}
+                                >
+                                  {heading}
+                                </th>
+                              ))}
+                              <th
+                                style={{
+                                  border: "1px solid #e2e8f0",
+                                  padding: "10px 12px",
+                                  textAlign: "left",
+                                  fontWeight: 600,
+                                }}
+                              >
+                                Images
+                              </th>
+                              <th
+                                style={{
+                                  border: "1px solid #e2e8f0",
+                                  padding: "10px 12px",
+                                  textAlign: "left",
+                                  fontWeight: 600,
+                                }}
+                              >
+                                Actions
+                              </th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {filtered.map((it, idx) => {
+                              const key = it._id || it.at || idx;
+                              const scopeText = `${it.scopeFamily || "-"}`;
+                              const rowData = new Map();
+                              Object.values(it.selections || {}).forEach(
+                                (fields) => {
+                                  dynamicHeadings.forEach((heading) => {
+                                    if (fields && fields[heading] != null) {
+                                      rowData.set(
+                                        heading,
+                                        String(fields[heading])
+                                      );
+                                    }
+                                  });
+                                }
+                              );
+                              return (
+                                <tr
+                                  key={key}
+                                  style={{
+                                    borderBottom: "1px solid #e2e8f0",
+                                  }}
+                                >
+                                  <td
+                                    style={{
+                                      border: "1px solid #e2e8f0",
+                                      padding: "10px 12px",
+                                    }}
+                                  >
+                                    {idx + 1}
+                                  </td>
+                                  <td
+                                    style={{
+                                      border: "1px solid #e2e8f0",
+                                      padding: "10px 12px",
+                                    }}
+                                  >
+                                    {scopeText}
+                                  </td>
+                                  {dynamicHeadings.map((heading) => (
+                                    <td
+                                      key={heading}
+                                      style={{
+                                        border: "1px solid #e2e8f0",
+                                        padding: "10px 12px",
+                                      }}
+                                    >
+                                      {rowData.get(heading) || "—"}
+                                    </td>
+                                  ))}
+                                  <td
+                                    style={{
+                                      border: "1px solid #e2e8f0",
+                                      padding: "10px 12px",
+                                    }}
+                                  >
+                                    <div
+                                      style={{
+                                        display: "flex",
+                                        flexDirection: "column",
+                                        gap: 6,
+                                      }}
+                                    >
+                                      <div
+                                        style={{
+                                          display: "flex",
+                                          gap: 8,
+                                          flexWrap: "wrap",
+                                        }}
+                                      >
+                                        {(Array.isArray(it.images)
+                                          ? it.images
+                                          : []
+                                        ).map((src, i) => {
+                                          const raw = String(src || "");
+                                          const url = raw.startsWith("http")
+                                            ? raw
+                                            : `${ASSET_BASE_URL || API_BASE_URL}${raw}`;
+                                          return (
+                                            <div
+                                              key={i}
+                                              style={{
+                                                position: "relative",
+                                                width: 56,
+                                              }}
+                                            >
+                                              <img
+                                                src={url}
+                                                alt={`img-${i}`}
+                                                style={{
+                                                  width: 56,
+                                                  height: 56,
+                                                  objectFit: "cover",
+                                                  borderRadius: 6,
+                                                  border: "1px solid #eee",
+                                                }}
+                                              />
+                                              <button
+                                                type="button"
+                                                title="Delete image"
+                                                onClick={async () => {
+                                                  try {
+                                                    const keyId = String(
+                                                      it._id || it.at
+                                                    );
+                                                    const res = await fetch(
+                                                      `${API_BASE_URL}/api/dummy-vendors/${vendorId}/inventory/${categoryId}/${keyId}/images/${i}`,
+                                                      {
+                                                        method: "DELETE",
+                                                      }
+                                                    );
+                                                    const json = await res
+                                                      .json()
+                                                      .catch(() => ({}));
+                                                    const imgs = Array.isArray(
+                                                      json.images
+                                                    )
+                                                      ? json.images
+                                                      : [];
+                                                    setInvItems((prev) =>
+                                                      (Array.isArray(prev)
+                                                        ? prev
+                                                        : []
+                                                      ).map((p) =>
+                                                        String(
+                                                          p._id || p.at
+                                                        ) === keyId
+                                                          ? {
+                                                              ...p,
+                                                              images: imgs,
+                                                            }
+                                                          : p
+                                                      )
+                                                    );
+                                                  } catch {
+                                                    // ignore
+                                                  }
+                                                }}
+                                                style={{
+                                                  position: "absolute",
+                                                  top: 2,
+                                                  right: 2,
+                                                  padding: 2,
+                                                  borderRadius: 4,
+                                                  border: "none",
+                                                  background:
+                                                    "rgba(255,255,255,0.9)",
+                                                  cursor: "pointer",
+                                                  fontSize: 10,
+                                                }}
+                                              >
+                                                🗑️
+                                              </button>
+                                            </div>
+                                          );
+                                        })}
+                                      </div>
+                                      <div
+                                        style={{
+                                          display: "flex",
+                                          gap: 6,
+                                          alignItems: "center",
+                                        }}
+                                      >
+                                        <span
+                                          style={{
+                                            fontSize: 12,
+                                            color: "#475569",
+                                          }}
+                                        >
+                                          Uploaded:{" "}
+                                          {Array.isArray(it.images)
+                                            ? it.images.length
+                                            : 0}
+                                          /5
+                                        </span>
+                                        <input
+                                          type="file"
+                                          accept="image/*"
+                                          multiple
+                                          onChange={async (e) => {
+                                            try {
+                                              const existing = Array.isArray(
+                                                it.images
+                                              )
+                                                ? it.images.length
+                                                : 0;
+                                              const remaining = Math.max(
+                                                0,
+                                                5 - existing
+                                              );
+                                              const files = Array.from(
+                                                e.target.files || []
+                                              ).slice(0, remaining);
+                                              if (!files.length) return;
+                                              const form = new FormData();
+                                              files.forEach((f) =>
+                                                form.append("images", f)
+                                              );
+                                              const keyId = String(
+                                                it._id || it.at
+                                              );
+                                              const res = await fetch(
+                                                `${API_BASE_URL}/api/dummy-vendors/${vendorId}/inventory/${categoryId}/${keyId}/images`,
+                                                {
+                                                  method: "POST",
+                                                  body: form,
+                                                }
+                                              );
+                                              const json = await res
+                                                .json()
+                                                .catch(() => ({}));
+                                              const imgs = Array.isArray(
+                                                json.images
+                                              )
+                                                ? json.images
+                                                : [];
+                                              setInvItems((prev) =>
+                                                (Array.isArray(prev)
+                                                  ? prev
+                                                  : []
+                                                ).map((p) =>
+                                                  String(
+                                                    p._id || p.at
+                                                  ) === keyId
+                                                    ? {
+                                                        ...p,
+                                                        images: imgs,
+                                                      }
+                                                    : p
+                                                )
+                                              );
+                                            } catch {
+                                              // ignore
+                                            }
+                                            // eslint-disable-next-line no-param-reassign
+                                            e.target.value = "";
+                                          }}
+                                        />
+                                      </div>
+                                    </div>
+                                  </td>
+                                  <td
+                                    style={{
+                                      border: "1px solid #e2e8f0",
+                                      padding: "10px 12px",
+                                    }}
+                                  >
+                                    <div
+                                      style={{
+                                        display: "flex",
+                                        gap: 6,
+                                      }}
+                                    >
+                                      <button
+                                        type="button"
+                                        title="Edit"
+                                        onClick={() => {
+                                          try {
+                                            const fam = String(
+                                              activeInvScope?.family ||
+                                                it.scopeFamily ||
+                                                ""
+                                            );
+                                            const fields =
+                                              (it.selections || {})[fam] ||
+                                              {};
+                                            setEditingItemKey(
+                                              it._id || it.at || null
+                                            );
+                                            setDraftSelections((prev) => ({
+                                              ...prev,
+                                              [fam]: { ...fields },
+                                            }));
+                                          } catch {
+                                            // ignore
+                                          }
+                                        }}
+                                        style={{
+                                          padding: "6px 8px",
+                                          borderRadius: 6,
+                                          border: "1px solid #e5e7eb",
+                                          background: "#fff",
+                                          cursor: "pointer",
+                                        }}
+                                      >
+                                        ✎
+                                      </button>
+                                      <button
+                                        type="button"
+                                        title="Delete"
+                                        onClick={async () => {
+                                          try {
+                                            const next = (Array.isArray(
+                                              invItems
+                                            )
+                                              ? invItems
+                                              : []
+                                            ).filter(
+                                              (p) =>
+                                                (p._id || p.at) !==
+                                                (it._id || it.at)
+                                            );
+                                            setInvItems(next);
+                                            if (vendorId && categoryId) {
+                                              await saveDummyInventorySelections(
+                                                vendorId,
+                                                categoryId,
+                                                next
+                                              );
+                                            }
+                                            if (
+                                              editingItemKey &&
+                                              editingItemKey ===
+                                                (it._id || it.at)
+                                            ) {
+                                              setEditingItemKey(null);
+                                            }
+                                          } catch {
+                                            // ignore
+                                          }
+                                        }}
+                                        style={{
+                                          padding: "6px 8px",
+                                          borderRadius: 6,
+                                          border: "1px solid #fecaca",
+                                          background: "#fee2e2",
+                                          color: "#ef4444",
+                                          cursor: "pointer",
+                                        }}
+                                      >
+                                        🗑️
+                                      </button>
+                                    </div>
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                    );
+                  })()}
+                </div>
+
+                <div
+                  style={{
+                    display: "flex",
+                    gap: 8,
+                    justifyContent: "flex-end",
+                    marginTop: 12,
+                  }}
+                >
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      try {
+                        const scope = activeInvScope || null;
+                        if (!scope) return;
+                        const fam = String(scope.family);
+                        const sel = draftSelections[fam] || {};
+                        const hasAny = Object.values(sel).some(
+                          (v) => v != null && String(v).trim() !== ""
+                        );
+                        if (!hasAny) return;
+                        const keyNow = editingItemKey || Date.now();
+                        const famLower = String(fam).toLowerCase();
+                        let selNorm = { ...sel };
+                        if (famLower === "bikes") {
+                          if (selNorm.brand && !selNorm.bikeBrand) {
+                            selNorm = { ...selNorm, bikeBrand: selNorm.brand };
+                          }
+                          if (selNorm.brand) {
+                            const { brand, ...rest } = selNorm;
+                            selNorm = rest;
+                          }
+                        }
+                        const snapshot = {
+                          at: keyNow,
+                          categoryId,
+                          selections: { [fam]: selNorm },
+                          scopeFamily: scope.family,
+                          scopeLabel: scope.label,
+                        };
+                        let nextItems;
+                        if (editingItemKey) {
+                          nextItems = (Array.isArray(invItems)
+                            ? invItems
+                            : []
+                          ).map((p) =>
+                            (p._id || p.at) === editingItemKey
+                              ? { ...snapshot, _id: p._id }
+                              : p
+                          );
+                        } else {
+                          nextItems = [
+                            ...(Array.isArray(invItems) ? invItems : []),
+                            snapshot,
+                          ];
+                        }
+                        setInvItems(nextItems);
+                        if (vendorId && categoryId) {
+                          await saveDummyInventorySelections(
+                            vendorId,
+                            categoryId,
+                            nextItems
+                          );
+                          await ensureLinkedSubcategoryForScope(
+                            categoryId,
+                            scope.family,
+                            scope.label
+                          );
+                        }
+                        setDraftSelections((prev) => ({ ...prev, [fam]: {} }));
+                        setEditingItemKey(null);
+                      } catch {
+                        // ignore
+                      }
+                    }}
+                    style={{
+                      padding: "6px 10px",
+                      borderRadius: 6,
+                      background: "#16a34a",
+                      color: "#fff",
+                      border: "none",
+                      cursor: "pointer",
+                    }}
+                  >
+                    Add Data
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowLinkedModal(false);
+                      setDraftSelections({});
+                      setEditingItemKey(null);
+                    }}
+                    style={{
+                      padding: "6px 10px",
+                      borderRadius: 6,
+                      background: "#e5e7eb",
+                      border: "none",
+                      cursor: "pointer",
+                    }}
+                  >
+                    Close
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
         </>
       )}
     </div>

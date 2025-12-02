@@ -18,6 +18,7 @@ export default function VendorMenuDropdown({
   servicesForMyPrices = [],
 }) {
   const [open, setOpen] = useState(false);
+  const [isMobile, setIsMobile] = useState(false);
   const containerRef = useRef(null);
 
   useEffect(() => {
@@ -29,6 +30,21 @@ export default function VendorMenuDropdown({
     };
     document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  useEffect(() => {
+    const update = () => {
+      try {
+        if (typeof window === "undefined") return;
+        setIsMobile(window.innerWidth < 900);
+      } catch {}
+    };
+    update();
+    if (typeof window !== "undefined") {
+      window.addEventListener("resize", update);
+      return () => window.removeEventListener("resize", update);
+    }
+    return undefined;
   }, []);
 
   const businessName = (() => {
@@ -139,21 +155,36 @@ export default function VendorMenuDropdown({
       {open && (
         <div
           style={{
-            position: "absolute",
-            top: "100%",
-            right: 0,
-            marginTop: 8,
-            width: 260,
-            borderRadius: 16,
+            position: isMobile ? "fixed" : "absolute",
+            top: isMobile ? "auto" : "100%",
+            bottom: isMobile ? 20 : "auto",
+            left: isMobile ? 16 : "auto",
+            right: isMobile ? 16 : 0,
+            marginTop: isMobile ? 0 : 8,
+            width: isMobile ? "auto" : 260,
+            maxHeight: isMobile ? "68vh" : "none",
+            overflowY: "auto",
+            borderRadius: isMobile ? 24 : 16,
             background: "#FFFFFF",
-            boxShadow: "0 16px 40px rgba(15,23,42,0.22)",
+            boxShadow: "0 20px 45px rgba(15,23,42,0.55)",
             border: "1px solid #E5E7EB",
-            padding: 16,
+            padding: isMobile ? 14 : 16,
             color: "#0F172A",
-            zIndex: 1200,
+            zIndex: 2000,
             fontFamily: "Poppins, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif",
           }}
         >
+          {isMobile && (
+            <div
+              style={{
+                width: 40,
+                height: 4,
+                borderRadius: 999,
+                background: "#E5E7EB",
+                margin: "4px auto 10px",
+              }}
+            />
+          )}
           <div style={{ marginBottom: 8 }}>
             <div
               style={{
@@ -246,7 +277,11 @@ export default function VendorMenuDropdown({
                       cursor: "pointer",
                       color: "#111827",
                     }}
-                    onClick={onNavigateInventory}
+                    onClick={() => {
+                      if (typeof onNavigateInventory === "function") {
+                        onNavigateInventory(String(lbl).trim());
+                      }
+                    }}
                   >
                     <span style={{ fontSize: 16, fontWeight: 400 }}>{`My ${String(lbl).trim()}`}</span>
                   </div>
@@ -268,14 +303,24 @@ export default function VendorMenuDropdown({
           <div
             style={{
               marginBottom: 4,
-              fontSize: 12,
-              fontWeight: 600,
-              letterSpacing: 0.5,
-              textTransform: "uppercase",
-              color: "#4B5563",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              gap: 6,
             }}
           >
-            My Prices
+            <span
+              style={{
+                fontSize: 12,
+                fontWeight: 600,
+                letterSpacing: 0.5,
+                textTransform: "uppercase",
+                color: "#4B5563",
+              }}
+            >
+              My Prices
+            </span>
+            
           </div>
           {Array.isArray(servicesForMyPrices) && servicesForMyPrices.length > 0
             ? servicesForMyPrices.map((svc, idx) => {

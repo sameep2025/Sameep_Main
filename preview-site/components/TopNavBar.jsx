@@ -20,6 +20,7 @@ export default function TopNavBar({
   onNavigateBusinessLocation,
   onNavigateBusinessHours,
   onNavigateInventory,
+  onOpenLogin,
   services = [
     "Driving Packages",
     "Individual Courses",
@@ -363,6 +364,11 @@ export default function TopNavBar({
             {!identityLoggedIn ? (
               <button
                 type="button"
+                onClick={() => {
+                  if (typeof onOpenLogin === "function") {
+                    onOpenLogin();
+                  }
+                }}
                 style={{
                   border: "none",
                   background: "transparent",
@@ -611,9 +617,6 @@ export default function TopNavBar({
                 justifyContent: "space-between",
                 cursor: "pointer",
               }}
-              onClick={() => {
-                setMenuOpen(false);
-              }}
             >
               {!identityLoggedIn ? (
                 <div
@@ -621,6 +624,11 @@ export default function TopNavBar({
                     display: "flex",
                     alignItems: "center",
                     gap: 8,
+                  }}
+                  onClick={() => {
+                    if (typeof onOpenLogin === "function") {
+                      onOpenLogin();
+                    }
                   }}
                 >
                   <User size={20} color="#111827" />
@@ -654,30 +662,21 @@ export default function TopNavBar({
                   </span>
                 </div>
               ) : (
-                <div
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 8,
-                  }}
-                >
-                  <div
-                    style={{
-                      width: 30,
-                      height: 30,
-                      borderRadius: "999px",
-                      backgroundColor: "#0EA5E9",
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      fontSize: 15,
-                      fontWeight: 700,
-                      color: "#FFFFFF",
-                    }}
-                  >
-                    {avatarLetter}
-                  </div>
-                </div>
+                <VendorMenuDropdown
+                  vendor={vendor}
+                  hasCombos={hasPackages || hasCombos}
+                  inventoryLabel={inventoryLabel}
+                  inventoryLabels={inventoryLabels}
+                  isInventoryModel={isInventoryModel}
+                  avatarLetter={avatarLetter}
+                  onNavigateMyPricesCombos={onNavigateMyPricesCombos}
+                  onNavigateMyPricesNonCombos={onNavigateMyPricesNonCombos}
+                  onNavigateHomeLocation={onNavigateHomeLocation}
+                  onNavigateBusinessLocation={onNavigateBusinessLocation}
+                  onNavigateBusinessHours={onNavigateBusinessHours}
+                  onNavigateInventory={onNavigateInventory}
+                  servicesForMyPrices={effectiveServices}
+                />
               )}
             </div>
 
