@@ -1,6 +1,7 @@
 // components/Footer.jsx
 import React, { useEffect, useState } from "react";
 import { Phone, MapPin, Clock } from "lucide-react";
+import API_BASE_URL, { ASSET_BASE_URL } from "../config";
 
 export default function Footer({
   businessName,
@@ -16,6 +17,8 @@ export default function Footer({
   popularCourses = [],
   reachUs = {},
   contact,
+  vendorId,
+  socialHandles = [], // category-level social handles
 }) {
   const [vw, setVw] = useState(typeof window !== 'undefined' ? window.innerWidth : 1200);
   useEffect(() => {
@@ -28,6 +31,10 @@ export default function Footer({
   }, []);
   const isMobile = vw <= 640;
   const isTablet = vw > 640 && vw <= 1024;
+
+  const [socialIcons, setSocialIcons] = useState({}); // normalized handle -> icon URL
+  const [vendorSocialLinks, setVendorSocialLinks] = useState({}); // raw map from API
+  const [footerSocialIcons, setFooterSocialIcons] = useState([]); // [{ key, label, url, iconUrl }]
 
   const titleName = (businessName && String(businessName).trim()) || categoryName || "Driving School";
   const hasContact = contact && typeof contact === "object";
@@ -56,6 +63,129 @@ export default function Footer({
   const column4Heading = hasContact && contact.footerHeading4 && String(contact.footerHeading4).trim().length
     ? String(contact.footerHeading4).trim()
     : "Reach Us";
+
+  const normalizeHandle = (v) => {
+    try {
+      return String(v == null ? "" : v)
+        .trim()
+        .toLowerCase()
+        .replace(/[^a-z0-9]/g, "");
+    } catch {
+      return "";
+    }
+  };
+
+  useEffect(() => {
+    const fetchIcons = async () => {
+      try {
+        const res = await fetch(
+          `${API_BASE_URL}/api/masters?type=${encodeURIComponent("socialHandle")}`
+        );
+        if (!res.ok) return;
+        const data = await res.json().catch(() => []);
+        const arr = Array.isArray(data) ? data : [];
+        const map = {};
+        arr.forEach((m) => {
+          const name = m && typeof m.name === "string" ? m.name : "";
+          const key = normalizeHandle(name);
+          if (!key) return;
+          const rawUrl = (m && typeof m.imageUrl === "string" ? m.imageUrl : "").trim();
+          if (!rawUrl) return;
+          const full = rawUrl.startsWith("http")
+            ? rawUrl
+            : `${ASSET_BASE_URL || ""}${rawUrl}`;
+          map[key] = full;
+        });
+        setSocialIcons(map);
+      } catch {
+        setSocialIcons({});
+      }
+    };
+    fetchIcons();
+  }, []);
+
+  useEffect(() => {
+    const fetchVendorSocialLinks = async () => {
+      try {
+        const id = vendorId ? String(vendorId).trim() : "";
+        if (!id) {
+          setVendorSocialLinks({});
+          return;
+        }
+        let links = {};
+        try {
+          const res = await fetch(`${API_BASE_URL}/api/dummy-vendors/${id}/social-links`);
+          if (res.ok) {
+            const data = await res.json().catch(() => ({}));
+            if (data && typeof data.socialLinks === "object" && data.socialLinks !== null) {
+              links = data.socialLinks;
+            }
+          }
+        } catch {}
+
+        if (!links || Object.keys(links || {}).length === 0) {
+          try {
+            const res2 = await fetch(`${API_BASE_URL}/api/dummy-vendors/${id}`);
+            if (res2.ok) {
+              const doc = await res2.json().catch(() => ({}));
+              if (doc && typeof doc.socialLinks === "object" && doc.socialLinks !== null) {
+                links = doc.socialLinks;
+              }
+            }
+          } catch {}
+        }
+
+        setVendorSocialLinks(links || {});
+      } catch {
+        setVendorSocialLinks({});
+      }
+    };
+    fetchVendorSocialLinks();
+  }, [vendorId]);
+
+  useEffect(() => {
+    try {
+      const handles = Array.isArray(socialHandles) ? socialHandles : [];
+      const links = vendorSocialLinks && typeof vendorSocialLinks === "object" ? vendorSocialLinks : {};
+      const iconMap = socialIcons && typeof socialIcons === "object" ? socialIcons : {};
+      const out = [];
+
+      handles.forEach((rawName) => {
+        const label = rawName == null ? "" : String(rawName).trim();
+        if (!label) return;
+        const nKey = normalizeHandle(label);
+        const iconUrl = iconMap[nKey];
+        if (!iconUrl) return;
+
+        let url = "";
+        const rawKeys = Object.keys(links);
+        const directCandidates = [label, nKey];
+        for (const k of directCandidates) {
+          if (!k) continue;
+          if (links[k] != null && String(links[k]).trim() !== "") {
+            url = String(links[k]);
+            break;
+          }
+        }
+        if (!url && rawKeys.length) {
+          const matchKey = rawKeys.find((rk) => {
+            const nr = normalizeHandle(rk);
+            return nr && nr === nKey;
+          });
+          if (matchKey && links[matchKey] != null) {
+            url = String(links[matchKey]);
+          }
+        }
+        if (!url) return;
+
+        out.push({ key: nKey, label, url, iconUrl });
+      });
+
+      setFooterSocialIcons(out);
+    } catch {
+      setFooterSocialIcons([]);
+    }
+  }, [socialHandles, vendorSocialLinks, socialIcons]);
 
   return (
     <footer
@@ -214,6 +344,43 @@ export default function Footer({
               <Clock size={18} color="#22c55e" />
               <span>Mon-Fri: 10 AM - 6 PM</span>
             </div> */}
+            {footerSocialIcons.length > 0 && (
+              <div
+                style={{
+                  marginTop: 10,
+                  display: "flex",
+                  gap: 10,
+                  flexWrap: "wrap",
+                  justifyContent: isMobile ? "center" : "flex-start",
+                }}
+              >
+                {footerSocialIcons.map((item) => (
+                  <a
+                    key={item.key}
+                    href={item.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      width: 32,
+                      height: 32,
+                      borderRadius: 999,
+                      background: "#111827",
+                      border: "1px solid #4b5563",
+                      cursor: "pointer",
+                    }}
+                  >
+                    <img
+                      src={item.iconUrl}
+                      alt={item.label}
+                      style={{ width: 18, height: 18, borderRadius: 4, objectFit: "cover" }}
+                    />
+                  </a>
+                ))}
+              </div>
+            )}
           </div>
         </div>
       </div>

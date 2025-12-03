@@ -16,6 +16,7 @@ export default function MyPackageDetailPage() {
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
   const [comboPricingStatusByRow, setComboPricingStatusByRow] = useState({});
+  const [vendorOverridesBySize, setVendorOverridesBySize] = useState({});
 
   useEffect(() => {
     if (!comboId) return;
@@ -28,15 +29,42 @@ export default function MyPackageDetailPage() {
         if (!res.ok) throw new Error("Failed to load package");
         const data = await res.json().catch(() => null);
         setCombo(data || null);
+
+        // Load vendor-specific overrides for this combo
+        if (vendorId) {
+          try {
+            const ovRes = await fetch(
+              `${API_BASE_URL}/api/vendor-combo-pricing/${encodeURIComponent(
+                String(vendorId)
+              )}/${id}`
+            );
+            if (ovRes.ok) {
+              const rows = await ovRes.json().catch(() => []);
+              const map = {};
+              (Array.isArray(rows) ? rows : []).forEach((r) => {
+                const key = String(r.sizeKey || "default");
+                map[key] = r;
+              });
+              setVendorOverridesBySize(map);
+            } else {
+              setVendorOverridesBySize({});
+            }
+          } catch {
+            setVendorOverridesBySize({});
+          }
+        } else {
+          setVendorOverridesBySize({});
+        }
       } catch (e) {
         console.error("MyPackageDetailPage combo error", e);
         setError(e?.message || "Failed to load package");
         setCombo(null);
+        setVendorOverridesBySize({});
       } finally {
         setLoading(false);
       }
     })();
-  }, [comboId]);
+  }, [comboId, vendorId]);
 
   const rows = useMemo(() => {
     try {
@@ -90,23 +118,35 @@ export default function MyPackageDetailPage() {
             : base != null && !Number.isNaN(base)
             ? base
             : null;
-        const priceText = priceValue != null ? `₹${priceValue}` : "Set price";
-        const id = combo._id?.$oid || combo._id || combo.id;
-        const sizeKey = sz || "default";
+        const vendorOverride = vendorOverridesBySize[sz || "default"] || null;
+        const overridePrice =
+          vendorOverride && vendorOverride.price != null && vendorOverride.price !== ""
+            ? Number(vendorOverride.price)
+            : null;
+        const finalPriceValue =
+          overridePrice != null && !Number.isNaN(overridePrice)
+            ? overridePrice
+            : priceValue;
+        const priceText =
+          finalPriceValue != null && !Number.isNaN(finalPriceValue)
+            ? `₹${finalPriceValue}`
+            : "Set price";
         const baseStatus =
           combo.pricingStatusPerSize &&
           typeof combo.pricingStatusPerSize === "object"
-            ? combo.pricingStatusPerSize[sizeKey] || "Inactive"
+            ? combo.pricingStatusPerSize[sz || "default"] || "Inactive"
             : "Inactive";
-        const mapKey = `${id}|${sizeKey}`;
+        const overrideStatus = vendorOverride?.status || null;
+        const initialStatus = overrideStatus || baseStatus || "Inactive";
+        const mapKey = `${combo._id?.$oid || combo._id || combo.id}|${sz || "default"}`;
         const currentStatus =
-          comboPricingStatusByRow[mapKey] || baseStatus || "Inactive";
+          comboPricingStatusByRow[mapKey] || initialStatus || "Inactive";
         return {
-          comboId: id,
+          comboId: combo._id?.$oid || combo._id || combo.id,
           comboName,
           size: sz || "Default",
-          sizeKey,
-          priceValue,
+          sizeKey: sz || "default",
+          priceValue: finalPriceValue,
           priceText,
           services: allItemsLabel,
           mapKey,
@@ -116,28 +156,45 @@ export default function MyPackageDetailPage() {
     } catch {
       return [];
     }
-  }, [combo, comboPricingStatusByRow]);
+  }, [combo, comboPricingStatusByRow, vendorOverridesBySize]);
 
   const updateStatus = async (row, nextStatus) => {
-    if (!combo) return;
+    if (!combo || !vendorId) return;
     try {
       const safe = nextStatus === "Active" ? "Active" : "Inactive";
       setComboPricingStatusByRow((prev) => ({ ...prev, [row.mapKey]: safe }));
-      const sizeKey = row.sizeKey;
-      const currentMap =
-        combo.pricingStatusPerSize &&
-        typeof combo.pricingStatusPerSize === "object"
-          ? combo.pricingStatusPerSize
-          : {};
-      const nextMap = { ...currentMap, [sizeKey]: safe };
       const id = combo._id?.$oid || combo._id || combo.id;
-      const res = await fetch(`${API_BASE_URL}/api/dummy-combos/${id}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ pricingStatusPerSize: nextMap }),
+      const res = await fetch(
+        `${API_BASE_URL}/api/vendor-combo-pricing/${encodeURIComponent(
+          String(vendorId)
+        )}/${encodeURIComponent(String(id))}`,
+        {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            overrides: [
+              {
+                sizeKey: row.sizeKey,
+                status: safe,
+              },
+            ],
+          }),
+        }
+      );
+      if (!res.ok) {
+        if (res.status === 404) {
+          console.warn("vendor-combo-pricing status API not found (404); skipping override refresh");
+          return;
+        }
+        throw new Error("Failed to update pricing status");
+      }
+      const rows = await res.json().catch(() => []);
+      const map = {};
+      (Array.isArray(rows) ? rows : []).forEach((r) => {
+        const key = String(r.sizeKey || "default");
+        map[key] = r;
       });
-      if (!res.ok) throw new Error("Failed to update pricing status");
-      setCombo((prev) => ({ ...(prev || {}), pricingStatusPerSize: nextMap }));
+      setVendorOverridesBySize((prev) => ({ ...prev, ...map }));
     } catch (e) {
       console.error("updateStatus error", e);
       alert("Failed to update pricing status");
@@ -145,7 +202,7 @@ export default function MyPackageDetailPage() {
   };
 
   const updatePrice = async (row) => {
-    if (!combo) return;
+    if (!combo || !vendorId) return;
     try {
       const input = window.prompt("Enter price", row.priceValue != null ? String(row.priceValue) : "");
       if (input == null) return;
@@ -156,32 +213,38 @@ export default function MyPackageDetailPage() {
       }
       setSaving(true);
       const id = combo._id?.$oid || combo._id || combo.id;
-      const updated = { ...combo };
-      const items = Array.isArray(updated.items) ? updated.items : [];
-      if (row.sizeKey === "default") {
-        // base price when there is no explicit size variant
-        updated.basePrice = val;
-      }
-      updated.items = items.map((it) => {
-        const vs = Array.isArray(it.variants) ? it.variants : [];
-        if (!vs.length && row.sizeKey === "default") {
-          return { ...it };
+      const res = await fetch(
+        `${API_BASE_URL}/api/vendor-combo-pricing/${encodeURIComponent(
+          String(vendorId)
+        )}/${encodeURIComponent(String(id))}`,
+        {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            overrides: [
+              {
+                sizeKey: row.sizeKey,
+                price: val,
+                status: row.status,
+              },
+            ],
+          }),
         }
-        const nextVs = vs.map((vv) => {
-          const match = (vv.size || null) === (row.sizeKey === "default" ? null : row.sizeKey);
-          if (!match) return vv;
-          return { ...vv, price: val };
-        });
-        return { ...it, variants: nextVs };
+      );
+      if (!res.ok) {
+        if (res.status === 404) {
+          console.warn("vendor-combo-pricing price API not found (404); skipping override refresh");
+          return;
+        }
+        throw new Error("Failed to save price");
+      }
+      const rows = await res.json().catch(() => []);
+      const map = {};
+      (Array.isArray(rows) ? rows : []).forEach((r) => {
+        const key = String(r.sizeKey || "default");
+        map[key] = r;
       });
-      const res = await fetch(`${API_BASE_URL}/api/dummy-combos/${id}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(updated),
-      });
-      if (!res.ok) throw new Error("Failed to save price");
-      const fresh = await res.json().catch(() => updated);
-      setCombo(fresh || updated);
+      setVendorOverridesBySize((prev) => ({ ...prev, ...map }));
     } catch (e) {
       console.error("updatePrice error", e);
       alert("Failed to save price");

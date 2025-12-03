@@ -342,6 +342,50 @@ router.post("/", async (req, res) => {
   }
 });
 
+// GET per-vendor social links (must be before generic :vendorId route)
+router.get("/:vendorId/social-links", async (req, res) => {
+  try {
+    const v = await DummyVendor.findById(req.params.vendorId).lean();
+    if (!v) return res.status(404).json({ success: false, message: "Vendor not found" });
+    const links =
+      v && v.socialLinks && typeof v.socialLinks === "object" && v.socialLinks !== null
+        ? v.socialLinks
+        : {};
+    return res.json({ success: true, socialLinks: links });
+  } catch (err) {
+    console.error("GET /dummy-vendors/:vendorId/social-links error:", err);
+    return res.status(500).json({ success: false, message: "Server error" });
+  }
+});
+
+// PUT per-vendor social links
+// PUT /api/dummy-vendors/:vendorId/social-links
+// Body: { socialLinks: { [handle]: url } }
+router.put("/:vendorId/social-links", async (req, res) => {
+  try {
+    const { vendorId } = req.params;
+    const raw = req.body && req.body.socialLinks ? req.body.socialLinks : {};
+    const cleaned = {};
+    if (raw && typeof raw === "object") {
+      Object.keys(raw).forEach((k) => {
+        const key = String(k || "").trim();
+        if (!key) return;
+        const val = raw[k];
+        const s = val == null ? "" : String(val);
+        cleaned[key] = s.trim();
+      });
+    }
+    const vdoc = await DummyVendor.findById(vendorId);
+    if (!vdoc) return res.status(404).json({ success: false, message: "Vendor not found" });
+    vdoc.socialLinks = cleaned;
+    await vdoc.save();
+    return res.json({ success: true, socialLinks: vdoc.socialLinks || {} });
+  } catch (err) {
+    console.error("PUT /dummy-vendors/:vendorId/social-links error:", err);
+    return res.status(500).json({ success: false, message: "Server error" });
+  }
+});
+
 // GET single dummy vendor
 router.get("/:vendorId", async (req, res) => {
   try {
@@ -413,7 +457,7 @@ router.put("/:vendorId", async (req, res) => {
       const existing = (vdoc.inventorySelections && typeof vdoc.inventorySelections === 'object') ? vdoc.inventorySelections : {};
       vdoc.inventorySelections = { ...existing, ...update.inventorySelections };
       // Allow updating a few other simple fields too
-      ["businessName","contactName","phone","status","location","businessHours","profilePictures","rowImages"].forEach((k) => {
+      ["businessName","contactName","phone","status","location","businessHours","profilePictures","rowImages","socialLinks"].forEach((k) => {
         if (update[k] !== undefined) vdoc[k] = update[k];
       });
       // If profilePictures provided, delete removed S3 objects

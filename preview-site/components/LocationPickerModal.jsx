@@ -32,38 +32,41 @@ export default function LocationPickerModal({
 }) {
   const defaultPos = [13.0827, 80.2707]; // Chennai fallback
   const [markerPos, setMarkerPos] = useState(initialPosition || defaultPos);
-  const [selectedPos, setSelectedPos] = useState(null);
+  const [selectedPos, setSelectedPos] = useState(null); // [lat, lng]
+  const [selectedLabel, setSelectedLabel] = useState(""); // area, city text
 
   useEffect(() => {
     if (!show) return;
     setMarkerPos(initialPosition ? [...initialPosition] : [...defaultPos]);
     setSelectedPos(null);
+    setSelectedLabel("");
   }, [show, initialPosition]);
 
   if (!show) return null;
 
   const handleSave = async () => {
-  if (!selectedLocation) {
-    alert("Please click 'Select Location' first.");
-    return;
-  }
-  setIsSaving(true);
-  try {
-    const { lat, lng } = selectedLocation;
-    const res = await axios.put(`${API_BASE_URL}/api/vendors/${vendorId}/location`, { lat, lng });
+    try {
+      if (!Array.isArray(selectedPos) || selectedPos.length !== 2) {
+        alert("Please click 'Select Location' first.");
+        return;
+      }
+      const [lat, lng] = selectedPos;
+      if (typeof lat !== "number" || typeof lng !== "number") {
+        alert("Please click 'Select Location' first.");
+        return;
+      }
 
-    // Send **backend returned location**, not just selectedLocation
-    if (onLocationSave) {
-      onLocationSave(res.data.location);
+      if (typeof onSave === "function") {
+        await onSave({ lat, lng, label: selectedLabel || "" });
+      }
+
+      if (typeof onClose === "function") {
+        onClose();
+      }
+    } catch (err) {
+      console.error("LocationPickerModal save error", err);
     }
-    onClose();
-  } catch (err) {
-    console.error("Failed to save location", err);
-    alert("Failed to save location.");
-  } finally {
-    setIsSaving(false);
-  }
-};
+  };
 
 
   return (
@@ -79,12 +82,8 @@ export default function LocationPickerModal({
       }}
     >
       <div style={{ width: "92%", maxWidth: 900, height: "80%", background: "#fff", borderRadius: 12, overflow: "hidden", display: "flex", flexDirection: "column" }}>
-        <div style={{ padding: 12, borderBottom: "1px solid #eee", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+        <div style={{ padding: 12, borderBottom: "1px solid #eee", display: "flex", justifyContent: "flex-start", alignItems: "center" }}>
           <h3 style={{ margin: 0 }}>{title}</h3>
-          <div>
-            <button onClick={onClose} style={{ marginRight: 8, padding: "6px 10px" }}>Cancel</button>
-            <button onClick={handleSave} style={{ padding: "6px 10px", background: "#16a34a", color: "#fff", border: "none", borderRadius: 6 }}>Save</button>
-          </div>
         </div>
 
         <div style={{ flex: 1, position: "relative" }}>
@@ -113,7 +112,37 @@ export default function LocationPickerModal({
 
             <div>
               <button
-                onClick={() => setSelectedPos([...markerPos])}
+                onClick={async () => {
+                  try {
+                    const [lat, lng] = markerPos || [];
+                    const plat = Number(lat);
+                    const plng = Number(lng);
+                    if (!Number.isFinite(plat) || !Number.isFinite(plng)) {
+                      return;
+                    }
+
+                    setSelectedPos([plat, plng]);
+                    setSelectedLabel("");
+
+                    const url = `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${plat}&lon=${plng}`;
+                    const res = await fetch(url, {
+                      headers: {
+                        Accept: "application/json",
+                        "User-Agent": "preview-location-picker",
+                      },
+                    });
+                    if (!res.ok) {
+                      throw new Error(`Reverse geocode HTTP ${res.status}`);
+                    }
+                    const data = await res.json().catch(() => ({}));
+                    const area = data.address?.suburb || data.address?.neighbourhood || "";
+                    const city = data.address?.city || data.address?.town || data.address?.village || "";
+                    const combined = [area, city].filter(Boolean).join(", ");
+                    setSelectedLabel(combined || "");
+                  } catch (err) {
+                    console.warn("Reverse geocode failed", err?.message || err);
+                  }
+                }}
                 style={{ padding: "6px 10px", borderRadius: 6, border: "none", background: "#00AEEF", color: "#fff", cursor: "pointer" }}
               >
                 Select Location
@@ -122,7 +151,13 @@ export default function LocationPickerModal({
 
             <div style={{ marginLeft: "auto" }}>
               <small>Selected:</small>
-              <div>{selectedPos ? `${selectedPos[0].toFixed(6)}, ${selectedPos[1].toFixed(6)}` : "—"}</div>
+              <div>
+                {selectedPos
+                  ? (selectedLabel && selectedLabel.trim()
+                      ? selectedLabel
+                      : `${selectedPos[0].toFixed(6)}, ${selectedPos[1].toFixed(6)}`)
+                  : "—"}
+              </div>
             </div>
           </div>
 

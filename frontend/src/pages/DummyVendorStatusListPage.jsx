@@ -36,6 +36,13 @@ export default function DummyVendorStatusListPage() {
   const [showStatusModal, setShowStatusModal] = useState(false);
   const [statusSaving, setStatusSaving] = useState(false);
   const [newStatus, setNewStatus] = useState("Waiting for Approval");
+  const [showSocialHandlesModal, setShowSocialHandlesModal] = useState(false);
+  const [categorySocialHandles, setCategorySocialHandles] = useState([]);
+  const [socialHandlesLoading, setSocialHandlesLoading] = useState(false);
+  const [socialHandlesError, setSocialHandlesError] = useState("");
+  const [socialHandleIcons, setSocialHandleIcons] = useState({}); // normalized name -> iconUrl
+  const [vendorSocialLinks, setVendorSocialLinks] = useState({}); // raw { [handleName]: url }
+  const [socialLinksSaving, setSocialLinksSaving] = useState(false);
 
   const applyLocalLocation = (vendorId, location) => {
     setVendors((list) =>
@@ -257,6 +264,83 @@ export default function DummyVendorStatusListPage() {
   useEffect(() => { fetchVendors(); }, [status, categoryId]);
   useEffect(() => { fetchStatusCounts(); }, [categoryId]);
 
+  const normalizeHandle = (v) => {
+    try {
+      return String(v == null ? "" : v)
+        .trim()
+        .toLowerCase()
+        .replace(/[^a-z0-9]/g, "");
+    } catch {
+      return "";
+    }
+  };
+
+  useEffect(() => {
+    const fetchIcons = async () => {
+      try {
+        const res = await axios.get(`${API_PREFIX}/api/masters`, {
+          params: { type: "socialHandle" },
+        });
+        const data = Array.isArray(res.data) ? res.data : [];
+        const map = {};
+        data.forEach((m) => {
+          const name = m && typeof m.name === "string" ? m.name : "";
+          const key = normalizeHandle(name);
+          if (!key) return;
+          const rawUrl = (m && typeof m.imageUrl === "string" ? m.imageUrl : "").trim();
+          if (!rawUrl) return;
+          map[key] = rawUrl; // frontend already talks to backend origin, so rawUrl is fine
+        });
+        setSocialHandleIcons(map);
+      } catch {
+        setSocialHandleIcons({});
+      }
+    };
+    fetchIcons();
+  }, [API_PREFIX]);
+
+  const openSocialHandlesModal = async () => {
+    if (!categoryId) return;
+    const v = vendors.find((x) => x._id === selectedVendorId);
+    if (!v) {
+      alert('Please select a vendor first');
+      return;
+    }
+    setSocialHandlesLoading(true);
+    setSocialHandlesError("");
+    try {
+      const [catRes, linksRes] = await Promise.all([
+        axios.get(`${API_PREFIX}/api/dummy-categories/${categoryId}`),
+        axios.get(`${API_PREFIX}/api/dummy-vendors/${v._id}/social-links`),
+      ]);
+
+      const doc = catRes.data || {};
+      const raw = Array.isArray(doc.socialHandle)
+        ? doc.socialHandle
+        : doc.socialHandle
+        ? [doc.socialHandle]
+        : [];
+      const cleaned = raw
+        .map((v) => (v == null ? "" : String(v)))
+        .map((v) => v.trim())
+        .filter(Boolean);
+      setCategorySocialHandles(cleaned);
+
+      const linksPayload =
+        linksRes.data && typeof linksRes.data.socialLinks === 'object' && linksRes.data.socialLinks !== null
+          ? linksRes.data.socialLinks
+          : {};
+      setVendorSocialLinks(linksPayload);
+      setShowSocialHandlesModal(true);
+    } catch (e) {
+      setCategorySocialHandles([]);
+      setSocialHandlesError(e?.response?.data?.message || "Failed to load social handles");
+      setShowSocialHandlesModal(true);
+    } finally {
+      setSocialHandlesLoading(false);
+    }
+  };
+
   return (
     <div>
       <h2>Vendors - {decodeURIComponent(status || "")} </h2>
@@ -304,6 +388,10 @@ export default function DummyVendorStatusListPage() {
           }}
           style={{ padding: '6px 12px', borderRadius: 6, background: '#f97316', color: '#fff', border: 'none' }}
         >Change Status</button>
+        <button
+          onClick={openSocialHandlesModal}
+          style={{ padding: '6px 12px', borderRadius: 6, background: '#0f766e', color: '#fff', border: 'none' }}
+        >Social Handles</button>
         <button
           onClick={() => {
             const v = vendors.find(x => x._id === selectedVendorId);
@@ -508,6 +596,133 @@ export default function DummyVendorStatusListPage() {
                 disabled={statusSaving}
               >
                 {statusSaving ? 'Saving...' : 'Save'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {showSocialHandlesModal && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(0,0,0,0.45)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 1400,
+          }}
+        >
+          <div
+            style={{
+              background: '#fff',
+              padding: 16,
+              borderRadius: 10,
+              minWidth: 320,
+              maxWidth: 480,
+              width: '90%',
+            }}
+          >
+            <h3 style={{ marginTop: 0, marginBottom: 8 }}>Category Social Handles</h3>
+            {socialHandlesLoading ? (
+              <div>Loading...</div>
+            ) : socialHandlesError ? (
+              <div style={{ color: '#b91c1c', background: '#fee2e2', border: '1px solid #fecaca', padding: 8, borderRadius: 6 }}>
+                {socialHandlesError}
+              </div>
+            ) : categorySocialHandles.length === 0 ? (
+              <div style={{ fontSize: 13, color: '#6b7280' }}>No social handles configured for this category.</div>
+            ) : (
+              <ul style={{ paddingLeft: 0, listStyle: 'none', fontSize: 13, color: '#111827', marginBottom: 12 }}>
+                {categorySocialHandles.map((name, idx) => {
+                  const key = normalizeHandle(name);
+                  const icon = socialHandleIcons[key] || null;
+                  const current = (() => {
+                    if (vendorSocialLinks && typeof vendorSocialLinks === 'object') {
+                      if (vendorSocialLinks[name] != null) return String(vendorSocialLinks[name]);
+                      if (vendorSocialLinks[key] != null) return String(vendorSocialLinks[key]);
+                    }
+                    return '';
+                  })();
+                  return (
+                    <li
+                      key={`${name}-${idx}`}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 8,
+                        marginBottom: 6,
+                      }}
+                    >
+                      {icon && (
+                        <img
+                          src={icon}
+                          alt={name}
+                          style={{ width: 18, height: 18, borderRadius: 4, objectFit: 'cover' }}
+                        />
+                      )}
+                      <span style={{ minWidth: 90 }}>{name}</span>
+                      <input
+                        style={{
+                          flex: 1,
+                          padding: 4,
+                          borderRadius: 4,
+                          border: '1px solid #e5e7eb',
+                          fontSize: 12,
+                        }}
+                        placeholder="Enter link / handle"
+                        value={current}
+                        onChange={(e) => {
+                          const value = e.target.value;
+                          setVendorSocialLinks((prev) => {
+                            const next = { ...(prev || {}) };
+                            next[name] = value;
+                            return next;
+                          });
+                        }}
+                      />
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+            <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 12 }}>
+              <button
+                onClick={() => setShowSocialHandlesModal(false)}
+                style={{ padding: '6px 10px', borderRadius: 6, background: '#e5e7eb', border: 'none' }}
+              >
+                Close
+              </button>
+              <button
+                onClick={async () => {
+                  const v = vendors.find((x) => x._id === selectedVendorId);
+                  if (!v) {
+                    alert('Please select a vendor first');
+                    return;
+                  }
+                  setSocialLinksSaving(true);
+                  try {
+                    const payload = {};
+                    (categorySocialHandles || []).forEach((name) => {
+                      const vlinks = vendorSocialLinks || {};
+                      const val = vlinks[name];
+                      const s = val == null ? '' : String(val).trim();
+                      payload[name] = s;
+                    });
+                    await axios.put(`${API_PREFIX}/api/dummy-vendors/${v._id}/social-links`, {
+                      socialLinks: payload,
+                    });
+                    setShowSocialHandlesModal(false);
+                  } catch (e) {
+                    alert(e?.response?.data?.message || 'Failed to save social links');
+                  } finally {
+                    setSocialLinksSaving(false);
+                  }
+                }}
+                style={{ marginLeft: 8, padding: '6px 10px', borderRadius: 6, background: '#0ea5e9', color: '#fff', border: 'none' }}
+                disabled={socialLinksSaving}
+              >
+                {socialLinksSaving ? 'Saving...' : 'Save'}
               </button>
             </div>
           </div>

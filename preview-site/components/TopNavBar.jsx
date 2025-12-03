@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import { Menu, ChevronDown, User } from "lucide-react";
 import VendorMenuDropdown from "./VendorMenuDropdown";
 
@@ -14,6 +14,7 @@ export default function TopNavBar({
   inventoryLabel = null,
   inventoryLabels = [],
   isInventoryModel = false,
+  categoryTree = null,
   onNavigateMyPricesCombos,
   onNavigateMyPricesNonCombos,
   onNavigateHomeLocation,
@@ -29,6 +30,7 @@ export default function TopNavBar({
   hasPackages = false,
   webMenu = null,
   servicesNavLabel = "Our Services",
+  socialHandles = [],
 }) {
   const [mobile, setMobile] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -63,6 +65,36 @@ export default function TopNavBar({
   const effectiveServices = hasPackages
     ? ["Packages", ...services]
     : services;
+
+  const firstLevelSubcategoryLabels = useMemo(() => {
+    try {
+      const children = Array.isArray(categoryTree?.children)
+        ? categoryTree.children
+        : [];
+      const out = [];
+      const seen = new Set();
+      children.forEach((n) => {
+        const name =
+          (n && typeof n.name === "string" ? n.name.trim() : "") || "";
+        const key = name.toLowerCase();
+        if (name && !seen.has(key)) {
+          seen.add(key);
+          out.push(name);
+        }
+      });
+
+      if (hasPackages) {
+        const pkgKey = "packages";
+        if (!seen.has(pkgKey)) {
+          out.unshift("Packages");
+        }
+      }
+
+      return out;
+    } catch {
+      return [];
+    }
+  }, [categoryTree, hasPackages]);
 
   const scrollToSection = (id) => {
     try {
@@ -412,38 +444,23 @@ export default function TopNavBar({
                 </span>
               </div>
             ) : (
-              <div
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 6,
-                }}
-              >
-                <VendorMenuDropdown
-                  vendor={vendor}
-                  hasCombos={hasPackages || hasCombos}
-                  inventoryLabel={inventoryLabel}
-                  inventoryLabels={inventoryLabels}
-                  isInventoryModel={isInventoryModel}
-                  avatarLetter={avatarLetter}
-                  onNavigateMyPricesCombos={onNavigateMyPricesCombos}
-                  onNavigateMyPricesNonCombos={onNavigateMyPricesNonCombos}
-                  onNavigateHomeLocation={onNavigateHomeLocation}
-                  onNavigateBusinessLocation={onNavigateBusinessLocation}
-                  onNavigateBusinessHours={onNavigateBusinessHours}
-                  onNavigateInventory={onNavigateInventory}
-                  servicesForMyPrices={effectiveServices}
-                />
-                <span
-                  style={{
-                    fontSize: 12,
-                    fontWeight: 500,
-                    color: "#6b7280",
-                  }}
-                >
-                  My Profile
-                </span>
-              </div>
+              <VendorMenuDropdown
+                vendor={vendor}
+                hasCombos={hasPackages || hasCombos}
+                inventoryLabel={inventoryLabel}
+                inventoryLabels={inventoryLabels}
+                isInventoryModel={isInventoryModel}
+                avatarLetter={avatarLetter}
+                onNavigateMyPricesCombos={onNavigateMyPricesCombos}
+                onNavigateMyPricesNonCombos={onNavigateMyPricesNonCombos}
+                onNavigateHomeLocation={onNavigateHomeLocation}
+                onNavigateBusinessLocation={onNavigateBusinessLocation}
+                onNavigateBusinessHours={onNavigateBusinessHours}
+                onNavigateInventory={onNavigateInventory}
+                servicesForMyPrices={firstLevelSubcategoryLabels}
+                activeServicesForMyPrices={effectiveServices}
+                socialHandles={socialHandles}
+              />
             )}
           </nav>
         )}
@@ -519,51 +536,7 @@ export default function TopNavBar({
               overflowY: "auto",
             }}
           >
-            {identityLoggedIn && identityRole === "vendor" && (
-              <div
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "space-between",
-                  marginBottom: 12,
-                }}
-              >
-                <div
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 8,
-                  }}
-                >
-                  <VendorMenuDropdown
-                    vendor={vendor}
-                    hasCombos={hasPackages || hasCombos}
-                    inventoryLabel={inventoryLabel}
-                    inventoryLabels={inventoryLabels}
-                    isInventoryModel={isInventoryModel}
-                    avatarLetter={avatarLetter}
-                    onNavigateMyPricesCombos={onNavigateMyPricesCombos}
-                    onNavigateMyPricesNonCombos={onNavigateMyPricesNonCombos}
-                    onNavigateHomeLocation={onNavigateHomeLocation}
-                    onNavigateBusinessLocation={onNavigateBusinessLocation}
-                    onNavigateBusinessHours={onNavigateBusinessHours}
-                    onNavigateInventory={onNavigateInventory}
-                    servicesForMyPrices={effectiveServices}
-                  />
-                  <span
-                    style={{
-                      fontSize: 14,
-                      fontWeight: 500,
-                      color: "#111827",
-                    }}
-                  >
-                    My Profile
-                  </span>
-                </div>
-              </div>
-            )}
-
-            {menuItems.map((label) => {
+            {menuItems.map((label, idx) => {
               const key = String(label).toLowerCase();
               const servicesKey = String(servicesNavLabel || "").toLowerCase();
 
@@ -643,6 +616,8 @@ export default function TopNavBar({
               }
 
               const target = getTargetForLabel(label);
+              const showVendorOnRow =
+                idx === 0 && identityLoggedIn && identityRole === "vendor";
 
               return (
                 <div
@@ -654,15 +629,45 @@ export default function TopNavBar({
                     justifyContent: "space-between",
                     fontSize: 18,
                     fontWeight: 600,
-                    cursor: "pointer",
                     borderBottom: "1px solid #e5e7eb",
                   }}
-                  onClick={() => {
-                    scrollToSection(target);
-                    setMenuOpen(false);
-                  }}
                 >
-                  <span>{label}</span>
+                  <span
+                    style={{ cursor: "pointer" }}
+                    onClick={() => {
+                      scrollToSection(target);
+                      setMenuOpen(false);
+                    }}
+                  >
+                    {label}
+                  </span>
+                  {showVendorOnRow && (
+                    <div
+                      style={{ marginLeft: 8 }}
+                      onClick={(e) => {
+                        // Prevent Home row click from firing when tapping the profile icon
+                        e.stopPropagation();
+                      }}
+                    >
+                      <VendorMenuDropdown
+                        vendor={vendor}
+                        hasCombos={hasPackages || hasCombos}
+                        inventoryLabel={inventoryLabel}
+                        inventoryLabels={inventoryLabels}
+                        isInventoryModel={isInventoryModel}
+                        avatarLetter={avatarLetter}
+                        onNavigateMyPricesCombos={onNavigateMyPricesCombos}
+                        onNavigateMyPricesNonCombos={onNavigateMyPricesNonCombos}
+                        onNavigateHomeLocation={onNavigateHomeLocation}
+                        onNavigateBusinessLocation={onNavigateBusinessLocation}
+                        onNavigateBusinessHours={onNavigateBusinessHours}
+                        onNavigateInventory={onNavigateInventory}
+                        servicesForMyPrices={firstLevelSubcategoryLabels}
+                        activeServicesForMyPrices={effectiveServices}
+                        socialHandles={socialHandles}
+                      />
+                    </div>
+                  )}
                 </div>
               );
             })}

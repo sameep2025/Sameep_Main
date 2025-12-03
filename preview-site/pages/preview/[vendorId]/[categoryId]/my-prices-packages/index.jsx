@@ -13,6 +13,7 @@ export default function MyPackagesListPage() {
   const [combos, setCombos] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [vendorOverrides, setVendorOverrides] = useState({}); // key: `${comboId}|${sizeKey}` -> { price, status }
 
   useEffect(() => {
     if (!categoryId) return;
@@ -37,15 +38,47 @@ export default function MyPackagesListPage() {
           } catch {}
         }
         setCombos(arr);
+
+        // Fetch vendor-specific overrides for all combos in this category
+        if (vendorId) {
+          try {
+            const ovRes = await fetch(
+              `${API_BASE_URL}/api/vendor-combo-pricing/${encodeURIComponent(
+                String(vendorId)
+              )}?categoryId=${encodeURIComponent(String(categoryId))}`
+            );
+            if (ovRes.ok) {
+              const rows = await ovRes.json().catch(() => []);
+              const map = {};
+              (Array.isArray(rows) ? rows : []).forEach((r) => {
+                const cid = String(r.comboId || "");
+                const sk = String(r.sizeKey || "default");
+                if (!cid) return;
+                map[`${cid}|${sk}`] = {
+                  price: typeof r.price === "number" ? r.price : null,
+                  status: r.status || "Inactive",
+                };
+              });
+              setVendorOverrides(map);
+            } else {
+              setVendorOverrides({});
+            }
+          } catch {
+            setVendorOverrides({});
+          }
+        } else {
+          setVendorOverrides({});
+        }
       } catch (e) {
         console.error("MyPackagesListPage combos error", e);
         setError(e?.message || "Failed to load packages");
         setCombos([]);
+        setVendorOverrides({});
       } finally {
         setLoading(false);
       }
     })();
-  }, [categoryId]);
+  }, [categoryId, vendorId]);
 
   const comboRows = useMemo(() => {
     try {
@@ -101,20 +134,32 @@ export default function MyPackagesListPage() {
               : base != null && !Number.isNaN(base)
               ? base
               : null;
-          const priceText = priceValue != null ? `₹${priceValue}` : "—";
           const comboId = combo._id?.$oid || combo._id || combo.id;
           const sizeKey = sz || "default";
+          const ovKey = `${comboId}|${sizeKey}`;
+          const override = vendorOverrides[ovKey];
+          const overridePrice =
+            override && override.price != null && !Number.isNaN(override.price)
+              ? override.price
+              : null;
+          const finalPriceValue =
+            overridePrice != null ? overridePrice : priceValue;
+          const priceText =
+            finalPriceValue != null && !Number.isNaN(finalPriceValue)
+              ? `₹${finalPriceValue}`
+              : "—";
           const baseStatus =
             combo.pricingStatusPerSize &&
             typeof combo.pricingStatusPerSize === "object"
               ? combo.pricingStatusPerSize[sizeKey] || "Inactive"
               : "Inactive";
+          const finalStatus = override?.status || baseStatus || "Inactive";
           out.push({
             comboId,
             comboName,
             size: sz || "Default",
             priceText,
-            status: baseStatus,
+            status: finalStatus,
             services: allItemsLabel,
           });
         });
@@ -123,7 +168,7 @@ export default function MyPackagesListPage() {
     } catch {
       return [];
     }
-  }, [combos]);
+  }, [combos, vendorOverrides]);
 
   const handleOpenCombo = (comboId) => {
     try {

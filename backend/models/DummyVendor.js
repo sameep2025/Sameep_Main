@@ -41,6 +41,9 @@ const dummyVendorSchema = new mongoose.Schema({
   // { [nodeId: string]: 'Active' | 'Inactive' }
   nodePricingStatus: { type: Object, default: {} },
 
+  // Per-vendor social links keyed by handle name, e.g. { website, instagram, facebook, youtube, linkedin, twitter }
+  socialLinks: { type: Object, default: {} },
+
   // Custom fields for preview Home section (Add-On Text)
   customFields: {
     freeText1: { type: String, default: "" }, // Heading

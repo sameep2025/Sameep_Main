@@ -3,6 +3,7 @@ import React, { useState, useEffect, useCallback, useMemo, useRef } from "react"
 
 import { useRouter } from "next/router";
 import Head from "next/head";
+import dynamic from "next/dynamic";
 import TopNavBar from "../../../components/TopNavBar";
 import HomeSection from "../../../components/HomeSection";
 import BenefitsSection from "../../../components/BenefitsSection";
@@ -11,6 +12,10 @@ import ContactSection from "../../../components/ContactSection";
 import Footer from "../../../components/Footer";
 import FullPageShimmer from "../../../components/FullPageShimmer";
 import API_BASE_URL, { ASSET_BASE_URL } from "../../../config";
+
+const LocationPickerModal = dynamic(() => import("../../../components/LocationPickerModal"), { ssr: false });
+const BusinessLocationModal = dynamic(() => import("../../../components/BusinessLocationModal"), { ssr: false });
+const BusinessHoursModal = dynamic(() => import("../../../components/BusinessHoursModal"), { ssr: false });
 
 export default function PreviewPage() {
   console.log("DRIVING PREVIEW PAGE LOADED (TOP)");
@@ -26,6 +31,9 @@ export default function PreviewPage() {
   const [error, setError] = useState("");
   const [selectedLeaf, setSelectedLeaf] = useState(null);
   const [location, setLocation] = useState(null);
+  const [showHomeLocationModal, setShowHomeLocationModal] = useState(false);
+  const [showBusinessLocationModal, setShowBusinessLocationModal] = useState(false);
+  const [showBusinessHoursModal, setShowBusinessHoursModal] = useState(false);
   const [cardSelections, setCardSelections] = useState({});
   const [nodeSelections, setNodeSelections] = useState({});
   // Attribute filter bar state (driven by uiConfig.attributesBar)
@@ -38,6 +46,7 @@ export default function PreviewPage() {
   const [webMenu, setWebMenu] = useState([]);
   const [servicesNavLabel, setServicesNavLabel] = useState("Our Services");
   const [isInventoryModel, setIsInventoryModel] = useState(false);
+  const [vendorComboOverrides, setVendorComboOverrides] = useState({}); // { `${comboId}|${sizeKey}`: { price, status } }
   const [packageSelections, setPackageSelections] = useState({}); // { [idx]: { size: string|null } }
   const [invImgIdx, setInvImgIdx] = useState({}); // { [targetId]: number }
   const [heroTitle, setHeroTitle] = useState(null);
@@ -63,6 +72,7 @@ export default function PreviewPage() {
   const [showLinkedModal, setShowLinkedModal] = useState(false); // inventory popup visibility
   const [draftSelections, setDraftSelections] = useState({}); // cascade selector draft per family
   const [editingItemKey, setEditingItemKey] = useState(null); // currently edited inventory row key
+  const [socialHandles, setSocialHandles] = useState([]);
 
   // OTP flow state for preview booking (country code + mobile + OTP)
   const [showOtpModal, setShowOtpModal] = useState(false);
@@ -124,6 +134,45 @@ export default function PreviewPage() {
     } catch {}
     return "Explore our products and services with a quick login.";
   })();
+
+  // Fetch vendor-specific combo pricing overrides for this vendor & category
+  useEffect(() => {
+    try {
+      if (!vendorId || !categoryId) {
+        setVendorComboOverrides({});
+        return;
+      }
+      (async () => {
+        try {
+          const res = await fetch(
+            `${API_BASE_URL}/api/vendor-combo-pricing/${encodeURIComponent(
+              String(vendorId)
+            )}?categoryId=${encodeURIComponent(String(categoryId))}`
+          );
+          if (!res.ok) {
+            setVendorComboOverrides({});
+            return;
+          }
+          const rows = await res.json().catch(() => []);
+          const map = {};
+          (Array.isArray(rows) ? rows : []).forEach((r) => {
+            const cid = String(r.comboId || "");
+            const sk = String(r.sizeKey || "default");
+            if (!cid) return;
+            map[`${cid}|${sk}`] = {
+              price: typeof r.price === "number" ? r.price : null,
+              status: r.status || "Inactive",
+            };
+          });
+          setVendorComboOverrides(map);
+        } catch {
+          setVendorComboOverrides({});
+        }
+      })();
+    } catch {
+      setVendorComboOverrides({});
+    }
+  }, [vendorId, categoryId]);
 
   // Fetch country codes when OTP modal is opened the first time
   useEffect(() => {
@@ -958,6 +1007,20 @@ export default function PreviewPage() {
               setPackagesAddon(null);
             }
             try {
+              const rawSocial = Array.isArray(wmJson?.socialHandle)
+                ? wmJson.socialHandle
+                : wmJson?.socialHandle
+                ? [wmJson.socialHandle]
+                : [];
+              const cleanedSocial = rawSocial
+                .map((v) => (v == null ? "" : String(v)))
+                .map((v) => v.trim())
+                .filter(Boolean);
+              setSocialHandles(cleanedSocial);
+            } catch {
+              setSocialHandles([]);
+            }
+            try {
               const rawInvLabel = typeof wmJson?.inventoryLabelName === 'string' ? wmJson.inventoryLabelName : '';
               const invTrim = rawInvLabel.trim();
               setInventoryLabelName(invTrim || null);
@@ -1286,8 +1349,18 @@ export default function PreviewPage() {
             setCombos(Array.isArray(combosData) ? combosData : []);
           } catch { setCombos([]); }
 
-          if (locationData?.success) setLocation(locationData.location);
-          else if (vendorData.location) setLocation(vendorData.location);
+          if (locationData) {
+            if (locationData.location) {
+              setLocation(locationData.location);
+            } else if (
+              typeof locationData.lat === "number" ||
+              typeof locationData.lng === "number"
+            ) {
+              setLocation(locationData);
+            }
+          } else if (vendorData.location) {
+            setLocation(vendorData.location);
+          }
         }
       }
     } catch (err) {
@@ -1915,12 +1988,12 @@ export default function PreviewPage() {
                     const attrAwarePrice = refined.length ? minPriceForList(refined) : null;
                     const fallback = pickBaselinePrice();
                     const resolvedPrice = (attrAwarePrice != null) ? attrAwarePrice : fallback;
-                    if (resolvedPrice == null) return null;
+                    if (resolvedPrice == null || Number(resolvedPrice) === 0) return null;
                     return (<p className="unified-price">₹ {resolvedPrice}</p>);
                   }
 
                   const resolvedPrice = pickBaselinePrice();
-                  if (resolvedPrice == null) return null;
+                  if (resolvedPrice == null || Number(resolvedPrice) === 0) return null;
                   return (<p className="unified-price">₹ {resolvedPrice}</p>);
                 } catch { return null; }
               })()}
@@ -2047,9 +2120,17 @@ export default function PreviewPage() {
                     try {
                       const pbr = entry && entry.pricesByRow && typeof entry.pricesByRow === 'object' ? entry.pricesByRow : null;
                       if (!pbr) return false;
-                      for (const [rk] of Object.entries(pbr)) {
+                      for (const rk of Object.keys(pbr)) {
                         const parts = String(rk).split('|');
-                        if (targetIds.some((tid) => tid && parts.some((id) => String(id) === tid))) return true;
+                        const matchesIds = targetIds.some(
+                          (tid) => tid && parts.some((id) => String(id) === tid)
+                        );
+                        if (!matchesIds) continue;
+                        // Only treat this row as a match if its pricing status is Active
+                        if (typeof rowPricingIsActive === 'function' && !rowPricingIsActive(entry, rk)) {
+                          continue;
+                        }
+                        return true;
                       }
                       return false;
                     } catch { return false; }
@@ -4027,23 +4108,82 @@ export default function PreviewPage() {
     } catch {}
   };
 
+  const handleSaveHomeLocation = async (pos) => {
+    try {
+      if (!pos || typeof pos.lat !== "number" || typeof pos.lng !== "number") return;
+      if (!vendorId) return;
+
+      const areaCity = typeof pos.label === "string" ? pos.label.trim() : "";
+
+      const res = await fetch(`${API_BASE_URL}/api/vendors/${vendorId}/location`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ lat: pos.lat, lng: pos.lng, areaCity, address: areaCity }),
+      });
+
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data || !data.location) {
+        alert("Failed to save location");
+        return;
+      }
+
+      const mergedLocation = {
+        ...(data.location || {}),
+        lat: pos.lat,
+        lng: pos.lng,
+        ...(areaCity ? { areaCity, address: areaCity } : {}),
+      };
+
+      setLocation(mergedLocation);
+      setVendor((prev) => (prev ? { ...prev, location: mergedLocation } : prev));
+
+      // Best-effort sync to dummy-vendor location so DummyVendorStatusListPage table reflects the same home location
+      (async () => {
+        try {
+          let nearbyLocations = [];
+          try {
+            const cur = await fetch(`${API_BASE_URL}/api/dummy-vendors/${vendorId}/location`);
+            const curJson = await cur.json().catch(() => ({}));
+            nearbyLocations = curJson?.location?.nearbyLocations || [];
+          } catch {}
+
+          await fetch(`${API_BASE_URL}/api/dummy-vendors/${vendorId}/location`, {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              lat: pos.lat,
+              lng: pos.lng,
+              nearbyLocations,
+              ...(areaCity ? { areaCity, address: areaCity } : {}),
+            }),
+          });
+        } catch {}
+      })();
+
+      setShowHomeLocationModal(false);
+    } catch (err) {
+      console.error("Error saving home location", err);
+      alert("Error saving location");
+    }
+  };
+
   const handleNavHomeLocation = () => {
     try {
-      if (!Array.isArray(parsedHomeLocations) || !parsedHomeLocations.length) return;
-      const first = parsedHomeLocations[0];
-      console.log("Home Location clicked", first);
+      if (!vendorId) return;
+      setShowHomeLocationModal(true);
     } catch {}
   };
 
   const handleNavBusinessLocation = () => {
     try {
-      if (!location) return;
-      console.log("Business Location clicked", location);
+      if (!vendorId) return;
+      setShowBusinessLocationModal(true);
     } catch {}
   };
 
   const handleNavBusinessHours = () => {
     try {
+      setShowBusinessHoursModal(true);
       const hours = vendor?.businessHours || vendor?.timings || null;
       console.log("Business Hours clicked", hours);
     } catch {}
@@ -4118,6 +4258,7 @@ export default function PreviewPage() {
             hasPackages={hasPackagesForNav}
             webMenu={webMenu}
             servicesNavLabel={servicesNavLabel}
+            socialHandles={socialHandles}
           />
           <HomeSection
             businessName={vendor?.businessName || "Loading..."}
@@ -4229,6 +4370,7 @@ export default function PreviewPage() {
                         return names.join(', ');
                       } catch { return ''; }
                     })();
+                    const comboId = combo._id?.$oid || combo._id || combo.id;
                     const rawSizes = (() => {
                       try {
                         const set = new Set();
@@ -4245,11 +4387,36 @@ export default function PreviewPage() {
                         return Array.from(set);
                       } catch { return []; }
                     })();
+                    const baseStatusMap =
+                      combo && combo.pricingStatusPerSize && typeof combo.pricingStatusPerSize === 'object'
+                        ? combo.pricingStatusPerSize
+                        : {};
+                    const statusMap = (() => {
+                      try {
+                        const out = { ...(baseStatusMap || {}) };
+                        if (vendorComboOverrides && comboId) {
+                          Object.entries(vendorComboOverrides).forEach(([key, ov]) => {
+                            const [cid, sk] = String(key).split('|');
+                            if (String(cid) !== String(comboId)) return;
+                            const status = ov && ov.status ? String(ov.status).trim() : '';
+                            if (!status) return;
+                            out[sk || 'default'] = status;
+                          });
+                        }
+                        return out;
+                      } catch { return baseStatusMap || {}; }
+                    })();
                     // Treat only non-placeholder entries as real combo types for the UI selector
+                    // and hide any size that is explicitly marked as inactive in pricingStatusPerSize.
                     const sizes = rawSizes.filter((s) => {
                       const v = String(s || '').trim();
                       if (!v) return false;
                       if (v === '—' || v.toLowerCase() === 'na' || v.toLowerCase() === 'n/a') return false;
+                      const statusRaw = statusMap[v];
+                      if (statusRaw != null) {
+                        const st = String(statusRaw).trim().toLowerCase();
+                        if (st && st !== 'active') return false;
+                      }
                       return true;
                     });
                     const base = (combo && combo.basePrice != null && combo.basePrice !== '') ? Number(combo.basePrice) : null;
@@ -4257,10 +4424,6 @@ export default function PreviewPage() {
                       ? packageSelections[idx].size
                       : (sizes[0] ?? null);
                     const sizeKey = selectedSize || 'default';
-                    const statusMap =
-                      combo && combo.pricingStatusPerSize && typeof combo.pricingStatusPerSize === 'object'
-                        ? combo.pricingStatusPerSize
-                        : {};
                     const comboStatus = String(statusMap[sizeKey] || 'Inactive').trim().toLowerCase();
                     const priceBySize = (() => {
                       try {
@@ -4281,7 +4444,16 @@ export default function PreviewPage() {
                       } catch { return null; }
                     })();
                     const bestVar = variantPrices.length ? Math.min(...variantPrices) : null;
-                    const price = (priceBySize != null ? priceBySize : (bestVar != null ? bestVar : base));
+                    const vendorOverrideKey = `${comboId}|${sizeKey}`;
+                    const vendorOverride = vendorComboOverrides?.[vendorOverrideKey];
+                    const overridePrice =
+                      vendorOverride && vendorOverride.price != null && !Number.isNaN(vendorOverride.price)
+                        ? vendorOverride.price
+                        : null;
+                    const price =
+                      overridePrice != null
+                        ? overridePrice
+                        : (priceBySize != null ? priceBySize : (bestVar != null ? bestVar : base));
                     const priceNode = (price != null && !Number.isNaN(price)) ? (
                       <div
                         className="font-extrabold text-emerald-600 unified-price"
@@ -4938,7 +5110,71 @@ export default function PreviewPage() {
                 "Mon-Fri: 8:00 AM - 8:00 PM",
             }}
             contact={contact}
+            vendorId={vendorId}
+            socialHandles={socialHandles}
           />
+
+          {showHomeLocationModal && (
+            <LocationPickerModal
+              show={showHomeLocationModal}
+              onClose={() => setShowHomeLocationModal(false)}
+              onSave={handleSaveHomeLocation}
+              initialPosition={(() => {
+                try {
+                  const loc = location || vendor?.location || null;
+                  if (!loc) return null;
+                  const plat = Number(loc.lat);
+                  const plng = Number(loc.lng);
+                  if (Number.isFinite(plat) && Number.isFinite(plng)) {
+                    return [plat, plng];
+                  }
+                  return null;
+                } catch {
+                  return null;
+                }
+              })()}
+              title="Set Home Location"
+            />
+          )}
+
+          {showBusinessHoursModal && vendor && (
+            <BusinessHoursModal
+              show={showBusinessHoursModal}
+              vendor={vendor}
+              onClose={() => setShowBusinessHoursModal(false)}
+              onUpdated={(data) => {
+                try {
+                  const next = data?.businessHours || data?.vendor?.businessHours || null;
+                  if (next) {
+                    setVendor((prev) => (prev ? { ...prev, businessHours: next } : prev));
+                  }
+                } catch {}
+                setShowBusinessHoursModal(false);
+              }}
+            />
+          )}
+
+          {showBusinessLocationModal && (
+            <BusinessLocationModal
+              show={showBusinessLocationModal}
+              onClose={() => setShowBusinessLocationModal(false)}
+              vendorId={vendorId}
+              onUpdated={async () => {
+                try {
+                  const res = await fetch(`${API_BASE_URL}/api/vendors/${vendorId}/location`, { cache: "no-store" });
+                  const data = await res.json().catch(() => ({}));
+                  const loc = data?.location || data || null;
+                  if (loc) {
+                    setLocation(loc);
+                    setVendor((prev) => (prev ? { ...prev, location: loc } : prev));
+                  }
+                } catch (err) {
+                  console.error("Failed to refresh business location", err);
+                }
+                setShowBusinessLocationModal(false);
+              }}
+            />
+          )}
 
           {showLinkedModal && (
             <div

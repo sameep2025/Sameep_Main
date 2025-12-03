@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useEffect, useRef } from "react";
+import API_BASE_URL, { ASSET_BASE_URL } from "../config";
 
 export default function VendorMenuDropdown({
   vendor,
@@ -16,10 +17,19 @@ export default function VendorMenuDropdown({
   onNavigateInventory,
   avatarLetter = "V",
   servicesForMyPrices = [],
+  activeServicesForMyPrices = [],
+  socialHandles = [],
 }) {
   const [open, setOpen] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
   const containerRef = useRef(null);
+  const [socialIcons, setSocialIcons] = useState({}); // normalized handle -> icon URL
+  const [vendorSocialLinks, setVendorSocialLinks] = useState({}); // raw map from API
+  const [editingHandleKey, setEditingHandleKey] = useState(""); // normalized key
+  const [editingHandleLabel, setEditingHandleLabel] = useState(""); // display label
+  const [editingValue, setEditingValue] = useState("");
+  const [savingSocial, setSavingSocial] = useState(false);
+  const [showSocialModal, setShowSocialModal] = useState(false);
 
   useEffect(() => {
     const handleClickOutside = (event) => {
@@ -47,6 +57,75 @@ export default function VendorMenuDropdown({
     return undefined;
   }, []);
 
+  useEffect(() => {
+    const fetchIcons = async () => {
+      try {
+        const res = await fetch(
+          `${API_BASE_URL}/api/masters?type=${encodeURIComponent("socialHandle")}`
+        );
+        if (!res.ok) return;
+        const data = await res.json().catch(() => []);
+        const arr = Array.isArray(data) ? data : [];
+        const map = {};
+        arr.forEach((m) => {
+          const name = m && typeof m.name === "string" ? m.name : "";
+          const key = normalizeHandle(name);
+          if (!key) return;
+          const rawUrl = (m && typeof m.imageUrl === "string" ? m.imageUrl : "").trim();
+          if (!rawUrl) return;
+          const full = rawUrl.startsWith("http")
+            ? rawUrl
+            : `${ASSET_BASE_URL || ""}${rawUrl}`;
+          map[key] = full;
+        });
+        setSocialIcons(map);
+      } catch {
+        setSocialIcons({});
+      }
+    };
+    fetchIcons();
+  }, []);
+
+  useEffect(() => {
+    const fetchVendorSocialLinks = async () => {
+      try {
+        const id = vendor && typeof vendor === "object" ? vendor._id || vendor.vendorId : null;
+        if (!id) {
+          setVendorSocialLinks({});
+          return;
+        }
+        let links = {};
+        try {
+          const res = await fetch(`${API_BASE_URL}/api/dummy-vendors/${id}/social-links`);
+          if (res.ok) {
+            const data = await res.json().catch(() => ({}));
+            if (data && typeof data.socialLinks === "object" && data.socialLinks !== null) {
+              links = data.socialLinks;
+            }
+          }
+        } catch {}
+
+        // Fallback: read from full vendor doc if needed
+        if (!links || Object.keys(links || {}).length === 0) {
+          try {
+            const res2 = await fetch(`${API_BASE_URL}/api/dummy-vendors/${id}`);
+            if (res2.ok) {
+              const doc = await res2.json().catch(() => ({}));
+              if (doc && typeof doc.socialLinks === "object" && doc.socialLinks !== null) {
+                links = doc.socialLinks;
+              }
+            }
+          } catch {}
+        }
+
+        setVendorSocialLinks(links || {});
+      } catch {
+        setVendorSocialLinks({});
+      }
+    };
+    fetchVendorSocialLinks();
+  }, [vendor]);
+
   const businessName = (() => {
     try {
       const raw = vendor && typeof vendor.businessName === "string" ? vendor.businessName : "";
@@ -57,15 +136,70 @@ export default function VendorMenuDropdown({
     }
   })();
 
-  const socialHandles = (() => {
+  const handleSaveSocialLink = async (normKey, label, origKey) => {
+    try {
+      const id = vendor && typeof vendor === "object" ? vendor._id || vendor.vendorId : null;
+      if (!id) return;
+      setSavingSocial(true);
+      const existing = vendorSocialLinks && typeof vendorSocialLinks === "object" ? vendorSocialLinks : {};
+      const next = { ...existing };
+      const val = String(editingValue || "").trim();
+
+      // Update any existing keys whose normalized form matches this handle
+      Object.keys(existing).forEach((k) => {
+        const nk = normalizeHandle(k);
+        if (nk && (nk === normKey || nk === normalizeHandle(label))) {
+          next[k] = val;
+        }
+      });
+
+      if (label) next[label] = val;
+      if (origKey) next[origKey] = val;
+      if (normKey) next[normKey] = val;
+
+      const res = await fetch(`${API_BASE_URL}/api/dummy-vendors/${id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ socialLinks: next }),
+      });
+      if (!res.ok) {
+        const txt = await res.text().catch(() => "");
+        throw new Error(txt || "Failed to save social link");
+      }
+      setVendorSocialLinks(next);
+      setEditingHandleKey("");
+      setEditingHandleLabel("");
+      setEditingValue("");
+      setShowSocialModal(false);
+    } catch (err) {
+      alert((err && err.message) || "Failed to save social link");
+    } finally {
+      setSavingSocial(false);
+    }
+  };
+
+  const normalizeHandle = (v) => {
+    try {
+      return String(v == null ? "" : v)
+        .trim()
+        .toLowerCase()
+        .replace(/[^a-z0-9]/g, "");
+    } catch {
+      return "";
+    }
+  };
+
+  const allSocialHandles = (() => {
     try {
       const v = vendor && typeof vendor === "object" ? vendor : {};
       const base = [
-        { key: "website",   label: "Website",   icon: "🌐",  value: v.website || v.siteUrl || v.url },
-        { key: "whatsapp",  label: "WhatsApp",  icon: "🟢",  value: v.whatsapp || v.whatsApp || v.whatsappNumber },
-        { key: "instagram", label: "Instagram", icon: "📸", value: v.instagram || v.instagramHandle || v.ig },
-        { key: "facebook",  label: "Facebook",  icon: "📘", value: v.facebook || v.fb || v.facebookPage },
-        { key: "youtube",   label: "YouTube",   icon: "▶️", value: v.youtube || v.youtubeChannel },
+        { key: "website",   label: "Website",   value: v.website || v.siteUrl || v.url },
+        { key: "whatsapp",  label: "WhatsApp",  value: v.whatsapp || v.whatsApp || v.whatsappNumber },
+        { key: "instagram", label: "Instagram", value: v.instagram || v.instagramHandle || v.ig },
+        { key: "facebook",  label: "Facebook",  value: v.facebook || v.fb || v.facebookPage },
+        { key: "youtube",   label: "YouTube",   value: v.youtube || v.youtubeChannel },
+        { key: "linkedin",  label: "LinkedIn",  value: v.linkedin || v.linkedIn || v.linkedinUrl },
+        { key: "twitter",   label: "Twitter",   value: v.twitter || v.x || v.twitterHandle },
       ];
       return base.map((item) => {
         const t = item.value == null ? "" : String(item.value).trim();
@@ -73,12 +207,40 @@ export default function VendorMenuDropdown({
       });
     } catch {
       return [
-        { key: "website",   label: "Website",   icon: "🌐",  value: "" },
-        { key: "whatsapp",  label: "WhatsApp",  icon: "🟢",  value: "" },
-        { key: "instagram", label: "Instagram", icon: "📸", value: "" },
-        { key: "facebook",  label: "Facebook",  icon: "📘", value: "" },
-        { key: "youtube",   label: "YouTube",   icon: "▶️", value: "" },
+        { key: "website",   label: "Website",   value: "" },
+        { key: "whatsapp",  label: "WhatsApp",  value: "" },
+        { key: "instagram", label: "Instagram", value: "" },
+        { key: "facebook",  label: "Facebook",  value: "" },
+        { key: "youtube",   label: "YouTube",   value: "" },
+        { key: "linkedin",  label: "LinkedIn",  value: "" },
+        { key: "twitter",   label: "Twitter",   value: "" },
       ];
+    }
+  })();
+
+  const selectedSocialHandles = (() => {
+    try {
+      const base = Array.isArray(allSocialHandles) ? allSocialHandles : [];
+      const selected = Array.isArray(socialHandles) ? socialHandles : [];
+      if (!selected.length) return [];
+
+      const index = new Set(
+        selected
+          .map((v) => normalizeHandle(v))
+          .filter(Boolean)
+      );
+
+      const out = base.filter((item) => {
+        const key = normalizeHandle(item.key);
+        const label = normalizeHandle(item.label);
+        if (!index.size) return false;
+        const match = index.has(key) || index.has(label);
+        return match;
+      });
+
+      return out;
+    } catch {
+      return [];
     }
   })();
 
@@ -133,23 +295,42 @@ export default function VendorMenuDropdown({
           }
         }}
         style={{
-          width: 36,
-          height: 36,
-          borderRadius: "999px",
-          border: "none",
-          backgroundColor: "#10B981", // solid green circle always
-          color: "#FFFFFF",
-          fontSize: 16,
-          fontWeight: 600,
           display: "flex",
+          flexDirection: "column",
           alignItems: "center",
-          justifyContent: "center",
+          gap: 2,
           cursor: "pointer",
-          boxShadow: "0 4px 10px rgba(15,23,42,0.18)",
         }}
         aria-label={businessName}
       >
-        {avatarLetter}
+        <div
+          style={{
+            width: 36,
+            height: 36,
+            borderRadius: "999px",
+            border: "none",
+            backgroundColor: "#10B981", // solid green circle always
+            color: "#FFFFFF",
+            fontSize: 16,
+            fontWeight: 600,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            boxShadow: "0 4px 10px rgba(15,23,42,0.18)",
+          }}
+        >
+          {avatarLetter}
+        </div>
+        <span
+          style={{
+            fontSize: 10,
+            fontWeight: 500,
+            color: "#6b7280",
+            lineHeight: 1.1,
+          }}
+        >
+          My Profile
+        </span>
       </div>
 
       {open && (
@@ -245,6 +426,189 @@ export default function VendorMenuDropdown({
             }}
           />
 
+          {selectedSocialHandles.length > 0 && (
+            <div style={{ marginBottom: 6 }}>
+              {selectedSocialHandles.map((item) => {
+                const nKey = normalizeHandle(item.key || item.label);
+                const nLabel = normalizeHandle(item.label);
+                const iconUrl = socialIcons[nKey] || socialIcons[nLabel] || null;
+                let current = "";
+                try {
+                  const links = vendorSocialLinks && typeof vendorSocialLinks === "object"
+                    ? vendorSocialLinks
+                    : {};
+                  const rawKeys = Object.keys(links);
+                  const directCandidates = [item.label, item.key, nKey];
+                  for (const k of directCandidates) {
+                    if (!k) continue;
+                    if (links[k] != null && String(links[k]).trim() !== "") {
+                      current = String(links[k]);
+                      break;
+                    }
+                  }
+                  if (!current && rawKeys.length) {
+                    const matchKey = rawKeys.find((rk) => {
+                      const nr = normalizeHandle(rk);
+                      return nr && (nr === nKey || nr === nLabel);
+                    });
+                    if (matchKey && links[matchKey] != null) {
+                      current = String(links[matchKey]);
+                    }
+                  }
+                  if (!current && item.value) {
+                    current = String(item.value);
+                  }
+                } catch {}
+                return (
+                  <div
+                    key={item.key}
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 8,
+                      fontSize: 11,
+                      color: "#111827",
+                      marginBottom: 4,
+                      cursor: "pointer",
+                    }}
+                    onClick={() => {
+                      setEditingHandleKey(nKey);
+                      setEditingHandleLabel(item.label || "");
+                      setEditingValue(current);
+                      setShowSocialModal(true);
+                    }}
+                  >
+                    {iconUrl && (
+                      <img
+                        src={iconUrl}
+                        alt={item.label}
+                        style={{ width: 16, height: 16, borderRadius: 4, objectFit: "cover" }}
+                      />
+                    )}
+                    <span style={{ fontWeight: 500 }}>{item.label}</span>
+                    {/* Hide raw URL text in the menu; only show name and icon */}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {showSocialModal && editingHandleKey && (
+            <div
+              style={{
+                position: "fixed",
+                inset: 0,
+                background: "rgba(0,0,0,0.45)",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                zIndex: 3000,
+              }}
+              onClick={() => {
+                if (!savingSocial) {
+                  setShowSocialModal(false);
+                  setEditingHandleKey("");
+                }
+              }}
+            >
+              <div
+                style={{
+                  background: "#fff",
+                  padding: 16,
+                  borderRadius: 12,
+                  minWidth: 260,
+                  maxWidth: 380,
+                  width: "90%",
+                  boxShadow: "0 18px 40px rgba(15,23,42,0.45)",
+                }}
+                onClick={(e) => e.stopPropagation()}
+              >
+                <div
+                  style={{
+                    fontSize: 14,
+                    fontWeight: 600,
+                    marginBottom: 10,
+                    textTransform: "none",
+                  }}
+                >
+                  Edit {editingHandleLabel || editingHandleKey} link
+                </div>
+                <input
+                  style={{
+                    width: "100%",
+                    padding: 8,
+                    borderRadius: 8,
+                    border: "1px solid #e5e7eb",
+                    fontSize: 12,
+                    marginBottom: 12,
+                  }}
+                  placeholder="Enter link / handle"
+                  value={editingValue}
+                  onChange={(e) => setEditingValue(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      handleSaveSocialLink(editingHandleKey, editingHandleLabel, editingHandleLabel);
+                    }
+                  }}
+                />
+                <div
+                  style={{
+                    marginTop: 10,
+                    display: "flex",
+                    justifyContent: "center",
+                    gap: 8,
+                  }}
+                >
+                  <button
+                    type="button"
+                    disabled={savingSocial}
+                    onClick={() => {
+                      if (!savingSocial) {
+                        setShowSocialModal(false);
+                        setEditingHandleKey("");
+                        setEditingHandleLabel("");
+                      }
+                    }}
+                    style={{
+                      padding: "4px 10px",
+                      borderRadius: 999,
+                      border: "none",
+                      cursor: "pointer",
+                      fontSize: 11,
+                      background: "#e0f2fe",
+                      color: "#0369a1",
+                    }}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    disabled={savingSocial}
+                    onClick={() =>
+                      handleSaveSocialLink(
+                        editingHandleKey,
+                        editingHandleLabel,
+                        editingHandleLabel
+                      )
+                    }
+                    style={{
+                      padding: "4px 12px",
+                      borderRadius: 999,
+                      background: "#0ea5e9",
+                      color: "#fff",
+                      border: "none",
+                      cursor: "pointer",
+                      fontSize: 11,
+                    }}
+                  >
+                    {savingSocial ? "Saving..." : "Save"}
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
           {effectiveInventoryLabel && (
             <>
               <div
@@ -327,6 +691,12 @@ export default function VendorMenuDropdown({
                 const label = (svc == null ? "" : String(svc)).trim();
                 if (!label) return null;
                 const key = label.toLowerCase();
+                const isActive = Array.isArray(activeServicesForMyPrices)
+                  ? activeServicesForMyPrices.some((v) => {
+                      const t = (v == null ? "" : String(v)).trim().toLowerCase();
+                      return t === key;
+                    })
+                  : false;
                 const isComboLike =
                   key.includes("package") ||
                   key.includes("combo");
@@ -353,6 +723,20 @@ export default function VendorMenuDropdown({
                     onClick={clickable ? () => handle(label) : undefined}
                   >
                     <span style={{ fontSize: 16, fontWeight: 400 }}>{label}</span>
+                    <span
+                      style={{
+                        marginLeft: 8,
+                        fontSize: 9,
+                        fontWeight: 600,
+                        textTransform: "uppercase",
+                        padding: "2px 6px",
+                        borderRadius: 999,
+                        backgroundColor: isActive ? "#DCFCE7" : "#F3F4F6",
+                        color: isActive ? "#16A34A" : "#6B7280",
+                      }}
+                    >
+                      {isActive ? "Active" : "Inactive"}
+                    </span>
                   </div>
                 );
               })
