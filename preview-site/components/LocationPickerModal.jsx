@@ -1,30 +1,11 @@
 // frontend/src/components/LocationPickerModal.jsx
-import React, { useState, useEffect } from "react";
-import { MapContainer, TileLayer, Marker, useMapEvents } from "react-leaflet";
-import L from "leaflet";
+import React, { useState, useEffect, useRef } from "react";
 import "leaflet/dist/leaflet.css";
-import iconRetinaUrl from "leaflet/dist/images/marker-icon-2x.png";
-import iconUrl from "leaflet/dist/images/marker-icon.png";
-import shadowUrl from "leaflet/dist/images/marker-shadow.png";
-import axios from "axios";
-import API_BASE_URL from "../config";
 
-// Fix default marker icon paths (Leaflet) using bundler-safe ESM imports
-delete L.Icon.Default.prototype._getIconUrl;
-L.Icon.Default.mergeOptions({
-  iconRetinaUrl,
-  iconUrl,
-  shadowUrl,
-});
+// Use plain Leaflet in an imperative way so it works reliably with Next.js
+// production builds without relying on react-leaflet hooks.
 
-function MarkerController({ position, setPosition }) {
-  useMapEvents({
-    click(e) {
-      setPosition([e.latlng.lat, e.latlng.lng]);
-    },
-  });
-  return null;
-}
+const DEFAULT_POS = [13.0827, 80.2707]; // Chennai fallback
 
 export default function LocationPickerModal({
   show,
@@ -33,19 +14,173 @@ export default function LocationPickerModal({
   initialPosition = null, // [lat, lng] or null
   title = "Pick Location",
 }) {
-  const defaultPos = [13.0827, 80.2707]; // Chennai fallback
-  const [markerPos, setMarkerPos] = useState(initialPosition || defaultPos);
+  const containerRef = useRef(null); // DOM node for the map
+  const mapRef = useRef(null); // Leaflet map instance
+  const markerRef = useRef(null); // Leaflet marker instance
+  const leafletRef = useRef(null); // cached Leaflet module
+
+  const [markerPos, setMarkerPos] = useState(
+    Array.isArray(initialPosition) && initialPosition.length === 2
+      ? [...initialPosition]
+      : [...DEFAULT_POS]
+  );
   const [selectedPos, setSelectedPos] = useState(null); // [lat, lng]
   const [selectedLabel, setSelectedLabel] = useState(""); // area, city text
 
+  // Reset position whenever modal is opened or initialPosition changes
   useEffect(() => {
     if (!show) return;
-    setMarkerPos(initialPosition ? [...initialPosition] : [...defaultPos]);
+    const nextPos =
+      Array.isArray(initialPosition) && initialPosition.length === 2
+        ? [...initialPosition]
+        : [...DEFAULT_POS];
+    setMarkerPos(nextPos);
     setSelectedPos(null);
     setSelectedLabel("");
   }, [show, initialPosition]);
 
+  // Initialize Leaflet map once when the modal is shown
+  useEffect(() => {
+    if (!show) return;
+    let cancelled = false;
+
+    const initMap = async () => {
+      try {
+        const LModule = await import("leaflet");
+        const L = LModule.default || LModule;
+        leafletRef.current = L;
+
+        // Fix default icon paths for Leaflet using bundler-resolved URLs
+        try {
+          const iconRetinaUrl = (await import("leaflet/dist/images/marker-icon-2x.png")).default;
+          const iconUrl = (await import("leaflet/dist/images/marker-icon.png")).default;
+          const shadowUrl = (await import("leaflet/dist/images/marker-shadow.png")).default;
+          delete L.Icon.Default.prototype._getIconUrl;
+          L.Icon.Default.mergeOptions({
+            iconRetinaUrl,
+            iconUrl,
+            shadowUrl,
+          });
+        } catch {
+          // If this fails, keep default icons; map will still be usable.
+        }
+
+        if (!containerRef.current || cancelled) return;
+
+        // Destroy any existing map (defensive)
+        if (mapRef.current) {
+          try {
+            mapRef.current.remove();
+          } catch {}
+          mapRef.current = null;
+          markerRef.current = null;
+        }
+
+        const start =
+          Array.isArray(markerPos) && markerPos.length === 2
+            ? markerPos
+            : DEFAULT_POS;
+
+        const map = L.map(containerRef.current).setView(start, 13);
+        mapRef.current = map;
+
+        L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+          attribution:
+            '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+        }).addTo(map);
+
+        const marker = L.marker(start, { draggable: true }).addTo(map);
+        markerRef.current = marker;
+
+        const updateFromLatLng = (latlng) => {
+          if (!latlng) return;
+          const { lat, lng } = latlng;
+          if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
+          setMarkerPos([lat, lng]);
+          setSelectedPos(null);
+          setSelectedLabel("");
+        };
+
+        map.on("click", (e) => {
+          if (cancelled) return;
+          updateFromLatLng(e.latlng);
+          try {
+            marker.setLatLng(e.latlng);
+          } catch {}
+        });
+
+        marker.on("dragend", (e) => {
+          if (cancelled) return;
+          const latlng = e.target.getLatLng();
+          updateFromLatLng(latlng);
+        });
+      } catch (err) {
+        console.error("Failed to initialize Leaflet map", err);
+      }
+    };
+
+    initMap();
+
+    return () => {
+      cancelled = true;
+      if (mapRef.current) {
+        try {
+          mapRef.current.remove();
+        } catch {}
+        mapRef.current = null;
+        markerRef.current = null;
+      }
+    };
+  }, [show]);
+
+  // Keep marker on map in sync when markerPos changes
+  useEffect(() => {
+    if (!show) return;
+    const map = mapRef.current;
+    const marker = markerRef.current;
+    if (!map || !marker) return;
+    try {
+      if (Array.isArray(markerPos) && markerPos.length === 2) {
+        marker.setLatLng(markerPos);
+        // Do not aggressively recenter; this just keeps marker in place.
+      }
+    } catch {}
+  }, [show, markerPos]);
+
   if (!show) return null;
+
+  const handleSelect = async () => {
+    try {
+      if (!Array.isArray(markerPos) || markerPos.length !== 2) return;
+      const [lat, lng] = markerPos;
+      if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
+
+      setSelectedPos([lat, lng]);
+      setSelectedLabel("");
+
+      const url = `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${lat}&lon=${lng}`;
+      const res = await fetch(url, {
+        headers: {
+          Accept: "application/json",
+          "User-Agent": "preview-location-picker",
+        },
+      });
+      if (!res.ok) {
+        throw new Error(`Reverse geocode HTTP ${res.status}`);
+      }
+      const data = await res.json().catch(() => ({}));
+      const area = data.address?.suburb || data.address?.neighbourhood || "";
+      const city =
+        data.address?.city ||
+        data.address?.town ||
+        data.address?.village ||
+        "";
+      const combined = [area, city].filter(Boolean).join(", ");
+      setSelectedLabel(combined || "");
+    } catch (err) {
+      console.warn("Reverse geocode failed", err?.message || err);
+    }
+  };
 
   const handleSave = async () => {
     try {
@@ -54,7 +189,7 @@ export default function LocationPickerModal({
         return;
       }
       const [lat, lng] = selectedPos;
-      if (typeof lat !== "number" || typeof lng !== "number") {
+      if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
         alert("Please click 'Select Location' first.");
         return;
       }
@@ -71,7 +206,6 @@ export default function LocationPickerModal({
     }
   };
 
-
   return (
     <div
       style={{
@@ -84,69 +218,68 @@ export default function LocationPickerModal({
         zIndex: 3000,
       }}
     >
-      <div style={{ width: "92%", maxWidth: 900, height: "80%", background: "#fff", borderRadius: 12, overflow: "hidden", display: "flex", flexDirection: "column" }}>
-        <div style={{ padding: 12, borderBottom: "1px solid #eee", display: "flex", justifyContent: "flex-start", alignItems: "center" }}>
+      <div
+        style={{
+          width: "92%",
+          maxWidth: 900,
+          height: "80%",
+          background: "#fff",
+          borderRadius: 12,
+          overflow: "hidden",
+          display: "flex",
+          flexDirection: "column",
+        }}
+      >
+        <div
+          style={{
+            padding: 12,
+            borderBottom: "1px solid #eee",
+            display: "flex",
+            justifyContent: "flex-start",
+            alignItems: "center",
+          }}
+        >
           <h3 style={{ margin: 0 }}>{title}</h3>
         </div>
 
         <div style={{ flex: 1, position: "relative" }}>
-          <MapContainer center={markerPos} zoom={13} style={{ width: "100%", height: "100%" }}>
-            <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
-            <Marker
-              position={markerPos}
-              draggable
-              eventHandlers={{
-                dragend: (e) => {
-                  const { lat, lng } = e.target.getLatLng();
-                  setMarkerPos([lat, lng]);
-                },
-              }}
-            />
-            <MarkerController position={markerPos} setPosition={setMarkerPos} />
-          </MapContainer>
+          <div
+            ref={containerRef}
+            style={{ width: "100%", height: "100%", background: "#e5e7eb" }}
+          />
         </div>
 
-        <div style={{ padding: 12, borderTop: "1px solid #eee", display: "flex", flexDirection: "column", gap: 8 }}>
+        <div
+          style={{
+            padding: 12,
+            borderTop: "1px solid #eee",
+            display: "flex",
+            flexDirection: "column",
+            gap: 8,
+          }}
+        >
           <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
             <div>
               <strong>Marker (live):</strong>
-              <div>{markerPos?.[0]?.toFixed?.(6) ?? "-"}, {markerPos?.[1]?.toFixed?.(6) ?? "-"}</div>
+              <div>
+                {markerPos?.[0] != null && markerPos?.[1] != null
+                  ? `${Number(markerPos[0]).toFixed(6)}, ${Number(markerPos[1]).toFixed(6)}`
+                  : "-"}
+              </div>
             </div>
 
             <div>
               <button
-                onClick={async () => {
-                  try {
-                    const [lat, lng] = markerPos || [];
-                    const plat = Number(lat);
-                    const plng = Number(lng);
-                    if (!Number.isFinite(plat) || !Number.isFinite(plng)) {
-                      return;
-                    }
-
-                    setSelectedPos([plat, plng]);
-                    setSelectedLabel("");
-
-                    const url = `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${plat}&lon=${plng}`;
-                    const res = await fetch(url, {
-                      headers: {
-                        Accept: "application/json",
-                        "User-Agent": "preview-location-picker",
-                      },
-                    });
-                    if (!res.ok) {
-                      throw new Error(`Reverse geocode HTTP ${res.status}`);
-                    }
-                    const data = await res.json().catch(() => ({}));
-                    const area = data.address?.suburb || data.address?.neighbourhood || "";
-                    const city = data.address?.city || data.address?.town || data.address?.village || "";
-                    const combined = [area, city].filter(Boolean).join(", ");
-                    setSelectedLabel(combined || "");
-                  } catch (err) {
-                    console.warn("Reverse geocode failed", err?.message || err);
-                  }
+                type="button"
+                onClick={handleSelect}
+                style={{
+                  padding: "6px 10px",
+                  borderRadius: 6,
+                  border: "none",
+                  background: "#00AEEF",
+                  color: "#fff",
+                  cursor: "pointer",
                 }}
-                style={{ padding: "6px 10px", borderRadius: 6, border: "none", background: "#00AEEF", color: "#fff", cursor: "pointer" }}
               >
                 Select Location
               </button>
@@ -156,19 +289,40 @@ export default function LocationPickerModal({
               <small>Selected:</small>
               <div>
                 {selectedPos
-                  ? (selectedLabel && selectedLabel.trim()
-                      ? selectedLabel
-                      : `${selectedPos[0].toFixed(6)}, ${selectedPos[1].toFixed(6)}`)
+                  ? selectedLabel && selectedLabel.trim()
+                    ? selectedLabel
+                    : `${selectedPos[0].toFixed(6)}, ${selectedPos[1].toFixed(6)}`
                   : "—"}
               </div>
             </div>
           </div>
 
           <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
-            <button onClick={onClose} style={{ padding: "6px 10px", borderRadius: 6, border: "1px solid #ccc", background: "#fff" }}>
+            <button
+              type="button"
+              onClick={onClose}
+              style={{
+                padding: "6px 10px",
+                borderRadius: 6,
+                border: "1px solid #ccc",
+                background: "#fff",
+                cursor: "pointer",
+              }}
+            >
               Cancel
             </button>
-            <button onClick={handleSave} style={{ padding: "6px 10px", borderRadius: 6, border: "none", background: "#16a34a", color: "#fff" }}>
+            <button
+              type="button"
+              onClick={handleSave}
+              style={{
+                padding: "6px 10px",
+                borderRadius: 6,
+                border: "none",
+                background: "#16a34a",
+                color: "#fff",
+                cursor: "pointer",
+              }}
+            >
               Save Location
             </button>
           </div>
