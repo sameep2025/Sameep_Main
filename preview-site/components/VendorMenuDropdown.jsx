@@ -402,96 +402,7 @@ export default function VendorMenuDropdown({
                 </span>
               </div>
             )}
-            <div
-              style={{
-                marginTop: 6,
-                fontSize: 10,
-                fontWeight: 500,
-                letterSpacing: 0.4,
-                textTransform: "uppercase",
-                color: "#9CA3AF",
-              }}
-            >
-              My Social Handles
-            </div>
           </div>
-
-          <div
-            style={{
-              height: 2,
-              background: "#E5E7EB",
-              margin: "6px 0 8px",
-              opacity: 0.8,
-              borderRadius: 999,
-            }}
-          />
-
-          {selectedSocialHandles.length > 0 && (
-            <div style={{ marginBottom: 6 }}>
-              {selectedSocialHandles.map((item) => {
-                const nKey = normalizeHandle(item.key || item.label);
-                const nLabel = normalizeHandle(item.label);
-                const iconUrl = socialIcons[nKey] || socialIcons[nLabel] || null;
-                let current = "";
-                try {
-                  const links = vendorSocialLinks && typeof vendorSocialLinks === "object"
-                    ? vendorSocialLinks
-                    : {};
-                  const rawKeys = Object.keys(links);
-                  const directCandidates = [item.label, item.key, nKey];
-                  for (const k of directCandidates) {
-                    if (!k) continue;
-                    if (links[k] != null && String(links[k]).trim() !== "") {
-                      current = String(links[k]);
-                      break;
-                    }
-                  }
-                  if (!current && rawKeys.length) {
-                    const matchKey = rawKeys.find((rk) => {
-                      const nr = normalizeHandle(rk);
-                      return nr && (nr === nKey || nr === nLabel);
-                    });
-                    if (matchKey && links[matchKey] != null) {
-                      current = String(links[matchKey]);
-                    }
-                  }
-                  if (!current && item.value) {
-                    current = String(item.value);
-                  }
-                } catch {}
-                return (
-                  <div
-                    key={item.key}
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      gap: 8,
-                      fontSize: 11,
-                      color: "#111827",
-                      marginBottom: 4,
-                      cursor: "pointer",
-                    }}
-                    onClick={() => {
-                      setEditingHandleKey(nKey);
-                      setEditingHandleLabel(item.label || "");
-                      setEditingValue(current);
-                      setShowSocialModal(true);
-                    }}
-                  >
-                    {iconUrl && (
-                      <img
-                        src={iconUrl}
-                        alt={item.label}
-                        style={{ width: 16, height: 16, borderRadius: 4, objectFit: "cover" }}
-                      />
-                    )}
-                    <span style={{ fontWeight: 500 }}>{item.label}</span>
-                    {/* Hide raw URL text in the menu; only show name and icon */}
-                  </div>
-                );
-              })}
-            </div>
-          )}
 
           {showSocialModal && editingHandleKey && (
             <div
@@ -557,12 +468,12 @@ export default function VendorMenuDropdown({
                     marginTop: 10,
                     display: "flex",
                     justifyContent: "center",
-                    gap: 8,
+                    gap: 10,
                   }}
                 >
-                  <button
-                    type="button"
-                    disabled={savingSocial}
+                  <div
+                    role="button"
+                    aria-label="Cancel"
                     onClick={() => {
                       if (!savingSocial) {
                         setShowSocialModal(false);
@@ -571,39 +482,50 @@ export default function VendorMenuDropdown({
                       }
                     }}
                     style={{
-                      padding: "4px 10px",
+                      padding: "4px 12px",
                       borderRadius: 999,
-                      border: "none",
-                      cursor: "pointer",
-                      fontSize: 11,
-                      background: "#e0f2fe",
-                      color: "#0369a1",
+                      border: "1px solid #0ea5e9",
+                      fontSize: 10,
+                      fontWeight: 500,
+                      textTransform: "uppercase",
+                      background: savingSocial ? "#e5e7eb" : "#e0f2fe",
+                      color: savingSocial ? "#9ca3af" : "#0369a1",
+                      cursor: savingSocial ? "default" : "pointer",
+                      minWidth: 70,
+                      textAlign: "center",
+                      letterSpacing: 0.6,
                     }}
                   >
                     Cancel
-                  </button>
-                  <button
-                    type="button"
-                    disabled={savingSocial}
-                    onClick={() =>
+                  </div>
+                  <div
+                    role="button"
+                    aria-label="Save social link"
+                    onClick={() => {
+                      if (savingSocial) return;
                       handleSaveSocialLink(
                         editingHandleKey,
                         editingHandleLabel,
                         editingHandleLabel
-                      )
-                    }
+                      );
+                    }}
                     style={{
-                      padding: "4px 12px",
+                      padding: "4px 14px",
                       borderRadius: 999,
-                      background: "#0ea5e9",
+                      background: savingSocial ? "#93c5fd" : "#0ea5e9",
                       color: "#fff",
-                      border: "none",
-                      cursor: "pointer",
-                      fontSize: 11,
+                      border: "1px solid #0284c7",
+                      fontSize: 10,
+                      fontWeight: 600,
+                      textTransform: "uppercase",
+                      cursor: savingSocial ? "default" : "pointer",
+                      minWidth: 70,
+                      textAlign: "center",
+                      letterSpacing: 0.6,
                     }}
                   >
                     {savingSocial ? "Saving..." : "Save"}
-                  </button>
+                  </div>
                 </div>
               </div>
             </div>
@@ -741,6 +663,101 @@ export default function VendorMenuDropdown({
                 );
               })
             : null}
+
+          <div
+            style={{
+              height: 2,
+              background: "#E5E7EB",
+              margin: "8px 0 6px",
+              opacity: 0.8,
+              borderRadius: 999,
+            }}
+          />
+
+          {selectedSocialHandles.length > 0 && (
+            <>
+              <div
+                style={{
+                  marginBottom: 4,
+                  fontSize: 12,
+                  fontWeight: 600,
+                  letterSpacing: 0.5,
+                  textTransform: "uppercase",
+                  color: "#4B5563",
+                }}
+              >
+                My Social Handles
+              </div>
+              <div style={{ marginBottom: 6 }}>
+                {selectedSocialHandles.map((item) => {
+                  const nKey = normalizeHandle(item.key || item.label);
+                  const nLabel = normalizeHandle(item.label);
+                  const iconUrl = socialIcons[nKey] || socialIcons[nLabel] || null;
+                  let current = "";
+                  try {
+                    const links = vendorSocialLinks && typeof vendorSocialLinks === "object"
+                      ? vendorSocialLinks
+                      : {};
+                    const rawKeys = Object.keys(links);
+                    const directCandidates = [item.label, item.key, nKey];
+                    for (const k of directCandidates) {
+                      if (!k) continue;
+                      if (links[k] != null && String(links[k]).trim() !== "") {
+                        current = String(links[k]);
+                        break;
+                      }
+                    }
+                    if (!current && rawKeys.length) {
+                      const matchKey = rawKeys.find((rk) => {
+                        const nr = normalizeHandle(rk);
+                        return nr && (nr === nKey || nr === nLabel);
+                      });
+                      if (matchKey && links[matchKey] != null) {
+                        current = String(links[matchKey]);
+                      }
+                    }
+                    if (!current && item.value) {
+                      current = String(item.value);
+                    }
+                  } catch {}
+                  return (
+                    <div
+                      key={item.key}
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "flex-start",
+                        width: "100%",
+                        padding: "6px 8px",
+                        borderRadius: 8,
+                        fontSize: 12,
+                        fontWeight: 400,
+                        color: "#111827",
+                        gap: 8,
+                        marginBottom: 4,
+                        cursor: "pointer",
+                      }}
+                      onClick={() => {
+                        setEditingHandleKey(nKey);
+                        setEditingHandleLabel(item.label || "");
+                        setEditingValue(current);
+                        setShowSocialModal(true);
+                      }}
+                    >
+                      {iconUrl && (
+                        <img
+                          src={iconUrl}
+                          alt={item.label}
+                          style={{ width: 16, height: 16, borderRadius: 4, objectFit: "cover" }}
+                        />
+                      )}
+                      <span style={{ fontSize: 16, fontWeight: 400 }}>{item.label}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            </>
+          )}
 
           <div
             style={{
