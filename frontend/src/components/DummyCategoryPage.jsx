@@ -20,6 +20,7 @@ function DummyCategoryPage() {
   const [labelInput, setLabelInput] = useState("");
   const [individualAddon, setIndividualAddon] = useState({ heading: "", description: "", buttonLabel: "" });
   const [packagesAddon, setPackagesAddon] = useState({ heading: "", description: "", buttonLabel: "" });
+  const [attrHeading, setAttrHeading] = useState("");
   const [addonForm, setAddonForm] = useState({
     individualHeading: "",
     individualDescription: "",
@@ -27,6 +28,7 @@ function DummyCategoryPage() {
     packagesHeading: "",
     packagesDescription: "",
     packagesButtonLabel: "",
+    attributesHeading: "",
   });
 
   const toAbs = (u) => {
@@ -94,6 +96,7 @@ function DummyCategoryPage() {
         const hasParent = Boolean(data?.parent || data?.parentId);
         setIsTopParentSubcategory(!hasParent);
         setParentSelectorLabel(typeof data.parentSelectorLabel === 'string' ? data.parentSelectorLabel : "");
+        setAttrHeading(typeof data.attributesHeading === 'string' ? data.attributesHeading : "");
         if (data.individualAddon && typeof data.individualAddon === 'object') {
           setIndividualAddon({
             heading: data.individualAddon.heading || "",
@@ -115,6 +118,7 @@ function DummyCategoryPage() {
       } catch {
         setIsTopParentSubcategory(false);
         setParentSelectorLabel("");
+        setAttrHeading("");
       }
     };
     checkTop();
@@ -186,6 +190,7 @@ function DummyCategoryPage() {
                     packagesHeading: packagesAddon.heading || "",
                     packagesDescription: packagesAddon.description || "",
                     packagesButtonLabel: packagesAddon.buttonLabel || "",
+                    attributesHeading: attrHeading || "",
                   });
                   setShowAddonPopup(true);
                 }}
@@ -393,6 +398,25 @@ function DummyCategoryPage() {
             }}
           >
             <h3 style={{ marginTop: 0, marginBottom: 12 }}>Add On Text</h3>
+            <div style={{ marginBottom: 12 }}>
+              <label style={{ display: "block", fontSize: 14, fontWeight: 500, marginBottom: 4 }}>
+                Attribute heading
+              </label>
+              <input
+                type="text"
+                value={addonForm.attributesHeading}
+                onChange={(e) =>
+                  setAddonForm({ ...addonForm, attributesHeading: e.target.value })
+                }
+                placeholder="e.g., Select model"
+                style={{
+                  width: "100%",
+                  padding: 8,
+                  borderRadius: 6,
+                  border: "1px solid #cbd5e1",
+                }}
+              />
+            </div>
             <div
               style={{
                 display: "grid",
@@ -532,6 +556,7 @@ function DummyCategoryPage() {
                     fd.append("packagesAddonHeading", addonForm.packagesHeading || "");
                     fd.append("packagesAddonDescription", addonForm.packagesDescription || "");
                     fd.append("packagesAddonButtonLabel", addonForm.packagesButtonLabel || "");
+                    fd.append("attributesHeading", addonForm.attributesHeading || "");
 
                     await fetch(`${API_BASE_URL}/api/dummy-categories/${parentId}`, {
                       method: "PUT",
@@ -548,6 +573,7 @@ function DummyCategoryPage() {
                       description: addonForm.packagesDescription || "",
                       buttonLabel: addonForm.packagesButtonLabel || "",
                     });
+                    setAttrHeading(addonForm.attributesHeading || "");
                     setShowAddonPopup(false);
                   } catch (e) {
                     alert(e?.message || "Failed to save add-on text");
