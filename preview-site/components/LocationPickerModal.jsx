@@ -50,20 +50,14 @@ export default function LocationPickerModal({
         const L = LModule.default || LModule;
         leafletRef.current = L;
 
-        // Fix default icon paths for Leaflet using bundler-resolved URLs
-        try {
-          const iconRetinaUrl = (await import("leaflet/dist/images/marker-icon-2x.png")).default;
-          const iconUrl = (await import("leaflet/dist/images/marker-icon.png")).default;
-          const shadowUrl = (await import("leaflet/dist/images/marker-shadow.png")).default;
-          delete L.Icon.Default.prototype._getIconUrl;
-          L.Icon.Default.mergeOptions({
-            iconRetinaUrl,
-            iconUrl,
-            shadowUrl,
-          });
-        } catch {
-          // If this fails, keep default icons; map will still be usable.
-        }
+        // Use an inline SVG location pin icon so we don't depend on
+        // external marker PNG assets, which can break in some bundles.
+        const icon = L.icon({
+          iconUrl:
+            "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='32' height='32' viewBox='0 0 32 32'%3E%3Cpath d='M16 2C10.8 2 7 5.86 7 11.02c0 3.02 1.77 6.24 3.65 8.98 1.9 2.77 3.9 4.98 4.23 5.34.29.32.7.51 1.13.51.44 0 .85-.19 1.14-.51.33-.36 2.33-2.57 4.23-5.34C23.23 17.26 25 14.04 25 11.02 25 5.86 21.2 2 16 2zm0 5c2.01 0 3.5 1.5 3.5 3.5S18.01 14 16 14s-3.5-1.49-3.5-3.5S13.99 7 16 7z' fill='%23ff4444' stroke='%23ffffff' stroke-width='1.2'/%3E%3C/svg%3E",
+          iconSize: [32, 32],
+          iconAnchor: [16, 30],
+        });
 
         if (!containerRef.current || cancelled) return;
 
@@ -89,7 +83,7 @@ export default function LocationPickerModal({
             '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
         }).addTo(map);
 
-        const marker = L.marker(start, { draggable: true }).addTo(map);
+        const marker = L.marker(start, { draggable: true, icon }).addTo(map);
         markerRef.current = marker;
 
         const updateFromLatLng = (latlng) => {
