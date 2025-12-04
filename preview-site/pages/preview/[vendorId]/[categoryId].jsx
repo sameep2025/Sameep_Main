@@ -408,7 +408,6 @@ export default function PreviewPage() {
   useEffect(() => {
     try {
       if (typeof window === "undefined") return undefined;
-      if (!navIdentity || !navIdentity.loggedIn) return undefined;
 
       const tokenKey = makePreviewTokenKey(vendorId, categoryId);
 
@@ -423,25 +422,75 @@ export default function PreviewPage() {
             body: JSON.stringify({ token }),
           });
 
-          if (!res.ok) return;
+          if (!res.ok) {
+            // If the status endpoint itself fails, be conservative and log out.
+            handleLogout();
+            return;
+          }
+
           const data = await res.json().catch(() => null);
           const status = data && data.status;
-          if (status && status !== "active") {
+          // Any non-active status (no_session, expired, invalid_token, etc.)
+          // should force this tab to log out.
+          if (!status || status !== "active") {
             handleLogout();
           }
         } catch {
-          // ignore errors in background check
+          // On unexpected errors, do nothing; next interval will retry.
         }
       };
 
-      // Run once immediately and then on an interval
+      // Run once immediately and then on a short interval
       checkToken();
-      const id = setInterval(checkToken, 30000);
+      const id = setInterval(checkToken, 5000);
       return () => clearInterval(id);
     } catch {
       return undefined;
     }
-  }, [navIdentity, vendorId, categoryId, makePreviewTokenKey, handleLogout]);
+  }, [vendorId, categoryId, makePreviewTokenKey, handleLogout]);
+
+  // Listen for token changes across tabs/windows. If the preview token for this
+  // vendor/category is changed (e.g., a new login happens elsewhere), this tab
+  // will immediately log out without requiring a manual refresh.
+  useEffect(() => {
+    try {
+      if (typeof window === "undefined") return undefined;
+
+      const tokenKey = makePreviewTokenKey(vendorId, categoryId);
+
+      const onStorage = (event) => {
+        try {
+          if (!event || event.key !== tokenKey) return;
+
+          const newVal = event.newValue;
+
+          // If token for this vendor/category is removed or changed, force logout
+          if (!newVal) {
+            handleLogout();
+            return;
+          }
+
+          // If there was a token in this tab and it has been replaced elsewhere,
+          // also force logout so that only the latest login remains active.
+          const current = window.localStorage.getItem(tokenKey);
+          if (current && current !== newVal) {
+            handleLogout();
+          }
+        } catch {
+          // ignore storage event errors
+        }
+      };
+
+      window.addEventListener("storage", onStorage);
+      return () => {
+        try {
+          window.removeEventListener("storage", onStorage);
+        } catch {}
+      };
+    } catch {
+      return undefined;
+    }
+  }, [vendorId, categoryId, makePreviewTokenKey, handleLogout]);
 
   const handleOpenOtpModal = async () => {
     try {

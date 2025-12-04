@@ -81,113 +81,121 @@ router.post("/admin-impersonate", async (req, res) => {
     if (!/^\d{4}$/.test(code) || code !== expected) {
       return res.status(401).json({ message: "Invalid admin passcode" });
     }
+
     const hours = await getSessionValidityHours(4);
     const now = new Date();
     const expiresAt = new Date(now.getTime() + hours * 60 * 60 * 1000);
 
-    // Log admin impersonation as a login event for the underlying vendor's customer (if available)
+    if (!vendorId) {
+      return res.status(400).json({ message: "vendorId required for admin impersonation" });
+    }
+
+    // Resolve underlying customer for this vendor (or dummy vendor)
+    let customerIdForHistory = null;
+    const vendor = await Vendor.findById(vendorId).lean().catch(() => null);
+    if (vendor && vendor.customerId) {
+      customerIdForHistory = vendor.customerId;
+    } else {
+      const dummyVendor = await DummyVendor.findById(vendorId).lean().catch(() => null);
+      if (dummyVendor && dummyVendor.customerId) {
+        customerIdForHistory = dummyVendor.customerId;
+      }
+    }
+
+    if (!customerIdForHistory) {
+      return res.status(400).json({ message: "No customer linked to this vendor for admin impersonation" });
+    }
+
+    // Expire any existing active LoginHistory rows for this customer first
     try {
-      if (vendorId) {
-        let customerIdForHistory = null;
-        const vendor = await Vendor.findById(vendorId).lean().catch(() => null);
-        if (vendor && vendor.customerId) {
-          customerIdForHistory = vendor.customerId;
+      const activeHist = await LoginHistory.find({ userId: customerIdForHistory, status: "active" });
+      for (const h of activeHist) {
+        if (!h.logoutTime) h.logoutTime = now;
+        h.status = "expired";
+        await h.save();
+      }
+    } catch (histErr) {
+      console.error("Failed to expire existing LoginHistory on admin impersonation:", histErr?.message || histErr);
+    }
+
+    // Terminate ANY existing active sessions for this vendor/category scope,
+    // regardless of which customer originally created them. This ensures that
+    // there is only one active session for this page (vendor+category) at a
+    // time: if admin logs in while a vendor/customer session exists, that
+    // other session is terminated, and vice versa.
+    try {
+      const sessFilter = {
+        isActive: true,
+      };
+      if (vendorId) sessFilter.vendorId = String(vendorId);
+      if (categoryId) sessFilter.categoryId = String(categoryId);
+
+      const activeSess = await Session.find(sessFilter);
+      for (const s of activeSess) {
+        const logoutTime = now;
+        await Session.updateOne({ _id: s._id }, { $set: { isActive: false, expiryTime: logoutTime } });
+
+        const existingHist = await LoginHistory.findOne({
+          userId: customerIdForHistory,
+          loginTime: s.loginTime,
+          expiryTime: s.expiryTime,
+        });
+
+        if (existingHist) {
+          if (!existingHist.logoutTime) existingHist.logoutTime = logoutTime;
+          existingHist.status = "expired";
+          await existingHist.save();
         } else {
-          const dummyVendor = await DummyVendor.findById(vendorId).lean().catch(() => null);
-          if (dummyVendor && dummyVendor.customerId) {
-            customerIdForHistory = dummyVendor.customerId;
-          }
-        }
-
-        if (customerIdForHistory) {
-          // Expire any existing active history rows for this customer first
-          try {
-            const activeHist = await LoginHistory.find({ userId: customerIdForHistory, status: "active" });
-            for (const h of activeHist) {
-              if (!h.logoutTime) h.logoutTime = now;
-              h.status = "expired";
-              await h.save();
-            }
-          } catch (histErr) {
-            console.error("Failed to expire existing LoginHistory on admin impersonation:", histErr?.message || histErr);
-          }
-
-          // Terminate any existing active sessions for this customer in the same vendor/category scope
-          try {
-            const sessFilter = {
-              userId: customerIdForHistory,
-              isActive: true,
-            };
-            if (vendorId) sessFilter.vendorId = String(vendorId);
-            if (categoryId) sessFilter.categoryId = String(categoryId);
-
-            const activeSess = await Session.find(sessFilter);
-            for (const s of activeSess) {
-              const logoutTime = now;
-              await Session.updateOne({ _id: s._id }, { $set: { isActive: false, expiryTime: logoutTime } });
-
-              const existingHist = await LoginHistory.findOne({
-                userId: customerIdForHistory,
-                loginTime: s.loginTime,
-                expiryTime: s.expiryTime,
-              });
-
-              if (existingHist) {
-                if (!existingHist.logoutTime) existingHist.logoutTime = logoutTime;
-                existingHist.status = "expired";
-                await existingHist.save();
-              } else {
-                await LoginHistory.create({
-                  userId: customerIdForHistory,
-                  loginTime: s.loginTime,
-                  expiryTime: s.expiryTime || logoutTime,
-                  logoutTime,
-                  deviceInfo: s.deviceInfo || "",
-                  status: "expired",
-                });
-              }
-            }
-          } catch (sessErr) {
-            console.error("Failed to terminate existing sessions on admin impersonation:", sessErr?.message || sessErr);
-          }
-
           await LoginHistory.create({
             userId: customerIdForHistory,
-            loginTime: now,
-            expiryTime: expiresAt,
-            logoutTime: null,
-            deviceInfo: `Admin impersonation for vendor ${String(vendorId)}`,
-            status: "active",
+            loginTime: s.loginTime,
+            expiryTime: s.expiryTime || logoutTime,
+            logoutTime,
+            deviceInfo: s.deviceInfo || "",
+            status: "expired",
           });
         }
       }
-    } catch (e) {
-      console.error("Failed to record admin impersonation login history:", e?.message || e);
+    } catch (sessErr) {
+      console.error("Failed to terminate existing sessions on admin impersonation:", sessErr?.message || sessErr);
     }
 
+    // Create a new active LoginHistory row for this admin impersonation
+    try {
+      await LoginHistory.create({
+        userId: customerIdForHistory,
+        loginTime: now,
+        expiryTime: expiresAt,
+        logoutTime: null,
+        deviceInfo: `Admin impersonation for vendor ${String(vendorId)}`,
+        status: "active",
+      });
+    } catch (histCreateErr) {
+      console.error("Failed to create LoginHistory for admin impersonation:", histCreateErr?.message || histCreateErr);
+    }
+
+    // Create a new active session for this admin impersonation
     let token = null;
     try {
-      if (customerIdForHistory) {
-        const session = await Session.create({
-          userId: customerIdForHistory,
-          vendorId: vendorId ? String(vendorId) : "",
-          categoryId: categoryId ? String(categoryId) : "",
-          loginTime: now,
-          expiryTime: expiresAt,
-          isActive: true,
-          deviceInfo: `Admin impersonation for vendor ${String(vendorId)}`,
-        });
+      const session = await Session.create({
+        userId: customerIdForHistory,
+        vendorId: vendorId ? String(vendorId) : "",
+        categoryId: categoryId ? String(categoryId) : "",
+        loginTime: now,
+        expiryTime: expiresAt,
+        isActive: true,
+        deviceInfo: `Admin impersonation for vendor ${String(vendorId)}`,
+      });
 
-        const payload = {
-          customerId: String(customerIdForHistory),
-          vendorId: vendorId ? String(vendorId) : "",
-          categoryId: categoryId ? String(categoryId) : "",
-          sessionId: String(session._id),
-        };
-        token = jwt.sign(payload, JWT_SECRET, { expiresIn: `${hours}h` });
-        if (token) {
-          await Session.updateOne({ _id: session._id }, { $set: { token } });
-        }
+      const payload = {
+        customerId: String(customerIdForHistory),
+        vendorId: vendorId ? String(vendorId) : "",
+        categoryId: categoryId ? String(categoryId) : "",
+        sessionId: String(session._id),
+      };
+      token = jwt.sign(payload, JWT_SECRET, { expiresIn: `${hours}h` });
+      if (token) {
+        await Session.updateOne({ _id: session._id }, { $set: { token } });
       }
     } catch (sessCreateErr) {
       console.error("Failed to create admin session/token:", sessCreateErr?.message || sessCreateErr);
@@ -224,12 +232,14 @@ router.post("/session-status-token", async (req, res) => {
     const customerId = decoded.customerId;
     const vendorId = decoded.vendorId || "";
     const categoryId = decoded.categoryId || "";
+    const sessionId = decoded.sessionId || null;
     if (!customerId) return res.status(400).json({ message: "Invalid token payload" });
 
     const now = new Date();
     const filter = { userId: customerId, isActive: true };
     if (vendorId) filter.vendorId = String(vendorId);
     if (categoryId) filter.categoryId = String(categoryId);
+    if (sessionId) filter._id = sessionId;
 
     const session = await Session.findOne(filter)
       .sort({ loginTime: -1 })
@@ -384,9 +394,11 @@ router.post("/verify-otp", async (req, res) => {
         const now = new Date();
         const expiryTime = new Date(now.getTime() + hours * 60 * 60 * 1000);
 
-        // Terminate ANY existing active sessions for this customer in the same vendor/category scope
+        // Terminate ANY existing active sessions for this vendor/category scope,
+        // regardless of which customer originally created them. This guarantees
+        // only one active session for this page at a time (admin vs vendor vs
+        // customer).
         const sessionFilter = {
-          userId: customer._id,
           isActive: true,
         };
         if (vendorId) sessionFilter.vendorId = String(vendorId);
@@ -616,30 +628,14 @@ router.get("/:id/login-history", async (req, res) => {
       }
     }
 
-    // Reload history after normalizing expired sessions
+    // Reload history after normalizing expired sessions. This already contains
+    // both active and expired entries because we create a LoginHistory row on
+    // each login and update it on logout/expiry.
     const history = await LoginHistory.find({ userId: id })
       .sort({ loginTime: -1 })
       .lean();
 
-    // Also include current active sessions (if any) as rows with status "active"
-    const stillActive = await Session.find({ userId: id, isActive: true })
-      .sort({ loginTime: -1 })
-      .lean();
-
-    const activeRows = stillActive
-      .filter((s) => s.expiryTime && new Date(s.expiryTime) > now)
-      .map((s) => ({
-        _id: `active-${s._id}`,
-        userId: id,
-        loginTime: s.loginTime,
-        expiryTime: s.expiryTime,
-        deviceInfo: s.deviceInfo || "",
-        status: "active",
-      }));
-
-    const combined = [...activeRows, ...history];
-
-    res.json(combined);
+    res.json(history);
   } catch (err) {
     console.error("GET /api/customers/:id/login-history error:", err.message);
     res.status(500).json({ message: "Failed to load login history" });
