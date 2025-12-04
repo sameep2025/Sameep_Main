@@ -20,6 +20,8 @@ const dummyCategoryRoutes = require('./routes/dummyCategoryRoutes');
 const dummyVendorRoutes = require('./routes/dummyVendorRoutes');
 const uploadRoutes = require('./routes/uploadRoutes');
 const appConfigRoutes = require('./routes/appConfigRoutes');
+const auditLogRoutes = require('./routes/auditLogRoutes');
+const enquiryRoutes = require('./routes/enquiryRoutes');
 
 const app = express();
 
@@ -52,10 +54,21 @@ mongoose.connection.once('open', async () => {
 
 // Middleware
 // CORS: allow cross-origin; explicitly mirror Origin and ensure preflight responses
+const allowedHeaders = [
+  'Content-Type',
+  'Authorization',
+  'Accept',
+  'Origin',
+  'X-Requested-With',
+  'x-root-category-id',
+  'x-vendor-id',
+  'x-actor-role',
+];
+
 app.use(cors({
   origin: true,
   methods: ['GET','HEAD','PUT','PATCH','POST','DELETE','OPTIONS'],
-  allowedHeaders: ['Content-Type','Authorization','Accept','Origin','X-Requested-With'],
+  allowedHeaders,
   credentials: false,
   optionsSuccessStatus: 200,
 }));
@@ -64,7 +77,7 @@ app.use((req, res, next) => {
   const origin = req.headers.origin || '*';
   res.header('Access-Control-Allow-Origin', origin);
   res.header('Vary', 'Origin');
-  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, Accept, Origin, X-Requested-With');
+  res.header('Access-Control-Allow-Headers', allowedHeaders.join(', '));
   res.header('Access-Control-Allow-Methods', 'GET,HEAD,PUT,PATCH,POST,DELETE,OPTIONS');
   if (req.method === 'OPTIONS') return res.sendStatus(200);
   next();
@@ -139,8 +152,10 @@ app.use('/api/vendorPricing', vendorPricingRoutes);
 app.use('/api/models', modelRoutes);
 app.use('/api/dummy-categories', dummyCategoryRoutes);
 app.use('/api/dummy-vendors', dummyVendorRoutes);
+app.use('/api/enquiries', enquiryRoutes);
 app.use('/api', uploadRoutes);
 app.use('/api/app-config', appConfigRoutes);
+app.use('/api/audit-logs', auditLogRoutes);
 
 // Debug: DB connection info
 app.get('/api/_debug/db', (req, res) => {

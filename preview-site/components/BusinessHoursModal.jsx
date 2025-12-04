@@ -55,7 +55,14 @@ export default function BusinessHoursModal({ show, vendor, onClose, onUpdated })
       }
       const res = await axios.put(
         `${API_BASE_URL}/api/dummy-vendors/${vendor._id}/business-hours`,
-        { businessHours: hours }
+        { businessHours: hours },
+        {
+          headers: {
+            "Content-Type": "application/json",
+            "x-actor-role": "vendor",
+            "x-vendor-id": vendor?._id,
+          },
+        },
       );
       onUpdated?.(res.data);
       onClose?.();

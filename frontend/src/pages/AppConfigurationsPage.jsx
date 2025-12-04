@@ -6,6 +6,9 @@ function AppConfigurationsPage() {
   const [selectedHour, setSelectedHour] = useState(null);
   const [showModal, setShowModal] = useState(false);
   const [newHour, setNewHour] = useState("");
+  const [adminPasscode, setAdminPasscode] = useState("1234");
+  const [savingAdminPasscode, setSavingAdminPasscode] = useState(false);
+  const [adminPasscodeError, setAdminPasscodeError] = useState("");
 
   // Load config from backend on mount
   useEffect(() => {
@@ -18,10 +21,38 @@ function AppConfigurationsPage() {
       } catch (err) {
         console.error("Failed to load session validity config", err);
       }
+
+      try {
+        const res = await API.get("/api/app-config/admin-passcode");
+        const code = res.data?.adminPasscode;
+        if (typeof code === "string" && code.trim()) {
+          setAdminPasscode(code.trim());
+        }
+      } catch (err) {
+        console.error("Failed to load admin passcode", err);
+      }
     };
 
     fetchConfig();
   }, []);
+
+  const handleSaveAdminPasscode = async () => {
+    const code = (adminPasscode || "").trim();
+    if (!/^\d{4}$/.test(code)) {
+      setAdminPasscodeError("Passcode must be a 4-digit number");
+      return;
+    }
+    setAdminPasscodeError("");
+    try {
+      setSavingAdminPasscode(true);
+      await API.post("/api/app-config/admin-passcode", { adminPasscode: code });
+    } catch (err) {
+      console.error("Failed to save admin passcode", err);
+      setAdminPasscodeError("Failed to save passcode");
+    } finally {
+      setSavingAdminPasscode(false);
+    }
+  };
 
   const saveConfig = async (hours, selected) => {
     try {
@@ -123,6 +154,66 @@ function AppConfigurationsPage() {
           <div style={{ marginTop: "8px", fontSize: "13px", color: "#555" }}>
             Selected session validity: <strong>{selectedHour} hrs</strong>
           </div>
+        )}
+      </div>
+
+      {/* Admin Passcode */}
+      <div
+        style={{
+          border: "1px solid #ddd",
+          borderRadius: "8px",
+          padding: "20px",
+          marginBottom: "20px",
+          background: "#fff",
+          boxShadow: "0 1px 3px rgba(0,0,0,0.05)",
+        }}
+      >
+        <h2 style={{ fontSize: "18px", marginBottom: "10px", color: "#00AEEF" }}>
+          Admin Passcode
+        </h2>
+        <p style={{ marginBottom: "15px", color: "#555" }}>
+          Set a 4-digit passcode used for sensitive admin actions. This can be
+          changed at any time.
+        </p>
+
+        <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "8px" }}>
+          <input
+            type="text"
+            maxLength={4}
+            value={adminPasscode}
+            onChange={(e) => {
+              const v = e.target.value.replace(/[^0-9]/g, "");
+              setAdminPasscode(v.slice(0, 4));
+            }}
+            style={{
+              width: "80px",
+              padding: "8px",
+              borderRadius: "4px",
+              border: "1px solid #ccc",
+              textAlign: "center",
+              letterSpacing: "4px",
+              fontWeight: "bold",
+            }}
+          />
+          <button
+            type="button"
+            onClick={handleSaveAdminPasscode}
+            disabled={savingAdminPasscode}
+            style={{
+              padding: "8px 14px",
+              borderRadius: "4px",
+              border: "1px solid #00AEEF",
+              background: savingAdminPasscode ? "#93c5fd" : "#00AEEF",
+              color: "#fff",
+              cursor: "pointer",
+              fontSize: "14px",
+            }}
+          >
+            {savingAdminPasscode ? "Saving..." : "Save Passcode"}
+          </button>
+        </div>
+        {adminPasscodeError && (
+          <div style={{ color: "#b91c1c", fontSize: "13px" }}>{adminPasscodeError}</div>
         )}
       </div>
 

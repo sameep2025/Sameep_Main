@@ -6,6 +6,7 @@ const DummySubcategory = require("../models/dummySubcategory");
 const multer = require("multer");
 const { v4: uuidv4 } = require("uuid");
 const { uploadBufferToS3, uploadBufferToS3WithLabel, deleteS3ObjectByUrl } = require("../utils/s3Upload");
+const { logAudit } = require("../utils/auditLogger");
 
 const router = express.Router();
 
@@ -455,6 +456,7 @@ router.put("/:vendorId", async (req, res) => {
       const vdoc = await DummyVendor.findById(vendorId);
       if (!vdoc) return res.status(404).json({ message: "Vendor not found" });
       const existing = (vdoc.inventorySelections && typeof vdoc.inventorySelections === 'object') ? vdoc.inventorySelections : {};
+      const beforeSelections = JSON.parse(JSON.stringify(existing));
       vdoc.inventorySelections = { ...existing, ...update.inventorySelections };
       // Allow updating a few other simple fields too
       ["businessName","contactName","phone","status","location","businessHours","profilePictures","rowImages","socialLinks"].forEach((k) => {
@@ -478,6 +480,126 @@ router.put("/:vendorId", async (req, res) => {
         }
       }
       await vdoc.save();
+
+      try {
+        const afterSelections = vdoc.inventorySelections || {};
+        Object.keys(update.inventorySelections || {}).forEach((cid) => {
+          const beforeList = Array.isArray(beforeSelections[cid]) ? beforeSelections[cid] : [];
+          const afterList = Array.isArray(afterSelections[cid]) ? afterSelections[cid] : [];
+          const byKey = (list) => {
+            const map = {};
+            list.forEach((it) => {
+              const key = String(it._id || it.at);
+              if (!key) return;
+              map[key] = it;
+            });
+            return map;
+          };
+          const beforeMap = byKey(beforeList);
+          const afterMap = byKey(afterList);
+          Object.keys(afterMap).forEach((key) => {
+            const prev = beforeMap[key] || {};
+            const curr = afterMap[key] || {};
+            if (prev.price !== curr.price) {
+              logAudit(req, {
+                action: "price_changed",
+                field: "price",
+                oldValue: prev.price ?? null,
+                newValue: curr.price ?? null,
+                entityType: "dummy_inventory_row",
+                entityId: key,
+                vendorId,
+                categoryId: cid,
+                meta: { scopeFamily: curr.scopeFamily || null, scopeLabel: curr.scopeLabel || null },
+              });
+            }
+            const prevPbr = (prev.pricesByRow && typeof prev.pricesByRow === 'object') ? prev.pricesByRow : {};
+            const currPbr = (curr.pricesByRow && typeof curr.pricesByRow === 'object') ? curr.pricesByRow : {};
+            Object.keys(currPbr).forEach((rowKey) => {
+              const oldVal = prevPbr[rowKey];
+              const newVal = currPbr[rowKey];
+              if (oldVal !== newVal) {
+                logAudit(req, {
+                  action: "price_changed",
+                  field: "pricesByRow",
+                  oldValue: oldVal ?? null,
+                  newValue: newVal ?? null,
+                  entityType: "dummy_inventory_row",
+                  entityId: key,
+                  vendorId,
+                  categoryId: cid,
+                  meta: { rowKey },
+                });
+              }
+            });
+            const prevStatusByRow = (prev.pricingStatusByRow && typeof prev.pricingStatusByRow === 'object') ? prev.pricingStatusByRow : {};
+            const currStatusByRow = (curr.pricingStatusByRow && typeof curr.pricingStatusByRow === 'object') ? curr.pricingStatusByRow : {};
+            Object.keys(currStatusByRow).forEach((rowKey) => {
+              const oldStatus = prevStatusByRow[rowKey] || null;
+              const newStatus = currStatusByRow[rowKey] || null;
+              if (oldStatus === newStatus) return;
+              logAudit(req, {
+                action: "status_changed",
+                field: "pricingStatusByRow",
+                oldValue: oldStatus,
+                newValue: newStatus,
+                entityType: "dummy_inventory_row",
+                entityId: key,
+                vendorId,
+                categoryId: cid,
+                meta: { rowKey },
+              });
+            });
+          });
+        });
+      } catch (e) {
+        console.error("dummyVendor inventorySelections audit error", e && e.message ? e.message : e);
+      }
+
+      return res.json(vdoc.toObject());
+    }
+
+    // If nodePricingStatus is being updated, handle it explicitly so we can audit status changes
+    if (update && typeof update.nodePricingStatus === 'object' && update.nodePricingStatus !== null) {
+      const vdoc = await DummyVendor.findById(vendorId);
+      if (!vdoc) return res.status(404).json({ message: "Vendor not found" });
+
+      const beforeNode =
+        vdoc.nodePricingStatus && typeof vdoc.nodePricingStatus === 'object'
+          ? { ...vdoc.nodePricingStatus }
+          : {};
+      const nextNode = update.nodePricingStatus && typeof update.nodePricingStatus === 'object'
+        ? update.nodePricingStatus
+        : {};
+
+      vdoc.nodePricingStatus = nextNode;
+      // Apply any other simple fields as before
+      Object.keys(update).forEach((k) => {
+        if (k === 'nodePricingStatus') return;
+        vdoc[k] = update[k];
+      });
+
+      await vdoc.save();
+
+      try {
+        Object.keys(nextNode || {}).forEach((nodeId) => {
+          const oldVal = beforeNode[nodeId] || null;
+          const newVal = nextNode[nodeId] || null;
+          if (oldVal === newVal) return;
+          logAudit(req, {
+            action: 'status_changed',
+            field: 'nodePricingStatus',
+            oldValue: oldVal,
+            newValue: newVal,
+            entityType: 'dummy_category',
+            entityId: String(nodeId),
+            vendorId,
+          });
+        });
+      } catch (e) {
+        console.error('dummyVendor nodePricingStatus audit error', e && e.message ? e.message : e);
+      }
+
       return res.json(vdoc.toObject());
     }
 

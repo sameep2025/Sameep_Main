@@ -49,6 +49,11 @@ export default function DummyVendorCategoriesDetailPage() {
   const [attributesHeading, setAttributesHeading] = useState("");
   const [pricingStatusByRow, setPricingStatusByRow] = useState({}); // { [categoryId]: 'Active' | 'Inactive' }
   const [comboPricingStatusByRow, setComboPricingStatusByRow] = useState({}); // { [comboId|size]: 'Active' | 'Inactive' }
+  const [logsModal, setLogsModal] = useState(null); // { loading, error, rows, context }
+  const [enquiries, setEnquiries] = useState([]);
+  const [enquiriesLoading, setEnquiriesLoading] = useState(false);
+  const [enquiriesError, setEnquiriesError] = useState("");
+  const [showEnquiriesModal, setShowEnquiriesModal] = useState(false);
 
   const fetchTree = async () => {
     try {
@@ -113,6 +118,26 @@ export default function DummyVendorCategoriesDetailPage() {
       } catch {}
     } finally {
       setLoading(false);
+    }
+  };
+
+  const loadEnquiries = async () => {
+    try {
+      if (!vendorId) return;
+      setEnquiriesLoading(true);
+      setEnquiriesError("");
+      const params = new URLSearchParams();
+      params.set("vendorId", String(vendorId));
+      if (previewCategoryId) params.set("categoryId", String(previewCategoryId));
+      const res = await axios.get(`${API_BASE_URL}/api/enquiries?${params.toString()}`);
+      const list = Array.isArray(res.data) ? res.data : [];
+      setEnquiries(list);
+      setShowEnquiriesModal(true);
+    } catch (e) {
+      setEnquiriesError(e?.response?.data?.message || e.message || "Failed to load enquiries");
+      setShowEnquiriesModal(true);
+    } finally {
+      setEnquiriesLoading(false);
     }
   };
 
@@ -254,7 +279,14 @@ export default function DummyVendorCategoriesDetailPage() {
   const saveDummyInventorySelections = async (vid, cid, items) => {
     const url = `${API_BASE_URL}/api/dummy-vendors/${vid}`;
     const payload = { inventorySelections: { [cid]: items } };
-    await axios.put(url, payload);
+    await axios.put(url, payload, {
+      headers: {
+        "Content-Type": "application/json",
+        "x-actor-role": "admin",
+        "x-vendor-id": vid,
+        "x-root-category-id": cid,
+      },
+    });
     return true;
   };
 
@@ -510,7 +542,18 @@ export default function DummyVendorCategoriesDetailPage() {
     }
     try {
       setSaving(true);
-      await axios.put(`${API_BASE_URL}/api/dummy-categories/${editingId}`, { price: val });
+      await axios.put(
+        `${API_BASE_URL}/api/dummy-categories/${editingId}`,
+        { price: val },
+        {
+          headers: {
+            "Content-Type": "application/json",
+            "x-actor-role": "admin",
+            "x-vendor-id": vendorId,
+            "x-root-category-id": categoryId,
+          },
+        }
+      );
       setEditingId(null);
       setEditingPrice("");
       await fetchTree();
@@ -522,6 +565,24 @@ export default function DummyVendorCategoriesDetailPage() {
   };
 
   const previewCategoryId = (vendor && (vendor.categoryId || vendor.category?._id)) || categoryId || (rows[0]?.categoryId);
+
+  const loadLogs = async ({ entityType, entityId, label, rowKey }) => {
+    try {
+      setLogsModal({ loading: true, error: "", rows: [], context: { entityType, entityId, label } });
+      const params = {
+        vendorId,
+        categoryId,
+        entityType,
+        entityId,
+      };
+      if (rowKey) params.rowKey = rowKey;
+      const res = await axios.get(`${API_BASE_URL}/api/audit-logs`, { params });
+      const rows = Array.isArray(res.data?.data) ? res.data.data : [];
+      setLogsModal({ loading: false, error: "", rows, context: { entityType, entityId, label, rowKey } });
+    } catch (e) {
+      setLogsModal((prev) => ({ ...(prev || {}), loading: false, error: e?.response?.data?.message || e.message || "Failed to load logs" }));
+    }
+  };
 
   return (
     <div>
@@ -554,6 +615,13 @@ export default function DummyVendorCategoriesDetailPage() {
             } catch { return null; }
           })()}
           {/* Attributes heading is now managed from DummyCategoryPage Add On Text */}
+          <button
+            onClick={loadEnquiries}
+            disabled={!vendorId}
+            style={{ padding: "8px 12px", borderRadius: 8, background: "#4b5563", color: "#fff", textDecoration: "none", opacity: vendorId ? 1 : 0.6, pointerEvents: vendorId ? "auto" : "none", border: 'none' }}
+          >
+            Enquiry Details
+          </button>
           <button
             onClick={() => {
               if (!previewCategoryId) return;
@@ -600,6 +668,7 @@ export default function DummyVendorCategoriesDetailPage() {
                 <th style={{ border: '1px solid #ccc', padding: 8 }}>Price</th>
                 <th style={{ border: '1px solid #ccc', padding: 8 }}>Pricing Status</th>
                 <th style={{ border: '1px solid #ccc', padding: 8 }}>Action</th>
+                <th style={{ border: '1px solid #ccc', padding: 8 }}>Logs</th>
               </tr>
             </thead>
             <tbody>
@@ -660,9 +729,18 @@ export default function DummyVendorCategoriesDetailPage() {
                             try {
                               const currentMap = (combo.pricingStatusPerSize && typeof combo.pricingStatusPerSize === 'object') ? combo.pricingStatusPerSize : {};
                               const nextMap = { ...currentMap, [sizeKey]: val };
-                              await axios.put(`${API_BASE_URL}/api/dummy-combos/${comboId}`, {
-                                pricingStatusPerSize: nextMap,
-                              }, { headers: { 'Content-Type': 'application/json' } });
+                              await axios.put(
+                                `${API_BASE_URL}/api/dummy-combos/${comboId}`,
+                                { pricingStatusPerSize: nextMap },
+                                {
+                                  headers: {
+                                    'Content-Type': 'application/json',
+                                    'x-actor-role': 'admin',
+                                    'x-vendor-id': vendorId,
+                                    'x-root-category-id': categoryId,
+                                  },
+                                }
+                              );
                               setCombos((prev) =>
                                 (Array.isArray(prev) ? prev : []).map((c) =>
                                   String(c._id || c.id) === String(comboId)
@@ -704,7 +782,18 @@ export default function DummyVendorCategoriesDetailPage() {
                                 });
                                 return next;
                               });
-                              await axios.put(`${API_BASE_URL}/api/dummy-combos/${id}`, updated, { headers: { 'Content-Type': 'application/json' } });
+                              await axios.put(
+                                `${API_BASE_URL}/api/dummy-combos/${id}`,
+                                updated,
+                                {
+                                  headers: {
+                                    'Content-Type': 'application/json',
+                                    'x-actor-role': 'admin',
+                                    'x-vendor-id': vendorId,
+                                    'x-root-category-id': categoryId,
+                                  },
+                                }
+                              );
                               // refresh
                               const res = await axios.get(`${API_BASE_URL}/api/dummy-combos`, { params: { parentCategoryId: categoryId } });
                               setCombos(Array.isArray(res.data) ? res.data : []);
@@ -714,6 +803,18 @@ export default function DummyVendorCategoriesDetailPage() {
                           }}
                           style={{ padding: '4px 8px', borderRadius: 4, background: '#0ea5e9', color: '#fff', border: 'none' }}
                         >Edit</button>
+                      </td>
+                      <td style={{ border: '1px solid #ccc', padding: 8 }}>
+                        <button
+                          onClick={() =>
+                            loadLogs({
+                              entityType: 'dummy_combo',
+                              entityId: String(comboId),
+                              label: `${comboName} / ${sz || 'Default'}`,
+                            })
+                          }
+                          style={{ padding: '4px 8px', borderRadius: 4, background: '#f97316', color: '#fff', border: 'none', fontSize: 12 }}
+                        >See Logs</button>
                       </td>
                     </tr>
                   );
@@ -747,6 +848,7 @@ export default function DummyVendorCategoriesDetailPage() {
               <th style={{ border: "1px solid #ccc", padding: "8px" }}>Price</th>
               <th style={{ border: "1px solid #ccc", padding: "8px" }}>Pricing Status</th>
               <th style={{ border: "1px solid #ccc", padding: "8px" }}>Action</th>
+              <th style={{ border: "1px solid #ccc", padding: "8px" }}>Logs</th>
             </tr>
           </thead>
           <tbody>
@@ -924,6 +1026,13 @@ export default function DummyVendorCategoriesDetailPage() {
                               const nextNodeMap = { ...existingNodeMap, [nodeId]: val };
                               await axios.put(`${API_BASE_URL}/api/dummy-vendors/${vendorId}`, {
                                 nodePricingStatus: nextNodeMap,
+                              }, {
+                                headers: {
+                                  'Content-Type': 'application/json',
+                                  'x-actor-role': 'admin',
+                                  'x-vendor-id': vendorId,
+                                  'x-root-category-id': categoryId,
+                                },
                               });
                               setVendor((prev) => ({ ...(prev || {}), nodePricingStatus: nextNodeMap }));
                             } catch (err) {
@@ -934,7 +1043,14 @@ export default function DummyVendorCategoriesDetailPage() {
                               const nodeId = String(row.categoryId || row.id);
                               const existing = (vendor && vendor.nodePricingStatus && typeof vendor.nodePricingStatus === 'object') ? vendor.nodePricingStatus : {};
                               const nextMap = { ...existing, [nodeId]: val };
-                              await axios.put(`${API_BASE_URL}/api/dummy-vendors/${vendorId}`, { nodePricingStatus: nextMap });
+                              await axios.put(`${API_BASE_URL}/api/dummy-vendors/${vendorId}`, { nodePricingStatus: nextMap }, {
+                                headers: {
+                                  'Content-Type': 'application/json',
+                                  'x-actor-role': 'admin',
+                                  'x-vendor-id': vendorId,
+                                  'x-root-category-id': categoryId,
+                                },
+                              });
                               setVendor((prev) => ({ ...(prev || {}), nodePricingStatus: nextMap }));
                             } catch (err) {
                               alert(err?.response?.data?.message || 'Failed to update pricing status');
@@ -975,12 +1091,104 @@ export default function DummyVendorCategoriesDetailPage() {
                     </>
                   )}
                 </td>
+                <td style={{ border: '1px solid #ccc', padding: 8 }}>
+                  {match ? (
+                    <button
+                      onClick={() => {
+                        const key = String(match._id || match.at);
+                        const rowKey = Array.isArray(row.levelIds) && row.levelIds.length ? row.levelIds.map(String).join('|') : String(row.id);
+                        const label = row.levels?.join(' / ') || 'Row';
+                        loadLogs({
+                          entityType: 'dummy_inventory_row',
+                          entityId: key,
+                          label,
+                          rowKey,
+                        });
+                      }}
+                      style={{ padding: '4px 8px', borderRadius: 4, background: '#f97316', color: '#fff', border: 'none', fontSize: 12 }}
+                    >See Logs</button>
+                  ) : (
+                    <button
+                      onClick={() => {
+                        const label = row.levels?.join(' / ') || 'Category';
+                        loadLogs({
+                          entityType: 'dummy_category',
+                          entityId: String(row.categoryId || row.id),
+                          label,
+                        });
+                      }}
+                      style={{ padding: '4px 8px', borderRadius: 4, background: '#f97316', color: '#fff', border: 'none', fontSize: 12 }}
+                    >See Logs</button>
+                  )}
+                </td>
               </tr>
             ))}
           </tbody>
         </table>
       )}
       </div>
+
+      {showEnquiriesModal && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1300 }}>
+          <div style={{ background: '#fff', padding: 16, borderRadius: 10, minWidth: 700, maxWidth: '95vw', maxHeight: '80vh', overflow: 'auto' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+              <h3 style={{ margin: 0 }}>Enquiry Details</h3>
+              <button onClick={() => setShowEnquiriesModal(false)} style={{ padding: '4px 8px', borderRadius: 6, border: '1px solid #e5e7eb', background: '#f3f4f6' }}>Close</button>
+            </div>
+            {enquiriesLoading ? (
+              <p>Loading enquiries...</p>
+            ) : enquiriesError ? (
+              <p style={{ color: '#b91c1c' }}>{enquiriesError}</p>
+            ) : enquiries.length === 0 ? (
+              <p>No enquiries found.</p>
+            ) : (
+              <div style={{ overflowX: 'auto' }}>
+                <table style={{ borderCollapse: 'collapse', width: '100%' }}>
+                  <thead>
+                    <tr>
+                      <th style={{ border: '1px solid #e5e7eb', padding: 8 }}>Time</th>
+                      <th style={{ border: '1px solid #e5e7eb', padding: 8 }}>Customer</th>
+                      <th style={{ border: '1px solid #e5e7eb', padding: 8 }}>Service</th>
+                      <th style={{ border: '1px solid #e5e7eb', padding: 8 }}>Category Path</th>
+                      <th style={{ border: '1px solid #e5e7eb', padding: 8 }}>Attributes</th>
+                      <th style={{ border: '1px solid #e5e7eb', padding: 8 }}>Price</th>
+                      <th style={{ border: '1px solid #e5e7eb', padding: 8 }}>Terms</th>
+                      <th style={{ border: '1px solid #e5e7eb', padding: 8 }}>Source</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {enquiries.map((enq) => {
+                      const dt = enq.createdAt ? new Date(enq.createdAt) : null;
+                      const timeStr = dt ? dt.toLocaleString() : '-';
+                      const phone = enq.phone || enq.customerId || '-';
+                      const catPath = Array.isArray(enq.categoryPath) ? enq.categoryPath.join(' / ') : '';
+                      const attrsObj = enq.attributes && typeof enq.attributes === 'object' ? enq.attributes : {};
+                      const attrsText = Object.keys(attrsObj).length
+                        ? Object.entries(attrsObj)
+                            .map(([k, v]) => `${k}: ${v}`)
+                            .join(', ')
+                        : '-';
+                      const priceStr = enq.price == null ? '-' : String(enq.price);
+                      return (
+                        <tr key={enq._id || `${enq.vendorId}-${enq.categoryId}-${enq.createdAt}`}>
+                          <td style={{ border: '1px solid #e5e7eb', padding: 8 }}>{timeStr}</td>
+                          <td style={{ border: '1px solid #e5e7eb', padding: 8 }}>{phone}</td>
+                          <td style={{ border: '1px solid #e5e7eb', padding: 8 }}>{enq.serviceName || '-'}</td>
+                          <td style={{ border: '1px solid #e5e7eb', padding: 8 }}>{catPath || '-'}</td>
+                          <td style={{ border: '1px solid #e5e7eb', padding: 8 }}>{attrsText}</td>
+                          <td style={{ border: '1px solid #e5e7eb', padding: 8 }}>{priceStr}</td>
+                          <td style={{ border: '1px solid #e5e7eb', padding: 8 }}>{enq.terms || '-'}</td>
+                          <td style={{ border: '1px solid #e5e7eb', padding: 8 }}>{enq.source || '-'}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       {showLinkedModal && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1200 }}>
@@ -1189,20 +1397,23 @@ export default function DummyVendorCategoriesDetailPage() {
                                     title="Edit"
                                     onClick={() => {
                                       try {
-                                        const scope = it.scopeFamily && it.scopeLabel ? { family: it.scopeFamily, label: it.scopeLabel } : null;
-                                        const famPrefix = scope ? `${scope.family}:${scope.label}:` : null;
+                                        const scope = it.scopeFamily && it.scopeLabel
+                                          ? { family: it.scopeFamily, label: it.scopeLabel }
+                                          : null;
+                                        if (scope) {
+                                          setActiveInvScope(scope);
+                                        }
                                         setEditingItemKey(it._id || it.at || null);
-                                        setLinkedAttributes((prev) => {
+                                        setDraftSelections((prev) => {
                                           const next = { ...prev };
-                                          if (famPrefix) {
-                                            Object.keys(next).forEach((k) => { if (k.startsWith(famPrefix)) delete next[k]; });
-                                          }
                                           Object.entries(it.selections || {}).forEach(([fam, fields]) => {
+                                            const famKey = String(fam);
+                                            const current = { ...(next[famKey] || {}) };
                                             Object.entries(fields || {}).forEach(([field, val]) => {
                                               if (val == null || String(val).trim() === '') return;
-                                              const storeKey = famPrefix ? `${famPrefix}${field}` : `${fam}:${field}`;
-                                              next[storeKey] = [String(val)];
+                                              current[field] = String(val);
                                             });
+                                            next[famKey] = current;
                                           });
                                           return next;
                                         });
@@ -1303,6 +1514,58 @@ export default function DummyVendorCategoriesDetailPage() {
                   alert(e?.response?.data?.message || 'Failed to save');
                 }
               }} style={{ padding: '6px 10px', borderRadius: 6, background: '#0ea5e9', color: '#fff', border: 'none' }}>Save</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {logsModal && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1250 }}>
+          <div style={{ background: '#fff', padding: 16, borderRadius: 10, minWidth: 480, maxWidth: '90vw', maxHeight: '80vh', overflow: 'auto' }}>
+            <h3 style={{ marginTop: 0 }}>
+              Logs{logsModal.context?.label ? ` - ${logsModal.context.label}` : ''}
+            </h3>
+            {logsModal.loading ? (
+              <p>Loading logs...</p>
+            ) : logsModal.error ? (
+              <p style={{ color: 'red' }}>{logsModal.error}</p>
+            ) : !logsModal.rows || logsModal.rows.length === 0 ? (
+              <p style={{ fontSize: 13, color: '#64748b' }}>No logs found for this item.</p>
+            ) : (
+              <table style={{ borderCollapse: 'collapse', width: '100%' }}>
+                <thead>
+                  <tr>
+                    <th style={{ border: '1px solid #e5e7eb', padding: 8 }}>When</th>
+                    <th style={{ border: '1px solid #e5e7eb', padding: 8 }}>Action</th>
+                    <th style={{ border: '1px solid #e5e7eb', padding: 8 }}>Field</th>
+                    <th style={{ border: '1px solid #e5e7eb', padding: 8 }}>Old</th>
+                    <th style={{ border: '1px solid #e5e7eb', padding: 8 }}>New</th>
+                    <th style={{ border: '1px solid #e5e7eb', padding: 8 }}>By</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {logsModal.rows.map((log) => (
+                    <tr key={log._id}>
+                      <td style={{ border: '1px solid #e5e7eb', padding: 8 }}>
+                        {log.createdAt ? new Date(log.createdAt).toLocaleString() : ''}
+                      </td>
+                      <td style={{ border: '1px solid #e5e7eb', padding: 8 }}>{log.action}</td>
+                      <td style={{ border: '1px solid #e5e7eb', padding: 8 }}>{log.field}</td>
+                      <td style={{ border: '1px solid #e5e7eb', padding: 8 }}>{JSON.stringify(log.oldValue)}</td>
+                      <td style={{ border: '1px solid #e5e7eb', padding: 8 }}>{JSON.stringify(log.newValue)}</td>
+                      <td style={{ border: '1px solid #e5e7eb', padding: 8 }}>{log.changedBy}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+            <div style={{ marginTop: 12, textAlign: 'right' }}>
+              <button
+                onClick={() => setLogsModal(null)}
+                style={{ padding: '6px 10px', borderRadius: 6, background: '#e5e7eb', border: 'none' }}
+              >
+                Close
+              </button>
             </div>
           </div>
         </div>

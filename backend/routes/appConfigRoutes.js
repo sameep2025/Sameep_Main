@@ -26,6 +26,46 @@ router.get("/session-validity", async (req, res) => {
   }
 });
 
+// GET current admin passcode
+// Returns: { adminPasscode: string }
+router.get("/admin-passcode", async (req, res) => {
+  try {
+    const value = await getConfigValue("adminPasscode");
+    let adminPasscode = "1234";
+    if (typeof value === "string" && /^\d{4}$/.test(value)) {
+      adminPasscode = value;
+    }
+    res.json({ adminPasscode });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+// POST to update admin passcode
+// Body: { adminPasscode: string } (must be 4-digit string)
+router.post("/admin-passcode", async (req, res) => {
+  try {
+    const { adminPasscode } = req.body || {};
+    const code = typeof adminPasscode === "string" ? adminPasscode.trim() : "";
+
+    if (!/^\d{4}$/.test(code)) {
+      return res
+        .status(400)
+        .json({ message: "adminPasscode must be a 4-digit numeric code" });
+    }
+
+    const updated = await AppConfig.findOneAndUpdate(
+      { key: "adminPasscode" },
+      { key: "adminPasscode", value: code },
+      { new: true, upsert: true }
+    ).lean();
+
+    res.json({ adminPasscode: updated.value });
+  } catch (err) {
+    res.status(400).json({ message: err.message });
+  }
+});
+
 // POST to update session validity config
 // Body: { availableHours: number[], selectedHour: number | null }
 router.post("/session-validity", async (req, res) => {

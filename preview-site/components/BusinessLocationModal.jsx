@@ -31,12 +31,22 @@ export default function BusinessLocationModal({ show, onClose, vendorId, onUpdat
 
   const persist = async (nextNearby) => {
     try {
-      await axios.put(`${API_BASE_URL}/api/dummy-vendors/${vendorId}/location`, {
-        lat: home.lat,
-        lng: home.lng,
-        address: home.address || "",
-        nearbyLocations: nextNearby,
-      });
+      await axios.put(
+        `${API_BASE_URL}/api/dummy-vendors/${vendorId}/location`,
+        {
+          lat: home.lat,
+          lng: home.lng,
+          address: home.address || "",
+          nearbyLocations: nextNearby,
+        },
+        {
+          headers: {
+            "Content-Type": "application/json",
+            "x-actor-role": "vendor",
+            "x-vendor-id": vendorId,
+          },
+        },
+      );
       onUpdated?.(vendorId, nextNearby);
     } catch (err) {
       console.error(err);

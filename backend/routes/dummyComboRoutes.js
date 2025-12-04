@@ -4,6 +4,7 @@ const multer = require("multer");
 const { uploadBufferToS3, uploadBufferToS3WithLabel } = require("../utils/s3Upload");
 const DummyCombo = require("../models/dummyCombo");
 const DummyCategory = require("../models/dummyCategory");
+const { logAudit } = require("../utils/auditLogger");
 
 const router = express.Router();
 
@@ -308,12 +309,40 @@ router.put("/:comboId", uploadAny, async (req, res) => {
     }
     if (typeof iconUrl !== "undefined") setPayload.iconUrl = iconUrl;
     if (typeof imageUrl !== "undefined") setPayload.imageUrl = imageUrl;
+    const beforeStatus =
+      current && current.pricingStatusPerSize && typeof current.pricingStatusPerSize === 'object'
+        ? current.pricingStatusPerSize
+        : {};
+
     if (pricingStatusPerSize && typeof pricingStatusPerSize === 'object') {
       setPayload.pricingStatusPerSize = pricingStatusPerSize;
     }
 
     const updated = await DummyCombo.findByIdAndUpdate(comboId, { $set: setPayload }, { new: true });
     if (!updated) return res.status(404).json({ message: "Combo not found" });
+    try {
+      const afterStatus =
+        updated && updated.pricingStatusPerSize && typeof updated.pricingStatusPerSize === 'object'
+          ? updated.pricingStatusPerSize
+          : {};
+      Object.keys(afterStatus || {}).forEach((sizeKey) => {
+        const oldVal = beforeStatus[sizeKey] || null;
+        const newVal = afterStatus[sizeKey] || null;
+        if (oldVal === newVal) return;
+        logAudit(req, {
+          action: 'status_changed',
+          field: 'pricingStatusPerSize',
+          oldValue: oldVal,
+          newValue: newVal,
+          entityType: 'dummy_combo',
+          entityId: String(comboId),
+          meta: { sizeKey },
+        });
+      });
+    } catch (e) {
+      console.error('dummyCombo pricingStatusPerSize audit error', e && e.message ? e.message : e);
+    }
+
     res.json(updated);
   } catch (err) {
     console.error("PUT /api/dummy-combos/:comboId error:", err);

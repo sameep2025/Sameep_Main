@@ -313,7 +313,12 @@ export default function MyIndividualServicesDetailPage() {
       const body = { price: val };
       await fetch(`${API_BASE_URL}/api/dummy-categories/${editingId}`, {
         method: "PUT",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          "x-actor-role": "vendor",
+          "x-vendor-id": vendorId,
+          "x-root-category-id": categoryId,
+        },
         body: JSON.stringify(body),
       });
       setTree((prev) => {
@@ -377,7 +382,12 @@ export default function MyIndividualServicesDetailPage() {
 
         await fetch(`${API_BASE_URL}/api/dummy-vendors/${vendorId}`, {
           method: "PUT",
-          headers: { "Content-Type": "application/json" },
+          headers: {
+            "Content-Type": "application/json",
+            "x-actor-role": "vendor",
+            "x-vendor-id": vendorId,
+            "x-root-category-id": categoryId,
+          },
           body: JSON.stringify({
             inventorySelections: { [categoryId]: items },
             nodePricingStatus: nextNodeMap,
@@ -396,7 +406,12 @@ export default function MyIndividualServicesDetailPage() {
         const nextMap = { ...existing, [nodeId]: safe };
         await fetch(`${API_BASE_URL}/api/dummy-vendors/${vendorId}`, {
           method: "PUT",
-          headers: { "Content-Type": "application/json" },
+          headers: {
+            "Content-Type": "application/json",
+            "x-actor-role": "vendor",
+            "x-vendor-id": vendorId,
+            "x-root-category-id": categoryId,
+          },
           body: JSON.stringify({ nodePricingStatus: nextMap }),
         });
         setVendor((prev) => ({ ...(prev || {}), nodePricingStatus: nextMap }));
@@ -438,7 +453,12 @@ export default function MyIndividualServicesDetailPage() {
         : [];
       await fetch(`${API_BASE_URL}/api/dummy-vendors/${vendorId}`, {
         method: "PUT",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          "x-actor-role": "vendor",
+          "x-vendor-id": vendorId,
+          "x-root-category-id": categoryId,
+        },
         body: JSON.stringify({ inventorySelections: { [categoryId]: items } }),
       });
       setInvItems(items);

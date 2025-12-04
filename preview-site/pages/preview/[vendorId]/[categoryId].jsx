@@ -84,7 +84,8 @@ export default function PreviewPage() {
   const [otp, setOtp] = useState("");
   const [otpLoading, setOtpLoading] = useState(false);
   const [otpError, setOtpError] = useState("");
-  const [loginAsVendor, setLoginAsVendor] = useState(false);
+  const [loginAsAdmin, setLoginAsAdmin] = useState(false);
+  const [adminPasscodeInput, setAdminPasscodeInput] = useState("");
   const [navIdentity, setNavIdentity] = useState({ role: "guest", displayName: "Guest", loggedIn: false });
 
   const loading = loadingVendor || loadingCategories;
@@ -98,6 +99,55 @@ export default function PreviewPage() {
       return "previewSession:unknown:unknown";
     }
   }, []);
+
+  const getStoredCustomerId = useCallback(() => {
+    try {
+      if (typeof window === "undefined") return "";
+      const key = makePreviewSessionKey(vendorId, categoryId);
+      const val = window.localStorage.getItem(key);
+      return val || "";
+    } catch {
+      return "";
+    }
+  }, [makePreviewSessionKey, vendorId, categoryId]);
+
+  const postEnquiry = useCallback(
+    async ({ source, serviceName, price, terms, categoryPath, categoryIds, attributes }) => {
+      try {
+        if (!vendorId || !categoryId) return;
+        const customerId = getStoredCustomerId();
+        const phone =
+          (vendor && vendor.customerId && vendor.customerId.fullNumber) ||
+          (vendor && vendor.phone) ||
+          "";
+
+        const body = {
+          vendorId: String(vendorId),
+          categoryId: String(categoryId),
+          customerId,
+          phone,
+          serviceName: serviceName || "",
+          source: source || "",
+          price: price == null || price === "" ? null : Number(price),
+          terms: terms || "",
+          categoryPath: Array.isArray(categoryPath) ? categoryPath : [],
+          categoryIds: Array.isArray(categoryIds)
+            ? categoryIds.map((v) => String(v))
+            : [],
+          attributes: attributes && typeof attributes === 'object' ? attributes : {},
+        };
+
+        await fetch(`${API_BASE_URL}/api/enquiries`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        });
+      } catch (err) {
+        console.error("Failed to create enquiry from preview", err);
+      }
+    },
+    [vendorId, categoryId, vendor, getStoredCustomerId]
+  );
 
   const makePreviewTokenKey = useCallback((venId, catId) => {
     try {
@@ -174,6 +224,62 @@ export default function PreviewPage() {
     }
   }, [vendorId, categoryId]);
 
+  const handleAdminLogin = async () => {
+    const code = (adminPasscodeInput || "").trim();
+    if (!/^\d{4}$/.test(code)) {
+      setOtpError("Invalid admin passcode");
+      return;
+    }
+    try {
+      setOtpLoading(true);
+      setOtpError("");
+      const res = await fetch(`${API_BASE_URL}/api/customers/admin-impersonate`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ passcode: code, vendorId, categoryId }),
+      });
+      if (!res.ok) {
+        const errJson = await res.json().catch(() => ({}));
+        setOtpError(errJson?.message || "Invalid admin passcode");
+        return;
+      }
+
+      const json = await res.json().catch(() => null);
+      const adminExpiresAt = json && json.expiresAt ? json.expiresAt : null;
+
+      // Treat admin impersonation as a vendor identity for this preview page
+      try {
+        if (typeof window !== "undefined") {
+          const role = "vendor";
+          const displayName = (vendor?.businessName && String(vendor.businessName).trim())
+            ? `${String(vendor.businessName).trim()} (Admin)`
+            : "Admin";
+          const identity = { role, displayName, loggedIn: true, adminExpiresAt };
+          const identityKey = makePreviewIdentityKey(vendorId, categoryId);
+          try {
+            window.localStorage.setItem(identityKey, JSON.stringify(identity));
+          } catch {}
+          try {
+            if (json && json.token) {
+              const tokenKey = makePreviewTokenKey(vendorId, categoryId);
+              window.localStorage.setItem(tokenKey, json.token);
+            }
+          } catch {}
+          setNavIdentity(identity);
+        }
+      } catch {}
+
+      handleCloseOtpModal();
+    } catch (err) {
+      console.error("admin login error (preview)", err);
+      if (!otpError) {
+        setOtpError("Invalid admin passcode");
+      }
+    } finally {
+      setOtpLoading(false);
+    }
+  };
+
   // Fetch country codes when OTP modal is opened the first time
   useEffect(() => {
     if (!showOtpModal) return;
@@ -232,6 +338,111 @@ export default function PreviewPage() {
     } catch {}
   }, [vendorId, categoryId, makePreviewIdentityKey]);
 
+  const handleLogout = useCallback(() => {
+    try {
+      if (typeof window === "undefined") return;
+      const identityKey = makePreviewIdentityKey(vendorId, categoryId);
+      const tokenKey = makePreviewTokenKey(vendorId, categoryId);
+      const sessionKey = makePreviewSessionKey(vendorId, categoryId);
+
+      try {
+        const token = window.localStorage.getItem(tokenKey);
+        if (token) {
+          fetch(`${API_BASE_URL}/api/customers/logout`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ token }),
+          }).catch(() => {});
+        }
+      } catch {}
+      try {
+        window.localStorage.removeItem(identityKey);
+      } catch {}
+      try {
+        window.localStorage.removeItem(tokenKey);
+      } catch {}
+      try {
+        window.localStorage.removeItem(sessionKey);
+      } catch {}
+      setNavIdentity({ role: "guest", displayName: "Guest", loggedIn: false });
+    } catch {}
+  }, [vendorId, categoryId, makePreviewIdentityKey, makePreviewTokenKey, makePreviewSessionKey]);
+
+  useEffect(() => {
+    try {
+      if (typeof window === "undefined") return undefined;
+      if (!navIdentity || !navIdentity.loggedIn) return undefined;
+
+      const identityKey = makePreviewIdentityKey(vendorId, categoryId);
+      let expiresAt = null;
+      try {
+        const raw = window.localStorage.getItem(identityKey);
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          if (parsed && typeof parsed === "object") {
+            expiresAt = parsed.adminExpiresAt || parsed.expiresAt || null;
+          }
+        }
+      } catch {}
+
+      if (!expiresAt) return undefined;
+      const ms = new Date(expiresAt).getTime();
+      if (!Number.isFinite(ms)) return undefined;
+
+      const check = () => {
+        if (Date.now() >= ms) {
+          handleLogout();
+        }
+      };
+
+      check();
+      const id = setInterval(check, 60000);
+      return () => clearInterval(id);
+    } catch {
+      return undefined;
+    }
+  }, [navIdentity, vendorId, categoryId, makePreviewIdentityKey, handleLogout]);
+
+  // Background token validity check: ensures that if the same user logs in elsewhere,
+  // this tab will pick up the change and log out shortly after.
+  useEffect(() => {
+    try {
+      if (typeof window === "undefined") return undefined;
+      if (!navIdentity || !navIdentity.loggedIn) return undefined;
+
+      const tokenKey = makePreviewTokenKey(vendorId, categoryId);
+
+      const checkToken = async () => {
+        try {
+          const token = window.localStorage.getItem(tokenKey);
+          if (!token) return;
+
+          const res = await fetch(`${API_BASE_URL}/api/customers/session-status-token`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ token }),
+          });
+
+          if (!res.ok) return;
+          const data = await res.json().catch(() => null);
+          const status = data && data.status;
+          if (status && status !== "active") {
+            handleLogout();
+          }
+        } catch {
+          // ignore errors in background check
+        }
+      };
+
+      // Run once immediately and then on an interval
+      checkToken();
+      const id = setInterval(checkToken, 30000);
+      return () => clearInterval(id);
+    } catch {
+      return undefined;
+    }
+  }, [navIdentity, vendorId, categoryId, makePreviewTokenKey, handleLogout]);
+
   const handleOpenOtpModal = async () => {
     try {
       if (navIdentity && navIdentity.role === "vendor" && navIdentity.loggedIn) {
@@ -252,8 +463,23 @@ export default function PreviewPage() {
             if (res.ok) {
               const data = await res.json().catch(() => null);
               if (data && data.status === "active") {
-                // Active token-based session: skip OTP, proceed directly to booking flow
+                // Active token-based session: skip OTP and restore identity
                 console.log("Active token session", data);
+                try {
+                  if (typeof window !== "undefined") {
+                    const role = "guest";
+                    const displayName =
+                      (data && typeof data.displayName === "string" && data.displayName.trim())
+                        ? data.displayName.trim()
+                        : "Guest";
+                    const identity = { role, displayName, loggedIn: true };
+                    const identityKey = makePreviewIdentityKey(vendorId, categoryId);
+                    try {
+                      window.localStorage.setItem(identityKey, JSON.stringify(identity));
+                    } catch {}
+                    setNavIdentity(identity);
+                  }
+                } catch {}
                 // TODO: implement actual booking/enroll navigation here
                 return;
               }
@@ -292,10 +518,14 @@ export default function PreviewPage() {
     setOtpStep(1);
     setPhone("");
     setOtp("");
-    setLoginAsVendor(false);
+    setLoginAsAdmin(false);
+    setAdminPasscodeInput("");
   };
 
   const requestOtp = async () => {
+    if (loginAsAdmin) {
+      return;
+    }
     const cleanPhone = phone.replace(/\D/g, "");
     if (!countryCode || !cleanPhone || cleanPhone.length < 6) {
       setOtpError("Enter a valid mobile number");
@@ -304,26 +534,6 @@ export default function PreviewPage() {
     try {
       setOtpLoading(true);
       setOtpError("");
-      if (loginAsVendor) {
-        // Bypass OTP and treat as vendor login for this preview page only
-        try {
-          if (typeof window !== "undefined") {
-            const role = "vendor";
-            const displayName = (vendor?.businessName && String(vendor.businessName).trim())
-              ? String(vendor.businessName).trim()
-              : "Vendor";
-            const identity = { role, displayName, loggedIn: true };
-            const identityKey = makePreviewIdentityKey(vendorId, categoryId);
-            try {
-              window.localStorage.setItem(identityKey, JSON.stringify(identity));
-            } catch {}
-            setNavIdentity(identity);
-          }
-        } catch {}
-        handleCloseOtpModal();
-        return;
-      }
-
       const res = await fetch(`${API_BASE_URL}/api/customers/request-otp`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -1630,6 +1840,9 @@ export default function PreviewPage() {
       const nodeId = (() => {
         try { return String(node?.id || node?._id || ""); } catch { return ""; }
       })();
+      const isVendorAcceptedLocal = String(vendor?.status || "")
+        .trim()
+        .toLowerCase() === "accepted".toLowerCase();
       // Per-vendor override from DummyVendor.nodePricingStatus, if present
       try {
         const map = (vendor && vendor.nodePricingStatus && typeof vendor.nodePricingStatus === 'object') ? vendor.nodePricingStatus : {};
@@ -1637,11 +1850,12 @@ export default function PreviewPage() {
         if (v === 'active') return true;
         if (v === 'inactive') return false;
       } catch {}
-      const self = String(node?.pricingStatus || "").trim().toLowerCase();
-      const children = Array.isArray(node?.children) ? node.children : [];
-      const hasTreeActive = (self === "active".toLowerCase()) ||
-        children.some((ch) => isNodePricingActive(ch));
-      if (hasTreeActive) return true;
+      // Before vendor acceptance, treat nodes as active regardless of
+      // pricingStatus so that cards are visible for preview even when
+      // pricing status is Inactive.
+      if (!isVendorAcceptedLocal) {
+        return true;
+      }
       // Fall back to inventorySelections: if any row for this node or its
       // descendants has pricingStatusByRow === "Active", treat node as active.
       if (typeof hasActivePricingForNode === "function") {
@@ -2590,7 +2804,75 @@ export default function PreviewPage() {
           })()}
 
           <button
-            onClick={handleOpenOtpModal}
+            onClick={async () => {
+              try {
+                const pathNames = [
+                  categoryTree?.name,
+                  node?.name,
+                  selectedParent?.name,
+                ].filter(Boolean);
+                const pathIds = [
+                  categoryId,
+                  node?.id,
+                  selectedParent?.id,
+                ].filter(Boolean);
+                const resolvedTerms = displayNode.terms || selectedParent?.terms || node.terms || "";
+                const num = (() => {
+                  try {
+                    const catKey = String(categoryId || '');
+                    const inv = Array.isArray(vendor?.inventorySelections?.[catKey])
+                      ? vendor.inventorySelections[catKey]
+                      : [];
+                    const ids = [displayNode?.id, selectedParent?.id, node?.id]
+                      .map((x) => String(x || ''))
+                      .filter(Boolean);
+                    let priceVal = null;
+                    inv.forEach((entry) => {
+                      if (priceVal != null) return;
+                      const pbr = (entry && entry.pricesByRow && typeof entry.pricesByRow === 'object') ? entry.pricesByRow : null;
+                      if (!pbr) return;
+                      ids.forEach((target) => {
+                        if (!target || priceVal != null) return;
+                        for (const [rk, val] of Object.entries(pbr)) {
+                          const parts = String(rk).split('|');
+                          if (parts.some((id) => String(id) === target)) {
+                            const n = Number(val);
+                            if (!Number.isNaN(n)) { priceVal = n; break; }
+                          }
+                        }
+                      });
+                    });
+                    if (priceVal == null) {
+                      const nodePrice =
+                        (displayNode?.vendorPrice ?? displayNode?.price) ??
+                        (selectedParent?.vendorPrice ?? selectedParent?.price) ??
+                        (node?.vendorPrice ?? node?.price) ?? null;
+                      return nodePrice == null ? null : Number(nodePrice);
+                    }
+                    return priceVal;
+                  } catch {
+                    return null;
+                  }
+                })();
+                await postEnquiry({
+                  source: "individual",
+                  serviceName: displayNode?.name || node?.name || "",
+                  price: num == null || Number.isNaN(Number(num)) ? null : Number(num),
+                  terms: resolvedTerms || "",
+                  categoryPath: pathNames,
+                  categoryIds: pathIds,
+                  attributes: {
+                    segment: node?.name || "",
+                    courseType: selectedParent?.name || "",
+                    model: selectedChild?.name || "",
+                    ...(displayNode?.attributes || {}),
+                  },
+                });
+                window.alert("Enquiry submitted");
+              } catch (e) {
+                console.error("Enroll Now enquiry error (card)", e);
+              }
+            }}
             style={{
               marginTop: "auto",
               width: "100%",
@@ -3545,7 +3827,7 @@ export default function PreviewPage() {
     try {
       const famSet = new Set(Array.isArray(famList) ? famList.map(String) : []);
       const list = (vendor?.inventorySelections?.[categoryId] || []).filter((e) => famSet.has(String(e?.scopeFamily || '')));
-      const buckets = new Map(); // attrKey -> { name, price, terms }
+      const buckets = new Map(); // attrKey -> { name, price, terms, attributes, scopeFamily }
       list.forEach((entry, idx) => {
         const sel = entry?.selections?.[entry?.scopeFamily] || {};
         const parts = Object.values(sel).filter((v) => v != null && String(v).trim() !== "");
@@ -3593,14 +3875,14 @@ export default function PreviewPage() {
           const attrKey = `${fam}|${kv}`;
           const prev = buckets.get(attrKey);
           if (!prev || (prev.price == null || (leafPrice != null && leafPrice < prev.price))) {
-            buckets.set(attrKey, { name, price: leafPrice, terms: termsSeed || "" });
+            buckets.set(attrKey, { name, price: leafPrice, terms: termsSeed || "", attributes: sel, scopeFamily: fam });
           }
         } catch {
           // fallback: unique per entry
           const attrKey = `raw-${entry?.scopeFamily || 'fam'}-${entry?.at || idx}`;
           const prev = buckets.get(attrKey);
           if (!prev || (prev.price == null || (leafPrice != null && leafPrice < prev.price))) {
-            buckets.set(attrKey, { name, price: leafPrice, terms: termsSeed || "" });
+            buckets.set(attrKey, { name, price: leafPrice, terms: termsSeed || "", attributes: sel, scopeFamily: String(entry?.scopeFamily || '') });
           }
         }
       });
@@ -3613,6 +3895,8 @@ export default function PreviewPage() {
           vendorPrice: v.price,
           price: v.price,
           terms: v.terms,
+          attributes: v.attributes || {},
+          scopeFamily: v.scopeFamily || '',
         }))
         .sort((a, b) => {
           const pa = a.vendorPrice == null ? Number.POSITIVE_INFINITY : Number(a.vendorPrice);
@@ -3627,12 +3911,20 @@ export default function PreviewPage() {
 
   const rowPricingIsActive = (entry, key) => {
     try {
+      // Before vendor acceptance, allow all matching rows (regardless of pricingStatus)
+      // so that inactive rows still appear in preview-site.
+      const isVendorAcceptedLocal =
+        String(vendor?.status || "")
+          .trim()
+          .toLowerCase() === "accepted".toLowerCase();
+      if (!isVendorAcceptedLocal) return true;
+
       const map =
-        entry && entry.pricingStatusByRow && typeof entry.pricingStatusByRow === 'object'
+        entry && entry.pricingStatusByRow && typeof entry.pricingStatusByRow === "object"
           ? entry.pricingStatusByRow
           : {};
-      const raw = String(map[key] || '').trim().toLowerCase();
-      return raw === 'active';
+      const raw = String(map[key] || "").trim().toLowerCase();
+      return raw === "active";
     } catch {
       return false;
     }
@@ -3685,6 +3977,12 @@ export default function PreviewPage() {
         hasInventoryActive,
       });
     } catch {}
+
+    // If this first-level node has no active category pricing and no active inventory
+    // rows under it, hide the entire card section (e.g., Two Wheeler / Four Wheeler)
+    if (!hasCategoryActive && !hasInventoryActive) {
+      return null;
+    }
 
     const serviceKey = makeServiceKey(lvl1?.name);
     return (
@@ -3817,7 +4115,25 @@ export default function PreviewPage() {
                           <div style={{ fontSize: 12, color: '#6b7280' }}>{terms}</div>
                         ) : null}
                         <button
-                          onClick={() => alert(`Booking ${child?.name}`)}
+                          onClick={async () => {
+                            try {
+                              const priceNumber = livePrice == null ? null : Number(livePrice);
+                              const pathNames = [categoryTree?.name, child?.name].filter(Boolean);
+                              const pathIds = [categoryId, child?.id].filter(Boolean);
+                              await postEnquiry({
+                                source: "individual",
+                                serviceName: child?.name || "",
+                                price: Number.isNaN(priceNumber) ? null : priceNumber,
+                                terms: terms || "",
+                                categoryPath: pathNames,
+                                categoryIds: pathIds,
+                                attributes: child?.attributes || {},
+                              });
+                              window.alert("Enquiry submitted");
+                            } catch (e) {
+                              console.error("Enroll Now enquiry error", e);
+                            }
+                          }}
                           style={{ width: '100%', padding: '10px 14px', borderRadius: 28, border: 'none', background: 'rgb(245 158 11)', color: '#111827', fontWeight: 600, cursor: 'pointer', fontFamily: 'Poppins, sans-serif' }}
                         >
                           {(() => {
@@ -3956,7 +4272,25 @@ export default function PreviewPage() {
                           <div style={{ fontSize: 12, color: '#6b7280' }}>{terms}</div>
                         ) : null}
                         <button
-                          onClick={() => alert(`Booking ${enriched?.name}`)}
+                          onClick={async () => {
+                            try {
+                              const priceNumber = livePrice == null ? null : Number(livePrice);
+                              const pathNames = [categoryTree?.name, enriched?.name].filter(Boolean);
+                              const pathIds = [categoryId, enriched?.id].filter(Boolean);
+                              await postEnquiry({
+                                source: "package",
+                                serviceName: enriched?.name || "",
+                                price: Number.isNaN(priceNumber) ? null : priceNumber,
+                                terms: terms || "",
+                                categoryPath: pathNames,
+                                categoryIds: pathIds,
+                                attributes: enriched?.attributes || {},
+                              });
+                              window.alert("Enquiry submitted");
+                            } catch (e) {
+                              console.error("Enroll Now enquiry error (package)", e);
+                            }
+                          }}
                           style={{ width: '100%', padding: '10px 14px', borderRadius: 28, border: 'none', background: 'rgb(245 158 11)', color: '#111827', fontWeight: 600, cursor: 'pointer', fontFamily: 'Poppins, sans-serif' }}
                         >
                           {(packagesAddon && typeof packagesAddon.buttonLabel === 'string' && packagesAddon.buttonLabel.trim())
@@ -4251,6 +4585,7 @@ export default function PreviewPage() {
             onNavigateBusinessHours={handleNavBusinessHours}
             onNavigateInventory={handleNavInventory}
             onOpenLogin={handleOpenOtpModal}
+            onLogout={handleLogout}
             services={serviceLabels}
             categoryTree={categoryTree}
             selectedLeaf={selectedLeaf}
@@ -4419,6 +4754,10 @@ export default function PreviewPage() {
                       }
                       return true;
                     });
+                    // If there are no active sizes left (all inactive), skip rendering this card
+                    if (!sizes.length) {
+                      return null;
+                    }
                     const base = (combo && combo.basePrice != null && combo.basePrice !== '') ? Number(combo.basePrice) : null;
                     const selectedSize = (packageSelections[idx]?.size != null)
                       ? packageSelections[idx].size
@@ -4868,98 +5207,158 @@ export default function PreviewPage() {
                       </p>
                     </div>
 
-                    <div style={{ marginBottom: 12 }}>
-                      <label style={{ display: "block", marginBottom: 4, fontSize: 13, color: "#374151" }}>
-                        Mobile number
-                      </label>
-                      <div
-                        style={{
-                          display: "flex",
-                          alignItems: "center",
-                          borderRadius: 999,
-                          border: "1px solid #e5e7eb",
-                          padding: "4px 10px",
-                          background: "#f9fafb",
-                        }}
-                      >
-                        <select
-                          value={countryCode}
-                          onChange={(e) => setCountryCode(e.target.value)}
+                    {!loginAsAdmin && (
+                      <>
+                        <div style={{ marginBottom: 12 }}>
+                          <label style={{ display: "block", marginBottom: 4, fontSize: 13, color: "#374151" }}>
+                            Mobile number
+                          </label>
+                          <div
+                            style={{
+                              display: "flex",
+                              alignItems: "center",
+                              borderRadius: 999,
+                              border: "1px solid #e5e7eb",
+                              padding: "4px 10px",
+                              background: "#f9fafb",
+                            }}
+                          >
+                            <select
+                              value={countryCode}
+                              onChange={(e) => setCountryCode(e.target.value)}
+                              style={{
+                                border: "none",
+                                background: "transparent",
+                                fontSize: 13,
+                                color: "#6b7280",
+                                paddingRight: 6,
+                                outline: "none",
+                              }}
+                            >
+                              {countries.length === 0 ? (
+                                <option value={countryCode}>+{countryCode}</option>
+                              ) : (
+                                countries.map((c) => (
+                                  <option key={c.code} value={c.code}>
+                                    +{c.code}
+                                  </option>
+                                ))
+                              )}
+                            </select>
+                            <span style={{ color: "#d1d5db", margin: "0 6px" }}>|</span>
+                            <input
+                              type="text"
+                              value={phone}
+                              onChange={(e) => setPhone(e.target.value)}
+                              placeholder="Mobile number"
+                              style={{
+                                flex: 1,
+                                border: "none",
+                                outline: "none",
+                                background: "transparent",
+                                fontSize: 14,
+                              }}
+                            />
+                          </div>
+                        </div>
+
+                        <div style={{ marginTop: 4, marginBottom: 8, display: "flex", alignItems: "center", gap: 8 }}>
+                          <input
+                            id="login-as-admin-checkbox"
+                            type="checkbox"
+                            checked={loginAsAdmin}
+                            onChange={(e) => {
+                              setLoginAsAdmin(e.target.checked);
+                              setOtpError("");
+                            }}
+                            style={{ width: 14, height: 14 }}
+                          />
+                          <label
+                            htmlFor="login-as-admin-checkbox"
+                            style={{ fontSize: 12, color: "#374151", cursor: "pointer" }}
+                          >
+                            Login as Admin
+                          </label>
+                        </div>
+
+                        {otpError && (
+                          <div style={{ color: "#b91c1c", marginBottom: 8, fontSize: 13 }}>{otpError}</div>
+                        )}
+
+                        <button
+                          type="button"
+                          onClick={requestOtp}
                           style={{
+                            width: "100%",
+                            marginTop: 8,
+                            padding: 10,
+                            borderRadius: 999,
                             border: "none",
-                            background: "transparent",
-                            fontSize: 13,
-                            color: "#6b7280",
-                            paddingRight: 6,
-                            outline: "none",
-                          }}
-                        >
-                          {countries.length === 0 ? (
-                            <option value={countryCode}>+{countryCode}</option>
-                          ) : (
-                            countries.map((c) => (
-                              <option key={c.code} value={c.code}>
-                                +{c.code}
-                              </option>
-                            ))
-                          )}
-                        </select>
-                        <span style={{ color: "#d1d5db", margin: "0 6px" }}>|</span>
-                        <input
-                          type="text"
-                          value={phone}
-                          onChange={(e) => setPhone(e.target.value)}
-                          placeholder="Mobile number"
-                          style={{
-                            flex: 1,
-                            border: "none",
-                            outline: "none",
-                            background: "transparent",
+                            background: "#059669",
+                            color: "#fff",
+                            fontWeight: 600,
+                            cursor: "pointer",
                             fontSize: 14,
                           }}
-                        />
-                      </div>
-                    </div>
-
-                    <div style={{ marginTop: 4, marginBottom: 8, display: "flex", alignItems: "center", gap: 8 }}>
-                      <input
-                        id="login-as-vendor-checkbox"
-                        type="checkbox"
-                        checked={loginAsVendor}
-                        onChange={(e) => setLoginAsVendor(e.target.checked)}
-                        style={{ width: 14, height: 14 }}
-                      />
-                      <label
-                        htmlFor="login-as-vendor-checkbox"
-                        style={{ fontSize: 12, color: "#374151", cursor: "pointer" }}
-                      >
-                        Login as vendor 
-                      </label>
-                    </div>
-
-                    {otpError && (
-                      <div style={{ color: "#b91c1c", marginBottom: 8, fontSize: 13 }}>{otpError}</div>
+                          disabled={otpLoading}
+                        >
+                          {otpLoading ? "Sending..." : "Continue"}
+                        </button>
+                      </>
                     )}
 
-                    <button
-                      type="button"
-                      onClick={requestOtp}
-                      style={{
-                        width: "100%",
-                        marginTop: 8,
-                        padding: 10,
-                        borderRadius: 999,
-                        border: "none",
-                        background: "#059669",
-                        color: "#fff",
-                        fontWeight: 600,
-                        cursor: "pointer",
-                        fontSize: 14,
-                      }}
-                      disabled={otpLoading}
-                    >
-                      {otpLoading ? "Sending..." : "Continue"}
-                    </button>
+                    {loginAsAdmin && (
+                      <>
+                        <div style={{ marginBottom: 12 }}>
+                          <label style={{ display: "block", marginBottom: 4, fontSize: 13, color: "#374151" }}>
+                            Enter Admin Passcode
+                          </label>
+                          <input
+                            type="password"
+                            maxLength={4}
+                            value={adminPasscodeInput}
+                            onChange={(e) => {
+                              const v = e.target.value.replace(/[^0-9]/g, "");
+                              setAdminPasscodeInput(v.slice(0, 4));
+                            }}
+                            placeholder="4-digit code"
+                            style={{
+                              width: "100%",
+                              padding: 10,
+                              borderRadius: 999,
+                              border: "1px solid #e5e7eb",
+                              textAlign: "center",
+                              letterSpacing: 4,
+                              fontSize: 16,
+                            }}
+                          />
+                        </div>
+
+                        {otpError && (
+                          <div style={{ color: "#b91c1c", marginBottom: 8, fontSize: 13 }}>{otpError}</div>
+                        )}
+
+                        <button
+                          type="button"
+                          onClick={handleAdminLogin}
+                          style={{
+                            width: "100%",
+                            marginTop: 8,
+                            padding: 10,
+                            borderRadius: 999,
+                            border: "none",
+                            background: "#059669",
+                            color: "#fff",
+                            fontWeight: 600,
+                            cursor: "pointer",
+                            fontSize: 14,
+                          }}
+                          disabled={otpLoading}
+                        >
+                          {otpLoading ? "Checking..." : "Login as Admin"}
+                        </button>
+                      </>
+                    )}
 
                     <button
                       type="button"

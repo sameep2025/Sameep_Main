@@ -251,6 +251,7 @@ function CustomersPage() {
                       <th style={{ textAlign: "left", padding: "6px 8px", borderBottom: "1px solid #e5e7eb" }}>Mobile</th>
                       <th style={{ textAlign: "left", padding: "6px 8px", borderBottom: "1px solid #e5e7eb" }}>Device / Browser</th>
                       <th style={{ textAlign: "left", padding: "6px 8px", borderBottom: "1px solid #e5e7eb" }}>Login Time</th>
+                      <th style={{ textAlign: "left", padding: "6px 8px", borderBottom: "1px solid #e5e7eb" }}>Logout Time</th>
                       <th style={{ textAlign: "left", padding: "6px 8px", borderBottom: "1px solid #e5e7eb" }}>Expiry Time</th>
                       <th style={{ textAlign: "left", padding: "6px 8px", borderBottom: "1px solid #e5e7eb" }}>Status</th>
                     </tr>
@@ -290,6 +291,15 @@ function CustomersPage() {
                             }}
                           >
                             {new Date(h.loginTime).toLocaleString()}
+                          </td>
+                          <td
+                            style={{
+                              padding: "6px 8px",
+                              borderBottom: "1px solid #e5e7eb",
+                              whiteSpace: "nowrap",
+                            }}
+                          >
+                            {h.logoutTime ? new Date(h.logoutTime).toLocaleString() : "-"}
                           </td>
                           <td
                             style={{

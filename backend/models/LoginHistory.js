@@ -15,6 +15,10 @@ const LoginHistorySchema = new mongoose.Schema(
       type: Date,
       required: true,
     },
+    logoutTime: {
+      type: Date,
+      default: null,
+    },
     deviceInfo: {
       type: String,
       default: "",

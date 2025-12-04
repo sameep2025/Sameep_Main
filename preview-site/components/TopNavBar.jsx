@@ -22,6 +22,7 @@ export default function TopNavBar({
   onNavigateBusinessHours,
   onNavigateInventory,
   onOpenLogin,
+  onLogout,
   services = [
     "Driving Packages",
     "Individual Courses",
@@ -428,39 +429,123 @@ export default function TopNavBar({
                 style={{
                   display: "flex",
                   alignItems: "center",
-                  gap: 8,
+                  gap: 12,
                 }}
               >
-                <User size={22} color="#111827" />
-                <span
+                <div
                   style={{
-                    marginLeft: 6,
-                    fontSize: 16,
-                    fontWeight: 500,
-                    color: "#111827",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 8,
                   }}
                 >
-                  Guest
-                </span>
+                  <User size={22} color="#111827" />
+                  <span
+                    style={{
+                      marginLeft: 6,
+                      fontSize: 16,
+                      fontWeight: 500,
+                      color: "#111827",
+                    }}
+                  >
+                    Guest
+                  </span>
+                </div>
+                {typeof onLogout === "function" && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      try {
+                        const ok = window.confirm("Do you want to logout?");
+                        if (!ok) return;
+                      } catch {
+                        // If confirm is not available, just proceed
+                      }
+                      onLogout();
+                    }}
+                    style={{
+                      border: "none",
+                      background: "transparent",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      cursor: "pointer",
+                      padding: 0,
+                    }}
+                  >
+                    <span
+                      style={{
+                        marginLeft: 6,
+                        fontSize: 16,
+                        fontWeight: 500,
+                        color: "#111827",
+                      }}
+                    >
+                      Logout
+                    </span>
+                  </button>
+                )}
               </div>
             ) : (
-              <VendorMenuDropdown
-                vendor={vendor}
-                hasCombos={hasPackages || hasCombos}
-                inventoryLabel={inventoryLabel}
-                inventoryLabels={inventoryLabels}
-                isInventoryModel={isInventoryModel}
-                avatarLetter={avatarLetter}
-                onNavigateMyPricesCombos={onNavigateMyPricesCombos}
-                onNavigateMyPricesNonCombos={onNavigateMyPricesNonCombos}
-                onNavigateHomeLocation={onNavigateHomeLocation}
-                onNavigateBusinessLocation={onNavigateBusinessLocation}
-                onNavigateBusinessHours={onNavigateBusinessHours}
-                onNavigateInventory={onNavigateInventory}
-                servicesForMyPrices={firstLevelSubcategoryLabels}
-                activeServicesForMyPrices={effectiveServices}
-                socialHandles={socialHandles}
-              />
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 12,
+                }}
+              >
+                <VendorMenuDropdown
+                  vendor={vendor}
+                  hasCombos={hasPackages || hasCombos}
+                  inventoryLabel={inventoryLabel}
+                  inventoryLabels={inventoryLabels}
+                  isInventoryModel={isInventoryModel}
+                  avatarLetter={avatarLetter}
+                  onNavigateMyPricesCombos={onNavigateMyPricesCombos}
+                  onNavigateMyPricesNonCombos={onNavigateMyPricesNonCombos}
+                  onNavigateHomeLocation={onNavigateHomeLocation}
+                  onNavigateBusinessLocation={onNavigateBusinessLocation}
+                  onNavigateBusinessHours={onNavigateBusinessHours}
+                  onNavigateInventory={onNavigateInventory}
+                  servicesForMyPrices={firstLevelSubcategoryLabels}
+                  activeServicesForMyPrices={effectiveServices}
+                  socialHandles={socialHandles}
+                />
+                {typeof onLogout === "function" && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      try {
+                        const ok = window.confirm("Do you want to logout?");
+                        if (!ok) return;
+                      } catch {
+                        // If confirm is not available, just proceed
+                      }
+                      onLogout();
+                    }}
+                    style={{
+                      border: "none",
+                      background: "transparent",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      cursor: "pointer",
+                      padding: 0,
+                    }}
+                  >
+                    <span
+                      style={{
+                        marginLeft: 6,
+                        fontSize: 16,
+                        fontWeight: 500,
+                        color: "#111827",
+                      }}
+                    >
+                      Logout
+                    </span>
+                  </button>
+                )}
+              </div>
             )}
           </nav>
         )}
@@ -619,6 +704,91 @@ export default function TopNavBar({
               const showVendorOnRow =
                 idx === 0 && identityLoggedIn && identityRole === "vendor";
 
+              // For Contact, render an extra Logout row just below (mobile only)
+              if (key === "contact") {
+                return (
+                  <React.Fragment key={label}>
+                    <div
+                      style={{
+                        padding: "10px 4px",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "space-between",
+                        fontSize: 18,
+                        fontWeight: 600,
+                        borderBottom: "1px solid #e5e7eb",
+                      }}
+                    >
+                      <span
+                        style={{ cursor: "pointer" }}
+                        onClick={() => {
+                          scrollToSection(target);
+                          setMenuOpen(false);
+                        }}
+                      >
+                        {label}
+                      </span>
+                      {showVendorOnRow && (
+                        <div
+                          style={{ marginLeft: 8 }}
+                          onClick={(e) => {
+                            // Prevent Home row click from firing when tapping the profile icon
+                            e.stopPropagation();
+                          }}
+                        >
+                          <VendorMenuDropdown
+                            vendor={vendor}
+                            hasCombos={hasPackages || hasCombos}
+                            inventoryLabel={inventoryLabel}
+                            inventoryLabels={inventoryLabels}
+                            isInventoryModel={isInventoryModel}
+                            avatarLetter={avatarLetter}
+                            onNavigateMyPricesCombos={onNavigateMyPricesCombos}
+                            onNavigateMyPricesNonCombos={onNavigateMyPricesNonCombos}
+                            onNavigateHomeLocation={onNavigateHomeLocation}
+                            onNavigateBusinessLocation={onNavigateBusinessLocation}
+                            onNavigateBusinessHours={onNavigateBusinessHours}
+                            onNavigateInventory={onNavigateInventory}
+                            servicesForMyPrices={firstLevelSubcategoryLabels}
+                            activeServicesForMyPrices={effectiveServices}
+                            socialHandles={socialHandles}
+                          />
+                        </div>
+                      )}
+                    </div>
+                    {identityLoggedIn && typeof onLogout === "function" && (
+                      <div
+                        style={{
+                          padding: "10px 4px",
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "space-between",
+                          fontSize: 18,
+                          fontWeight: 600,
+                          borderBottom: "1px solid #e5e7eb",
+                        }}
+                      >
+                        <span
+                          style={{ cursor: "pointer" }}
+                          onClick={() => {
+                            try {
+                              const ok = window.confirm("Do you want to logout?");
+                              if (!ok) return;
+                            } catch {
+                              // If confirm is not available, just proceed
+                            }
+                            setMenuOpen(false);
+                            onLogout();
+                          }}
+                        >
+                          Logout
+                        </span>
+                      </div>
+                    )}
+                  </React.Fragment>
+                );
+              }
+
               return (
                 <div
                   key={label}
@@ -713,19 +883,63 @@ export default function TopNavBar({
                   style={{
                     display: "flex",
                     alignItems: "center",
-                    gap: 8,
+                    justifyContent: "space-between",
+                    width: "100%",
+                    gap: 12,
                   }}
                 >
-                  <User size={20} color="#111827" />
-                  <span
+                  <div
                     style={{
-                      fontSize: 18,
-                      fontWeight: 600,
-                      color: "#111827",
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 8,
                     }}
                   >
-                    Guest
-                  </span>
+                    <User size={20} color="#111827" />
+                    <span
+                      style={{
+                        fontSize: 18,
+                        fontWeight: 600,
+                        color: "#111827",
+                      }}
+                    >
+                      Guest
+                    </span>
+                  </div>
+                  {typeof onLogout === "function" && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        try {
+                          const ok = window.confirm("Do you want to logout?");
+                          if (!ok) return;
+                        } catch {
+                          // If confirm is not available, just proceed
+                        }
+                        onLogout();
+                      }}
+                      style={{
+                        border: "none",
+                        background: "transparent",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        cursor: "pointer",
+                        padding: 0,
+                      }}
+                    >
+                      <span
+                        style={{
+                          marginLeft: 6,
+                          fontSize: 18,
+                          fontWeight: 600,
+                          color: "#111827",
+                        }}
+                      >
+                        Logout
+                      </span>
+                    </button>
+                  )}
                 </div>
               ) : null}
             </div>

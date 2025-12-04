@@ -3,6 +3,7 @@ const DummySubcategory = require("../models/dummySubcategory");
 const fs = require("fs");
 const { uploadBufferToS3, uploadBufferToS3WithLabel, deleteS3ObjectByUrl } = require("../utils/s3Upload");
 const { v4: uuidv4 } = require("uuid");
+const { logAudit } = require("../utils/auditLogger");
 
 // Fallback to avoid ReferenceError in any legacy path that might still reference profileFiles
 // before a local declaration. Current functions declare const profileFiles where needed.
@@ -377,6 +378,13 @@ exports.updateCategory = async (req, res) => {
     }
     if (!doc) return res.status(404).json({ message: "Item not found" });
 
+    const before = {
+      price: doc.price,
+      pricingStatus: doc.pricingStatus,
+      visibleToUser: doc.visibleToUser,
+      visibleToVendor: doc.visibleToVendor,
+    };
+
     if (name !== undefined) doc.name = name;
     doc.price = parseNumber(price, true);
     if (req.body.pricingStatus !== undefined) {
@@ -632,6 +640,61 @@ exports.updateCategory = async (req, res) => {
     }
 
     await doc.save();
+
+    try {
+      const after = {
+        price: doc.price,
+        pricingStatus: doc.pricingStatus,
+        visibleToUser: doc.visibleToUser,
+        visibleToVendor: doc.visibleToVendor,
+      };
+      const entityType = modelType === "subcategory" ? "dummy_subcategory" : "dummy_category";
+      const entityId = String(doc._id || id);
+
+      if (before.price !== after.price) {
+        await logAudit(req, {
+          action: "price_changed",
+          field: "price",
+          oldValue: before.price,
+          newValue: after.price,
+          entityType,
+          entityId,
+        });
+      }
+      if (before.pricingStatus !== after.pricingStatus) {
+        await logAudit(req, {
+          action: "status_changed",
+          field: "pricingStatus",
+          oldValue: before.pricingStatus,
+          newValue: after.pricingStatus,
+          entityType,
+          entityId,
+        });
+      }
+      if (before.visibleToUser !== after.visibleToUser) {
+        await logAudit(req, {
+          action: "visibility_changed",
+          field: "visibleToUser",
+          oldValue: before.visibleToUser,
+          newValue: after.visibleToUser,
+          entityType,
+          entityId,
+        });
+      }
+      if (before.visibleToVendor !== after.visibleToVendor) {
+        await logAudit(req, {
+          action: "visibility_changed",
+          field: "visibleToVendor",
+          oldValue: before.visibleToVendor,
+          newValue: after.visibleToVendor,
+          entityType,
+          entityId,
+        });
+      }
+    } catch (e) {
+      console.error("dummyCategory audit error", e && e.message ? e.message : e);
+    }
+
     res.json(doc);
   } catch (err) {
     console.error("Update dummy category error:", err);
