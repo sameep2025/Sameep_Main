@@ -2,6 +2,25 @@ import React, { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/router";
 import API_BASE_URL from "../../../../../../config";
 
+// Authentication check helper (pure boolean, no UI side-effects)
+const checkAuthentication = (vendorId, categoryId) => {
+  try {
+    if (typeof window === "undefined") return false;
+    const tokenKey = `previewToken:${vendorId}:${categoryId}`;
+    const identityKey = `previewIdentity:${vendorId}:${categoryId}`;
+
+    const token = window.localStorage.getItem(tokenKey);
+    const identityStr = window.localStorage.getItem(identityKey);
+
+    if (!token || !identityStr) return false;
+
+    const identity = JSON.parse(identityStr);
+    return !!(identity && identity.loggedIn === true);
+  } catch {
+    return false;
+  }
+};
+
 // Final My Individual Services page for a specific LVL1 and LVL2 combination.
 // Reuses the same dummy vendor/category + inventory logic as the admin page,
 // but renders a mobile-friendly UI with Active/Inactive tabs and price editing.
@@ -43,9 +62,17 @@ export default function MyIndividualServicesDetailPage() {
   const [invItems, setInvItems] = useState([]);
   const [vendor, setVendor] = useState(null);
   const [rowPriceEdit, setRowPriceEdit] = useState(null); // { entryId, rowKey, price, labels }
+  const [sessionExpired, setSessionExpired] = useState(false);
 
   useEffect(() => {
     if (!vendorId) return;
+    
+    // Check authentication first
+    if (!checkAuthentication(vendorId, categoryId)) {
+      setSessionExpired(true);
+      return;
+    }
+    
     const fetchTree = async () => {
       try {
         setLoading(true);
@@ -68,6 +95,22 @@ export default function MyIndividualServicesDetailPage() {
     };
     fetchTree();
   }, [vendorId]);
+
+  useEffect(() => {
+    if (!vendorId || !categoryId) return;
+    if (typeof window === "undefined") return;
+
+    const id = setInterval(() => {
+      try {
+        if (!checkAuthentication(vendorId, categoryId)) {
+          setSessionExpired(true);
+          clearInterval(id);
+        }
+      } catch {}
+    }, 2000);
+
+    return () => clearInterval(id);
+  }, [vendorId, categoryId, router]);
 
   const rows = useMemo(() => tree.flatMap((root) => flattenTree(root)), [tree]);
 
@@ -920,6 +963,75 @@ export default function MyIndividualServicesDetailPage() {
                 {saving ? "Saving..." : "Save"}
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {sessionExpired && (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(0,0,0,0.4)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 9999,
+          }}
+        >
+          <div
+            style={{
+              width: 280,
+              borderRadius: 16,
+              background: "#ffffff",
+              padding: "20px 16px 12px",
+              boxShadow: "0 10px 30px rgba(0,0,0,0.2)",
+              textAlign: "center",
+              fontFamily:
+                "Poppins, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif",
+            }}
+          >
+            <div
+              style={{ fontSize: 18, fontWeight: 700, marginBottom: 8 }}
+            >
+              Session Expired
+            </div>
+            <div
+              style={{
+                fontSize: 14,
+                color: "#4b5563",
+                marginBottom: 16,
+              }}
+            >
+              Please log in again.
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                try {
+                  if (vendorId && categoryId) {
+                    router.replace(`/preview/${vendorId}/${categoryId}`);
+                  } else {
+                    router.replace("/");
+                  }
+                } catch {
+                  router.replace("/");
+                }
+              }}
+              style={{
+                minWidth: 80,
+                padding: "8px 24px",
+                borderRadius: 999,
+                border: "none",
+                background: "#16a34a",
+                color: "#ffffff",
+                fontWeight: 600,
+                fontSize: 14,
+                cursor: "pointer",
+              }}
+            >
+              OK
+            </button>
           </div>
         </div>
       )}

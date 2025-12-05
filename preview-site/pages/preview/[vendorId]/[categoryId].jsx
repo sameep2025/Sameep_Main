@@ -86,6 +86,7 @@ export default function PreviewPage() {
   const [otpError, setOtpError] = useState("");
   const [loginAsAdmin, setLoginAsAdmin] = useState(false);
   const [adminPasscodeInput, setAdminPasscodeInput] = useState("");
+  const [sessionExpired, setSessionExpired] = useState(false);
   const [navIdentity, setNavIdentity] = useState({ role: "guest", displayName: "Guest", loggedIn: false });
 
   const loading = loadingVendor || loadingCategories;
@@ -290,8 +291,11 @@ export default function PreviewPage() {
       try {
         setCountriesLoading(true);
         const res = await fetch(`${API_BASE_URL}/api/countries/codes`);
-        if (!res.ok) throw new Error("Failed to load country codes");
-        const json = await res.json();
+        if (!res.ok) {
+          console.error("Failed to load country codes, status:", res.status);
+          return;
+        }
+        const json = await res.json().catch(() => ({}));
         const data = Array.isArray(json?.data) ? json.data : [];
         const list = data
           .map((c) => ({
@@ -391,6 +395,7 @@ export default function PreviewPage() {
 
       const check = () => {
         if (Date.now() >= ms) {
+          setSessionExpired(true);
           handleLogout();
         }
       };
@@ -424,6 +429,7 @@ export default function PreviewPage() {
 
           if (!res.ok) {
             // If the status endpoint itself fails, be conservative and log out.
+            setSessionExpired(true);
             handleLogout();
             return;
           }
@@ -433,6 +439,7 @@ export default function PreviewPage() {
           // Any non-active status (no_session, expired, invalid_token, etc.)
           // should force this tab to log out.
           if (!status || status !== "active") {
+            setSessionExpired(true);
             handleLogout();
           }
         } catch {
@@ -466,6 +473,7 @@ export default function PreviewPage() {
 
           // If token for this vendor/category is removed or changed, force logout
           if (!newVal) {
+            setSessionExpired(true);
             handleLogout();
             return;
           }
@@ -474,6 +482,7 @@ export default function PreviewPage() {
           // also force logout so that only the latest login remains active.
           const current = window.localStorage.getItem(tokenKey);
           if (current && current !== newVal) {
+            setSessionExpired(true);
             handleLogout();
           }
         } catch {
@@ -494,71 +503,18 @@ export default function PreviewPage() {
 
   const handleOpenOtpModal = async () => {
     try {
-      if (navIdentity && navIdentity.role === "vendor" && navIdentity.loggedIn) {
-        console.log("Vendor already logged in for this preview, bypassing OTP modal");
-        return;
-      }
-
-      if (typeof window !== "undefined") {
-        const tokenKey = makePreviewTokenKey(vendorId, categoryId);
-        const token = window.localStorage.getItem(tokenKey);
-        if (token) {
-          try {
-            const res = await fetch(`${API_BASE_URL}/api/customers/session-status-token`, {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ token }),
-            });
-            if (res.ok) {
-              const data = await res.json().catch(() => null);
-              if (data && data.status === "active") {
-                // Active token-based session: skip OTP and restore identity
-                console.log("Active token session", data);
-                try {
-                  if (typeof window !== "undefined") {
-                    const role = "guest";
-                    const displayName =
-                      (data && typeof data.displayName === "string" && data.displayName.trim())
-                        ? data.displayName.trim()
-                        : "Guest";
-                    const identity = { role, displayName, loggedIn: true };
-                    const identityKey = makePreviewIdentityKey(vendorId, categoryId);
-                    try {
-                      window.localStorage.setItem(identityKey, JSON.stringify(identity));
-                    } catch {}
-                    setNavIdentity(identity);
-                  }
-                } catch {}
-                // TODO: implement actual booking/enroll navigation here
-                return;
-              }
-              if (data && (data.status === "expired" || data.status === "invalid_token")) {
-                window.alert("Session expired. Please log in again.");
-                try {
-                  const sessionKey = makePreviewSessionKey(vendorId, categoryId);
-                  const identityKey = makePreviewIdentityKey(vendorId, categoryId);
-                  window.localStorage.removeItem(tokenKey);
-                  window.localStorage.removeItem(sessionKey);
-                  window.localStorage.removeItem(identityKey);
-                } catch {}
-                setNavIdentity({ role: "guest", displayName: "Guest", loggedIn: false });
-              }
-            }
-          } catch (e) {
-            console.error("Failed to check token-based session before OTP", e);
-          }
-        }
-      }
+      // Always prepare and show the OTP modal. Any existing session checks
+      // are handled elsewhere; this function just opens the login flow.
+      setOtpError("");
+      setOtpStep(1);
+      setPhone("");
+      setOtp("");
+      setLoginAsAdmin(false);
+      setAdminPasscodeInput("");
+      setShowOtpModal(true);
     } catch (e) {
-      console.error("Failed to check session status before OTP", e);
+      console.error("Failed to open OTP modal", e);
     }
-
-    // No active session or check failed -> show OTP modal
-    setOtpError("");
-    setOtpStep(1);
-    setPhone("");
-    setOtp("");
-    setShowOtpModal(true);
   };
 
   const handleCloseOtpModal = () => {
@@ -632,10 +588,46 @@ export default function PreviewPage() {
             window.localStorage.setItem(tokenKey, json.token);
           }
           if (json) {
-            const role = json.role === "vendor" ? "vendor" : "guest";
-            const displayName = typeof json.displayName === "string" && json.displayName.trim()
-              ? json.displayName.trim()
-              : role === "vendor" ? (vendor?.businessName || "Vendor") : "Guest";
+            // Decide role strictly for this preview page based on phone number.
+            // Only when the verified customer's phone matches THIS vendor's
+            // configured number do we treat them as vendor.
+            let role = "guest";
+            try {
+              if (vendor) {
+                const vendorRaw =
+                  (vendor.customerId && vendor.customerId.fullNumber) ||
+                  vendor.phone ||
+                  "";
+                const vendorDigits = String(vendorRaw).replace(/\D/g, "");
+
+                const customerRaw =
+                  (json.customer && (json.customer.fullNumber || json.customer.phone)) ||
+                  "";
+                const customerDigits = String(customerRaw).replace(/\D/g, "");
+
+                console.log("VENDOR PHONE CHECK:", {
+                  vendorRaw,
+                  vendorDigits,
+                  customerRaw,
+                  customerDigits,
+                  match: vendorDigits === customerDigits || customerDigits.endsWith(vendorDigits) || vendorDigits.endsWith(customerDigits)
+                });
+
+                if (vendorDigits && customerDigits && 
+                    (vendorDigits === customerDigits || 
+                     customerDigits.endsWith(vendorDigits) || 
+                     vendorDigits.endsWith(customerDigits))) {
+                  role = "vendor";
+                }
+              }
+            } catch {}
+
+            const displayName =
+              typeof json.displayName === "string" && json.displayName.trim()
+                ? json.displayName.trim()
+                : role === "vendor"
+                ? (vendor?.businessName || "Vendor")
+                : "Guest";
             const identity = { role, displayName, loggedIn: true };
             const identityKey = makePreviewIdentityKey(vendorId, categoryId);
             try {
@@ -6388,6 +6380,72 @@ export default function PreviewPage() {
           )}
 
         </>
+      )}
+      {sessionExpired && (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(0,0,0,0.4)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 9999,
+          }}
+        >
+          <div
+            style={{
+              width: 280,
+              borderRadius: 16,
+              background: "#ffffff",
+              padding: "20px 16px 12px",
+              boxShadow: "0 10px 30px rgba(0,0,0,0.2)",
+              textAlign: "center",
+            }}
+          >
+            <div
+              style={{ fontSize: 18, fontWeight: 700, marginBottom: 8 }}
+            >
+              Session Expired
+            </div>
+            <div
+              style={{
+                fontSize: 14,
+                color: "#4b5563",
+                marginBottom: 16,
+              }}
+            >
+              Please log in again.
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                try {
+                  if (vendorId && categoryId) {
+                    window.location.href = `/preview/${vendorId}/${categoryId}`;
+                  } else {
+                    window.location.href = "/";
+                  }
+                } catch {
+                  window.location.href = "/";
+                }
+              }}
+              style={{
+                minWidth: 80,
+                padding: "8px 24px",
+                borderRadius: 999,
+                border: "none",
+                background: "#16a34a",
+                color: "#ffffff",
+                fontWeight: 600,
+                fontSize: 14,
+                cursor: "pointer",
+              }}
+            >
+              OK
+            </button>
+          </div>
+        </div>
       )}
     </div>
   );

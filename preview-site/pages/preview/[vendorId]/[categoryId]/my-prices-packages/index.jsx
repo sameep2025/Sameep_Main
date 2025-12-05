@@ -2,6 +2,25 @@ import React, { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/router";
 import API_BASE_URL from "../../../../../config";
 
+// Authentication check helper (pure boolean, no UI side-effects)
+const checkAuthentication = (vendorId, categoryId) => {
+  try {
+    if (typeof window === "undefined") return false;
+    const tokenKey = `previewToken:${vendorId}:${categoryId}`;
+    const identityKey = `previewIdentity:${vendorId}:${categoryId}`;
+
+    const token = window.localStorage.getItem(tokenKey);
+    const identityStr = window.localStorage.getItem(identityKey);
+
+    if (!token || !identityStr) return false;
+
+    const identity = JSON.parse(identityStr);
+    return !!(identity && identity.loggedIn === true);
+  } catch {
+    return false;
+  }
+};
+
 // My Prices - Packages list page
 // Shows all dummy combos (packages) for this category and lets the vendor
 // drill down into a combo detail page for price + status editing.
@@ -14,9 +33,17 @@ export default function MyPackagesListPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [vendorOverrides, setVendorOverrides] = useState({}); // key: `${comboId}|${sizeKey}` -> { price, status }
+  const [sessionExpired, setSessionExpired] = useState(false);
 
   useEffect(() => {
     if (!categoryId) return;
+    
+    // Check authentication first
+    if (!checkAuthentication(vendorId, categoryId)) {
+      setSessionExpired(true);
+      return;
+    }
+    
     (async () => {
       try {
         setLoading(true);
@@ -79,6 +106,22 @@ export default function MyPackagesListPage() {
       }
     })();
   }, [categoryId, vendorId]);
+
+  useEffect(() => {
+    if (!vendorId || !categoryId) return;
+    if (typeof window === "undefined") return;
+
+    const id = setInterval(() => {
+      try {
+        if (!checkAuthentication(vendorId, categoryId)) {
+          setSessionExpired(true);
+          clearInterval(id);
+        }
+      } catch {}
+    }, 2000);
+
+    return () => clearInterval(id);
+  }, [vendorId, categoryId, router]);
 
   const comboRows = useMemo(() => {
     try {
@@ -293,6 +336,75 @@ export default function MyPackagesListPage() {
               </div>
             </div>
           ))}
+        </div>
+      )}
+
+      {sessionExpired && (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(0,0,0,0.4)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 9999,
+          }}
+        >
+          <div
+            style={{
+              width: 280,
+              borderRadius: 16,
+              background: "#ffffff",
+              padding: "20px 16px 12px",
+              boxShadow: "0 10px 30px rgba(0,0,0,0.2)",
+              textAlign: "center",
+              fontFamily:
+                "Poppins, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif",
+            }}
+          >
+            <div
+              style={{ fontSize: 18, fontWeight: 700, marginBottom: 8 }}
+            >
+              Session Expired
+            </div>
+            <div
+              style={{
+                fontSize: 14,
+                color: "#4b5563",
+                marginBottom: 16,
+              }}
+            >
+              Please log in again.
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                try {
+                  if (vendorId && categoryId) {
+                    router.replace(`/preview/${vendorId}/${categoryId}`);
+                  } else {
+                    router.replace("/");
+                  }
+                } catch {
+                  router.replace("/");
+                }
+              }}
+              style={{
+                minWidth: 80,
+                padding: "8px 24px",
+                borderRadius: 999,
+                border: "none",
+                background: "#16a34a",
+                color: "#ffffff",
+                fontWeight: 600,
+                fontSize: 14,
+                cursor: "pointer",
+              }}
+            >
+              OK
+            </button>
+          </div>
         </div>
       )}
     </div>

@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useEffect, useMemo } from "react";
-import { Menu, ChevronDown, User } from "lucide-react";
+import { Menu, ChevronDown, User, LogOut } from "lucide-react";
 import VendorMenuDropdown from "./VendorMenuDropdown";
 
 export default function TopNavBar({
@@ -37,6 +37,8 @@ export default function TopNavBar({
   const [menuOpen, setMenuOpen] = useState(false);
   const [hoverKey, setHoverKey] = useState(null);
   const [servicesOpen, setServicesOpen] = useState(false);
+  const [guestLogoutHover, setGuestLogoutHover] = useState(false);
+  const [vendorLogoutHover, setVendorLogoutHover] = useState(false);
 
   const isVendor = identityLoggedIn && identityRole === "vendor";
   const avatarLetter = (() => {
@@ -463,26 +465,25 @@ export default function TopNavBar({
                       }
                       onLogout();
                     }}
+                    title="Logout"
+                    onMouseEnter={() => setGuestLogoutHover(true)}
+                    onMouseLeave={() => setGuestLogoutHover(false)}
                     style={{
                       border: "none",
-                      background: "transparent",
+                      background: guestLogoutHover ? "#059669" : "#06b26b",
                       display: "flex",
                       alignItems: "center",
                       justifyContent: "center",
                       cursor: "pointer",
-                      padding: 0,
+                      width: 38,
+                      height: 38,
+                      borderRadius: 999,
+                      boxShadow: guestLogoutHover
+                        ? "0 10px 22px rgba(6,178,107,0.45)"
+                        : "0 8px 18px rgba(6,178,107,0.35)",
                     }}
                   >
-                    <span
-                      style={{
-                        marginLeft: 6,
-                        fontSize: 16,
-                        fontWeight: 500,
-                        color: "#111827",
-                      }}
-                    >
-                      Logout
-                    </span>
+                    <LogOut size={18} color="#ffffff" />
                   </button>
                 )}
               </div>
@@ -523,26 +524,25 @@ export default function TopNavBar({
                       }
                       onLogout();
                     }}
+                    title="Logout"
+                    onMouseEnter={() => setVendorLogoutHover(true)}
+                    onMouseLeave={() => setVendorLogoutHover(false)}
                     style={{
                       border: "none",
-                      background: "transparent",
+                      background: vendorLogoutHover ? "#059669" : "#06b26b",
                       display: "flex",
                       alignItems: "center",
                       justifyContent: "center",
                       cursor: "pointer",
-                      padding: 0,
+                      width: 38,
+                      height: 38,
+                      borderRadius: 999,
+                      boxShadow: vendorLogoutHover
+                        ? "0 10px 22px rgba(6,178,107,0.45)"
+                        : "0 8px 18px rgba(6,178,107,0.35)",
                     }}
                   >
-                    <span
-                      style={{
-                        marginLeft: 6,
-                        fontSize: 16,
-                        fontWeight: 500,
-                        color: "#111827",
-                      }}
-                    >
-                      Logout
-                    </span>
+                    <LogOut size={18} color="#ffffff" />
                   </button>
                 )}
               </div>
