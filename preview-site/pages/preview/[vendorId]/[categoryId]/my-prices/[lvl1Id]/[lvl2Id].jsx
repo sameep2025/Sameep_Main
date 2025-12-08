@@ -201,11 +201,10 @@ export default function MyIndividualServicesDetailPage() {
     return out;
   }, [rows, rowMatches]);
 
-  // Filter by LVL1 (e.g., "Two Wheeler") and LVL2 (e.g., "With License")
-  // without assuming fixed level indices. We:
-  // - treat index 0 as root (e.g., "Driving School")
-  // - match LVL1 against ANY child level name (levels[1+])
-  // - match LVL2 against the last level name
+  // Filter by LVL1 (e.g., "Men's Grooming") and LVL2 (e.g., "Hair")
+  // Show all items that are UNDER the specified hierarchy
+  // - LVL1 should appear somewhere in the levels (after root)
+  // - LVL2 should appear somewhere in the levels (after LVL1)
   const levelFilteredRows = useMemo(() => {
     try {
       const lvl1Target = String(lvl1Id || "").trim().toLowerCase();
@@ -217,13 +216,17 @@ export default function MyIndividualServicesDetailPage() {
         if (!levels.length) return false;
         const lower = levels.map((x) => String(x || "").trim().toLowerCase());
 
-        // Skip root (index 0) when matching LVL1 like "Two Wheeler"
+        // Skip root (index 0) when matching LVL1 like "Men's Grooming"
         const childLevels = lower.slice(1);
+        
+        // LVL1 must appear somewhere in the hierarchy
         if (lvl1Target && !childLevels.includes(lvl1Target)) return false;
 
+        // LVL2 must appear somewhere in the hierarchy (after LVL1)
         if (lvl2Target) {
-          const last = lower[lower.length - 1];
-          if (last !== lvl2Target) return false;
+          const lvl1Index = childLevels.indexOf(lvl1Target);
+          const levelsAfterLvl1 = lvl1Index >= 0 ? childLevels.slice(lvl1Index + 1) : childLevels;
+          if (!levelsAfterLvl1.includes(lvl2Target)) return false;
         }
         return true;
       });

@@ -1895,11 +1895,6 @@ export default function PreviewPage() {
       // For non-accepted vendors, keep showing Packages as long as there is any combo.
       if (!isVendorAccepted) return true;
 
-      // Check if this category has inventory
-      const catKey = String(categoryId || '');
-      const invList = vendor?.inventorySelections?.[catKey];
-      const hasInventory = Array.isArray(invList) && invList.length > 0;
-
       // For accepted vendors, check if any combo has Active status
       const hasAnyActive = combos.some((combo) => {
         try {
@@ -1910,30 +1905,48 @@ export default function PreviewPage() {
           
           // Check pricingStatusPerSize values
           const statusValues = Object.values(statusMap);
-          if (statusValues.length > 0) {
-            return statusValues.some((v) =>
-              String(v || "").trim().toLowerCase() === "active"
-            );
+          const comboLevelStatus = String(combo?.pricingStatus || '').trim().toLowerCase();
+          
+          // Debug log
+          console.log('[hasPackagesForNav] combo check:', {
+            comboName: combo?.name,
+            statusMap,
+            statusValues,
+            comboLevelStatus,
+            pricingStatus: combo?.pricingStatus
+          });
+          
+          // Has explicit active status
+          if (statusValues.some((v) => String(v || "").trim().toLowerCase() === "active")) {
+            console.log('[hasPackagesForNav] Found active in statusValues');
+            return true;
+          }
+          if (comboLevelStatus === 'active') {
+            console.log('[hasPackagesForNav] Found active in comboLevelStatus');
+            return true;
           }
           
-          // If no pricingStatusPerSize, check combo-level pricingStatus
-          const comboStatus = String(combo?.pricingStatus || '').trim().toLowerCase();
-          if (comboStatus === 'active') return true;
-          if (comboStatus === 'inactive') return false;
+          // Has explicit inactive status - skip this combo
+          if (comboLevelStatus === 'inactive') {
+            return false;
+          }
+          if (statusValues.length > 0 && statusValues.every((v) => String(v || "").trim().toLowerCase() === "inactive")) {
+            return false;
+          }
           
-          // No status defined at all - for categories without inventory, default to showing
-          // This handles legacy data
-          if (!hasInventory) return true;
-          return true; // Default to showing if no explicit inactive status
+          // No status set at all - for accepted vendors, require explicit active
+          console.log('[hasPackagesForNav] No status found, returning false');
+          return false;
         } catch {
-          return true; // Default to showing on error
+          return false;
         }
       });
+      console.log('[hasPackagesForNav] Final result:', hasAnyActive);
       return hasAnyActive;
     } catch {
-      return Array.isArray(combos) && combos.length > 0;
+      return false;
     }
-  }, [combos, isVendorAccepted, categoryId, vendor]);
+  }, [combos, isVendorAccepted]);
 
   const hasVendorActiveForNode = (node) => {
     try {
@@ -1967,26 +1980,67 @@ export default function PreviewPage() {
       if (nodeStatusRaw === "inactive") return false;
       
       // Then check vendor.nodePricingStatus map
-      const vendorNodeStatus = vendor?.nodePricingStatus?.[nodeId];
-      if (vendorNodeStatus) {
+      const nodePricingStatusMap = vendor?.nodePricingStatus || {};
+      const vendorNodeStatus = nodePricingStatusMap[nodeId];
+      
+      if (vendorNodeStatus !== undefined) {
         const vendorStatusRaw = String(vendorNodeStatus).trim().toLowerCase();
         if (vendorStatusRaw === "active") return true;
         if (vendorStatusRaw === "inactive") return false;
       }
+      
+      // Collect ALL node IDs in this subtree (including this node and all descendants)
+      const collectAllNodeIds = (n) => {
+        if (!n) return [];
+        const ids = [];
+        const nId = String(n?.id || n?._id || "");
+        if (nId) ids.push(nId);
+        const children = Array.isArray(n.children) ? n.children : [];
+        for (const child of children) {
+          ids.push(...collectAllNodeIds(child));
+        }
+        return ids;
+      };
+      
+      const allNodeIds = collectAllNodeIds(node);
+      
+      // Check if any node in this subtree has a status in nodePricingStatusMap
+      const statusesInSubtree = allNodeIds
+        .map(id => nodePricingStatusMap[id])
+        .filter(s => s !== undefined)
+        .map(s => String(s).trim().toLowerCase());
+      
+      if (statusesInSubtree.length > 0) {
+        // If ALL statuses are inactive, this node is inactive
+        const allInactive = statusesInSubtree.every(s => s === 'inactive');
+        const hasAnyActive = statusesInSubtree.some(s => s === 'active');
+        
+        if (allInactive) return false;
+        if (hasAnyActive) return true;
+      }
 
-      // If node status is missing/blank, check if this category has inventory
-      // If no inventory exists for this category, default to true (show the node)
+      // Check if this category has inventory
       const catKey = String(categoryId || '');
       const invList = vendor?.inventorySelections?.[catKey];
       const hasInventory = Array.isArray(invList) && invList.length > 0;
       
-      if (!hasInventory) {
-        // No inventory for this category - default to showing the node
-        return true;
+      if (hasInventory) {
+        // Has inventory - defer to inventory: active if any inventory row for this node is Active.
+        return hasActivePricingForNode(node);
       }
-
-      // Has inventory - defer to inventory: active if any inventory row for this node is Active.
-      return hasActivePricingForNode(node);
+      
+      // No inventory and no explicit status found in subtree
+      // For accepted vendors, if nodePricingStatusMap has ANY entries, 
+      // nodes without status should be hidden (they weren't explicitly activated)
+      // If nodePricingStatusMap is empty, show all (legacy/no pricing set up yet)
+      const hasAnyPricingStatus = Object.keys(nodePricingStatusMap).length > 0;
+      if (hasAnyPricingStatus) {
+        // Some nodes have status set, but this node/subtree doesn't - hide it
+        return false;
+      }
+      
+      // No pricing status set up at all - default to showing
+      return true;
     } catch {
       return false;
     }
@@ -5174,17 +5228,45 @@ export default function PreviewPage() {
                     const hasInventoryForCat = Array.isArray(vendor?.inventorySelections?.[catKey]) && vendor.inventorySelections[catKey].length > 0;
                     const isVendorAcceptedLocal = String(vendor?.status || '').trim().toLowerCase() === 'accepted';
                     
+                    // Debug log
+                    console.log('[Package Card]', {
+                      comboName: combo?.name,
+                      statusMap,
+                      rawSizes,
+                      hasInventoryForCat,
+                      isVendorAcceptedLocal
+                    });
+                    
                     // For accepted vendors, check if this combo should be shown
-                    // Only hide if explicitly marked as Inactive
                     if (isVendorAcceptedLocal) {
-                      // Check if combo has any active status
                       const statusValues = Object.values(statusMap);
-                      const hasExplicitInactive = statusValues.length > 0 && 
-                        statusValues.every((v) => String(v || '').trim().toLowerCase() === 'inactive');
-                      // Also check combo-level pricingStatus
                       const comboLevelStatus = String(combo?.pricingStatus || '').trim().toLowerCase();
-                      if (hasExplicitInactive || comboLevelStatus === 'inactive') {
-                        return null; // Skip this combo for accepted vendors
+                      
+                      // Check if combo has any active status
+                      const hasAnyActive = statusValues.some((v) => String(v || '').trim().toLowerCase() === 'active') ||
+                                          comboLevelStatus === 'active';
+                      const hasExplicitInactive = (statusValues.length > 0 && 
+                        statusValues.every((v) => String(v || '').trim().toLowerCase() === 'inactive')) ||
+                        comboLevelStatus === 'inactive';
+                      
+                      console.log('[Package Card] Status check:', {
+                        comboName: combo?.name,
+                        statusValues,
+                        comboLevelStatus,
+                        hasAnyActive,
+                        hasExplicitInactive
+                      });
+                      
+                      // If explicitly inactive, hide
+                      if (hasExplicitInactive) {
+                        console.log('[Package Card] Hiding - explicitly inactive');
+                        return null;
+                      }
+                      
+                      // If no status set at all, hide for accepted vendors (require explicit active)
+                      if (!hasAnyActive && statusValues.length === 0 && !comboLevelStatus) {
+                        console.log('[Package Card] Hiding - no status set');
+                        return null;
                       }
                     }
                     
@@ -5204,10 +5286,19 @@ export default function PreviewPage() {
                       }
                       return true;
                     });
+                    
+                    console.log('[Package Card] Sizes filter:', {
+                      comboName: combo?.name,
+                      rawSizes,
+                      sizes,
+                      hasInventoryForCat
+                    });
+                    
                     // If there are no active sizes left (all inactive), skip rendering this card
                     // But for categories without inventory, if rawSizes had entries, allow the card
                     // For non-accepted vendors, always show the card
                     if (!sizes.length && isVendorAcceptedLocal && (hasInventoryForCat || rawSizes.length === 0)) {
+                      console.log('[Package Card] Hiding - no sizes left');
                       return null;
                     }
                     // Fallback: if sizes is empty but rawSizes had placeholder entries, use them
@@ -5346,7 +5437,8 @@ export default function PreviewPage() {
                       if (!cand) return null;
                       return normalize(cand);
                     })();
-                    if (isVendorAccepted && comboStatus !== 'active') return null;
+                    // We already checked hasAnyActive earlier, so don't filter again here
+                    // The earlier check at line 5246-5270 handles active/inactive filtering
                     return (
                       <section key={`pkg-${idx}`} style={{ flex: '1 1 320px', minWidth: 300, marginBottom: 0 }}>
                         <div
