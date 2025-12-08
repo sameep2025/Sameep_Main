@@ -1149,7 +1149,6 @@ export default function DummyVendorCategoriesDetailPage() {
                       <th style={{ border: '1px solid #e5e7eb', padding: 8 }}>Time</th>
                       <th style={{ border: '1px solid #e5e7eb', padding: 8 }}>Customer</th>
                       <th style={{ border: '1px solid #e5e7eb', padding: 8 }}>Service</th>
-                      <th style={{ border: '1px solid #e5e7eb', padding: 8 }}>Category Path</th>
                       <th style={{ border: '1px solid #e5e7eb', padding: 8 }}>Attributes</th>
                       <th style={{ border: '1px solid #e5e7eb', padding: 8 }}>Price</th>
                       <th style={{ border: '1px solid #e5e7eb', padding: 8 }}>Terms</th>
@@ -1163,18 +1162,36 @@ export default function DummyVendorCategoriesDetailPage() {
                       const phone = enq.phone || enq.customerId || '-';
                       const catPath = Array.isArray(enq.categoryPath) ? enq.categoryPath.join(' / ') : '';
                       const attrsObj = enq.attributes && typeof enq.attributes === 'object' ? enq.attributes : {};
-                      const attrsText = Object.keys(attrsObj).length
-                        ? Object.entries(attrsObj)
-                            .map(([k, v]) => `${k}: ${v}`)
-                            .join(', ')
-                        : '-';
+                      // Attributes: show only the inventory label name (inventoryName) if present, else '-'
+                      const attrsText =
+                        typeof attrsObj.inventoryName === 'string' && attrsObj.inventoryName.trim()
+                          ? attrsObj.inventoryName.trim()
+                          : '-';
                       const priceStr = enq.price == null ? '-' : String(enq.price);
+                      const serviceLabel = (() => {
+                        // Build label from category path: first subcategory on left, remaining nested levels on right
+                        if (catPath && catPath.trim()) {
+                          const segs = catPath
+                            .split('/')
+                            .map((s) => s.trim())
+                            .filter(Boolean);
+                          if (segs.length >= 3) {
+                            const left = segs[1];
+                            const right = segs.slice(2).join(' / ');
+                            return `${left} - ${right}`;
+                          }
+                          if (segs.length === 2) {
+                            return `${segs[0]} - ${segs[1]}`;
+                          }
+                          return segs[0];
+                        }
+                        return enq.serviceName || '-';
+                      })();
                       return (
                         <tr key={enq._id || `${enq.vendorId}-${enq.categoryId}-${enq.createdAt}`}>
                           <td style={{ border: '1px solid #e5e7eb', padding: 8 }}>{timeStr}</td>
                           <td style={{ border: '1px solid #e5e7eb', padding: 8 }}>{phone}</td>
-                          <td style={{ border: '1px solid #e5e7eb', padding: 8 }}>{enq.serviceName || '-'}</td>
-                          <td style={{ border: '1px solid #e5e7eb', padding: 8 }}>{catPath || '-'}</td>
+                          <td style={{ border: '1px solid #e5e7eb', padding: 8 }}>{serviceLabel}</td>
                           <td style={{ border: '1px solid #e5e7eb', padding: 8 }}>{attrsText}</td>
                           <td style={{ border: '1px solid #e5e7eb', padding: 8 }}>{priceStr}</td>
                           <td style={{ border: '1px solid #e5e7eb', padding: 8 }}>{enq.terms || '-'}</td>

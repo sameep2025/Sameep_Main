@@ -48,6 +48,7 @@ import DummyVendorStatusPage from "./pages/DummyVendorStatusPage";
 import DummyVendorStatusListPage from "./pages/DummyVendorStatusListPage";
 import DummyVendorCategoriesDetailPage from "./pages/DummyVendorCategoriesDetailPage";
 import AppConfigurationsPage from "./pages/AppConfigurationsPage";
+import EnquiriesPage from "./pages/EnquiriesPage";
 
 
 function App() {
@@ -119,6 +120,9 @@ function App() {
 
             {/* Customers */}
             <Route path="/customers" element={<CustomersPage />} />
+
+            {/* Enquiries (all vendors/customers) */}
+            <Route path="/enquiries" element={<EnquiriesPage />} />
 
             {/* App Configurations */}
             <Route

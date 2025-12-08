@@ -18,7 +18,6 @@ const BusinessLocationModal = dynamic(() => import("../../../components/Business
 const BusinessHoursModal = dynamic(() => import("../../../components/BusinessHoursModal"), { ssr: false });
 
 export default function PreviewPage() {
-  console.log("DRIVING PREVIEW PAGE LOADED (TOP)");
   const router = useRouter();
   const { vendorId, categoryId, lat, lng, homeLocs, mode } = router.query;
 
@@ -117,16 +116,51 @@ export default function PreviewPage() {
       try {
         if (!vendorId || !categoryId) return;
         const customerId = getStoredCustomerId();
-        const phone =
-          (vendor && vendor.customerId && vendor.customerId.fullNumber) ||
-          (vendor && vendor.phone) ||
-          "";
+        // Prefer customer phone over vendor phone for enquiries
+        let enquiryPhone = "";
+        try {
+          // Try to read persisted identity (may contain customer phone)
+          if (typeof window !== "undefined") {
+            const identityKey = makePreviewIdentityKey(vendorId, categoryId);
+            const raw = window.localStorage.getItem(identityKey);
+            if (raw) {
+              try {
+                const parsed = JSON.parse(raw);
+                if (parsed && typeof parsed === "object") {
+                  if (parsed.fullNumber && typeof parsed.fullNumber === "string") {
+                    enquiryPhone = parsed.fullNumber;
+                  } else if (parsed.phone && typeof parsed.phone === "string") {
+                    enquiryPhone = parsed.phone;
+                  }
+                }
+              } catch {}
+            }
+          }
+        } catch {}
+
+        // Fallback: rebuild from current OTP state if available
+        if (!enquiryPhone) {
+          try {
+            const cleanPhone = (phone || "").replace(/\D/g, "");
+            if (countryCode && cleanPhone) {
+              enquiryPhone = `+${countryCode}${cleanPhone}`;
+            }
+          } catch {}
+        }
+
+        // Final fallback: vendor phone (old behaviour)
+        if (!enquiryPhone) {
+          enquiryPhone =
+            (vendor && vendor.customerId && vendor.customerId.fullNumber) ||
+            (vendor && vendor.phone) ||
+            "";
+        }
 
         const body = {
           vendorId: String(vendorId),
           categoryId: String(categoryId),
           customerId,
-          phone,
+          phone: enquiryPhone,
           serviceName: serviceName || "",
           source: source || "",
           price: price == null || price === "" ? null : Number(price),
@@ -628,7 +662,17 @@ export default function PreviewPage() {
                 : role === "vendor"
                 ? (vendor?.businessName || "Vendor")
                 : "Guest";
-            const identity = { role, displayName, loggedIn: true };
+            const customerRaw =
+              (json.customer && (json.customer.fullNumber || json.customer.phone)) ||
+              `+${countryCode}${cleanPhone}`;
+            const customerDigits = String(customerRaw).replace(/\D/g, "");
+            const identity = {
+              role,
+              displayName,
+              loggedIn: true,
+              fullNumber: customerRaw,
+              phone: customerDigits,
+            };
             const identityKey = makePreviewIdentityKey(vendorId, categoryId);
             try {
               window.localStorage.setItem(identityKey, JSON.stringify(identity));
@@ -709,10 +753,12 @@ export default function PreviewPage() {
       };
       collectIds(node);
 
-      const allInv = vendor && vendor.inventorySelections && typeof vendor.inventorySelections === 'object'
-        ? vendor.inventorySelections
-        : {};
+      const allInv =
+        vendor && vendor.inventorySelections && typeof vendor.inventorySelections === "object"
+          ? vendor.inventorySelections
+          : {};
       const lists = Object.values(allInv);
+
       for (const listRaw of lists) {
         const inv = Array.isArray(listRaw) ? listRaw : [];
         for (const entry of inv) {
@@ -725,11 +771,19 @@ export default function PreviewPage() {
             entry && entry.pricingStatusByRow && typeof entry.pricingStatusByRow === "object"
               ? entry.pricingStatusByRow
               : {};
+
           for (const key of Object.keys(pbr)) {
-            const keyIds = String(key).split('|');
-            if (!keyIds.some((id) => idsToMatch.has(String(id)))) continue;
-            const rawStatus = String(statusMap[key] || '').trim().toLowerCase();
-            if (rawStatus === 'active') return true;
+            const keyIds = String(key).split("|");
+            // Match this node or any of its descendants against ANY id segment
+            // in the composite key so that parents stay active when a child row
+            // is active.
+            const hasMatchingId = keyIds.some((id) => idsToMatch.has(String(id)));
+            if (!hasMatchingId) continue;
+
+            const rawStatus = String(statusMap[key] || "").trim().toLowerCase();
+            if (rawStatus === "active") {
+              return true;
+            }
           }
         }
       }
@@ -1881,28 +1935,13 @@ export default function PreviewPage() {
       const nodeId = (() => {
         try { return String(node?.id || node?._id || ""); } catch { return ""; }
       })();
-      const isVendorAcceptedLocal = String(vendor?.status || "")
-        .trim()
-        .toLowerCase() === "accepted".toLowerCase();
-      // Per-vendor override from DummyVendor.nodePricingStatus, if present
-      try {
-        const map = (vendor && vendor.nodePricingStatus && typeof vendor.nodePricingStatus === 'object') ? vendor.nodePricingStatus : {};
-        const v = nodeId ? String(map[nodeId] || "").trim().toLowerCase() : "";
-        if (v === 'active') return true;
-        if (v === 'inactive') return false;
-      } catch {}
-      // Before vendor acceptance, treat nodes as active regardless of
-      // pricingStatus so that cards are visible for preview even when
-      // pricing status is Inactive.
-      if (!isVendorAcceptedLocal) {
-        return true;
-      }
-      // Fall back to inventorySelections: if any row for this node or its
-      // descendants has pricingStatusByRow === "Active", treat node as active.
-      if (typeof hasActivePricingForNode === "function") {
-        return hasActivePricingForNode(node);
-      }
-      return false;
+      // Always enforce node-level pricingStatus when present.
+      const nodeStatusRaw = String(node?.pricingStatus || "").trim().toLowerCase();
+      if (nodeStatusRaw === "active") return true;
+      if (nodeStatusRaw === "inactive") return false;
+
+      // If node status is missing/blank, defer to inventory: active if any inventory row for this node is Active.
+      return hasActivePricingForNode(node);
     } catch {
       return false;
     }
@@ -2141,7 +2180,22 @@ export default function PreviewPage() {
               {(() => {
                 try {
                   const catKey = String(categoryId || '');
-                  const inv = Array.isArray(vendor?.inventorySelections?.[catKey]) ? vendor.inventorySelections[catKey] : [];
+                  const invRaw = Array.isArray(vendor?.inventorySelections?.[catKey]) ? vendor.inventorySelections[catKey] : [];
+                  // Filter out inventory entries where ALL rows are inactive
+                  const inv = invRaw.filter((entry) => {
+                    try {
+                      const statusMap = entry?.pricingStatusByRow || {};
+                      const keys = Object.keys(statusMap);
+                      if (keys.length === 0) return true; // no status defined, allow
+                      for (const key of keys) {
+                        const raw = String(statusMap[key] || '').trim().toLowerCase();
+                        if (raw === 'active') return true;
+                      }
+                      return false;
+                    } catch {
+                      return true;
+                    }
+                  });
                   const ids = [displayNode?.id, selectedParent?.id, node?.id].map((x) => String(x || ''));
                   const rootNameLocal = String(categoryTree?.name || '').toLowerCase();
                   const isDrivingLocal = rootNameLocal === 'driving school';
@@ -2204,19 +2258,26 @@ export default function PreviewPage() {
                       try {
                         const prices = [];
                         list.forEach((n) => {
-                          const pbr = (n.entry && n.entry.pricesByRow && typeof n.entry.pricesByRow === 'object') ? n.entry.pricesByRow : null;
+                          const pbr =
+                            n.entry &&
+                            n.entry.pricesByRow &&
+                            typeof n.entry.pricesByRow === 'object'
+                              ? n.entry.pricesByRow
+                              : null;
                           if (!pbr) return;
                           for (const [key, value] of Object.entries(pbr)) {
                             const ids = String(key).split('|');
-                            if (ids.some((id) => String(id) === targetId)) {
-                              const num = Number(value);
-                              if (!Number.isNaN(num)) prices.push(num);
-                            }
+                            if (!ids.some((id) => String(id) === targetId)) continue;
+                            if (typeof rowPricingIsActive === 'function' && !rowPricingIsActive(n.entry, key)) continue;
+                            const num = Number(value);
+                            if (!Number.isNaN(num)) prices.push(num);
                           }
                         });
                         if (!prices.length) return null;
                         return Math.min(...prices);
-                      } catch { return null; }
+                      } catch {
+                        return null;
+                      }
                     };
 
                     const carBrand = String(attrSelections?.brand ?? '').trim() || null;
@@ -2303,10 +2364,27 @@ export default function PreviewPage() {
                       .map(([k]) => k)
                   );
                   const catKey = String(categoryId || '');
-                  const invPriceList = Array.isArray(vendor?.inventorySelections?.[catKey]) ? vendor.inventorySelections[catKey] : [];
+                  const invPriceListRaw = Array.isArray(vendor?.inventorySelections?.[catKey]) ? vendor.inventorySelections[catKey] : [];
+                  // Filter out entries where ALL rows are inactive
+                  const invPriceList = invPriceListRaw.filter((entry) => {
+                    try {
+                      const statusMap = entry?.pricingStatusByRow || {};
+                      const keys = Object.keys(statusMap);
+                      if (keys.length === 0) return true;
+                      for (const key of keys) {
+                        const raw = String(statusMap[key] || '').trim().toLowerCase();
+                        if (raw === 'active') return true;
+                      }
+                      return false;
+                    } catch {
+                      return true;
+                    }
+                  });
                   // Do NOT auto-allow families not configured; they will render only if an explicit mapping exists.
                   // First try strict linkedAttributes-based entries; then, if nothing matches, fall back to any entries
                   // whose pricesByRow target this card's node ids.
+                  // IMPORTANT: Use the specific current node ID for row-level active status check
+                  const currentDisplayNodeId = String(displayNode?.id || selectedParent?.id || node?.id || '');
                   let entriesAll = invPriceList.filter((e) => {
                     const famLower = String(e?.scopeFamily || '').toLowerCase();
                     if (!familiesAllLower.has(famLower)) return false;
@@ -2323,23 +2401,19 @@ export default function PreviewPage() {
                     const matchesSub = mapped === 'ALL' || targetIdsLinkedAttrs.some((tid) => tid && String(mapped) === String(tid));
                     if (!matchesSub) return false;
 
-                    // Require at least one matching row for this card's node ids.
-                    // If vendor is accepted, the row must be Active; otherwise any matching row is allowed
-                    // so that non-accepted vendors can still preview attribute dropdowns.
+                    // Require the row for the CURRENT display node to be Active
                     try {
                       const pbr = e && e.pricesByRow && typeof e.pricesByRow === 'object' ? e.pricesByRow : null;
                       const statusMap = e && e.pricingStatusByRow && typeof e.pricingStatusByRow === 'object' ? e.pricingStatusByRow : {};
                       if (!pbr) return false;
+                      const hasStatusMap = Object.keys(statusMap).length > 0;
                       for (const [rk] of Object.entries(pbr)) {
                         const parts = String(rk).split('|');
-                        const hitsThisCard = targetIdsLinkedAttrs.some((tid) => tid && parts.some((id) => String(id) === tid));
-                        if (!hitsThisCard) continue;
-                        if (isVendorAcceptedLocal) {
-                          const raw = String(statusMap[rk] || '').trim().toLowerCase();
-                          if (raw === 'active') return true;
-                        } else {
-                          return true;
-                        }
+                        // Only check rows that target the CURRENT display node
+                        if (!parts.some((id) => String(id) === currentDisplayNodeId)) continue;
+                        if (!hasStatusMap) return true; // legacy data without status
+                        const raw = String(statusMap[rk] || '').trim().toLowerCase();
+                        if (raw === 'active') return true;
                       }
                       return false;
                     } catch {
@@ -2348,23 +2422,21 @@ export default function PreviewPage() {
                   });
 
                   if (entriesAll.length === 0 && invPriceList.length > 0) {
-                    // Fallback: any inventory entry that has a pricesByRow targeting this card's node ids.
-                    // Again, for accepted vendors require Active; for others, allow any matching row.
+                    // Fallback: any inventory entry that has a pricesByRow targeting the current node.
+                    // Always require Active status for the specific current node.
                     entriesAll = invPriceList.filter((e) => {
                       try {
                         const pbr = e && e.pricesByRow && typeof e.pricesByRow === 'object' ? e.pricesByRow : null;
                         const statusMap = e && e.pricingStatusByRow && typeof e.pricingStatusByRow === 'object' ? e.pricingStatusByRow : {};
                         if (!pbr) return false;
+                        const hasStatusMap = Object.keys(statusMap).length > 0;
                         for (const [rk] of Object.entries(pbr)) {
                           const parts = String(rk).split('|');
-                          const hitsThisCard = targetIdsLinkedAttrs.some((tid) => tid && parts.some((id) => String(id) === tid));
-                          if (!hitsThisCard) continue;
-                          if (isVendorAcceptedLocal) {
-                            const raw = String(statusMap[rk] || '').trim().toLowerCase();
-                            if (raw === 'active') return true;
-                          } else {
-                            return true;
-                          }
+                          // Only check rows that target the CURRENT display node
+                          if (!parts.some((id) => String(id) === currentDisplayNodeId)) continue;
+                          if (!hasStatusMap) return true; // legacy data
+                          const raw = String(statusMap[rk] || '').trim().toLowerCase();
+                          if (raw === 'active') return true;
                         }
                         return false;
                       } catch { return false; }
@@ -2391,7 +2463,32 @@ export default function PreviewPage() {
                     } catch { return false; }
                   });
                   const entries = entriesMatched.length > 0 ? entriesMatched : entriesAll;
-                  let blocks = entries.map((entry, idx) => {
+                  
+                  // Additional filter: ensure we only include entries with active row for the CURRENT display node
+                  // This is critical: we must check the specific node ID, not all parent IDs
+                  const currentNodeId = String(displayNode?.id || selectedParent?.id || node?.id || '');
+                  const filteredEntries = entries.filter((entry) => {
+                        // Ensure an active row exists specifically for the current node
+                        try {
+                          const pbr = entry && entry.pricesByRow && typeof entry.pricesByRow === 'object' ? entry.pricesByRow : null;
+                          const statusMap = entry && entry.pricingStatusByRow && typeof entry.pricingStatusByRow === 'object' ? entry.pricingStatusByRow : {};
+                          if (!pbr) return false;
+                          // If no status map, allow entry (legacy data)
+                          if (Object.keys(statusMap).length === 0) return true;
+                          for (const [rk] of Object.entries(pbr)) {
+                            const parts = String(rk).split('|');
+                            // Check if this row targets the CURRENT node specifically
+                            if (!parts.some((id) => String(id) === currentNodeId)) continue;
+                            const raw = String(statusMap[rk] || '').trim().toLowerCase();
+                            if (raw === 'active') return true;
+                          }
+                          return false;
+                        } catch {
+                          return false;
+                        }
+                      });
+                  
+                  let blocks = filteredEntries.map((entry, idx) => {
                     const fam = String(entry?.scopeFamily || '');
                     const famLower = fam.toLowerCase();
                     let sel = {};
@@ -2437,8 +2534,9 @@ export default function PreviewPage() {
                     return { key: entry._id || entry.at || idx, pairs, sel, fam: famLower };
                   }).filter((b) => b.pairs.length > 0);
                   // Fallback: if nothing matched, render first inventory selection raw pairs
-                  if (blocks.length === 0 && entriesAll.length > 0) {
-                    const first = entriesAll[0];
+                  // Only use active entries for accepted vendors
+                  if (blocks.length === 0 && filteredEntries.length > 0) {
+                    const first = filteredEntries[0];
                     const fam = String(first?.scopeFamily || '');
                     const famLower = fam.toLowerCase();
                     const sels = first?.selections || {};
@@ -2561,6 +2659,10 @@ export default function PreviewPage() {
                   const handleSelectCombo = (combo) => {
                     setAttrSelections((prev) => {
                       const next = { ...(prev || {}) };
+                      // Store the full inventory name for enquiries
+                      const fullLabel = buildLabel(combo);
+                      next.inventoryName = fullLabel || undefined;
+                      
                       if (combo.isBike) {
                         next.bikeBrand = combo.brand || undefined;
                         next.bikeModel = combo.model || undefined;
@@ -2895,6 +2997,71 @@ export default function PreviewPage() {
                     return null;
                   }
                 })();
+
+                const nodeAttrs = displayNode?.attributes || {};
+                // Check if this category actually has inventory entries configured.
+                const catKeyForAttrs = String(categoryId || "");
+                const invForAttrs = Array.isArray(vendor?.inventorySelections?.[catKeyForAttrs])
+                  ? vendor.inventorySelections[catKeyForAttrs]
+                  : [];
+                const hasInventoryForThisCategory = invForAttrs.length > 0;
+
+                // Decide if this specific enquiry should be treated as inventory-based,
+                // using common inventory-related fields from either node attributes or
+                // the current attribute selections. This avoids hardcoding any category
+                // names but still prevents non-inventory cards (with no inventory
+                // configured) from reusing stale inventoryName values.
+                const inventoryKeys = [
+                  "brand",
+                  "model",
+                  "modelName",
+                  "bikeBrand",
+                  "bikeModel",
+                  "bodyType",
+                  "transmission",
+                  "bikeTransmission",
+                ];
+                const sel = attrSelections || {};
+                const nodeHasInventoryFields = inventoryKeys.some((k) => {
+                  const v = nodeAttrs[k];
+                  return typeof v === "string" && v.trim();
+                });
+                const selectionHasInventoryFields =
+                  inventoryKeys.some((k) => {
+                    const v = sel[k];
+                    return typeof v === "string" && v.trim();
+                  }) ||
+                  (typeof sel.inventoryName === "string" && sel.inventoryName.trim());
+
+                const treatAsInventory =
+                  hasInventoryForThisCategory && (nodeHasInventoryFields || selectionHasInventoryFields);
+
+                const baseAttrs = {
+                  segment: node?.name || "",
+                  courseType: selectedParent?.name || "",
+                  // Only when there is inventory configured for this category AND we see
+                  // inventory-like fields, merge the current selections (which may
+                  // contain inventoryName from the dropdown).
+                  ...(treatAsInventory ? sel : {}),
+                  // Also keep any static attributes defined on the display node.
+                  ...nodeAttrs,
+                };
+
+                // Derive a clean inventory name from the card's inventory attributes
+                let inventoryNameForCard = baseAttrs.inventoryName || "";
+                if (!inventoryNameForCard) {
+                  const invSourceAttrsForCard = displayNode?.attributes || {};
+                  const invBrandForCard =
+                    (typeof invSourceAttrsForCard.brand === "string" && invSourceAttrsForCard.brand.trim()) ||
+                    (typeof invSourceAttrsForCard.bikeBrand === "string" && invSourceAttrsForCard.bikeBrand.trim()) ||
+                    "";
+                  const invModelForCard =
+                    (typeof invSourceAttrsForCard.model === "string" && invSourceAttrsForCard.model.trim()) ||
+                    (typeof invSourceAttrsForCard.modelName === "string" && invSourceAttrsForCard.modelName.trim()) ||
+                    "";
+                  const mb = [invBrandForCard, invModelForCard].filter(Boolean).join(" ");
+                  if (mb) inventoryNameForCard = mb;
+                }
                 await postEnquiry({
                   source: "individual",
                   serviceName: displayNode?.name || node?.name || "",
@@ -2902,12 +3069,9 @@ export default function PreviewPage() {
                   terms: resolvedTerms || "",
                   categoryPath: pathNames,
                   categoryIds: pathIds,
-                  attributes: {
-                    segment: node?.name || "",
-                    courseType: selectedParent?.name || "",
-                    model: selectedChild?.name || "",
-                    ...(displayNode?.attributes || {}),
-                  },
+                  attributes: inventoryNameForCard
+                    ? { ...baseAttrs, inventoryName: inventoryNameForCard }
+                    : baseAttrs,
                 });
                 window.alert("Enquiry submitted");
               } catch (e) {
@@ -2930,9 +3094,24 @@ export default function PreviewPage() {
             {(() => {
               try {
                 const catKey = String(categoryId || '');
-                const inv = Array.isArray(vendor?.inventorySelections?.[catKey])
+                const invRaw = Array.isArray(vendor?.inventorySelections?.[catKey])
                   ? vendor.inventorySelections[catKey]
                   : [];
+                // Filter out inventory entries where ALL rows are inactive
+                const inv = invRaw.filter((entry) => {
+                  try {
+                    const statusMap = entry?.pricingStatusByRow || {};
+                    const keys = Object.keys(statusMap);
+                    if (keys.length === 0) return true;
+                    for (const key of keys) {
+                      const raw = String(statusMap[key] || '').trim().toLowerCase();
+                      if (raw === 'active') return true;
+                    }
+                    return false;
+                  } catch {
+                    return true;
+                  }
+                });
                 const ids = [displayNode?.id, selectedParent?.id, node?.id]
                   .map((x) => String(x || ''))
                   .filter(Boolean);
@@ -3100,7 +3279,23 @@ export default function PreviewPage() {
     familiesByTarget.get(key).add(fam);
   });
 
-  const invEntries = vendor?.inventorySelections?.[categoryId] || [];
+  const invEntriesRaw = vendor?.inventorySelections?.[categoryId] || [];
+  // Filter out inventory entries where ALL rows are inactive
+  const invEntries = invEntriesRaw.filter((entry) => {
+    try {
+      const statusMap = entry?.pricingStatusByRow || {};
+      const keys = Object.keys(statusMap);
+      if (keys.length === 0) return true; // no status defined, allow
+      // Check if at least one row is active
+      for (const key of keys) {
+        const raw = String(statusMap[key] || '').trim().toLowerCase();
+        if (raw === 'active') return true;
+      }
+      return false; // all rows are inactive
+    } catch {
+      return true;
+    }
+  });
   // Build attribute fields/options from inventory selections
   const allFields = new Set();
   const fieldValues = new Map(); // field -> Set(values)
@@ -3288,7 +3483,19 @@ export default function PreviewPage() {
         // Consider inventory per-row prices targeting this node id
         try {
           const idStr = String(x.id || '');
-          const inv = Array.isArray(vendor?.inventorySelections?.[catKey]) ? vendor.inventorySelections[catKey] : [];
+          const invRaw = Array.isArray(vendor?.inventorySelections?.[catKey]) ? vendor.inventorySelections[catKey] : [];
+          const inv = invRaw.filter((entry) => {
+            try {
+              const statusMap = entry?.pricingStatusByRow || {};
+              const keys = Object.keys(statusMap);
+              if (keys.length === 0) return true;
+              for (const key of keys) {
+                const raw = String(statusMap[key] || '').trim().toLowerCase();
+                if (raw === 'active') return true;
+              }
+              return false;
+            } catch { return true; }
+          });
           inv.forEach((entry) => {
             const pbr = entry && entry.pricesByRow && typeof entry.pricesByRow === 'object' ? entry.pricesByRow : null;
             if (!pbr) return;
@@ -3306,7 +3513,19 @@ export default function PreviewPage() {
 
     const renderPriceForNode = (node, parentNode) => {
       let livePrice = null;
-      const priceRows = vendor?.inventorySelections?.[categoryId] || [];
+      const priceRowsRaw = vendor?.inventorySelections?.[categoryId] || [];
+      const priceRows = priceRowsRaw.filter((entry) => {
+        try {
+          const statusMap = entry?.pricingStatusByRow || {};
+          const keys = Object.keys(statusMap);
+          if (keys.length === 0) return true;
+          for (const key of keys) {
+            const raw = String(statusMap[key] || '').trim().toLowerCase();
+            if (raw === 'active') return true;
+          }
+          return false;
+        } catch { return true; }
+      });
       for (const entry of priceRows) {
         const pbr = (entry && entry.pricesByRow && typeof entry.pricesByRow === 'object') ? entry.pricesByRow : null;
         if (!pbr) continue;
@@ -3382,8 +3601,19 @@ export default function PreviewPage() {
         {root.children.map((lvl1) => {
           const serviceKey = makeServiceKey(lvl1?.name || "");
       const lvl2KidsRaw = Array.isArray(lvl1.children) ? lvl1.children : [];
+      // Filter lvl2Kids to only show active options for accepted vendors
+      const lvl2Kids = isVendorAccepted
+        ? lvl2KidsRaw.filter((kid) => {
+            try {
+              // Check if this node has any active pricing
+              return isNodePricingActive(kid);
+            } catch {
+              return false;
+            }
+          })
+        : lvl2KidsRaw;
       // Sort L2 by min subtree price
-      const lvl2Kids = [...lvl2KidsRaw].sort((a, b) => {
+      const sortedLvl2Kids = [...lvl2Kids].sort((a, b) => {
         const pa = localMinPriceInSubtree(a);
         const pb = localMinPriceInSubtree(b);
         const va = pa == null ? Number.POSITIVE_INFINITY : Number(pa);
@@ -3391,16 +3621,30 @@ export default function PreviewPage() {
         return va - vb;
       });
       const selState = taxiSelections[lvl1.id] || {};
-      const selectedLvl2 = lvl2Kids.find((c) => String(c.id) === String(selState.lvl2)) || lvl2Kids[0] || null;
+      const selectedLvl2 = sortedLvl2Kids.find((c) => String(c.id) === String(selState.lvl2)) || sortedLvl2Kids[0] || null;
       const lvl3KidsRaw = Array.isArray(selectedLvl2?.children) ? selectedLvl2.children : [];
-      const lvl3Kids = [...lvl3KidsRaw].sort((a, b) => {
+      // Filter lvl3Kids to only show active options for accepted vendors
+      const lvl3Kids = isVendorAccepted
+        ? lvl3KidsRaw.filter((kid) => {
+            try {
+              // Check if this node has any active pricing
+              const isActive = isNodePricingActive(kid);
+              console.log(`[DEBUG] lvl3Kid: ${kid.name}, isActive: ${isActive}`);
+              return isActive;
+            } catch {
+              console.log(`[DEBUG] lvl3Kid: ${kid.name}, error in check, returning false`);
+              return false;
+            }
+          })
+        : lvl3KidsRaw;
+      const sortedLvl3Kids = [...lvl3Kids].sort((a, b) => {
         const pa = localMinPriceInSubtree(a);
         const pb = localMinPriceInSubtree(b);
         const va = pa == null ? Number.POSITIVE_INFINITY : Number(pa);
         const vb = pb == null ? Number.POSITIVE_INFINITY : Number(pb);
         return va - vb;
       });
-      const selectedLvl3 = lvl3Kids.find((c) => String(c.id) === String(selState.lvl3)) || lvl3Kids[0] || null;
+      const selectedLvl3 = sortedLvl3Kids.find((c) => String(c.id) === String(selState.lvl3)) || sortedLvl3Kids[0] || null;
 
       const belongsToLvl1 = (entry) => {
         try {
@@ -3416,23 +3660,74 @@ export default function PreviewPage() {
           }
           // If no pricesByRow, allow it by default
           return true;
-        } catch { return false; }
+        } catch {
+          return false;
+        }
       };
 
-      // In dummy inventory preview, do not partition inventory rows by lvl1.
-      // Use all normalized rows so categories like Two Wheeler always see data.
-      const normalizedForLvl1 = (isInventoryModel && isDummyMode)
+      // For accepted vendors, always partition inventory rows by the
+      // current lvl1 / lvl2 / lvl3 using belongsToLvl1 so that models are
+      // correctly scoped to the selected size. Only keep the old dummy
+      // shortcut (no partition) for non-accepted vendors so they can see a
+      // loose preview even without configured rows.
+      const normalizedForLvl1 = (isInventoryModel && isDummyMode && !isVendorAccepted)
         ? normalized
         : normalized.filter((n) => belongsToLvl1(n.entry));
-      const bodySeatsOptions = Array.from(new Set(normalizedForLvl1
-        .filter((n) => n.body && n.seats)
-        .map((n) => `${n.body}|${n.seats}`)));
+
+      // Further restrict to rows that actually include the current target
+      // node (selected size / sub-size) and are Active. This ensures that
+      // model dropdowns only see rows for the currently selected size.
+      const targetNodeId = String((selectedLvl3 || selectedLvl2 || lvl1)?.id || '');
+      const normalizedForTarget = targetNodeId
+        ? normalizedForLvl1.filter((n) => {
+            try {
+              const pbr =
+                n.entry &&
+                n.entry.pricesByRow &&
+                typeof n.entry.pricesByRow === 'object'
+                  ? n.entry.pricesByRow
+                  : null;
+              if (!pbr) return false;
+              for (const key of Object.keys(pbr)) {
+                const ids = String(key).split('|');
+                if (!ids.some((id) => String(id) === targetNodeId)) continue;
+                if (!rowPricingIsActive(n.entry, key)) continue;
+                return true;
+              }
+              return false;
+            } catch {
+              return false;
+            }
+          })
+        : normalizedForLvl1;
+
+      // Final safety: exclude any row where pricingStatusByRow is explicitly "Inactive"
+      const normalizedFiltered = normalizedForTarget.filter((n) => {
+        try {
+          const statusMap = n.entry?.pricingStatusByRow || {};
+          for (const key of Object.keys(statusMap)) {
+            const raw = String(statusMap[key] || '').trim().toLowerCase();
+            if (raw === 'inactive') return false;
+          }
+          return true;
+        } catch {
+          return true;
+        }
+      });
+
+      const bodySeatsOptions = Array.from(new Set(
+        normalizedFiltered
+          .filter((n) => n.body && n.seats)
+          .map((n) => `${n.body}|${n.seats}`)
+      ));
       const filterByBodySeats = (pair) => {
         // If any inventory pricing is active, do not filter by body/seats at all.
-        if (hasInventoryActive) return normalizedForLvl1;
-        if (!pair) return normalizedForLvl1;
+        if (hasInventoryActive) return normalizedFiltered;
+        if (!pair) return normalizedFiltered;
         const [b, s] = String(pair).split('|');
-        return normalizedForLvl1.filter((n) => String(n.body) === String(b ?? '') && String(n.seats) === String(s ?? ''));
+        return normalizedFiltered.filter(
+          (n) => String(n.body) === String(b ?? '') && String(n.seats) === String(s ?? '')
+        );
       };
       const filteredByBodySeats = filterByBodySeats(selState.bodySeats);
       // Sort bodySeats options by min price for current target
@@ -3576,11 +3871,11 @@ export default function PreviewPage() {
             >
               {lvl1.name}
             </h2>
-            {lvl2Kids.length > 0 ? (
+            {sortedLvl2Kids.length > 0 ? (
               <select
                 value={String(selectedLvl2?.id || '')}
                 onChange={(e) => {
-                  const next = lvl2Kids.find((c) => String(c.id) === e.target.value) || lvl2Kids[0] || null;
+                  const next = sortedLvl2Kids.find((c) => String(c.id) === e.target.value) || sortedLvl2Kids[0] || null;
                   // Compute cheapest defaults for Taxi (bodySeats, fuel, modelBrand) under new selection
                   const nextTargetId = String((selectedLvl3 || next || lvl1)?.id || '');
                   const mp = (list) => {
@@ -3601,11 +3896,11 @@ export default function PreviewPage() {
                       return Math.min(...prices);
                     } catch { return null; }
                   };
-                  const nextBodySeatsOptions = Array.from(new Set(normalizedForLvl1
+                  const nextBodySeatsOptions = Array.from(new Set(normalizedFiltered
                     .filter((n) => n.body && n.seats)
                     .map((n) => `${n.body}|${n.seats}`)));
                   const bodySeatsWithPrice2 = nextBodySeatsOptions.map((opt) => ({ opt, price: mp(
-                    (pair => { const [b,s] = String(pair).split('|'); return normalizedForLvl1.filter((n) => String(n.body)===String(b||'') && String(n.seats)===String(s||'')); })(opt)
+                    (pair => { const [b,s] = String(pair).split('|'); return normalizedFiltered.filter((n) => String(n.body)===String(b||'') && String(n.seats)===String(s||'')); })(opt)
                   ) }));
                   bodySeatsWithPrice2.sort((a,b)=>{
                     const va = a.price == null ? Number.POSITIVE_INFINITY : Number(a.price);
@@ -3613,7 +3908,7 @@ export default function PreviewPage() {
                     return va - vb;
                   });
                   const bestBodySeats = bodySeatsWithPrice2[0]?.opt;
-                  const listAfterBody = bestBodySeats ? ((pair)=>{ const [b,s]=String(pair).split('|'); return normalizedForLvl1.filter((n)=> String(n.body)===String(b||'') && String(n.seats)===String(s||'')); })(bestBodySeats) : normalizedForLvl1;
+                  const listAfterBody = bestBodySeats ? ((pair)=>{ const [b,s]=String(pair).split('|'); return normalizedFiltered.filter((n)=> String(n.body)===String(b||'') && String(n.seats)===String(s||'')); })(bestBodySeats) : normalizedFiltered;
                   const fuelOpts2 = Array.from(new Set(listAfterBody.map((n)=>n.fuel).filter((v)=> v != null && String(v).trim()!=='')));
                   const fuelWithPrice2 = fuelOpts2.map((opt)=>({ opt, price: mp(listAfterBody.filter((n)=> String(n.fuel??'')===String(opt))) }));
                   fuelWithPrice2.sort((a,b)=>{
@@ -3636,6 +3931,7 @@ export default function PreviewPage() {
                   });
                   const bestModelBrand = mbWithPrice2[0]?.opt;
 
+                  setAttrSelections({});
                   setTaxiSelections((prev) => ({
                     ...prev,
                     [lvl1.id]: {
@@ -3649,7 +3945,7 @@ export default function PreviewPage() {
                 }}
                 style={{ padding: '8px 10px', borderRadius: 8, border: '1px solid #d1d5db', background: '#fff', fontSize: 13 }}
               >
-                {lvl2Kids.map((opt) => (
+                {sortedLvl2Kids.map((opt) => (
                   <option key={opt.id} value={opt.id}>{opt.name}</option>
                 ))}
               </select>
@@ -3745,11 +4041,11 @@ export default function PreviewPage() {
               ) : null}
             </div>
 
-            {lvl3Kids.length > 0 ? uiRow('Options', (
+            {sortedLvl3Kids.length > 0 ? uiRow('Options', (
               <select
                 value={String(selectedLvl3?.id || '')}
                 onChange={(e) => {
-                  const next = lvl3Kids.find((c) => String(c.id) === e.target.value) || lvl3Kids[0] || null;
+                  const next = sortedLvl3Kids.find((c) => String(c.id) === e.target.value) || sortedLvl3Kids[0] || null;
                   setTaxiSelections((prev) => ({
                     ...prev,
                     [lvl1.id]: { ...(prev[lvl1.id] || {}), lvl3: next?.id },
@@ -3758,7 +4054,7 @@ export default function PreviewPage() {
                 }}
                 style={{ width: '100%', padding: '8px 10px', borderRadius: 8, border: '1px solid #d1d5db', background: '#fff', fontSize: 13 }}
               >
-                {lvl3Kids.map((opt) => (
+                {sortedLvl3Kids.map((opt) => (
                   <option key={opt.id} value={opt.id}>{opt.name}</option>
                 ))}
               </select>
@@ -3952,20 +4248,18 @@ export default function PreviewPage() {
 
   const rowPricingIsActive = (entry, key) => {
     try {
-      // Before vendor acceptance, allow all matching rows (regardless of pricingStatus)
-      // so that inactive rows still appear in preview-site.
-      const isVendorAcceptedLocal =
-        String(vendor?.status || "")
-          .trim()
-          .toLowerCase() === "accepted".toLowerCase();
-      if (!isVendorAcceptedLocal) return true;
-
       const map =
         entry && entry.pricingStatusByRow && typeof entry.pricingStatusByRow === "object"
           ? entry.pricingStatusByRow
           : {};
-      const raw = String(map[key] || "").trim().toLowerCase();
-      return raw === "active";
+
+      // If a status is defined for this row, only treat it as active when it is "Active".
+      // If no explicit status is present, default to active so legacy data still works.
+      if (Object.prototype.hasOwnProperty.call(map, key)) {
+        const raw = String(map[key] || "").trim().toLowerCase();
+        return raw === "active";
+      }
+      return true;
     } catch {
       return false;
     }
@@ -4161,6 +4455,20 @@ export default function PreviewPage() {
                               const priceNumber = livePrice == null ? null : Number(livePrice);
                               const pathNames = [categoryTree?.name, child?.name].filter(Boolean);
                               const pathIds = [categoryId, child?.id].filter(Boolean);
+                              const childAttrs = child?.attributes || {};
+                              // Use inventoryName if already set, otherwise build from brand/model
+                              let childInvName = childAttrs.inventoryName || '';
+                              if (!childInvName) {
+                                const childBrand =
+                                  (typeof childAttrs.brand === "string" && childAttrs.brand.trim()) ||
+                                  (typeof childAttrs.bikeBrand === "string" && childAttrs.bikeBrand.trim()) ||
+                                  "";
+                                const childModel =
+                                  (typeof childAttrs.model === "string" && childAttrs.model.trim()) ||
+                                  (typeof childAttrs.modelName === "string" && childAttrs.modelName.trim()) ||
+                                  "";
+                                childInvName = [childBrand, childModel].filter(Boolean).join(" ");
+                              }
                               await postEnquiry({
                                 source: "individual",
                                 serviceName: child?.name || "",
@@ -4168,7 +4476,9 @@ export default function PreviewPage() {
                                 terms: terms || "",
                                 categoryPath: pathNames,
                                 categoryIds: pathIds,
-                                attributes: child?.attributes || {},
+                                attributes: childInvName
+                                  ? { ...childAttrs, inventoryName: childInvName }
+                                  : childAttrs,
                               });
                               window.alert("Enquiry submitted");
                             } catch (e) {
@@ -4318,6 +4628,20 @@ export default function PreviewPage() {
                               const priceNumber = livePrice == null ? null : Number(livePrice);
                               const pathNames = [categoryTree?.name, enriched?.name].filter(Boolean);
                               const pathIds = [categoryId, enriched?.id].filter(Boolean);
+                              const pkgAttrs = enriched?.attributes || {};
+                              // Use inventoryName if already set, otherwise build from brand/model
+                              let pkgInvName = pkgAttrs.inventoryName || '';
+                              if (!pkgInvName) {
+                                const pkgBrand =
+                                  (typeof pkgAttrs.brand === "string" && pkgAttrs.brand.trim()) ||
+                                  (typeof pkgAttrs.bikeBrand === "string" && pkgAttrs.bikeBrand.trim()) ||
+                                  "";
+                                const pkgModel =
+                                  (typeof pkgAttrs.model === "string" && pkgAttrs.model.trim()) ||
+                                  (typeof pkgAttrs.modelName === "string" && pkgAttrs.modelName.trim()) ||
+                                  "";
+                                pkgInvName = [pkgBrand, pkgModel].filter(Boolean).join(" ");
+                              }
                               await postEnquiry({
                                 source: "package",
                                 serviceName: enriched?.name || "",
@@ -4325,7 +4649,9 @@ export default function PreviewPage() {
                                 terms: terms || "",
                                 categoryPath: pathNames,
                                 categoryIds: pathIds,
-                                attributes: enriched?.attributes || {},
+                                attributes: pkgInvName
+                                  ? { ...pkgAttrs, inventoryName: pkgInvName }
+                                  : pkgAttrs,
                               });
                               window.alert("Enquiry submitted");
                             } catch (e) {
@@ -5141,7 +5467,32 @@ export default function PreviewPage() {
                             </ul>
                           ) : null}
                           <button
-                            onClick={handleOpenOtpModal}
+                            onClick={async () => {
+                              try {
+                                const priceNumber = price == null ? null : Number(price);
+                                const pathNames = [categoryTree?.name, name].filter(Boolean);
+                                const pathIds = [categoryId, comboId].filter(Boolean);
+                                const baseAttrs = combo?.attributes || {};
+                                const sizeLabel = selectedSize ? String(selectedSize) : "";
+                                const finalAttrs = sizeLabel
+                                  ? { ...baseAttrs, inventoryName: sizeLabel }
+                                  : baseAttrs;
+
+                                await postEnquiry({
+                                  source: "package",
+                                  serviceName: name || "",
+                                  price: priceNumber == null || Number.isNaN(priceNumber) ? null : priceNumber,
+                                  terms: terms || "",
+                                  categoryPath: pathNames,
+                                  categoryIds: pathIds,
+                                  attributes: finalAttrs,
+                                });
+                                window.alert("Enquiry submitted");
+                              } catch (e) {
+                                console.error("Enroll Now enquiry error (package size)", e);
+                                try { handleOpenOtpModal(); } catch {}
+                              }
+                            }}
                             style={{
                               marginTop: 'auto',
                               width: '100%',
