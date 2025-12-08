@@ -759,6 +759,12 @@ export default function PreviewPage() {
           : {};
       const lists = Object.values(allInv);
 
+      console.log('DEBUG hasActivePricingForNode', {
+        nodeName: node?.name,
+        nodeId: rootId,
+        idsToMatch: Array.from(idsToMatch)
+      });
+
       for (const listRaw of lists) {
         const inv = Array.isArray(listRaw) ? listRaw : [];
         for (const entry of inv) {
@@ -781,12 +787,20 @@ export default function PreviewPage() {
             if (!hasMatchingId) continue;
 
             const rawStatus = String(statusMap[key] || "").trim().toLowerCase();
+            console.log('DEBUG found matching row', {
+              nodeName: node?.name,
+              key,
+              keyIds,
+              rawStatus
+            });
             if (rawStatus === "active") {
               return true;
             }
           }
         }
       }
+      
+      console.log('DEBUG no active rows found for', node?.name);
       return false;
     } catch {
       return false;
@@ -1979,7 +1993,42 @@ export default function PreviewPage() {
       if (nodeStatusRaw === "active") return true;
       if (nodeStatusRaw === "inactive") return false;
       
-      // Then check vendor.nodePricingStatus map
+      // Check if this category has inventory FIRST
+      const catKey = String(categoryId || '');
+      const invList = vendor?.inventorySelections?.[catKey];
+      const hasInventory = Array.isArray(invList) && invList.length > 0;
+      
+      // For inventory-based categories, check if this specific node has active inventory rows
+      if (hasInventory) {
+        // Check if this node (not its subtree) has active inventory
+        const hasActiveInventory = (() => {
+          for (const entry of invList) {
+            const pbr = entry?.pricesByRow;
+            if (!pbr) continue;
+            const statusMap = entry?.pricingStatusByRow || {};
+            
+            for (const key of Object.keys(pbr)) {
+              // Check if the key contains this node's ID anywhere
+              const keyParts = String(key).split("|");
+              if (keyParts.includes(nodeId)) {
+                const rawStatus = String(statusMap[key] || "").trim().toLowerCase();
+                if (rawStatus === "active") {
+                  return true;
+                }
+              }
+            }
+          }
+          return false;
+        })();
+        
+        // If this node has active inventory, return true
+        if (hasActiveInventory) return true;
+        
+        // For all nodes, check if any descendant has active inventory
+        return hasActivePricingForNode(node);
+      }
+      
+      // For non-inventory categories, check vendor.nodePricingStatus map
       const nodePricingStatusMap = vendor?.nodePricingStatus || {};
       const vendorNodeStatus = nodePricingStatusMap[nodeId];
       
@@ -2017,16 +2066,6 @@ export default function PreviewPage() {
         
         if (allInactive) return false;
         if (hasAnyActive) return true;
-      }
-
-      // Check if this category has inventory
-      const catKey = String(categoryId || '');
-      const invList = vendor?.inventorySelections?.[catKey];
-      const hasInventory = Array.isArray(invList) && invList.length > 0;
-      
-      if (hasInventory) {
-        // Has inventory - defer to inventory: active if any inventory row for this node is Active.
-        return hasActivePricingForNode(node);
       }
       
       // No inventory and no explicit status found in subtree
@@ -2080,13 +2119,24 @@ export default function PreviewPage() {
         if (!isVendorAcceptedLocal) return rawChildren;
         const filtered = rawChildren.filter((ch) => {
           try {
+            // For driving school, use hasActivePricingForNode which checks descendants
+            const rootNameForCard = String(categoryTree?.name || '').toLowerCase();
+            const isDriving = rootNameForCard === 'driving school';
+            if (isDriving) {
+              return hasActivePricingForNode(ch);
+            }
             return isNodePricingActive(ch);
           } catch {
             return false;
           }
         });
-        // If everything is inactive, fall back to original list so vendor can still preview configuration.
-        return filtered.length > 0 ? filtered : rawChildren;
+        console.log('DEBUG parentCandidates', {
+          nodeName: node?.name,
+          rawChildren: rawChildren.map(c => ({ name: c?.name, id: c?.id })),
+          filtered: filtered.map(c => ({ name: c?.name, id: c?.id }))
+        });
+        // For accepted vendors, only show filtered results (no fallback)
+        return filtered;
       } catch {
         return rawChildren;
       }
@@ -2979,7 +3029,20 @@ export default function PreviewPage() {
 
           {/* Child Buttons / Dropdown (resolved per selected parent) */}
           {includeLeafChildren && selectedParent?.children?.length > 0 && (
-            childSelectorMode === "buttons" ? (
+            (() => {
+              // Filter child buttons for driving school
+              const filteredChildren = isVendorAcceptedLocal && isDriving
+                ? selectedParent.children.filter((child) => {
+                    try {
+                      return hasActivePricingForNode(child);
+                    } catch {
+                      return false;
+                    }
+                  })
+                : selectedParent.children;
+              
+              return filteredChildren.length > 0 ? (
+                childSelectorMode === "buttons" ? (
               <>
                 {childLabelForCard && (
                   <div style={{ fontSize: 11, fontWeight: 400, color: "#111827", marginLeft: 2, marginTop: 4, marginBottom: 6 }}>
@@ -2987,7 +3050,7 @@ export default function PreviewPage() {
                   </div>
                 )}
                 <div style={{ display: "flex", flexWrap: "wrap", columnGap: 8, rowGap: 6, marginBottom: 14 }}>
-                  {selectedParent.children.map((child) => (
+                  {filteredChildren.map((child) => (
                     <button
                       key={child.id}
                       type="button"
@@ -3015,18 +3078,20 @@ export default function PreviewPage() {
                 <select
                   value={selectedChild?.id || ""}
                   onChange={(e) => {
-                    const next = selectedParent.children.find((c) => String(c.id) === e.target.value) || selectedParent.children[0];
+                    const next = filteredChildren.find((c) => String(c.id) === e.target.value) || filteredChildren[0];
                     onSelectionChange?.(selectedParent, next);
                     onLeafSelect?.(next);
                   }}
                   style={{ width: "100%", padding: "8px 10px", borderRadius: 8, border: "1px solid #d1d5db", background: "#fff", fontSize: 13 }}
                 >
-                  {selectedParent.children.map((child) => (
+                  {filteredChildren.map((child) => (
                     <option key={child.id} value={child.id}>{child.name}</option>
                   ))}
                 </select>
               </div>
             )
+              ) : null;
+            })()
           )}
 
           {attributeDropdown}
@@ -3643,6 +3708,75 @@ export default function PreviewPage() {
       return livePrice;
     };
 
+    const hasNodeActiveInventory = (node) => {
+    try {
+      const nodeId = String(node?.id || node?._id || "");
+      if (!nodeId) return false;
+      
+      const catKey = String(categoryId || '');
+      const invList = vendor?.inventorySelections?.[catKey];
+      if (!Array.isArray(invList) || invList.length === 0) return false;
+      
+      console.log(`[DEBUG] Checking node: ${node.name} (ID: ${nodeId})`);
+      console.log(`[DEBUG] Inventory list length:`, invList.length);
+      
+      // Check if this node has any active inventory rows
+      for (const entry of invList) {
+        const pbr = entry?.pricesByRow;
+        if (!pbr) continue;
+        const statusMap = entry?.pricingStatusByRow || {};
+        
+        console.log(`[DEBUG] Entry pricesByRow keys:`, Object.keys(pbr));
+        console.log(`[DEBUG] Entry pricingStatusByRow:`, statusMap);
+        
+        for (const key of Object.keys(pbr)) {
+          const keyParts = String(key).split('|');
+          // Check if this row is for this specific node OR any of its descendants
+          // This is important because inventory might be stored at parent level
+          if (keyParts.includes(nodeId)) {
+            const rawStatus = String(statusMap[key] || "").trim().toLowerCase();
+            console.log(`[DEBUG] Found key ${key} for node ${node.name}, status: ${rawStatus}`);
+            if (rawStatus === "active" || rawStatus === "") {
+              console.log(`[DEBUG] Node ${node.name} has active inventory`);
+              return true;
+            }
+          }
+        }
+      }
+      
+      // Also check if any parent has active inventory for this node
+      // This handles cases where inventory is stored at parent level
+      for (const entry of invList) {
+        const pbr = entry?.pricesByRow;
+        if (!pbr) continue;
+        const statusMap = entry?.pricingStatusByRow || {};
+        
+        for (const key of Object.keys(pbr)) {
+          const keyParts = String(key).split('|');
+          // Check if any parent of this node has active inventory
+          for (const part of keyParts) {
+            // Check if this part is a parent of the current node
+            if (part && part !== nodeId) {
+              // This is a simplified check - in reality we'd need to traverse the tree
+              // For now, let's be more permissive
+              const rawStatus = String(statusMap[key] || "").trim().toLowerCase();
+              if (rawStatus === "active" || rawStatus === "") {
+                console.log(`[DEBUG] Node ${node.name} found active inventory in parent ${part}`);
+                return true;
+              }
+            }
+          }
+        }
+      }
+      
+      console.log(`[DEBUG] Node ${node.name} has no active inventory`);
+      return false;
+    } catch (error) {
+      console.log(`[DEBUG] Error checking node ${node.name}:`, error);
+      return false;
+    }
+  };
+
     const hasActivePricingForNode = (node) => {
       try {
         const rootId = (() => {
@@ -3699,13 +3833,18 @@ export default function PreviewPage() {
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 30, alignItems: 'stretch' }}>
         {root.children.map((lvl1) => {
           const serviceKey = makeServiceKey(lvl1?.name || "");
+          // Check if the lvl1 node itself should be displayed
+          const shouldShowLvl1 = !isVendorAccepted || isNodePricingActive(lvl1) || hasActivePricingForNode(lvl1);
+          console.log(`[DEBUG] Lvl1 ${lvl1.name}: isVendorAccepted=${isVendorAccepted}, shouldShow=${shouldShowLvl1}`);
+          if (!shouldShowLvl1) return null;
+          
       const lvl2KidsRaw = Array.isArray(lvl1.children) ? lvl1.children : [];
-      // Filter lvl2Kids to only show active options for accepted vendors
+      // Filter lvl2Kids to only show those with active inventory records for accepted vendors
       const lvl2Kids = isVendorAccepted
         ? lvl2KidsRaw.filter((kid) => {
             try {
-              // Check if this node has any active pricing
-              return isNodePricingActive(kid);
+              // Check if this subcategory has any active inventory records specifically for this node
+              return hasActivePricingForNode(kid);
             } catch {
               return false;
             }
@@ -3720,14 +3859,14 @@ export default function PreviewPage() {
         return va - vb;
       });
       const selState = taxiSelections[lvl1.id] || {};
-      const selectedLvl2 = sortedLvl2Kids.find((c) => String(c.id) === String(selState.lvl2)) || sortedLvl2Kids[0] || null;
+      const selectedLvl2 = sortedLvl2Kids.find((c) => String(c.id) === String(selState.lvl2)) || sortedLvl2Kids[0] || lvl2KidsRaw[0] || null;
       const lvl3KidsRaw = Array.isArray(selectedLvl2?.children) ? selectedLvl2.children : [];
-      // Filter lvl3Kids to only show active options for accepted vendors
+      // Filter lvl3Kids to only show those with active inventory records for accepted vendors
       const lvl3Kids = isVendorAccepted
         ? lvl3KidsRaw.filter((kid) => {
             try {
-              // Check if this node has any active pricing
-              const isActive = isNodePricingActive(kid);
+              // Check if this subcategory has any active inventory records specifically for this node
+              const isActive = hasActivePricingForNode(kid);
               console.log(`[DEBUG] lvl3Kid: ${kid.name}, isActive: ${isActive}`);
               return isActive;
             } catch {
@@ -3743,7 +3882,7 @@ export default function PreviewPage() {
         const vb = pb == null ? Number.POSITIVE_INFINITY : Number(pb);
         return va - vb;
       });
-      const selectedLvl3 = sortedLvl3Kids.find((c) => String(c.id) === String(selState.lvl3)) || sortedLvl3Kids[0] || null;
+      const selectedLvl3 = sortedLvl3Kids.find((c) => String(c.id) === String(selState.lvl3)) || sortedLvl3Kids[0] || lvl3KidsRaw[0] || null;
 
       const belongsToLvl1 = (entry) => {
         try {
@@ -3970,84 +4109,215 @@ export default function PreviewPage() {
             >
               {lvl1.name}
             </h2>
-            {sortedLvl2Kids.length > 0 ? (
-              <select
-                value={String(selectedLvl2?.id || '')}
-                onChange={(e) => {
-                  const next = sortedLvl2Kids.find((c) => String(c.id) === e.target.value) || sortedLvl2Kids[0] || null;
-                  // Compute cheapest defaults for Taxi (bodySeats, fuel, modelBrand) under new selection
-                  const nextTargetId = String((selectedLvl3 || next || lvl1)?.id || '');
-                  const mp = (list) => {
-                    try {
-                      const prices = [];
-                      list.forEach((n) => {
-                        const pbr = (n.entry && n.entry.pricesByRow && typeof n.entry.pricesByRow === 'object') ? n.entry.pricesByRow : null;
-                        if (!pbr) return;
-                        for (const [key, value] of Object.entries(pbr)) {
-                          const ids = String(key).split('|');
-                          if (ids.some((id) => String(id) === String(nextTargetId))) {
-                            const num = Number(value);
-                            if (!Number.isNaN(num)) prices.push(num);
-                          }
+            {sortedLvl2KidsRaw.length > 0 ? (
+              (() => {
+                // For driving school, render buttons instead of dropdown if there are only 2 options (With/Without License)
+                const shouldRenderButtons = sortedLvl2KidsRaw.length <= 2 && 
+                  sortedLvl2KidsRaw.every(k => k.name && (k.name.includes('License') || k.name.includes('licence')));
+                
+                console.log(`[DEBUG] shouldRenderButtons: ${shouldRenderButtons}, lvl2KidsRaw.length: ${sortedLvl2KidsRaw.length}`);
+                console.log(`[DEBUG] lvl2KidsRaw names:`, sortedLvl2KidsRaw.map(k => k.name));
+                
+                if (shouldRenderButtons) {
+                  console.log(`[DEBUG] Should render buttons for ${lvl1.name}`);
+                  console.log(`[DEBUG] Raw lvl2Kids:`, sortedLvl2KidsRaw.map(k => ({ name: k.name, id: k.id })));
+                  
+                  // Filter buttons to show only those with active inventory records for accepted vendors
+                  const filteredButtons = isVendorAccepted
+                    ? sortedLvl2KidsRaw.filter((kid) => {
+                        try {
+                          // Check if this subcategory has any active inventory records specifically for this node
+                          return hasActivePricingForNode(kid);
+                        } catch {
+                          return false;
                         }
-                      });
-                      if (prices.length === 0) return null;
-                      return Math.min(...prices);
-                    } catch { return null; }
-                  };
-                  const nextBodySeatsOptions = Array.from(new Set(normalizedFiltered
-                    .filter((n) => n.body && n.seats)
-                    .map((n) => `${n.body}|${n.seats}`)));
-                  const bodySeatsWithPrice2 = nextBodySeatsOptions.map((opt) => ({ opt, price: mp(
-                    (pair => { const [b,s] = String(pair).split('|'); return normalizedFiltered.filter((n) => String(n.body)===String(b||'') && String(n.seats)===String(s||'')); })(opt)
-                  ) }));
-                  bodySeatsWithPrice2.sort((a,b)=>{
-                    const va = a.price == null ? Number.POSITIVE_INFINITY : Number(a.price);
-                    const vb = b.price == null ? Number.POSITIVE_INFINITY : Number(b.price);
-                    return va - vb;
-                  });
-                  const bestBodySeats = bodySeatsWithPrice2[0]?.opt;
-                  const listAfterBody = bestBodySeats ? ((pair)=>{ const [b,s]=String(pair).split('|'); return normalizedFiltered.filter((n)=> String(n.body)===String(b||'') && String(n.seats)===String(s||'')); })(bestBodySeats) : normalizedFiltered;
-                  const fuelOpts2 = Array.from(new Set(listAfterBody.map((n)=>n.fuel).filter((v)=> v != null && String(v).trim()!=='')));
-                  const fuelWithPrice2 = fuelOpts2.map((opt)=>({ opt, price: mp(listAfterBody.filter((n)=> String(n.fuel??'')===String(opt))) }));
-                  fuelWithPrice2.sort((a,b)=>{
-                    const va = a.price == null ? Number.POSITIVE_INFINITY : Number(a.price);
-                    const vb = b.price == null ? Number.POSITIVE_INFINITY : Number(b.price);
-                    return va - vb;
-                  });
-                  const bestFuel = fuelWithPrice2[0]?.opt;
-                  const listAfterFuel = bestFuel ? listAfterBody.filter((n)=> String(n.fuel??'')===String(bestFuel)) : listAfterBody;
-                  const mbPairs2 = Array.from(new Set(listAfterFuel.filter((n)=> n.model && n.brand).map((n)=> `${n.model}|${n.brand}`)));
-                  const mbWithPrice2 = mbPairs2.map((opt)=>{
-                    const [m,b] = String(opt).split('|');
-                    const lst = listAfterFuel.filter((n)=> String(n.model)===String(m||'') && String(n.brand)===String(b||''));
-                    return { opt, price: mp(lst) };
-                  });
-                  mbWithPrice2.sort((a,b)=>{
-                    const va = a.price == null ? Number.POSITIVE_INFINITY : Number(a.price);
-                    const vb = b.price == null ? Number.POSITIVE_INFINITY : Number(b.price);
-                    return va - vb;
-                  });
-                  const bestModelBrand = mbWithPrice2[0]?.opt;
+                      })
+                    : sortedLvl2KidsRaw;
+                  
+                  console.log(`[DEBUG] Filtered buttons:`, filteredButtons.map(k => ({ name: k.name, id: k.id })));
+                  
+                  // Only render buttons section if there are any active buttons
+                  if (filteredButtons.length > 0) {
+                    return (
+                      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                        {filteredButtons.map((kid) => {
+                          const isSelected = String(selectedLvl2?.id || '') === String(kid.id);
+                          return (
+                            <button
+                              key={kid.id}
+                              type="button"
+                              onClick={() => {
+                                const next = kid;
+                                // Compute cheapest defaults for Taxi (bodySeats, fuel, modelBrand) under new selection
+                                const nextTargetId = String((selectedLvl3 || next || lvl1)?.id || '');
+                                const mp = (list) => {
+                                  try {
+                                    const prices = [];
+                                    list.forEach((n) => {
+                                      const pbr = (n.entry && n.entry.pricesByRow && typeof n.entry.pricesByRow === 'object') ? n.entry.pricesByRow : null;
+                                      if (!pbr) return;
+                                      for (const [key, value] of Object.entries(pbr)) {
+                                        const ids = String(key).split('|');
+                                        if (ids.some((id) => String(id) === String(nextTargetId))) {
+                                          const num = Number(value);
+                                          if (!Number.isNaN(num)) prices.push(num);
+                                        }
+                                      }
+                                    });
+                                    if (prices.length === 0) return null;
+                                    return Math.min(...prices);
+                                  } catch { return null; }
+                                };
+                                const nextBodySeatsOptions = Array.from(new Set(normalizedFiltered
+                                  .filter((n) => n.body && n.seats)
+                                  .map((n) => `${n.body}|${n.seats}`)));
+                                const bodySeatsWithPrice2 = nextBodySeatsOptions.map((opt) => ({ opt, price: mp(
+                                  (pair => { const [b,s] = String(pair).split('|'); return normalizedFiltered.filter((n)=> String(n.body)===String(b||'') && String(n.seats)===String(s||'')); })(opt)
+                                ) }));
+                                bodySeatsWithPrice2.sort((a,b)=>{
+                                  const va = a.price == null ? Number.POSITIVE_INFINITY : Number(a.price);
+                                  const vb = b.price == null ? Number.POSITIVE_INFINITY : Number(b.price);
+                                  return va - vb;
+                                });
+                                const bestBodySeats = bodySeatsWithPrice2[0]?.opt;
+                                const listAfterBody = bestBodySeats ? ((pair)=>{ const [b,s]=String(pair).split('|'); return normalizedFiltered.filter((n)=> String(n.body)===String(b||'') && String(n.seats)===String(s||'')); })(bestBodySeats) : normalizedFiltered;
+                                const fuelOpts2 = Array.from(new Set(listAfterBody.map((n)=>n.fuel).filter((v)=> v != null && String(v).trim()!=='')));
+                                const fuelWithPrice2 = fuelOpts2.map((opt)=>({ opt, price: mp(listAfterFuel.filter((n)=> String(n.fuel??'')===String(opt))) }));
+                                fuelWithPrice2.sort((a,b)=>{
+                                  const va = a.price == null ? Number.POSITIVE_INFINITY : Number(a.price);
+                                  const vb = b.price == null ? Number.POSITIVE_INFINITY : Number(b.price);
+                                  return va - vb;
+                                });
+                                const bestFuel = fuelWithPrice2[0]?.opt;
+                                const listAfterFuel = bestFuel ? listAfterBody.filter((n)=> String(n.fuel??'')===String(bestFuel)) : listAfterBody;
+                                const mbPairs2 = Array.from(new Set(listAfterFuel.filter((n)=> n.model && n.brand).map((n)=> `${n.model}|${n.brand}`)));
+                                const mbWithPrice2 = mbPairs2.map((opt)=>{
+                                  const [m,b] = String(opt).split('|');
+                                  const lst = listAfterFuel.filter((n)=> String(n.model)===String(m||'') && String(n.brand)===String(b||''));
+                                  return { opt, price: mp(lst) };
+                                });
+                                mbWithPrice2.sort((a,b)=>{
+                                  const va = a.price == null ? Number.POSITIVE_INFINITY : Number(a.price);
+                                  const vb = b.price == null ? Number.POSITIVE_INFINITY : Number(b.price);
+                                  return va - vb;
+                                });
+                                const bestModelBrand = mbWithPrice2[0]?.opt;
 
-                  setAttrSelections({});
-                  setTaxiSelections((prev) => ({
-                    ...prev,
-                    [lvl1.id]: {
-                      lvl2: next?.id,
-                      lvl3: (Array.isArray(next?.children) && next.children[0]?.id) || undefined,
-                      bodySeats: bestBodySeats,
-                      fuelType: bestFuel,
-                      modelBrand: bestModelBrand,
-                    },
-                  }));
-                }}
-                style={{ padding: '8px 10px', borderRadius: 8, border: '1px solid #d1d5db', background: '#fff', fontSize: 13 }}
-              >
-                {sortedLvl2Kids.map((opt) => (
-                  <option key={opt.id} value={opt.id}>{opt.name}</option>
-                ))}
-              </select>
+                                setAttrSelections({});
+                                setTaxiSelections((prev) => ({
+                                  ...prev,
+                                  [lvl1.id]: {
+                                    lvl2: next?.id,
+                                    lvl3: (Array.isArray(next?.children) && next.children[0]?.id) || undefined,
+                                    bodySeats: bestBodySeats,
+                                    fuelType: bestFuel,
+                                    modelBrand: bestModelBrand,
+                                  },
+                                }));
+                              }}
+                              style={{
+                                padding: '8px 16px',
+                                borderRadius: 8,
+                                border: isSelected ? '2px solid #059669' : '1px solid #d1d5db',
+                                background: isSelected ? '#059669' : '#fff',
+                                color: isSelected ? '#fff' : '#374151',
+                                cursor: 'pointer',
+                                fontSize: 14,
+                                fontWeight: 500,
+                                transition: 'all 0.2s ease',
+                              }}
+                            >
+                              {kid.name}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    );
+                  }
+                  return null;
+                } else {
+                  // Render dropdown for non-license options or more than 2 options
+                  return (
+                    <select
+                      value={String(selectedLvl2?.id || '')}
+                      onChange={(e) => {
+                        const next = sortedLvl2Kids.find((c) => String(c.id) === e.target.value) || sortedLvl2Kids[0] || null;
+                        // Compute cheapest defaults for Taxi (bodySeats, fuel, modelBrand) under new selection
+                        const nextTargetId = String((selectedLvl3 || next || lvl1)?.id || '');
+                        const mp = (list) => {
+                          try {
+                            const prices = [];
+                            list.forEach((n) => {
+                              const pbr = (n.entry && n.entry.pricesByRow && typeof n.entry.pricesByRow === 'object') ? n.entry.pricesByRow : null;
+                              if (!pbr) return;
+                              for (const [key, value] of Object.entries(pbr)) {
+                                const ids = String(key).split('|');
+                                if (ids.some((id) => String(id) === String(nextTargetId))) {
+                                  const num = Number(value);
+                                  if (!Number.isNaN(num)) prices.push(num);
+                                }
+                              }
+                            });
+                            if (prices.length === 0) return null;
+                            return Math.min(...prices);
+                          } catch { return null; }
+                        };
+                        const nextBodySeatsOptions = Array.from(new Set(normalizedFiltered
+                          .filter((n) => n.body && n.seats)
+                          .map((n) => `${n.body}|${n.seats}`)));
+                        const bodySeatsWithPrice2 = nextBodySeatsOptions.map((opt) => ({ opt, price: mp(
+                          (pair => { const [b,s] = String(pair).split('|'); return normalizedFiltered.filter((n)=> String(n.body)===String(b||'') && String(n.seats)===String(s||'')); })(opt)
+                        ) }));
+                        bodySeatsWithPrice2.sort((a,b)=>{
+                          const va = a.price == null ? Number.POSITIVE_INFINITY : Number(a.price);
+                          const vb = b.price == null ? Number.POSITIVE_INFINITY : Number(b.price);
+                          return va - vb;
+                        });
+                        const bestBodySeats = bodySeatsWithPrice2[0]?.opt;
+                        const listAfterBody = bestBodySeats ? ((pair)=>{ const [b,s]=String(pair).split('|'); return normalizedFiltered.filter((n)=> String(n.body)===String(b||'') && String(n.seats)===String(s||'')); })(bestBodySeats) : normalizedFiltered;
+                        const fuelOpts2 = Array.from(new Set(listAfterBody.map((n)=>n.fuel).filter((v)=> v != null && String(v).trim()!=='')));
+                        const fuelWithPrice2 = fuelOpts2.map((opt)=>({ opt, price: mp(listAfterFuel.filter((n)=> String(n.fuel??'')===String(opt))) }));
+                        fuelWithPrice2.sort((a,b)=>{
+                          const va = a.price == null ? Number.POSITIVE_INFINITY : Number(a.price);
+                          const vb = b.price == null ? Number.POSITIVE_INFINITY : Number(b.price);
+                          return va - vb;
+                        });
+                        const bestFuel = fuelWithPrice2[0]?.opt;
+                        const listAfterFuel = bestFuel ? listAfterBody.filter((n)=> String(n.fuel??'')===String(bestFuel)) : listAfterBody;
+                        const mbPairs2 = Array.from(new Set(listAfterFuel.filter((n)=> n.model && n.brand).map((n)=> `${n.model}|${n.brand}`)));
+                        const mbWithPrice2 = mbPairs2.map((opt)=>{
+                          const [m,b] = String(opt).split('|');
+                          const lst = listAfterFuel.filter((n)=> String(n.model)===String(m||'') && String(n.brand)===String(b||''));
+                          return { opt, price: mp(lst) };
+                        });
+                        mbWithPrice2.sort((a,b)=>{
+                          const va = a.price == null ? Number.POSITIVE_INFINITY : Number(a.price);
+                          const vb = b.price == null ? Number.POSITIVE_INFINITY : Number(b.price);
+                          return va - vb;
+                        });
+                        const bestModelBrand = mbWithPrice2[0]?.opt;
+
+                        setAttrSelections({});
+                        setTaxiSelections((prev) => ({
+                          ...prev,
+                          [lvl1.id]: {
+                            lvl2: next?.id,
+                            lvl3: (Array.isArray(next?.children) && next.children[0]?.id) || undefined,
+                            bodySeats: bestBodySeats,
+                            fuelType: bestFuel,
+                            modelBrand: bestModelBrand,
+                          },
+                        }));
+                      }}
+                      style={{ padding: '8px 10px', borderRadius: 8, border: '1px solid #d1d5db', background: '#fff', fontSize: 13 }}
+                    >
+                      {sortedLvl2Kids.map((opt) => (
+                        <option key={opt.id} value={opt.id}>{opt.name}</option>
+                      ))}
+                    </select>
+                  );
+                }
+              })()
             ) : null}
           </div>
 
