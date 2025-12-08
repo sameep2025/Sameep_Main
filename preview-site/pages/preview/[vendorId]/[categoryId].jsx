@@ -1895,26 +1895,45 @@ export default function PreviewPage() {
       // For non-accepted vendors, keep showing Packages as long as there is any combo.
       if (!isVendorAccepted) return true;
 
-      // For accepted vendors, require at least one combo with Active pricing status
-      // across any defined size key.
+      // Check if this category has inventory
+      const catKey = String(categoryId || '');
+      const invList = vendor?.inventorySelections?.[catKey];
+      const hasInventory = Array.isArray(invList) && invList.length > 0;
+
+      // For accepted vendors, check if any combo has Active status
       const hasAnyActive = combos.some((combo) => {
         try {
           const statusMap =
             combo && combo.pricingStatusPerSize && typeof combo.pricingStatusPerSize === "object"
               ? combo.pricingStatusPerSize
               : {};
-          return Object.values(statusMap).some((v) =>
-            String(v || "").trim().toLowerCase() === "active"
-          );
+          
+          // Check pricingStatusPerSize values
+          const statusValues = Object.values(statusMap);
+          if (statusValues.length > 0) {
+            return statusValues.some((v) =>
+              String(v || "").trim().toLowerCase() === "active"
+            );
+          }
+          
+          // If no pricingStatusPerSize, check combo-level pricingStatus
+          const comboStatus = String(combo?.pricingStatus || '').trim().toLowerCase();
+          if (comboStatus === 'active') return true;
+          if (comboStatus === 'inactive') return false;
+          
+          // No status defined at all - for categories without inventory, default to showing
+          // This handles legacy data
+          if (!hasInventory) return true;
+          return true; // Default to showing if no explicit inactive status
         } catch {
-          return false;
+          return true; // Default to showing on error
         }
       });
       return hasAnyActive;
     } catch {
       return Array.isArray(combos) && combos.length > 0;
     }
-  }, [combos, isVendorAccepted]);
+  }, [combos, isVendorAccepted, categoryId, vendor]);
 
   const hasVendorActiveForNode = (node) => {
     try {
@@ -1935,12 +1954,38 @@ export default function PreviewPage() {
       const nodeId = (() => {
         try { return String(node?.id || node?._id || ""); } catch { return ""; }
       })();
-      // Always enforce node-level pricingStatus when present.
+      
+      const isVendorAcceptedLocal = String(vendor?.status || "").trim().toLowerCase() === "accepted";
+      
+      // For non-accepted vendors, show all nodes
+      if (!isVendorAcceptedLocal) return true;
+      
+      // For accepted vendors, check pricing status
+      // First check node-level pricingStatus
       const nodeStatusRaw = String(node?.pricingStatus || "").trim().toLowerCase();
       if (nodeStatusRaw === "active") return true;
       if (nodeStatusRaw === "inactive") return false;
+      
+      // Then check vendor.nodePricingStatus map
+      const vendorNodeStatus = vendor?.nodePricingStatus?.[nodeId];
+      if (vendorNodeStatus) {
+        const vendorStatusRaw = String(vendorNodeStatus).trim().toLowerCase();
+        if (vendorStatusRaw === "active") return true;
+        if (vendorStatusRaw === "inactive") return false;
+      }
 
-      // If node status is missing/blank, defer to inventory: active if any inventory row for this node is Active.
+      // If node status is missing/blank, check if this category has inventory
+      // If no inventory exists for this category, default to true (show the node)
+      const catKey = String(categoryId || '');
+      const invList = vendor?.inventorySelections?.[catKey];
+      const hasInventory = Array.isArray(invList) && invList.length > 0;
+      
+      if (!hasInventory) {
+        // No inventory for this category - default to showing the node
+        return true;
+      }
+
+      // Has inventory - defer to inventory: active if any inventory row for this node is Active.
       return hasActivePricingForNode(node);
     } catch {
       return false;
@@ -2812,7 +2857,7 @@ export default function PreviewPage() {
           {parentCandidates.length > 0 && (
             parentSelectorMode === "buttons" ? (
               <>
-                <div style={{ fontSize: 11, fontWeight: 400, color: "#111827", marginLeft: 2, marginBottom: isSpecialCard ? -6 : -10 }}>
+                <div style={{ fontSize: 11, fontWeight: 400, color: "#111827", marginLeft: 2, marginTop: 8, marginBottom: 4 }}>
                   {labelForCard || "Select course type"}
                 </div>
                 <div style={{ display: "flex", flexWrap: "wrap", columnGap: 8, rowGap: 6, marginTop: 2, marginBottom: isSpecialCard ? 4 : 10 }}>
@@ -4730,13 +4775,22 @@ export default function PreviewPage() {
             }
 
             // Sort children by minimum price in their subtree
-            const sortedKids = [...kidsTop].sort((a, b) => {
+            // Filter out inactive children for accepted vendors
+            const filteredKids = kidsTop.filter((child) => {
+              // For accepted vendors, check if child is active
+              if (isVendorAccepted) {
+                return isNodePricingActive(child);
+              }
+              return true; // For non-accepted vendors, show all
+            });
+            const sortedKids = [...filteredKids].sort((a, b) => {
               const pa = minPriceInSubtree(a);
               const pb = minPriceInSubtree(b);
               const va = pa == null ? Number.POSITIVE_INFINITY : Number(pa);
               const vb = pb == null ? Number.POSITIVE_INFINITY : Number(pb);
               return va - vb;
             });
+            if (sortedKids.length === 0) return null; // Hide section if no active children
             return sortedKids.map((child) => renderNode(child, enriched));
           })()}
         </div>
@@ -5076,6 +5130,10 @@ export default function PreviewPage() {
                     const rawSizes = (() => {
                       try {
                         const set = new Set();
+                        // If no items, add a default placeholder
+                        if (items.length === 0) {
+                          set.add('—');
+                        }
                         items.forEach((it) => {
                           const vs = Array.isArray(it?.variants) ? it.variants : [];
                           if (vs.length === 0) {
@@ -5087,7 +5145,7 @@ export default function PreviewPage() {
                           });
                         });
                         return Array.from(set);
-                      } catch { return []; }
+                      } catch { return ['—']; }
                     })();
                     const baseStatusMap =
                       combo && combo.pricingStatusPerSize && typeof combo.pricingStatusPerSize === 'object'
@@ -5110,25 +5168,59 @@ export default function PreviewPage() {
                     })();
                     // Treat only non-placeholder entries as real combo types for the UI selector
                     // and hide any size that is explicitly marked as inactive in pricingStatusPerSize.
+                    // For categories without inventory, be more lenient with size filtering.
+                    // IMPORTANT: Only filter by active status for ACCEPTED vendors
+                    const catKey = String(categoryId || '');
+                    const hasInventoryForCat = Array.isArray(vendor?.inventorySelections?.[catKey]) && vendor.inventorySelections[catKey].length > 0;
+                    const isVendorAcceptedLocal = String(vendor?.status || '').trim().toLowerCase() === 'accepted';
+                    
+                    // For accepted vendors, check if this combo should be shown
+                    // Only hide if explicitly marked as Inactive
+                    if (isVendorAcceptedLocal) {
+                      // Check if combo has any active status
+                      const statusValues = Object.values(statusMap);
+                      const hasExplicitInactive = statusValues.length > 0 && 
+                        statusValues.every((v) => String(v || '').trim().toLowerCase() === 'inactive');
+                      // Also check combo-level pricingStatus
+                      const comboLevelStatus = String(combo?.pricingStatus || '').trim().toLowerCase();
+                      if (hasExplicitInactive || comboLevelStatus === 'inactive') {
+                        return null; // Skip this combo for accepted vendors
+                      }
+                    }
+                    
                     const sizes = rawSizes.filter((s) => {
                       const v = String(s || '').trim();
                       if (!v) return false;
-                      if (v === '—' || v.toLowerCase() === 'na' || v.toLowerCase() === 'n/a') return false;
-                      const statusRaw = statusMap[v];
-                      if (statusRaw != null) {
-                        const st = String(statusRaw).trim().toLowerCase();
-                        if (st && st !== 'active') return false;
+                      // For categories without inventory, allow placeholder sizes
+                      const isPlaceholder = v === '—' || v.toLowerCase() === 'na' || v.toLowerCase() === 'n/a';
+                      if (isPlaceholder && hasInventoryForCat) return false;
+                      // Only filter by active status for accepted vendors with explicit inactive status
+                      if (isVendorAcceptedLocal) {
+                        const statusRaw = statusMap[v];
+                        if (statusRaw != null) {
+                          const st = String(statusRaw).trim().toLowerCase();
+                          if (st === 'inactive') return false;
+                        }
                       }
                       return true;
                     });
                     // If there are no active sizes left (all inactive), skip rendering this card
-                    if (!sizes.length) {
+                    // But for categories without inventory, if rawSizes had entries, allow the card
+                    // For non-accepted vendors, always show the card
+                    if (!sizes.length && isVendorAcceptedLocal && (hasInventoryForCat || rawSizes.length === 0)) {
                       return null;
                     }
+                    // Fallback: if sizes is empty but rawSizes had placeholder entries, use them
+                    const effectiveSizes = sizes.length > 0 ? sizes : rawSizes.filter(s => s);
+                    // Check if all sizes are just placeholders (should hide Size section)
+                    const hasRealSizes = effectiveSizes.some((s) => {
+                      const v = String(s || '').trim();
+                      return v && v !== '—' && v.toLowerCase() !== 'na' && v.toLowerCase() !== 'n/a';
+                    });
                     const base = (combo && combo.basePrice != null && combo.basePrice !== '') ? Number(combo.basePrice) : null;
                     const selectedSize = (packageSelections[idx]?.size != null)
                       ? packageSelections[idx].size
-                      : (sizes[0] ?? null);
+                      : (effectiveSizes[0] ?? null);
                     const sizeKey = selectedSize || 'default';
                     const comboStatus = String(statusMap[sizeKey] || 'Inactive').trim().toLowerCase();
                     const priceBySize = (() => {
@@ -5289,8 +5381,8 @@ export default function PreviewPage() {
                               <span>{includesLabel}</span>
                             </div>
                           ) : null}
-                          {/* Size selector: only show when there are real combo types */}
-                          {sizes && sizes.length ? (
+                          {/* Size selector: only show when there are real combo types (not just placeholders) */}
+                          {hasRealSizes && effectiveSizes && effectiveSizes.length ? (
                             <div>
                               {(() => {
                                 const raw = combo && typeof combo.heading === 'string' ? combo.heading : '';
@@ -5367,7 +5459,7 @@ export default function PreviewPage() {
                                         overscrollBehavior: 'contain',
                                       }}
                                     >
-                                      {sizes.map((s) => {
+                                      {effectiveSizes.map((s) => {
                                         const value = String(s || '');
                                         return (
                                           <button
