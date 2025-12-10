@@ -72,6 +72,12 @@ export default function PreviewPage() {
   const [draftSelections, setDraftSelections] = useState({}); // cascade selector draft per family
   const [editingItemKey, setEditingItemKey] = useState(null); // currently edited inventory row key
   const [socialHandles, setSocialHandles] = useState([]);
+  const [showMyEnquiriesModal, setShowMyEnquiriesModal] = useState(false);
+  const [myEnquiries, setMyEnquiries] = useState([]);
+  const [myEnquiriesLoading, setMyEnquiriesLoading] = useState(false);
+  const [myEnquiriesError, setMyEnquiriesError] = useState("");
+  const [enquiryStatusConfig, setEnquiryStatusConfig] = useState([]);
+  const [expandedEnquiryGroup, setExpandedEnquiryGroup] = useState(null); // track which group's table is visible
 
   // OTP flow state for preview booking (country code + mobile + OTP)
   const [showOtpModal, setShowOtpModal] = useState(false);
@@ -87,6 +93,9 @@ export default function PreviewPage() {
   const [adminPasscodeInput, setAdminPasscodeInput] = useState("");
   const [sessionExpired, setSessionExpired] = useState(false);
   const [navIdentity, setNavIdentity] = useState({ role: "guest", displayName: "Guest", loggedIn: false });
+  const [enquirySubmitted, setEnquirySubmitted] = useState(false);
+  const [contactInfoModal, setContactInfoModal] = useState(null); // { enquiry, nextStatus }
+  const [expandedEnquiryId, setExpandedEnquiryId] = useState(null); // which individual enquiry card details are visible
 
   const loading = loadingVendor || loadingCategories;
 
@@ -156,6 +165,30 @@ export default function PreviewPage() {
             "";
         }
 
+        // Default status for new enquiries: first / lowest-rank status from config (e.g., "New")
+        let initialStatus = "";
+        try {
+          const cfgList = Array.isArray(enquiryStatusConfig)
+            ? enquiryStatusConfig
+            : [];
+          let bestName = "";
+          let bestRank = Infinity;
+          cfgList.forEach((row, idx) => {
+            if (!row) return;
+            const nm =
+              row && row.name != null ? String(row.name).trim() : "";
+            if (!nm) return;
+            const rawRank = row && typeof row.rank === "number" && !Number.isNaN(row.rank)
+              ? row.rank
+              : idx + 1;
+            if (rawRank < bestRank) {
+              bestRank = rawRank;
+              bestName = nm;
+            }
+          });
+          initialStatus = bestName || "";
+        } catch {}
+
         const body = {
           vendorId: String(vendorId),
           categoryId: String(categoryId),
@@ -170,6 +203,7 @@ export default function PreviewPage() {
             ? categoryIds.map((v) => String(v))
             : [],
           attributes: attributes && typeof attributes === 'object' ? attributes : {},
+          status: initialStatus || undefined,
         };
 
         await fetch(`${API_BASE_URL}/api/enquiries`, {
@@ -181,7 +215,7 @@ export default function PreviewPage() {
         console.error("Failed to create enquiry from preview", err);
       }
     },
-    [vendorId, categoryId, vendor, getStoredCustomerId]
+    [vendorId, categoryId, vendor, getStoredCustomerId, enquiryStatusConfig]
   );
 
   const makePreviewTokenKey = useCallback((venId, catId) => {
@@ -1120,9 +1154,9 @@ export default function PreviewPage() {
   }, [vendorId, categoryId, loadDummyInventorySelections]);
 
   // Build dynamic service labels from top-level category children (product card sections).
-  // For accepted vendors, filter by isNodePricingActive so dropdown and cards share the
-  // same active/inactive logic (including inventory rows via hasActivePricingForNode).
-  // For non-accepted vendors, include all top-level services.
+  // For accepted vendors, use the same visibility rule as the product cards (shouldShowLvl1),
+  // which treats a L1 node as visible if either the node itself or its inventory has
+  // active pricing. For non-accepted vendors, include all top-level services.
   const serviceLabels = useMemo(() => {
     try {
       const isVendorAcceptedLocal =
@@ -1131,9 +1165,13 @@ export default function PreviewPage() {
 
       const source = (() => {
         if (!isVendorAcceptedLocal) return children; // no filtering before acceptance
+
+        // For accepted vendors, mirror the shouldShowLvl1 logic used in the
+        // card renderer so that any top-level service that shows a card also
+        // appears in the Our Services dropdown.
         return children.filter((n) => {
           try {
-            return isNodePricingActive(n);
+            return isNodePricingActive(n) || hasActivePricingForNode(n);
           } catch {
             return false;
           }
@@ -1367,6 +1405,12 @@ export default function PreviewPage() {
             } catch {
               setLinkedAttributes({});
               setInventoryLabelsList([]);
+            }
+            try {
+              const cfg = Array.isArray(wmJson?.enquiryStatusConfig) ? wmJson.enquiryStatusConfig : [];
+              setEnquiryStatusConfig(cfg);
+            } catch {
+              setEnquiryStatusConfig([]);
             }
             // Derive Inventory model flag from categoryModel array on dummy category
             try {
@@ -2949,6 +2993,882 @@ export default function PreviewPage() {
                             })}
                           </div>
                         )}
+
+          {showMyEnquiriesModal && (
+            <div
+              style={{
+                position: "fixed",
+                inset: 0,
+                background: "rgba(0,0,0,0.45)",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                zIndex: 2300,
+              }}
+            >
+              <div
+                style={{
+                  background: "#ffffff",
+                  padding: 16,
+                  borderRadius: 10,
+                  width: "95vw",
+                  maxWidth: 900,
+                  maxHeight: "85vh",
+                  overflow: "auto",
+                  fontFamily:
+                    "Poppins, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif",
+                }}
+              >
+                <div
+                style={{
+                  display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    marginBottom: 8,
+                }}
+              >
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  {expandedEnquiryGroup && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        try {
+                          setExpandedEnquiryGroup(null);
+                          setExpandedEnquiryId(null);
+                        } catch {}
+                      }}
+                      style={{
+                        padding: "4px 10px",
+                        borderRadius: 9999,
+                        border: "1px solid #e5e7eb",
+                        background: "#f9fafb",
+                        cursor: "pointer",
+                        fontSize: 12,
+                        fontWeight: 500,
+                      }}
+                    >
+                      ← 
+                    </button>
+                  )}
+                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <h3 style={{ margin: 0 }}>
+                      {(() => {
+                        try {
+                          if (!expandedEnquiryGroup) return "My Enquiries";
+                          const raw = String(expandedEnquiryGroup || "");
+                          const parts = raw.split("|");
+                          const label = (parts[0] || "").trim();
+                          return label || "My Enquiries";
+                        } catch {
+                          return "My Enquiries";
+                        }
+                      })()}
+                    </h3>
+                    {!expandedEnquiryGroup && Array.isArray(myEnquiries) && myEnquiries.length > 0 && (
+                      <span
+                        style={{
+  fontSize: 12,
+  fontWeight: 600,
+  color: "#0369a1",
+  background: "#e0f2fe",
+  borderRadius: 9999,
+  padding: "3px 10px",
+}}
+                      >
+                        {myEnquiries.length}
+                      </span>
+                    )}
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowMyEnquiriesModal(false)}
+                  style={{
+                    width: 28,
+                    height: 28,
+                    borderRadius: "9999px",
+                    border: "1px solid #e5e7eb",
+                    background: "#f9fafb",
+                    cursor: "pointer",
+                    fontSize: 14,
+                    lineHeight: 1,
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                  }}
+                >
+                  ×
+                </button>
+                </div>
+
+                {myEnquiriesLoading ? (
+                  <div style={{ padding: 12 }}>Loading enquiries...</div>
+                ) : myEnquiriesError ? (
+                  <div
+                    style={{
+                      padding: 12,
+                      color: "#b91c1c",
+                      background: "#fee2e2",
+                      border: "1px solid #fecaca",
+                      borderRadius: 8,
+                      marginBottom: 8,
+                    }}
+                  >
+                    {myEnquiriesError}
+                  </div>
+                ) : (
+                  (() => {
+                    try {
+                      const cfgList = Array.isArray(enquiryStatusConfig)
+                        ? enquiryStatusConfig
+                        : [];
+                      const cfgByName = new Map();
+                      // Build config map and seed groups for each configured status
+                      cfgList.forEach((row, idx) => {
+                        const nm = (row && row.name != null ? String(row.name) : "").trim();
+                        if (!nm) return;
+                        const baseRank =
+                          row && typeof row.rank === "number" && !Number.isNaN(row.rank)
+                            ? row.rank
+                            : idx + 1;
+                        cfgByName.set(nm, {
+                          name: nm,
+                          vendorLabel:
+                            row && row.vendorLabel != null
+                              ? String(row.vendorLabel)
+                              : nm,
+                          rank: baseRank,
+                          mode: row.mode || "action-required",
+                          nextStatuses: Array.isArray(row.nextStatuses) ? row.nextStatuses : [],
+                        });
+                      });
+
+                      const groupsMap = new Map();
+
+                      // Seed one empty group per configured status so cards always show
+                      cfgByName.forEach((cfg) => {
+                        const key = `${cfg.rank}|${cfg.vendorLabel}`;
+                        if (!groupsMap.has(key)) {
+                          const contactNextStatus = Array.isArray(cfg.nextStatuses)
+                            ? cfg.nextStatuses.find((nm) =>
+                                typeof nm === "string" && nm.toLowerCase().includes("contact")
+                              ) || null
+                            : null;
+                          groupsMap.set(key, {
+                            label: cfg.vendorLabel,
+                            rank: cfg.rank,
+                            items: [],
+                            statusName: cfg.name,
+                            mode: cfg.mode,
+                            nextStatuses: cfg.nextStatuses,
+                            contactNextStatus,
+                          });
+                        }
+                      });
+
+                      // Optional 'Other' group for statuses not present in config
+                      const getOrCreateOtherGroup = () => {
+                        const key = "999999|Other";
+                        let g = groupsMap.get(key);
+                        if (!g) {
+                          g = { label: "Other", rank: 999999, items: [] };
+                          groupsMap.set(key, g);
+                        }
+                        return g;
+                      };
+
+                      (Array.isArray(myEnquiries) ? myEnquiries : []).forEach((enq) => {
+                        try {
+                          const rawStatus = enq && enq.status != null ? String(enq.status) : "";
+                          const trimmed = rawStatus.trim();
+                          const cfg = cfgByName.get(trimmed) || null;
+                          if (cfg) {
+                            const key = `${cfg.rank}|${cfg.vendorLabel}`;
+                            const g = groupsMap.get(key);
+                            if (g) {
+                              g.items.push(enq);
+                            }
+                          } else {
+                            // Unconfigured / empty statuses go to Other
+                            const other = getOrCreateOtherGroup();
+                            other.items.push(enq);
+                          }
+                        } catch {}
+                      });
+
+                      const groups = Array.from(groupsMap.values()).sort((a, b) => {
+                        if (a.rank !== b.rank) return a.rank - b.rank;
+                        return String(a.label || "").localeCompare(String(b.label || ""));
+                      });
+
+                      const statusPalette = [
+                        {
+                          background: "linear-gradient(135deg, #eff6ff, #e0f2fe)",
+                          icon: "📄",
+                        },
+                        {
+                          background: "linear-gradient(135deg, #f5f3ff, #e0f2fe)",
+                          icon: "👁️",
+                        },
+                        {
+                          background: "linear-gradient(135deg, #ecfdf5, #e0f2fe)",
+                          icon: "📞",
+                        },
+                        {
+                          background: "linear-gradient(135deg, #fef2f2, #fee2e2)",
+                          icon: "✖️",
+                        },
+                        {
+                          background: "linear-gradient(135deg, #ecfdf3, #dcfce7)",
+                          icon: "✅",
+                        },
+                      ];
+
+                      const formatDateTime = (value) => {
+                        try {
+                          if (!value) return "";
+                          const d = new Date(value);
+                          if (Number.isNaN(d.getTime())) return String(value);
+                          return d.toLocaleString();
+                        } catch {
+                          return String(value);
+                        }
+                      };
+
+                      const formatDate = (value) => {
+                        try {
+                          if (!value) return "";
+                          const d = new Date(value);
+                          if (Number.isNaN(d.getTime())) return String(value);
+                          return d.toLocaleDateString(undefined, {
+                            day: "2-digit",
+                            month: "short",
+                            year: "numeric",
+                          });
+                        } catch {
+                          return String(value);
+                        }
+                      };
+
+                      const formatTime = (value) => {
+                        try {
+                          if (!value) return "";
+                          const d = new Date(value);
+                          if (Number.isNaN(d.getTime())) return "";
+                          return d.toLocaleTimeString(undefined, {
+                            hour: "2-digit",
+                            minute: "2-digit",
+                            hour12: true,
+                          });
+                        } catch {
+                          return "";
+                        }
+                      };
+
+                      return (
+                        <div
+                          style={{
+                            display: "grid",
+                            gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))",
+                            gap: 16,
+                            alignItems: "stretch",
+                          }}
+                        >
+                          {groups.map((g, idx) => {
+                            const groupKey = `${g.label}|${g.rank}`;
+                            const isExpanded = expandedEnquiryGroup === groupKey;
+                            const visuals =
+                              statusPalette[idx % statusPalette.length] || {
+                                background: "#ffffff",
+                                icon: "📩",
+                              };
+
+                            // When one group is expanded, hide all other groups
+                            if (expandedEnquiryGroup && !isExpanded) {
+                              return null;
+                            }
+
+                            return (
+                              <div
+                                key={`${g.label}|${g.rank}|${idx}`}
+                                onClick={() => {
+                                  try {
+                                    if (!g.items || g.items.length === 0) return;
+                                    if (expandedEnquiryGroup === groupKey) return;
+                                    setExpandedEnquiryGroup(groupKey);
+                                  } catch {}
+                                }}
+                                style={{
+                                  border: "1px solid #e5e7eb",
+                                  borderRadius: 16,
+                                  padding: 16,
+                                  background: visuals.background,
+                                  display: "flex",
+                                  flexDirection: "column",
+                                  justifyContent: "space-between",
+                                  minHeight: 150,
+                                  boxShadow:
+                                    "0 12px 30px rgba(15, 23, 42, 0.06)",
+                                  transition:
+                                    "box-shadow 0.2s ease-in-out, transform 0.15s ease-in-out",
+                                  cursor: g.items && g.items.length > 0 ? "pointer" : "default",
+                                }}
+                              >
+                                {/* Only show the icon + label + count header when NOT expanded */}
+                                {!isExpanded && (
+                                  <div
+                                    style={{
+                                      display: "flex",
+                                      flexDirection: "column",
+                                      alignItems: "center",
+                                      justifyContent: "center",
+                                      gap: 6,
+                                      marginBottom: 12,
+                                    }}
+                                  >
+                                    <div
+                                      style={{
+                                        display: "flex",
+                                        alignItems: "center",
+                                        justifyContent: "center",
+                                        gap: 6,
+                                        fontWeight: 700,
+                                        color: "#020617",
+                                        fontSize: 14,
+                                        letterSpacing: 0.1,
+                                        textAlign: "center",
+                                      }}
+                                    >
+                                      <span
+                                        style={{
+                                          display: "inline-flex",
+                                          alignItems: "center",
+                                          justifyContent: "center",
+                                          width: 28,
+                                          height: 28,
+                                          borderRadius: "9999px",
+                                          background: "rgba(255,255,255,0.8)",
+                                          fontSize: 14,
+                                        }}
+                                      >
+                                        {visuals.icon}
+                                      </span>
+                                      <span>{g.label}</span>
+                                    </div>
+                                    <div
+                                      style={{
+                                        fontSize: 12,
+                                        color: "#0f172a",
+                                        background: "rgba(15,23,42,0.04)",
+                                        borderRadius: 9999,
+                                        padding: "3px 12px",
+                                        border: "1px solid #dbeafe",
+                                        fontWeight: 600,
+                                      }}
+                                    >
+                                      {g.items.length}
+                                    </div>
+                                  </div>
+                                )}
+                                <div style={{ overflowX: "auto" }}>
+                                  {(!g.items || g.items.length === 0) ? null : (
+                                    <>
+                                      {isExpanded ? (
+                                        <>
+                                          <div
+                                            style={{
+                                              display: "grid",
+                                              gridTemplateColumns:
+                                                expandedEnquiryId != null || (g.items || []).length <= 1
+                                                  ? "minmax(0, 1fr)"
+                                                  : "repeat(2, minmax(0, 1fr))",
+                                              gap: 12,
+                                              maxHeight: 360,
+                                              overflowY: "auto",
+                                              paddingRight: 4,
+                                              paddingBottom: 4,
+                                              maxWidth: 880,
+                                              margin: "0 auto",
+                                            }}
+                                          >
+                                            {(g.items || []).map((enq, i2) => {
+                                              const path = Array.isArray(enq?.categoryPath)
+                                                ? enq.categoryPath.map((v) => String(v || ""))
+                                                : [];
+                                              const leafLabel = path.length > 0 ? path[path.length - 1] : enq?.serviceName || "";
+                                              const parentLabel = path.length > 1 ? path[path.length - 2] : path[0] || "";
+                                              let priceText = "";
+                                              if (enq?.price != null && enq.price !== "") {
+                                                priceText = `₹${enq.price}`;
+                                              }
+                                              // Use latest status change time for display date/time
+                                              let displayTimestamp = enq?.createdAt;
+                                              try {
+                                                if (Array.isArray(enq?.statusHistory) && enq.statusHistory.length > 0) {
+                                                  const lastEntry = enq.statusHistory[enq.statusHistory.length - 1];
+                                                  if (lastEntry && lastEntry.changedAt) {
+                                                    displayTimestamp = lastEntry.changedAt;
+                                                  }
+                                                }
+                                              } catch {}
+
+                                              const dateText = formatDate(displayTimestamp);
+                                              const timeText = formatTime(displayTimestamp);
+
+                                              let thumbSrc = "";
+                                              try {
+                                                const attrsObjForImg =
+                                                  enq?.attributes && typeof enq.attributes === "object"
+                                                    ? enq.attributes
+                                                    : {};
+                                                const raw =
+                                                  attrsObjForImg.imageUrl ||
+                                                  attrsObjForImg.img ||
+                                                  attrsObjForImg.photo ||
+                                                  attrsObjForImg.thumbnail ||
+                                                  "";
+                                                const s = String(raw || "");
+                                                const normalizeImg = (val) => {
+                                                  const str = String(val || "");
+                                                  if (!str) return "";
+                                                  if (str.startsWith("http://") || str.startsWith("https://") || str.startsWith("data:")) {
+                                                    return str;
+                                                  }
+                                                  const pathPart = str.startsWith("/") ? str : `/${str}`;
+                                                  return `${ASSET_BASE_URL || API_BASE_URL}${pathPart}`;
+                                                };
+
+                                                if (s) {
+                                                  thumbSrc = normalizeImg(s);
+                                                }
+
+                                                // If no explicit image on the enquiry, fall back to vendor/category images
+                                                if (!thumbSrc) {
+                                                  let fallback = "";
+                                                  if (Array.isArray(vendor?.profilePictures) && vendor.profilePictures.length) {
+                                                    fallback = normalizeImg(vendor.profilePictures[0]);
+                                                  }
+                                                  if (!fallback && Array.isArray(categoryProfilePictures) && categoryProfilePictures.length) {
+                                                    fallback = normalizeImg(categoryProfilePictures[0]);
+                                                  }
+                                                  thumbSrc = fallback;
+                                                }
+                                              } catch {}
+
+                                              const attrsObj =
+                                                enq?.attributes && typeof enq.attributes === "object"
+                                                  ? enq.attributes
+                                                  : {};
+                                              const inventoryLabel =
+                                                typeof attrsObj.inventoryName === "string" && attrsObj.inventoryName.trim()
+                                                  ? attrsObj.inventoryName.trim()
+                                                  : leafLabel || "";
+
+                                              const primaryHeadingValue =
+                                                typeof attrsObj.primaryHeadingValue === "string" && attrsObj.primaryHeadingValue.trim()
+                                                  ? attrsObj.primaryHeadingValue.trim()
+                                                  : "";
+
+                                              const courseTypeLabel =
+                                                primaryHeadingValue ||
+                                                (typeof attrsObj.courseType === "string" && attrsObj.courseType.trim()
+                                                  ? attrsObj.courseType.trim()
+                                                  : inventoryLabel || leafLabel || "");
+
+                                              const selectorLabelFromAttrsRaw =
+                                                typeof attrsObj.parentSelectorLabel === "string" && attrsObj.parentSelectorLabel.trim()
+                                                  ? attrsObj.parentSelectorLabel.trim()
+                                                  : "";
+
+                                              const selectorOverrideLabel =
+                                                typeof attrsObj.primaryHeadingLabel === "string" && attrsObj.primaryHeadingLabel.trim()
+                                                  ? attrsObj.primaryHeadingLabel.trim()
+                                                  : "";
+
+                                              const selectorLabelFromAttrs = selectorOverrideLabel || selectorLabelFromAttrsRaw;
+
+                                              const isDetailsOpen = expandedEnquiryId === (enq?._id || i2);
+
+                                              if (expandedEnquiryId && !isDetailsOpen) {
+                                                return null;
+                                              }
+
+                                              return (
+                                                <div
+                                                  key={`${g.label}|card|${enq?._id || i2}`}
+                                                  style={{
+                                                    borderRadius: 12,
+                                                    border: "1px solid #e5e7eb",
+                                                    background: "#ffffff",
+                                                    boxShadow: "0 6px 18px rgba(15,23,42,0.05)",
+                                                    padding: 10,
+                                                  }}
+                                                >
+                                                  <div
+                                                    style={{
+                                                      display: "flex",
+                                                      alignItems: "center",
+                                                      gap: 10,
+                                                      marginBottom: 8,
+                                                    }}
+                                                  >
+                                                    {thumbSrc ? (
+                                                      <img
+                                                        src={thumbSrc}
+                                                        alt={inventoryLabel || leafLabel || "enquiry"}
+                                                        style={{
+                                                          width: 72,
+                                                          height: 72,
+                                                          borderRadius: 12,
+                                                          objectFit: "cover",
+                                                        }}
+                                                      />
+                                                    ) : (
+                                                      <div
+                                                        style={{
+                                                          width: 72,
+                                                          height: 72,
+                                                          borderRadius: 12,
+                                                          background: "#e5e7eb",
+                                                          display: "flex",
+                                                          alignItems: "center",
+                                                          justifyContent: "center",
+                                                          fontSize: 22,
+                                                          fontWeight: 600,
+                                                          color: "#4b5563",
+                                                        }}
+                                                      >
+                                                        {(inventoryLabel || leafLabel || "?")
+                                                          .toString()
+                                                          .trim()
+                                                          .slice(0, 1)
+                                                          .toUpperCase()}
+                                                      </div>
+                                                    )}
+                                                    <div style={{ flex: 1 }}>
+                                                      <div
+                                                        style={{
+                                                          display: "flex",
+                                                          justifyContent: "space-between",
+                                                          alignItems: "flex-start",
+                                                          marginBottom: 2,
+                                                        }}
+                                                      >
+                                                        <div>
+                                                          <div
+                                                            style={{
+                                                              fontWeight: 700,
+                                                              fontSize: 14,
+                                                              color: "#111827",
+                                                            }}
+                                                          >
+                                                            {courseTypeLabel || "-"}
+                                                          </div>
+                                                        </div>
+                                                        {priceText && (
+                                                          <div
+                                                            style={{
+                                                              fontWeight: 800,
+                                                              fontSize: 18,
+                                                              color: "#16a34a",
+                                                            }}
+                                                          >
+                                                            {priceText}
+                                                          </div>
+                                                        )}
+                                                      </div>
+                                                    </div>
+                                                  </div>
+
+                                                  <div
+                                                    style={{
+                                                      display: "flex",
+                                                      alignItems: "center",
+                                                      gap: 12,
+                                                      fontSize: 11,
+                                                      marginTop: 4,
+                                                      marginBottom: 6,
+                                                      color: "#4b5563",
+                                                    }}
+                                                  >
+                                                    <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                                                      <span style={{ opacity: 0.7 }}>Date</span>
+                                                      <span style={{ fontWeight: 600 }}>{dateText || "-"}</span>
+                                                    </div>
+                                                    <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                                                      <span style={{ opacity: 0.7 }}>Time</span>
+                                                      <span style={{ fontWeight: 600 }}>{timeText || "-"}</span>
+                                                    </div>
+                                                  </div>
+
+                                                  <button
+                                                    type="button"
+                                                    onClick={async () => {
+                                                      try {
+                                                        const idVal = enq?._id || i2;
+
+                                                        const willClose = expandedEnquiryId === idVal;
+
+                                                        // Toggle details panel first
+                                                        setExpandedEnquiryId((prev) =>
+                                                          prev === idVal ? null : idVal
+                                                        );
+
+                                                        // For automatic groups WITHOUT contact info action,
+                                                        // move to next status only when the vendor hides
+                                                        // an already-open enquiry (i.e., on "Hide" click),
+                                                        // not when first viewing it.
+                                                        if (
+                                                          willClose &&
+                                                          g.mode !== "action-required" &&
+                                                          !g.contactNextStatus &&
+                                                          Array.isArray(g.nextStatuses) &&
+                                                          g.nextStatuses.length > 0 &&
+                                                          enq?._id
+                                                        ) {
+                                                          const rawNext = g.nextStatuses[0];
+                                                          const nextLabel = typeof rawNext === "string" ? rawNext.trim() : String(rawNext || "").trim();
+                                                          if (nextLabel) {
+                                                            try {
+                                                              await fetch(`${API_BASE_URL}/api/enquiries/${enq._id}/status`, {
+                                                                method: "PUT",
+                                                                headers: { "Content-Type": "application/json" },
+                                                                body: JSON.stringify({ status: nextLabel }),
+                                                              });
+                                                              try {
+                                                                const params = new URLSearchParams();
+                                                                params.set("vendorId", String(vendorId));
+                                                                params.set("categoryId", String(categoryId));
+                                                                const res = await fetch(`${API_BASE_URL}/api/enquiries?${params.toString()}`, {
+                                                                  cache: "no-store",
+                                                                });
+                                                                const list = await res.json().catch(() => []);
+                                                                setMyEnquiries(Array.isArray(list) ? list : []);
+                                                              } catch {}
+                                                            } catch {}
+                                                          }
+                                                        }
+                                                      } catch {}
+                                                    }}
+                                                    style={{
+                                                      width: "100%",
+                                                      padding: "6px 10px",
+                                                      borderRadius: 9999,
+                                                      border: "1px solid #e5e7eb",
+                                                      background: "#f9fafb",
+                                                      fontSize: 11,
+                                                      fontWeight: 500,
+                                                      color: "#111827",
+                                                      cursor: "pointer",
+                                                      marginTop: 4,
+                                                    }}
+                                                  >
+                                                    {isDetailsOpen ? "Hide enquiry details" : "View enquiry details"}
+                                                  </button>
+
+                                                  {isDetailsOpen && (
+                                                    <div
+                                                      style={{
+                                                        marginTop: 8,
+                                                        padding: 10,
+                                                        borderRadius: 10,
+                                                        background: "#f9fafb",
+                                                        border: "1px dashed #e5e7eb",
+                                                        fontSize: 12,
+                                                        lineHeight: 1.5,
+                                                        color: "#374151",
+                                                        position: "relative",
+                                                      }}
+                                                    >
+                                                      {/* Next Status buttons at the top */}
+                                                      {g.mode === "action-required" && Array.isArray(g.nextStatuses) && g.nextStatuses.length > 0 && (
+                                                        <div style={{ marginBottom: 12 }}>
+                                                          <div style={{ marginBottom: 6 }}><strong>Next Status</strong></div>
+                                                          <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+                                                            {g.nextStatuses.map((ns, idxNs) => {
+                                                              const label = typeof ns === "string" ? ns : String(ns || "");
+                                                              if (!label.trim()) return null;
+                                                              const isActive = String(enq.status || "").trim() === label.trim();
+                                                              return (
+                                                                <button
+                                                                  key={`next-${enq._id || i2}-${idxNs}`}
+                                                                  type="button"
+                                                                  onClick={async () => {
+                                                                    try {
+                                                                      if (!enq._id) return;
+                                                                      await fetch(`${API_BASE_URL}/api/enquiries/${enq._id}/status`, {
+                                                                        method: "PUT",
+                                                                        headers: { "Content-Type": "application/json" },
+                                                                        body: JSON.stringify({ status: label }),
+                                                                      });
+                                                                      try {
+                                                                        const params = new URLSearchParams();
+                                                                        params.set("vendorId", String(vendorId));
+                                                                        params.set("categoryId", String(categoryId));
+                                                                        const res = await fetch(`${API_BASE_URL}/api/enquiries?${params.toString()}`, {
+                                                                          cache: "no-store",
+                                                                        });
+                                                                        const list = await res.json().catch(() => []);
+                                                                        setMyEnquiries(Array.isArray(list) ? list : []);
+                                                                      } catch {}
+                                                                    } catch {}
+                                                                  }}
+                                                                  style={{
+  padding: "8px 18px",
+  borderRadius: 9999,
+  border: "none",
+  background: "linear-gradient(135deg, #3b82f6, #6366f1)",
+  color: "#ffffff",
+  cursor: "pointer",
+  fontSize: 12,
+  fontWeight: 600,
+  boxShadow: "0 4px 12px rgba(59, 130, 246, 0.35)",
+  transition: "transform 0.15s ease, box-shadow 0.15s ease",
+}}
+                                                                >
+                                                                  {label}
+                                                                </button>
+                                                              );
+                                                            })}
+                                                          </div>
+                                                        </div>
+                                                      )}
+                                                      {/* Status changed timestamp removed; Date/Time above card now uses latest status change time */}
+                                                      <div style={{ marginBottom: 4 }}>
+                                                        <strong>Service:</strong>{" "}
+                                                        {(() => {
+                                                          if (Array.isArray(path) && path.length > 1) {
+                                                            return path.slice(1).join(" > ");
+                                                          }
+                                                          if (Array.isArray(path) && path.length === 1) {
+                                                            return path[0];
+                                                          }
+                                                          return enq?.serviceName || "-";
+                                                        })()}
+                                                      </div>
+                                                      <div style={{ marginBottom: 4 }}>
+                                                        <strong>Vehicle type:</strong>{" "}
+                                                        {(() => {
+                                                          try {
+                                                            const attrs = attrsObj;
+                                                            const label =
+                                                              typeof attrs.inventoryName === "string" && attrs.inventoryName.trim()
+                                                                ? attrs.inventoryName.trim()
+                                                                : "-";
+                                                            return label;
+                                                          } catch {
+                                                            return "-";
+                                                          }
+                                                        })()}
+                                                      </div>
+                                                      <div style={{ marginBottom: 4 }}>
+                                                        <strong>Terms:</strong>{" "}
+                                                        {(() => {
+                                                          const raw = String(enq?.terms || "");
+                                                          const parts = raw
+                                                            .split(",")
+                                                            .map((t) => t.trim())
+                                                            .filter(Boolean);
+                                                          if (!parts.length) return <span>-</span>;
+                                                          return (
+                                                            <ul style={{ margin: "4px 0 0", paddingLeft: 0, listStyle: "none" }}>
+                                                              {parts.map((t, i) => (
+                                                                <li
+                                                                  key={i}
+                                                                  style={{ display: "flex", alignItems: "flex-start", gap: 6, marginBottom: 2 }}
+                                                                >
+                                                                  <span style={{ color: "#16a34a" }}>✅</span>
+                                                                  <span style={{ fontWeight: 400 }}>{t}</span>
+                                                                </li>
+                                                              ))}
+                                                            </ul>
+                                                          );
+                                                        })()}
+                                                      </div>
+                                                      <div style={{ marginBottom: 4 }}>
+                                                        <strong>Source:</strong> {enq?.source || "-"}
+                                                      </div>
+                                                      {g.contactNextStatus && (
+                                                        <div
+                                                          style={{
+                                                            position: "absolute",
+                                                            top: 10,
+                                                            right: 10,
+                                                          }}
+                                                        >
+                                                          <button
+                                                            type="button"
+                                                            onClick={() => {
+                                                              setContactInfoModal({ enquiry: enq, nextStatus: g.contactNextStatus });
+                                                            }}
+                                                            style={{
+                                                              width: 28,
+                                                              height: 28,
+                                                              borderRadius: "9999px",
+                                                              border: "none",
+                                                              background: "#16a34a",
+                                                              display: "flex",
+                                                              alignItems: "center",
+                                                              justifyContent: "center",
+                                                              cursor: "pointer",
+                                                              color: "#ffffff",
+                                                              fontSize: 14,
+                                                            }}
+                                                          >
+                                                            📞
+                                                          </button>
+                                                        </div>
+                                                      )}
+                                                    </div>
+                                                  )}
+                                                </div>
+                                              );
+                                            })}
+                                          </div>
+                                        </>
+                                      ) : (
+                                        <div
+                                          style={{
+                                            marginTop: 6,
+                                            fontSize: 11,
+                                            textAlign: "center",
+                                            color: "#64748b",
+                                          }}
+                                        >
+                                          {/* {(!g.items || g.items.length === 0)
+                                            ? "No enquiries yet"
+                                            : "Tap the card to view details"} */}
+                                        </div>
+                                      )}
+                                    </>
+                                  )}
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      );
+                    } catch (e) {
+                      return (
+                        <div
+                          style={{
+                            padding: 16,
+                            textAlign: "center",
+                            color: "#b91c1c",
+                            background: "#fee2e2",
+                            border: "1px solid #fecaca",
+                            borderRadius: 8,
+                          }}
+                        >
+                          Failed to render enquiries.
+                        </div>
+                      );
+                    }
+                  })()
+                )}
+              </div>
+            </div>
+          )}
                       </div>
                     </div>
                   );
@@ -3127,36 +4047,129 @@ export default function PreviewPage() {
                 const num = (() => {
                   try {
                     const catKey = String(categoryId || '');
-                    const inv = Array.isArray(vendor?.inventorySelections?.[catKey])
+                    const invRaw = Array.isArray(vendor?.inventorySelections?.[catKey])
                       ? vendor.inventorySelections[catKey]
                       : [];
+                    // Filter out inventory entries where ALL rows are inactive
+                    const inv = invRaw.filter((entry) => {
+                      try {
+                        const statusMap = entry?.pricingStatusByRow || {};
+                        const keys = Object.keys(statusMap);
+                        if (keys.length === 0) return true;
+                        for (const key of keys) {
+                          const raw = String(statusMap[key] || '').trim().toLowerCase();
+                          if (raw === 'active') return true;
+                        }
+                        return false;
+                      } catch {
+                        return true;
+                      }
+                    });
                     const ids = [displayNode?.id, selectedParent?.id, node?.id]
                       .map((x) => String(x || ''))
                       .filter(Boolean);
-                    let priceVal = null;
-                    inv.forEach((entry) => {
-                      if (priceVal != null) return;
-                      const pbr = (entry && entry.pricesByRow && typeof entry.pricesByRow === 'object') ? entry.pricesByRow : null;
-                      if (!pbr) return;
-                      ids.forEach((target) => {
-                        if (!target || priceVal != null) return;
-                        for (const [rk, val] of Object.entries(pbr)) {
-                          const parts = String(rk).split('|');
-                          if (parts.some((id) => String(id) === target)) {
-                            const n = Number(val);
-                            if (!Number.isNaN(n)) { priceVal = n; break; }
+                    const rootName = String(categoryTree?.name || '').toLowerCase();
+                    const isDriving = rootName === 'driving school';
+
+                    const pickBaselinePrice = () => {
+                      let invPrice = null;
+                      inv.forEach((entry) => {
+                        if (invPrice != null) return;
+                        const pbr = (entry && entry.pricesByRow && typeof entry.pricesByRow === 'object') ? entry.pricesByRow : null;
+                        if (!pbr) return;
+                        ids.forEach((target) => {
+                          if (!target || invPrice != null) return;
+                          for (const [rk, val] of Object.entries(pbr)) {
+                            const parts = String(rk).split('|');
+                            if (parts.some((id) => String(id) === target)) {
+                              const n = Number(val);
+                              if (!Number.isNaN(n)) { invPrice = n; break; }
+                            }
                           }
-                        }
+                        });
                       });
-                    });
-                    if (priceVal == null) {
                       const nodePrice =
                         (displayNode?.vendorPrice ?? displayNode?.price) ??
                         (selectedParent?.vendorPrice ?? selectedParent?.price) ??
                         (node?.vendorPrice ?? node?.price) ?? null;
-                      return nodePrice == null ? null : Number(nodePrice);
+                      return (invPrice != null) ? invPrice : nodePrice;
+                    };
+
+                    if (isDriving && inv.length > 0) {
+                      const targetId = String((displayNode?.id || selectedParent?.id || node?.id || ''));
+                      const normalized = [];
+                      inv.forEach((entry) => {
+                        try {
+                          const fam = String(entry?.scopeFamily || '').toLowerCase();
+                          const sels = entry?.selections || {};
+                          let sel = sels[fam] || sels.cars || sels.bikes || {};
+                          if (!sel || typeof sel !== 'object') sel = {};
+                          if (fam === 'bikes') {
+                            const brand = sel.bikeBrand != null ? String(sel.bikeBrand).trim() : (sel.brand != null ? String(sel.brand).trim() : '');
+                            const transmission = sel.bikeTransmission != null ? String(sel.bikeTransmission).trim() : (sel.transmission != null ? String(sel.transmission).trim() : '');
+                            const model = sel.model != null ? String(sel.model).trim() : '';
+                            if (brand || model || transmission) {
+                              normalized.push({ family: fam, brand, model, transmission, bodyType: null, entry });
+                            }
+                          } else if (fam === 'cars') {
+                            const brand = sel.brand != null ? String(sel.brand).trim() : '';
+                            const transmission = sel.transmission != null ? String(sel.transmission).trim() : '';
+                            const model = sel.model != null ? String(sel.model).trim() : '';
+                            const bodyType = sel.bodyType != null ? String(sel.bodyType).trim() : '';
+                            if (brand || model || transmission || bodyType) {
+                              normalized.push({ family: fam, brand, model, transmission, bodyType, entry });
+                            }
+                          }
+                        } catch {}
+                      });
+
+                      const getPriceForEntry = (n) => {
+                        const pbr = (n.entry && n.entry.pricesByRow && typeof n.entry.pricesByRow === 'object') ? n.entry.pricesByRow : null;
+                        if (!pbr) return null;
+                        for (const [key, value] of Object.entries(pbr)) {
+                          const rowIds = String(key).split('|');
+                          if (rowIds.some((id) => String(id) === targetId)) {
+                            const num = Number(value);
+                            if (!Number.isNaN(num)) return num;
+                          }
+                        }
+                        return null;
+                      };
+
+                      const carBrand = String(attrSelections?.brand ?? '').trim() || null;
+                      const carModel = String(attrSelections?.model ?? '').trim() || null;
+                      const carTrans = String(attrSelections?.transmission ?? '').trim() || null;
+                      const carBody = String(attrSelections?.bodyType ?? '').trim() || null;
+                      const bikeBrand = String(attrSelections?.bikeBrand ?? '').trim() || null;
+                      const bikeModel = String(attrSelections?.bikeModel ?? '').trim() || null;
+                      const bikeTrans = String(attrSelections?.bikeTransmission ?? '').trim() || null;
+
+                      const refined = normalized.filter((n) => {
+                        const fam = String(n.family || '').toLowerCase();
+                        const effBrand = fam === 'bikes' ? bikeBrand : carBrand;
+                        const effModel = fam === 'bikes' ? bikeModel : carModel;
+                        const effTrans = fam === 'bikes' ? bikeTrans : carTrans;
+                        const effBody = fam === 'cars' ? carBody : null;
+                        if (effBrand && String(n.brand) !== String(effBrand)) return false;
+                        if (effModel && String(n.model) !== String(effModel)) return false;
+                        if (effTrans && String(n.transmission) !== String(effTrans)) return false;
+                        if (effBody && n.bodyType && String(n.bodyType) !== String(effBody)) return false;
+                        return true;
+                      });
+
+                      // Get the exact price for the selected attributes (first match, not min)
+                      let attrAwarePrice = null;
+                      for (const n of refined) {
+                        const p = getPriceForEntry(n);
+                        if (p != null) { attrAwarePrice = p; break; }
+                      }
+                      const fallback = pickBaselinePrice();
+                      const resolvedPrice = (attrAwarePrice != null) ? attrAwarePrice : fallback;
+                      return resolvedPrice == null ? null : Number(resolvedPrice);
+                    } else {
+                      const basePrice = pickBaselinePrice();
+                      return basePrice == null ? null : Number(basePrice);
                     }
-                    return priceVal;
                   } catch {
                     return null;
                   }
@@ -3203,6 +4216,7 @@ export default function PreviewPage() {
                 const baseAttrs = {
                   segment: node?.name || "",
                   courseType: selectedParent?.name || "",
+                  parentSelectorLabel: labelForCard || parentSelectorLabel || "",
                   // Only when there is inventory configured for this category AND we see
                   // inventory-like fields, merge the current selections (which may
                   // contain inventoryName from the dropdown).
@@ -3210,6 +4224,18 @@ export default function PreviewPage() {
                   // Also keep any static attributes defined on the display node.
                   ...nodeAttrs,
                 };
+
+                // Try to attach a representative image for this leaf/card so that
+                // My Enquiries can show the correct thumbnail instead of a generic one.
+                if (!baseAttrs.imageUrl) {
+                  const imgCandidate =
+                    displayNode?.imageUrl ||
+                    displayNode?.iconUrl ||
+                    node?.imageUrl ||
+                    node?.iconUrl ||
+                    "";
+                  if (imgCandidate) baseAttrs.imageUrl = imgCandidate;
+                }
 
                 // Derive a clean inventory name from the card's inventory attributes
                 let inventoryNameForCard = baseAttrs.inventoryName || "";
@@ -3237,7 +4263,7 @@ export default function PreviewPage() {
                     ? { ...baseAttrs, inventoryName: inventoryNameForCard }
                     : baseAttrs,
                 });
-                window.alert("Enquiry submitted");
+                setEnquirySubmitted(true);
               } catch (e) {
                 console.error("Enroll Now enquiry error (card)", e);
               }
@@ -3419,7 +4445,7 @@ export default function PreviewPage() {
       );
     };
 
-    // ... rest of the code remains the same ...
+    
   const familiesByTarget = new Map();
   // First pass: detect families that have any specific mappings (fam:*:linkedSubcategory)
   const famHasSpecific = new Map(); // fam -> boolean
@@ -4760,9 +5786,11 @@ export default function PreviewPage() {
                     key={child.id}
                     node={nodeWithLivePrice}
                     selection={cardSelections[child.id]}
-                    onSelectionChange={(parent, leaf) =>
-                      setCardSelections((prev) => ({ ...prev, [child.id]: { parent, child: leaf } }))
-                    }
+                    onSelectionChange={(parent, leaf) => {
+                      setCardSelections((prev) => ({ ...prev, [child.id]: { parent, child: leaf } }));
+                      // Reset attribute selections when parent changes to avoid stale values
+                      setAttrSelections({});
+                    }}
                     onLeafSelect={(leaf) => setSelectedLeaf(leaf)}
                     mode={'buttons'}
                     includeLeafChildren={Boolean(child?.uiRules?.includeLeafChildren ?? true)}
@@ -4838,6 +5866,15 @@ export default function PreviewPage() {
                                   "";
                                 childInvName = [childBrand, childModel].filter(Boolean).join(" ");
                               }
+                              const childAttrsWithImage = {
+                                ...childAttrs,
+                                parentSelectorLabel: childLabelForCard || labelForCard || parentSelectorLabel || "",
+                              };
+                              if (!childAttrsWithImage.imageUrl) {
+                                const imgCandidate = child?.imageUrl || child?.iconUrl || "";
+                                if (imgCandidate) childAttrsWithImage.imageUrl = imgCandidate;
+                              }
+
                               await postEnquiry({
                                 source: "individual",
                                 serviceName: child?.name || "",
@@ -4846,10 +5883,10 @@ export default function PreviewPage() {
                                 categoryPath: pathNames,
                                 categoryIds: pathIds,
                                 attributes: childInvName
-                                  ? { ...childAttrs, inventoryName: childInvName }
-                                  : childAttrs,
+                                  ? { ...childAttrsWithImage, inventoryName: childInvName }
+                                  : childAttrsWithImage,
                               });
-                              window.alert("Enquiry submitted");
+                              setEnquirySubmitted(true);
                             } catch (e) {
                               console.error("Enroll Now enquiry error", e);
                             }
@@ -5022,7 +6059,7 @@ export default function PreviewPage() {
                                   ? { ...pkgAttrs, inventoryName: pkgInvName }
                                   : pkgAttrs,
                               });
-                              window.alert("Enquiry submitted");
+                              setEnquirySubmitted(true);
                             } catch (e) {
                               console.error("Enroll Now enquiry error (package)", e);
                             }
@@ -5088,9 +6125,11 @@ export default function PreviewPage() {
                   key={`parent-${enriched.id}`}
                   node={nodeWithLivePrice}
                   selection={cardSelections[enriched.id]}
-                  onSelectionChange={(parent, leaf) =>
-                    setCardSelections((prev) => ({ ...prev, [enriched.id]: { parent, child: leaf } }))
-                  }
+                  onSelectionChange={(parent, leaf) => {
+                    setCardSelections((prev) => ({ ...prev, [enriched.id]: { parent, child: leaf } }));
+                    // Reset attribute selections when parent changes to avoid stale values
+                    setAttrSelections({});
+                  }}
                   onLeafSelect={(leaf) => setSelectedLeaf(leaf)}
                   mode={'buttons'}
                   includeLeafChildren={true}
@@ -5329,6 +6368,30 @@ export default function PreviewPage() {
             onNavigateBusinessLocation={handleNavBusinessLocation}
             onNavigateBusinessHours={handleNavBusinessHours}
             onNavigateInventory={handleNavInventory}
+            onNavigateMyEnquiries={async () => {
+              try {
+                if (!vendorId || !categoryId) return;
+                setMyEnquiriesLoading(true);
+                setMyEnquiriesError("");
+                const params = new URLSearchParams();
+                params.set("vendorId", String(vendorId));
+                params.set("categoryId", String(categoryId));
+                const res = await fetch(`${API_BASE_URL}/api/enquiries?${params.toString()}`, {
+                  cache: "no-store",
+                });
+                const list = await res.json().catch(() => []);
+                setMyEnquiries(Array.isArray(list) ? list : []);
+                setExpandedEnquiryGroup(null); // Reset expanded group when opening modal
+                setShowMyEnquiriesModal(true);
+              } catch (e) {
+                setMyEnquiries([]);
+                setMyEnquiriesError(e?.message || "Failed to load enquiries");
+                setExpandedEnquiryGroup(null); // Reset expanded group when opening modal
+                setShowMyEnquiriesModal(true);
+              } finally {
+                setMyEnquiriesLoading(false);
+              }
+            }}
             onOpenLogin={handleOpenOtpModal}
             onLogout={handleLogout}
             services={serviceLabels}
@@ -5926,11 +6989,27 @@ export default function PreviewPage() {
                                 const priceNumber = price == null ? null : Number(price);
                                 const pathNames = [categoryTree?.name, name].filter(Boolean);
                                 const pathIds = [categoryId, comboId].filter(Boolean);
-                                const baseAttrs = combo?.attributes || {};
+                                const baseAttrs = {
+                                  ...(combo?.attributes || {}),
+                                  // For combo/size flows, prefer the size heading label for the
+                                  // primary selector shown in My Enquiries.
+                                  parentSelectorLabel: (combo?.sizeHeadingLabel || "Select size") || labelForCard || parentSelectorLabel || "",
+                                  primaryHeadingLabel: combo?.sizeHeadingLabel || "Select size",
+                                };
                                 const sizeLabel = selectedSize ? String(selectedSize) : "";
+                                const attrsWithImage = { ...baseAttrs };
+                                if (!attrsWithImage.imageUrl) {
+                                  const comboImg =
+                                    combo?.imageUrl ||
+                                    combo?.iconUrl ||
+                                    (Array.isArray(combo?.images) && combo.images[0]) ||
+                                    "";
+                                  if (comboImg) attrsWithImage.imageUrl = comboImg;
+                                }
+
                                 const finalAttrs = sizeLabel
-                                  ? { ...baseAttrs, inventoryName: sizeLabel }
-                                  : baseAttrs;
+                                  ? { ...attrsWithImage, inventoryName: sizeLabel, primaryHeadingValue: sizeLabel }
+                                  : attrsWithImage;
 
                                 await postEnquiry({
                                   source: "package",
@@ -5941,7 +7020,7 @@ export default function PreviewPage() {
                                   categoryIds: pathIds,
                                   attributes: finalAttrs,
                                 });
-                                window.alert("Enquiry submitted");
+                                setEnquirySubmitted(true);
                               } catch (e) {
                                 console.error("Enroll Now enquiry error (package size)", e);
                                 try { handleOpenOtpModal(); } catch {}
@@ -7248,6 +8327,161 @@ export default function PreviewPage() {
               }}
             >
               OK
+            </button>
+          </div>
+        </div>
+      )}
+      {enquirySubmitted && (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(0,0,0,0.4)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 9999,
+          }}
+        >
+          <div
+            style={{
+              width: 280,
+              borderRadius: 16,
+              background: "#ffffff",
+              padding: "20px 16px 12px",
+              boxShadow: "0 10px 30px rgba(0,0,0,0.2)",
+              textAlign: "center",
+              fontFamily:
+                "Poppins, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif",
+            }}
+          >
+            <div
+              style={{ fontSize: 18, fontWeight: 700, marginBottom: 8 }}
+            >
+              Enquiry submitted
+            </div>
+            <div
+              style={{
+                fontSize: 14,
+                color: "#4b5563",
+                marginBottom: 16,
+              }}
+            >
+              We have received your enquiry. Our Team will contact you shortly.
+            </div>
+            <button
+              type="button"
+              onClick={() => setEnquirySubmitted(false)}
+              style={{
+                minWidth: 80,
+                padding: "8px 24px",
+                borderRadius: 999,
+                border: "none",
+                background: "#16a34a",
+                color: "#ffffff",
+                fontWeight: 600,
+                fontSize: 14,
+                cursor: "pointer",
+              }}
+            >
+              OK
+            </button>
+          </div>
+        </div>
+      )}
+
+      {contactInfoModal && contactInfoModal.enquiry && (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(0,0,0,0.4)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 10000,
+          }}
+        >
+          <div
+            style={{
+              width: 300,
+              borderRadius: 16,
+              background: "#ffffff",
+              padding: "20px 16px 16px",
+              boxShadow: "0 10px 30px rgba(0,0,0,0.25)",
+              textAlign: "center",
+              fontFamily:
+                "Poppins, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif",
+            }}
+          >
+            <div
+              style={{ fontSize: 18, fontWeight: 700, marginBottom: 8 }}
+            >
+              Contact Info
+            </div>
+            <div
+              style={{
+                fontSize: 14,
+                color: "#4b5563",
+                marginBottom: 4,
+              }}
+            >
+              Customer number
+            </div>
+            <div
+              style={{
+                fontSize: 18,
+                fontWeight: 600,
+                color: "#111827",
+                marginBottom: 16,
+              }}
+            >
+              {contactInfoModal.enquiry.phone || "-"}
+            </div>
+            <button
+              type="button"
+              onClick={async () => {
+                try {
+                  const modal = contactInfoModal;
+                  const nextStatus = modal?.nextStatus;
+                  const enq = modal?.enquiry;
+                  if (nextStatus && enq && enq._id) {
+                    try {
+                      await fetch(`${API_BASE_URL}/api/enquiries/${enq._id}/status`, {
+                        method: "PUT",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ status: nextStatus }),
+                      });
+                    } catch {}
+
+                    try {
+                      const params = new URLSearchParams();
+                      params.set("vendorId", String(vendorId));
+                      params.set("categoryId", String(categoryId));
+                      const res = await fetch(`${API_BASE_URL}/api/enquiries?${params.toString()}`, {
+                        cache: "no-store",
+                      });
+                      const list = await res.json().catch(() => []);
+                      setMyEnquiries(Array.isArray(list) ? list : []);
+                    } catch {}
+                  }
+                } finally {
+                  setContactInfoModal(null);
+                }
+              }}
+              style={{
+                minWidth: 80,
+                padding: "8px 24px",
+                borderRadius: 999,
+                border: "none",
+                background: "#2563eb",
+                color: "#ffffff",
+                fontWeight: 600,
+                fontSize: 14,
+                cursor: "pointer",
+              }}
+            >
+              Close
             </button>
           </div>
         </div>

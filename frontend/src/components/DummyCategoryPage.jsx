@@ -30,6 +30,10 @@ function DummyCategoryPage() {
     packagesButtonLabel: "",
     attributesHeading: "",
   });
+  const [showEnquiryStatusPopup, setShowEnquiryStatusPopup] = useState(false);
+  const [enquiryStatuses, setEnquiryStatuses] = useState([]);
+  const [savingEnquiryStatuses, setSavingEnquiryStatuses] = useState(false);
+  const [nextStatusInput, setNextStatusInput] = useState("");
 
   const toAbs = (u) => {
     if (!u) return "";
@@ -114,6 +118,12 @@ function DummyCategoryPage() {
           });
         } else {
           setPackagesAddon({ heading: "", description: "", buttonLabel: "" });
+        }
+
+        if (Array.isArray(data.enquiryStatusConfig)) {
+          setEnquiryStatuses(data.enquiryStatusConfig);
+        } else {
+          setEnquiryStatuses([]);
         }
       } catch {
         setIsTopParentSubcategory(false);
@@ -222,6 +232,22 @@ function DummyCategoryPage() {
                 }}
               >
                 Add Label
+              </button>
+            )}
+            {parentId && isTopParentSubcategory && (
+              <button
+                type="button"
+                onClick={() => setShowEnquiryStatusPopup(true)}
+                style={{
+                  padding: "6px 10px",
+                  borderRadius: 6,
+                  border: "none",
+                  background: "#0ea5e9",
+                  color: "#fff",
+                  fontWeight: 600,
+                }}
+              >
+                Enquiry Status
               </button>
             )}
           </div>
@@ -375,6 +401,354 @@ function DummyCategoryPage() {
         initialEditingCombo={editingCombo}
         onSaved={() => loadCombos()}
       />
+
+      {showEnquiryStatusPopup && (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(0,0,0,0.5)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 1400,
+          }}
+        >
+          <div
+            style={{
+              background: "#fff",
+              padding: 16,
+              borderRadius: 10,
+              minWidth: 720,
+              maxWidth: "95vw",
+              maxHeight: "80vh",
+              overflow: "auto",
+            }}
+          >
+            <h3 style={{ marginTop: 0, marginBottom: 12 }}>Enquiry Status Workflow</h3>
+            <table style={{ borderCollapse: "collapse", width: "100%", marginBottom: 12 }}>
+              <thead>
+                <tr>
+                  <th style={{ border: "1px solid #e5e7eb", padding: 8 }}>Status Name</th>
+                  <th style={{ border: "1px solid #e5e7eb", padding: 8 }}>Vendor Label</th>
+                  <th style={{ border: "1px solid #e5e7eb", padding: 8 }}>Customer Label</th>
+                  <th style={{ border: "1px solid #e5e7eb", padding: 8 }}>Next Allowed Statuses</th>
+                  <th style={{ border: "1px solid #e5e7eb", padding: 8 }}>Mode</th>
+                  <th style={{ border: "1px solid #e5e7eb", padding: 8 }}>Rank</th>
+                  <th style={{ border: "1px solid #e5e7eb", padding: 8 }}>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {enquiryStatuses.map((row, idx) => {
+                  const nextList = Array.isArray(row.nextStatuses) ? row.nextStatuses : [];
+                  const selfName = (row && typeof row.name === "string" ? row.name.trim() : "") || "";
+                  const allStatusNames = enquiryStatuses
+                    .map((r) => (r && typeof r.name === "string" ? r.name.trim() : ""))
+                    .filter((v) => v && v !== selfName);
+                  return (
+                    <tr key={idx}>
+                      <td style={{ border: "1px solid #e5e7eb", padding: 6 }}>
+                        <input
+                          type="text"
+                          value={row.name || ""}
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            setEnquiryStatuses((prev) => {
+                              const next = prev.slice();
+                              next[idx] = { ...next[idx], name: val };
+                              return next;
+                            });
+                          }}
+                          style={{ width: "100%", padding: 6, borderRadius: 6, border: "1px solid #e5e7eb" }}
+                        />
+                      </td>
+                      <td style={{ border: "1px solid #e5e7eb", padding: 6 }}>
+                        <input
+                          type="text"
+                          value={row.vendorLabel || ""}
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            setEnquiryStatuses((prev) => {
+                              const next = prev.slice();
+                              next[idx] = { ...next[idx], vendorLabel: val };
+                              return next;
+                            });
+                          }}
+                          style={{ width: "100%", padding: 6, borderRadius: 6, border: "1px solid #e5e7eb" }}
+                        />
+                      </td>
+                      <td style={{ border: "1px solid #e5e7eb", padding: 6 }}>
+                        <input
+                          type="text"
+                          value={row.customerLabel || ""}
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            setEnquiryStatuses((prev) => {
+                              const next = prev.slice();
+                              next[idx] = { ...next[idx], customerLabel: val };
+                              return next;
+                            });
+                          }}
+                          style={{ width: "100%", padding: 6, borderRadius: 6, border: "1px solid #e5e7eb" }}
+                        />
+                      </td>
+                      <td style={{ border: "1px solid #e5e7eb", padding: 6 }}>
+                        <div style={{ display: "flex", flexDirection: "column", gap: 6, position: "relative" }}>
+                          <details>
+                            <summary
+                              style={{
+                                listStyle: "none",
+                                cursor: "pointer",
+                                padding: "6px 8px",
+                                borderRadius: 6,
+                                border: "1px solid #e5e7eb",
+                                fontSize: 12,
+                                display: "flex",
+                                alignItems: "center",
+                                justifyContent: "space-between",
+                                background: "#fff",
+                              }}
+                            >
+                              <span style={{ marginRight: 8 }}>
+                                {nextList.length
+                                  ? nextList.join(", ")
+                                  : "Select next allowed statuses"}
+                              </span>
+                              <span style={{ fontSize: 10, opacity: 0.7 }}>▼</span>
+                            </summary>
+                            <div
+                              style={{
+                                marginTop: 6,
+                                maxHeight: 180,
+                                overflowY: "auto",
+                                borderRadius: 6,
+                                border: "1px solid #e5e7eb",
+                                background: "#ffffff",
+                                padding: 6,
+                                boxShadow: "0 6px 16px rgba(15,23,42,0.12)",
+                              }}
+                            >
+                              {allStatusNames.length === 0 ? (
+                                <div style={{ fontSize: 12, color: "#6b7280", padding: 4 }}>
+                                  Add some Status Names first.
+                                </div>
+                              ) : (
+                                allStatusNames.map((name) => {
+                                  const checked = nextList.includes(name);
+                                  return (
+                                    <label
+                                      key={name}
+                                      style={{
+                                        display: "flex",
+                                        alignItems: "center",
+                                        gap: 6,
+                                        padding: "4px 6px",
+                                        fontSize: 12,
+                                        cursor: "pointer",
+                                      }}
+                                    >
+                                      <input
+                                        type="checkbox"
+                                        checked={checked}
+                                        onChange={(e) => {
+                                          const isOn = e.target.checked;
+                                          setEnquiryStatuses((prev) => {
+                                            const next = prev.slice();
+                                            const currentRow = next[idx] || {};
+                                            const list = Array.isArray(currentRow.nextStatuses)
+                                              ? currentRow.nextStatuses.slice()
+                                              : [];
+                                            const existsIdx = list.indexOf(name);
+                                            if (isOn) {
+                                              if (existsIdx === -1) list.push(name);
+                                            } else if (existsIdx !== -1) {
+                                              list.splice(existsIdx, 1);
+                                            }
+                                            next[idx] = { ...currentRow, nextStatuses: list };
+                                            return next;
+                                          });
+                                        }}
+                                      />
+                                      <span>{name}</span>
+                                    </label>
+                                  );
+                                })
+                              )}
+                            </div>
+                          </details>
+                        </div>
+                      </td>
+                      <td style={{ border: "1px solid #e5e7eb", padding: 6 }}>
+                        <div style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12 }}>
+                          <label style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                            <input
+                              type="radio"
+                              name={`mode-${idx}`}
+                              checked={(row.mode || "action-required") === "automatic"}
+                              onChange={() => {
+                                setEnquiryStatuses((prev) => {
+                                  const next = prev.slice();
+                                  next[idx] = { ...next[idx], mode: "automatic" };
+                                  return next;
+                                });
+                              }}
+                            />
+                            <span>Automatic</span>
+                          </label>
+                          <label style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                            <input
+                              type="radio"
+                              name={`mode-${idx}`}
+                              checked={(row.mode || "action-required") === "action-required"}
+                              onChange={() => {
+                                setEnquiryStatuses((prev) => {
+                                  const next = prev.slice();
+                                  next[idx] = { ...next[idx], mode: "action-required" };
+                                  return next;
+                                });
+                              }}
+                            />
+                            <span>Action Required</span>
+                          </label>
+                        </div>
+                      </td>
+                      <td style={{ border: "1px solid #e5e7eb", padding: 6 }}>
+                        <input
+                          type="number"
+                          value={row.rank == null ? "" : row.rank}
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            setEnquiryStatuses((prev) => {
+                              const next = prev.slice();
+                              const n = val === "" ? null : Number(val);
+                              next[idx] = { ...next[idx], rank: n };
+                              return next;
+                            });
+                          }}
+                          style={{ width: 70, padding: 6, borderRadius: 6, border: "1px solid #e5e7eb" }}
+                        />
+                      </td>
+                      <td style={{ border: "1px solid #e5e7eb", padding: 6 }}>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setEnquiryStatuses((prev) => prev.filter((_, i) => i !== idx));
+                          }}
+                          style={{
+                            padding: "4px 8px",
+                            borderRadius: 6,
+                            border: "1px solid #fecaca",
+                            background: "#fee2e2",
+                            color: "#b91c1c",
+                            fontSize: 12,
+                          }}
+                        >
+                          Delete
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
+                {enquiryStatuses.length === 0 && (
+                  <tr>
+                    <td colSpan={7} style={{ border: "1px solid #e5e7eb", padding: 10, textAlign: "center", fontSize: 13, color: "#6b7280" }}>
+                      No statuses configured yet.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+              <button
+                type="button"
+                onClick={() => {
+                  setEnquiryStatuses((prev) => [
+                    ...prev,
+                    { name: "", vendorLabel: "", customerLabel: "", nextStatuses: [], mode: "action-required", rank: (prev.length || 0) + 1 },
+                  ]);
+                }}
+                style={{
+                  padding: "6px 10px",
+                  borderRadius: 6,
+                  border: "none",
+                  background: "#0ea5e9",
+                  color: "#fff",
+                  fontWeight: 600,
+                }}
+              >
+                Add Row
+              </button>
+              <div style={{ display: "flex", gap: 8 }}>
+                <button
+                  type="button"
+                  onClick={() => setShowEnquiryStatusPopup(false)}
+                  style={{
+                    padding: "6px 10px",
+                    borderRadius: 6,
+                    border: "1px solid #e5e7eb",
+                    background: "#fff",
+                  }}
+                  disabled={savingEnquiryStatuses}
+                >
+                  Close
+                </button>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    if (!parentId) return;
+                    try {
+                      setSavingEnquiryStatuses(true);
+                      const configArray = enquiryStatuses.map((row, idx) => ({
+                        name: row.name || "",
+                        vendorLabel: row.vendorLabel || "",
+                        customerLabel: row.customerLabel || "",
+                        nextStatuses: Array.isArray(row.nextStatuses)
+                          ? row.nextStatuses
+                              .filter((v) => v != null && String(v).trim() !== "")
+                              .map((v) => String(v))
+                          : [],
+                        mode: row.mode || "action-required",
+                        rank:
+                          row.rank == null || row.rank === ""
+                            ? idx + 1
+                            : Number(row.rank),
+                      }));
+
+                      // Use FormData because dummyCategoryRoutes wraps update with multer.fields
+                      const fd = new FormData();
+                      fd.append(
+                        "enquiryStatusConfig",
+                        JSON.stringify(configArray)
+                      );
+
+                      await fetch(`${API_BASE_URL}/api/dummy-categories/${parentId}`, {
+                        method: "PUT",
+                        body: fd,
+                      });
+
+                      setShowEnquiryStatusPopup(false);
+                    } catch (e) {
+                      alert(e?.message || "Failed to save enquiry status config");
+                    } finally {
+                      setSavingEnquiryStatuses(false);
+                    }
+                  }}
+                  style={{
+                    padding: "6px 10px",
+                    borderRadius: 6,
+                    border: "none",
+                    background: "#16a34a",
+                    color: "#fff",
+                  }}
+                  disabled={savingEnquiryStatuses}
+                >
+                  {savingEnquiryStatuses ? "Saving..." : "Save"}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {showAddonPopup && (
         <div

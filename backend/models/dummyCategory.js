@@ -120,6 +120,27 @@ const DummyCategorySchema = new mongoose.Schema({
 
   dropdowns: { type: Object, default: {} },
 
+  // Per-category enquiry workflow configuration (all labels and transitions are dynamic)
+  enquiryStatusConfig: {
+    type: [
+      {
+        // internal/admin name for the status (not hardcoded; per-category)
+        name: { type: String, required: true },
+        // what vendor sees
+        vendorLabel: { type: String, default: '' },
+        // what customer sees
+        customerLabel: { type: String, default: '' },
+        // allowed forward-only next statuses (array of status names)
+        nextStatuses: { type: [String], default: [] },
+        // 'automatic' or 'action-required' (free string to keep it flexible)
+        mode: { type: String, default: 'action-required' },
+        // rank / sequence for ordering and forward-only movement
+        rank: { type: Number, default: 0 },
+      },
+    ],
+    default: [],
+  },
+
   createdAt: { type: Date, default: Date.now },
 });
 

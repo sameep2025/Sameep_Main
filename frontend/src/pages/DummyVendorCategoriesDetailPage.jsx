@@ -22,6 +22,128 @@ function flattenTree(node, rows = [], parentLevels = [], parentIds = []) {
   return rows;
 }
 
+// Admin Enquiry Viewer - view-only with dropdown filter by vendor label (no actions)
+function AdminEnquiryViewer({
+  enquiries,
+  enquiryStatusConfig,
+  selectedStatusFilter,
+  setSelectedStatusFilter,
+}) {
+  const cfgList = Array.isArray(enquiryStatusConfig) ? enquiryStatusConfig : [];
+  
+  // Build unique vendor labels for dropdown
+  const vendorLabels = [];
+  const seenLabels = new Set();
+  cfgList.forEach((row) => {
+    const label = row && row.vendorLabel != null ? String(row.vendorLabel).trim() : "";
+    if (label && !seenLabels.has(label)) {
+      seenLabels.add(label);
+      vendorLabels.push(label);
+    }
+  });
+
+  // Map status name to vendor label
+  const statusToLabel = new Map();
+  cfgList.forEach((row) => {
+    const nm = (row && row.name != null ? String(row.name) : "").trim();
+    const label = row && row.vendorLabel != null ? String(row.vendorLabel).trim() : nm;
+    if (nm) statusToLabel.set(nm, label);
+  });
+
+  // Filter enquiries by selected vendor label
+  const filteredEnquiries = (Array.isArray(enquiries) ? enquiries : []).filter((enq) => {
+    if (!selectedStatusFilter || selectedStatusFilter === "All") return true;
+    const rawStatus = enq && enq.status != null ? String(enq.status).trim() : "";
+    const label = statusToLabel.get(rawStatus) || "Other";
+    return label === selectedStatusFilter;
+  });
+
+  const formatDateTime = (val) => {
+    try {
+      if (!val) return "-";
+      const d = new Date(val);
+      if (Number.isNaN(d.getTime())) return "-";
+      return d.toLocaleString();
+    } catch { return "-"; }
+  };
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+      {/* Dropdown filter */}
+      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        <label style={{ fontWeight: 500, fontSize: 14 }}>Filter by Status:</label>
+        <select
+          value={selectedStatusFilter || "All"}
+          onChange={(e) => setSelectedStatusFilter(e.target.value)}
+          style={{ padding: "6px 10px", borderRadius: 6, border: "1px solid #e5e7eb", fontSize: 14 }}
+        >
+          <option value="All">All</option>
+          {vendorLabels.map((label) => (
+            <option key={label} value={label}>{label}</option>
+          ))}
+        </select>
+        <span style={{ fontSize: 12, color: "#6b7280" }}>
+          {filteredEnquiries.length} enquiry{filteredEnquiries.length === 1 ? "" : "ies"}
+        </span>
+      </div>
+
+      {/* Enquiries table */}
+      {filteredEnquiries.length === 0 ? (
+        <p style={{ color: "#6b7280" }}>No enquiries found.</p>
+      ) : (
+        <div style={{ overflowX: "auto" }}>
+          <table style={{ borderCollapse: "collapse", width: "100%" }}>
+            <thead>
+              <tr>
+                <th style={{ border: "1px solid #e5e7eb", padding: 8, background: "#f9fafb" }}>Time</th>
+                <th style={{ border: "1px solid #e5e7eb", padding: 8, background: "#f9fafb" }}>Customer</th>
+                <th style={{ border: "1px solid #e5e7eb", padding: 8, background: "#f9fafb" }}>Service</th>
+                <th style={{ border: "1px solid #e5e7eb", padding: 8, background: "#f9fafb" }}>Attributes</th>
+                <th style={{ border: "1px solid #e5e7eb", padding: 8, background: "#f9fafb" }}>Price</th>
+                <th style={{ border: "1px solid #e5e7eb", padding: 8, background: "#f9fafb" }}>Terms</th>
+                <th style={{ border: "1px solid #e5e7eb", padding: 8, background: "#f9fafb" }}>Source</th>
+                <th style={{ border: "1px solid #e5e7eb", padding: 8, background: "#f9fafb" }}>Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filteredEnquiries.map((enq) => {
+                const catPath = Array.isArray(enq.categoryPath) ? enq.categoryPath.join(" / ") : "";
+                const attrsObj = enq.attributes && typeof enq.attributes === "object" ? enq.attributes : {};
+                const attrsText = typeof attrsObj.inventoryName === "string" && attrsObj.inventoryName.trim()
+                  ? attrsObj.inventoryName.trim()
+                  : "-";
+                const serviceLabel = (() => {
+                  if (catPath && catPath.trim()) {
+                    const segs = catPath.split("/").map((s) => s.trim()).filter(Boolean);
+                    if (segs.length >= 3) return `${segs[1]} - ${segs.slice(2).join(" / ")}`;
+                    if (segs.length === 2) return `${segs[0]} - ${segs[1]}`;
+                    return segs[0];
+                  }
+                  return enq.serviceName || "-";
+                })();
+                const rawStatus = enq && enq.status != null ? String(enq.status).trim() : "";
+                const statusLabel = statusToLabel.get(rawStatus) || rawStatus || "-";
+                return (
+                  <tr key={enq._id || `${enq.vendorId}-${enq.categoryId}-${enq.createdAt}`}>
+                    <td style={{ border: "1px solid #e5e7eb", padding: 8 }}>{formatDateTime(enq.createdAt)}</td>
+                    <td style={{ border: "1px solid #e5e7eb", padding: 8 }}>{enq.phone || enq.customerId || "-"}</td>
+                    <td style={{ border: "1px solid #e5e7eb", padding: 8 }}>{serviceLabel}</td>
+                    <td style={{ border: "1px solid #e5e7eb", padding: 8 }}>{attrsText}</td>
+                    <td style={{ border: "1px solid #e5e7eb", padding: 8 }}>{enq.price == null ? "-" : String(enq.price)}</td>
+                    <td style={{ border: "1px solid #e5e7eb", padding: 8 }}>{enq.terms || "-"}</td>
+                    <td style={{ border: "1px solid #e5e7eb", padding: 8 }}>{enq.source || "-"}</td>
+                    <td style={{ border: "1px solid #e5e7eb", padding: 8 }}>{statusLabel}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function DummyVendorCategoriesDetailPage() {
   const { vendorId, categoryId } = useParams();
   const [tree, setTree] = useState([]);
@@ -54,6 +176,8 @@ export default function DummyVendorCategoriesDetailPage() {
   const [enquiriesLoading, setEnquiriesLoading] = useState(false);
   const [enquiriesError, setEnquiriesError] = useState("");
   const [showEnquiriesModal, setShowEnquiriesModal] = useState(false);
+  const [enquiryStatusConfig, setEnquiryStatusConfig] = useState([]);
+  const [selectedStatusFilter, setSelectedStatusFilter] = useState("All"); // dropdown filter for admin view
 
   const fetchTree = async () => {
     try {
@@ -132,9 +256,11 @@ export default function DummyVendorCategoriesDetailPage() {
       const res = await axios.get(`${API_BASE_URL}/api/enquiries?${params.toString()}`);
       const list = Array.isArray(res.data) ? res.data : [];
       setEnquiries(list);
+      setSelectedStatusFilter("All");
       setShowEnquiriesModal(true);
     } catch (e) {
       setEnquiriesError(e?.response?.data?.message || e.message || "Failed to load enquiries");
+      setSelectedStatusFilter("All");
       setShowEnquiriesModal(true);
     } finally {
       setEnquiriesLoading(false);
@@ -232,11 +358,13 @@ export default function DummyVendorCategoriesDetailPage() {
         setAttributesHeading(
           typeof c.attributesHeading === "string" ? c.attributesHeading : ""
         );
+        setEnquiryStatusConfig(Array.isArray(c.enquiryStatusConfig) ? c.enquiryStatusConfig : []);
       } catch {
         setInventoryLabelName("");
         setLinkedAttributes({});
         setIsInventoryModelCategory(false);
         setAttributesHeading("");
+        setEnquiryStatusConfig([]);
       }
     })();
   }, [categoryId]);
@@ -1139,69 +1267,13 @@ export default function DummyVendorCategoriesDetailPage() {
               <p>Loading enquiries...</p>
             ) : enquiriesError ? (
               <p style={{ color: '#b91c1c' }}>{enquiriesError}</p>
-            ) : enquiries.length === 0 ? (
-              <p>No enquiries found.</p>
             ) : (
-              <div style={{ overflowX: 'auto' }}>
-                <table style={{ borderCollapse: 'collapse', width: '100%' }}>
-                  <thead>
-                    <tr>
-                      <th style={{ border: '1px solid #e5e7eb', padding: 8 }}>Time</th>
-                      <th style={{ border: '1px solid #e5e7eb', padding: 8 }}>Customer</th>
-                      <th style={{ border: '1px solid #e5e7eb', padding: 8 }}>Service</th>
-                      <th style={{ border: '1px solid #e5e7eb', padding: 8 }}>Attributes</th>
-                      <th style={{ border: '1px solid #e5e7eb', padding: 8 }}>Price</th>
-                      <th style={{ border: '1px solid #e5e7eb', padding: 8 }}>Terms</th>
-                      <th style={{ border: '1px solid #e5e7eb', padding: 8 }}>Source</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {enquiries.map((enq) => {
-                      const dt = enq.createdAt ? new Date(enq.createdAt) : null;
-                      const timeStr = dt ? dt.toLocaleString() : '-';
-                      const phone = enq.phone || enq.customerId || '-';
-                      const catPath = Array.isArray(enq.categoryPath) ? enq.categoryPath.join(' / ') : '';
-                      const attrsObj = enq.attributes && typeof enq.attributes === 'object' ? enq.attributes : {};
-                      // Attributes: show only the inventory label name (inventoryName) if present, else '-'
-                      const attrsText =
-                        typeof attrsObj.inventoryName === 'string' && attrsObj.inventoryName.trim()
-                          ? attrsObj.inventoryName.trim()
-                          : '-';
-                      const priceStr = enq.price == null ? '-' : String(enq.price);
-                      const serviceLabel = (() => {
-                        // Build label from category path: first subcategory on left, remaining nested levels on right
-                        if (catPath && catPath.trim()) {
-                          const segs = catPath
-                            .split('/')
-                            .map((s) => s.trim())
-                            .filter(Boolean);
-                          if (segs.length >= 3) {
-                            const left = segs[1];
-                            const right = segs.slice(2).join(' / ');
-                            return `${left} - ${right}`;
-                          }
-                          if (segs.length === 2) {
-                            return `${segs[0]} - ${segs[1]}`;
-                          }
-                          return segs[0];
-                        }
-                        return enq.serviceName || '-';
-                      })();
-                      return (
-                        <tr key={enq._id || `${enq.vendorId}-${enq.categoryId}-${enq.createdAt}`}>
-                          <td style={{ border: '1px solid #e5e7eb', padding: 8 }}>{timeStr}</td>
-                          <td style={{ border: '1px solid #e5e7eb', padding: 8 }}>{phone}</td>
-                          <td style={{ border: '1px solid #e5e7eb', padding: 8 }}>{serviceLabel}</td>
-                          <td style={{ border: '1px solid #e5e7eb', padding: 8 }}>{attrsText}</td>
-                          <td style={{ border: '1px solid #e5e7eb', padding: 8 }}>{priceStr}</td>
-                          <td style={{ border: '1px solid #e5e7eb', padding: 8 }}>{enq.terms || '-'}</td>
-                          <td style={{ border: '1px solid #e5e7eb', padding: 8 }}>{enq.source || '-'}</td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
+              <AdminEnquiryViewer
+                enquiries={enquiries}
+                enquiryStatusConfig={enquiryStatusConfig}
+                selectedStatusFilter={selectedStatusFilter}
+                setSelectedStatusFilter={setSelectedStatusFilter}
+              />
             )}
           </div>
         </div>

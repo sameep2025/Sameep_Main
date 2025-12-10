@@ -13,6 +13,18 @@ const EnquirySchema = new mongoose.Schema({
   price: { type: Number, default: null },
   terms: { type: String, default: '' },
   meta: { type: Object, default: {} },
+  // current workflow status for this enquiry (label is per-category configurable)
+  status: { type: String, default: '' },
+  // full history of status changes for analytics
+  statusHistory: {
+    type: [
+      {
+        status: { type: String, required: true },
+        changedAt: { type: Date, default: Date.now },
+      },
+    ],
+    default: [],
+  },
   createdAt: { type: Date, default: Date.now },
 });
 

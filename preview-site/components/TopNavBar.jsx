@@ -21,6 +21,7 @@ export default function TopNavBar({
   onNavigateBusinessLocation,
   onNavigateBusinessHours,
   onNavigateInventory,
+  onNavigateMyEnquiries,
   onOpenLogin,
   onLogout,
   services = [
@@ -508,6 +509,7 @@ export default function TopNavBar({
                   onNavigateBusinessLocation={onNavigateBusinessLocation}
                   onNavigateBusinessHours={onNavigateBusinessHours}
                   onNavigateInventory={onNavigateInventory}
+                  onNavigateMyEnquiries={onNavigateMyEnquiries}
                   servicesForMyPrices={firstLevelSubcategoryLabels}
                   activeServicesForMyPrices={effectiveServices}
                   socialHandles={socialHandles}
@@ -749,6 +751,7 @@ export default function TopNavBar({
                             onNavigateBusinessLocation={onNavigateBusinessLocation}
                             onNavigateBusinessHours={onNavigateBusinessHours}
                             onNavigateInventory={onNavigateInventory}
+                            onNavigateMyEnquiries={onNavigateMyEnquiries}
                             servicesForMyPrices={firstLevelSubcategoryLabels}
                             activeServicesForMyPrices={effectiveServices}
                             socialHandles={socialHandles}
@@ -832,6 +835,7 @@ export default function TopNavBar({
                         onNavigateBusinessLocation={onNavigateBusinessLocation}
                         onNavigateBusinessHours={onNavigateBusinessHours}
                         onNavigateInventory={onNavigateInventory}
+                        onNavigateMyEnquiries={onNavigateMyEnquiries}
                         servicesForMyPrices={firstLevelSubcategoryLabels}
                         activeServicesForMyPrices={effectiveServices}
                         socialHandles={socialHandles}

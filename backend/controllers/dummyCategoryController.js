@@ -637,6 +637,18 @@ exports.updateCategory = async (req, res) => {
         const arr = Array.from({ length: 10 }, (_, i) => req.body[`freeText${i}`] || "");
         if (arr.some((x) => x !== undefined)) doc.freeTexts = arr;
       }
+
+      // Per-category enquiry workflow config (array or JSON string)
+      if (req.body.enquiryStatusConfig !== undefined) {
+        try {
+          const cfg = typeof req.body.enquiryStatusConfig === 'string'
+            ? JSON.parse(req.body.enquiryStatusConfig)
+            : req.body.enquiryStatusConfig;
+          if (Array.isArray(cfg)) {
+            doc.enquiryStatusConfig = cfg;
+          }
+        } catch {}
+      }
     }
 
     await doc.save();

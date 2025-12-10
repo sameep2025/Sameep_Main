@@ -15,6 +15,7 @@ export default function VendorMenuDropdown({
   onNavigateBusinessLocation,
   onNavigateBusinessHours,
   onNavigateInventory,
+  onNavigateMyEnquiries,
   avatarLetter = "V",
   servicesForMyPrices = [],
   activeServicesForMyPrices = [],
@@ -400,6 +401,33 @@ export default function VendorMenuDropdown({
                 >
                   {phoneNumber}
                 </span>
+              </div>
+            )}
+            {typeof onNavigateMyEnquiries === "function" && (
+              <div
+                role="button"
+                style={{
+                  marginTop: 6,
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 6,
+                  padding: "4px 10px",
+                  borderRadius: 999,
+                  border: "1px solid #0ea5e9",
+                  background: "#e0f2fe",
+                  color: "#0f172a",
+                  fontSize: 11,
+                  fontWeight: 500,
+                  cursor: "pointer",
+                }}
+                onClick={() => {
+                  try {
+                    onNavigateMyEnquiries();
+                  } catch {}
+                }}
+              >
+                <span style={{ fontSize: 12 }}>📩</span>
+                <span>My Enquiries</span>
               </div>
             )}
           </div>
