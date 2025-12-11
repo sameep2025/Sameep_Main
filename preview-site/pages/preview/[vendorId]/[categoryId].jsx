@@ -94,6 +94,7 @@ export default function PreviewPage() {
   const [sessionExpired, setSessionExpired] = useState(false);
   const [navIdentity, setNavIdentity] = useState({ role: "guest", displayName: "Guest", loggedIn: false });
   const [enquirySubmitted, setEnquirySubmitted] = useState(false);
+  const [lastEnquiryPath, setLastEnquiryPath] = useState("");
   const [contactInfoModal, setContactInfoModal] = useState(null); // { enquiry, nextStatus }
   const [expandedEnquiryId, setExpandedEnquiryId] = useState(null); // which individual enquiry card details are visible
 
@@ -124,6 +125,27 @@ export default function PreviewPage() {
     async ({ source, serviceName, price, terms, categoryPath, categoryIds, attributes }) => {
       try {
         if (!vendorId || !categoryId) return;
+
+        // Hard block: do not create enquiries when preview is viewed as vendor/admin
+        try {
+          let effectiveRole = (navIdentity && navIdentity.role) || "guest";
+          if (!effectiveRole && typeof window !== "undefined") {
+            const identityKey = makePreviewIdentityKey(vendorId, categoryId);
+            const raw = window.localStorage.getItem(identityKey);
+            if (raw) {
+              try {
+                const parsed = JSON.parse(raw);
+                if (parsed && typeof parsed.role === "string") {
+                  effectiveRole = parsed.role;
+                }
+              } catch {}
+            }
+          }
+          if (effectiveRole === "vendor") {
+            return;
+          }
+        } catch {}
+
         const customerId = getStoredCustomerId();
         // Prefer customer phone over vendor phone for enquiries
         let enquiryPhone = "";
@@ -206,16 +228,33 @@ export default function PreviewPage() {
           status: initialStatus || undefined,
         };
 
+        const pathLabel = (() => {
+          try {
+            const arr = Array.isArray(categoryPath) ? categoryPath : [];
+            const clean = arr.map((s) => String(s || "").trim()).filter(Boolean);
+            return clean.join(" > ");
+          } catch {
+            return "";
+          }
+        })();
+        try {
+          setLastEnquiryPath(pathLabel);
+        } catch {}
+
         await fetch(`${API_BASE_URL}/api/enquiries`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(body),
         });
+
+        try {
+          setEnquirySubmitted(true);
+        } catch {}
       } catch (err) {
         console.error("Failed to create enquiry from preview", err);
       }
     },
-    [vendorId, categoryId, vendor, getStoredCustomerId, enquiryStatusConfig]
+    [vendorId, categoryId, vendor, navIdentity, getStoredCustomerId, enquiryStatusConfig]
   );
 
   const makePreviewTokenKey = useCallback((venId, catId) => {
@@ -410,6 +449,37 @@ export default function PreviewPage() {
     } catch {}
   }, [vendorId, categoryId, makePreviewIdentityKey]);
 
+  useEffect(() => {
+    try {
+      if (typeof window === "undefined") return;
+      const url = new URL(window.location.href);
+      const gNameParam = url.searchParams.get("googleName");
+      const gEmailParam = url.searchParams.get("googleEmail");
+      if (!gNameParam && !gEmailParam) return;
+
+      const name = decodeURIComponent(gNameParam || "").trim();
+      const email = decodeURIComponent(gEmailParam || "").trim();
+      const displayName = name || email || "Guest";
+
+      const identity = {
+        role: "guest",
+        displayName,
+        loggedIn: true,
+      };
+
+      try {
+        const key = makePreviewIdentityKey(vendorId, categoryId);
+        window.localStorage.setItem(key, JSON.stringify(identity));
+      } catch {}
+
+      setNavIdentity(identity);
+
+      url.searchParams.delete("googleName");
+      url.searchParams.delete("googleEmail");
+      window.history.replaceState(null, "", url.toString());
+    } catch {}
+  }, [vendorId, categoryId, makePreviewIdentityKey]);
+
   const handleLogout = useCallback(() => {
     try {
       if (typeof window === "undefined") return;
@@ -593,6 +663,43 @@ export default function PreviewPage() {
     setOtp("");
     setLoginAsAdmin(false);
     setAdminPasscodeInput("");
+  };
+
+  const guardEnrollClick = async () => {
+    try {
+      const role = (navIdentity && navIdentity.role) || "guest";
+      const loggedIn = !!(navIdentity && navIdentity.loggedIn);
+
+      // Vendor/admin preview: ignore Enroll clicks
+      if (role === "vendor") {
+        return false;
+      }
+
+      // Not logged in: open login popup
+      if (!loggedIn) {
+        await handleOpenOtpModal();
+        return false;
+      }
+
+      // Logged-in non-vendor (customer): allow enquiry
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
+  const handleGoogleLogin = () => {
+    try {
+      if (typeof window === "undefined") return;
+      const params = new URLSearchParams();
+      if (vendorId) params.set("vendorId", String(vendorId));
+      if (categoryId) params.set("categoryId", String(categoryId));
+      const base = `${API_BASE_URL}/auth/google/login`;
+      const qs = params.toString();
+      window.location.href = qs ? `${base}?${qs}` : base;
+    } catch (e) {
+      console.error("Failed to start Google login from preview", e);
+    }
   };
 
   const requestOtp = async () => {
@@ -4033,6 +4140,8 @@ export default function PreviewPage() {
           <button
             onClick={async () => {
               try {
+                const allow = await guardEnrollClick();
+                if (!allow) return;
                 const pathNames = [
                   categoryTree?.name,
                   node?.name,
@@ -4263,7 +4372,6 @@ export default function PreviewPage() {
                     ? { ...baseAttrs, inventoryName: inventoryNameForCard }
                     : baseAttrs,
                 });
-                setEnquirySubmitted(true);
               } catch (e) {
                 console.error("Enroll Now enquiry error (card)", e);
               }
@@ -5849,6 +5957,8 @@ export default function PreviewPage() {
                         <button
                           onClick={async () => {
                             try {
+                              const allow = await guardEnrollClick();
+                              if (!allow) return;
                               const priceNumber = livePrice == null ? null : Number(livePrice);
                               const pathNames = [categoryTree?.name, child?.name].filter(Boolean);
                               const pathIds = [categoryId, child?.id].filter(Boolean);
@@ -5886,7 +5996,6 @@ export default function PreviewPage() {
                                   ? { ...childAttrsWithImage, inventoryName: childInvName }
                                   : childAttrsWithImage,
                               });
-                              setEnquirySubmitted(true);
                             } catch (e) {
                               console.error("Enroll Now enquiry error", e);
                             }
@@ -6031,6 +6140,8 @@ export default function PreviewPage() {
                         <button
                           onClick={async () => {
                             try {
+                              const allow = await guardEnrollClick();
+                              if (!allow) return;
                               const priceNumber = livePrice == null ? null : Number(livePrice);
                               const pathNames = [categoryTree?.name, enriched?.name].filter(Boolean);
                               const pathIds = [categoryId, enriched?.id].filter(Boolean);
@@ -6059,7 +6170,6 @@ export default function PreviewPage() {
                                   ? { ...pkgAttrs, inventoryName: pkgInvName }
                                   : pkgAttrs,
                               });
-                              setEnquirySubmitted(true);
                             } catch (e) {
                               console.error("Enroll Now enquiry error (package)", e);
                             }
@@ -6986,6 +7096,8 @@ export default function PreviewPage() {
                           <button
                             onClick={async () => {
                               try {
+                                const allow = await guardEnrollClick();
+                                if (!allow) return;
                                 const priceNumber = price == null ? null : Number(price);
                                 const pathNames = [categoryTree?.name, name].filter(Boolean);
                                 const pathIds = [categoryId, comboId].filter(Boolean);
@@ -7020,7 +7132,6 @@ export default function PreviewPage() {
                                   categoryIds: pathIds,
                                   attributes: finalAttrs,
                                 });
-                                setEnquirySubmitted(true);
                               } catch (e) {
                                 console.error("Enroll Now enquiry error (package size)", e);
                                 try { handleOpenOtpModal(); } catch {}
@@ -7228,6 +7339,45 @@ export default function PreviewPage() {
                           disabled={otpLoading}
                         >
                           {otpLoading ? "Sending..." : "Continue"}
+                        </button>
+
+                        <div
+                          style={{
+                            marginTop: 12,
+                            marginBottom: 8,
+                            display: "flex",
+                            alignItems: "center",
+                            gap: 8,
+                            fontSize: 12,
+                            color: "#9ca3af",
+                          }}
+                        >
+                          <span style={{ flex: 1, height: 1, background: "#e5e7eb" }} />
+                          <span>or</span>
+                          <span style={{ flex: 1, height: 1, background: "#e5e7eb" }} />
+                        </div>
+
+                        <button
+                          type="button"
+                          onClick={handleGoogleLogin}
+                          style={{
+                            width: "100%",
+                            padding: 10,
+                            borderRadius: 999,
+                            border: "1px solid #e5e7eb",
+                            background: "#ffffff",
+                            color: "#111827",
+                            fontWeight: 500,
+                            cursor: "pointer",
+                            fontSize: 14,
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "center",
+                            gap: 8,
+                          }}
+                          disabled={otpLoading}
+                        >
+                          <span>Continue with Google</span>
                         </button>
                       </>
                     )}
@@ -8367,7 +8517,12 @@ export default function PreviewPage() {
                 marginBottom: 16,
               }}
             >
-              We have received your enquiry. Our Team will contact you shortly.
+              {(() => {
+                const base = "Your enquiry has been submitted.";
+                const path = String(lastEnquiryPath || "").trim();
+                if (!path) return base;
+                return `Your enquiry for ${path} has been submitted.`;
+              })()}
             </div>
             <button
               type="button"

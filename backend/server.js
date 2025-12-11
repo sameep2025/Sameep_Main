@@ -22,6 +22,7 @@ const uploadRoutes = require('./routes/uploadRoutes');
 const appConfigRoutes = require('./routes/appConfigRoutes');
 const auditLogRoutes = require('./routes/auditLogRoutes');
 const enquiryRoutes = require('./routes/enquiryRoutes');
+const authRoutes = require('./routes/authRoutes');
 
 const app = express();
 
@@ -156,6 +157,7 @@ app.use('/api/enquiries', enquiryRoutes);
 app.use('/api', uploadRoutes);
 app.use('/api/app-config', appConfigRoutes);
 app.use('/api/audit-logs', auditLogRoutes);
+app.use('/', authRoutes);
 
 // Debug: DB connection info
 app.get('/api/_debug/db', (req, res) => {
