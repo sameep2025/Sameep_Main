@@ -137,6 +137,9 @@ div[style*="display:flex"][style*="flex-wrap:wrap"][style*="gap:16px"] {
   padding: 4px 0 !important;
   position: relative !important;
 }
+#preview-page header nav button.preview-auth-btn {
+  font-size: 18px !important;
+}
 #preview-page header nav a:hover,
 #preview-page header nav button:hover { color: var(--brand-green) !important; }
 

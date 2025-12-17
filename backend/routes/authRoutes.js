@@ -1,8 +1,11 @@
 const express = require("express");
 const { google } = require("googleapis");
+const jwt = require("jsonwebtoken");
 const GoogleUser = require("../models/GoogleUser");
 
 const router = express.Router();
+
+const JWT_SECRET = process.env.JWT_SECRET || "dev_jwt_secret_change_me";
 
 function getOAuthClient() {
   const clientId = process.env.GOOGLE_CLIENT_ID;
@@ -96,6 +99,12 @@ router.get("/auth/google/callback", async (req, res) => {
 
     await doc.save();
 
+    const googleAuthToken = jwt.sign(
+      { googleId },
+      JWT_SECRET,
+      { expiresIn: "30d" }
+    );
+
     const safeState = {
       vendorId: parsedState.vendorId || null,
       categoryId: parsedState.categoryId || null,
@@ -118,6 +127,7 @@ router.get("/auth/google/callback", async (req, res) => {
     if (safeState.categoryId) params.set("categoryId", String(safeState.categoryId));
     params.set("googleName", encodeURIComponent(name || ""));
     params.set("googleEmail", encodeURIComponent(email || ""));
+    params.set("googleAuthToken", String(googleAuthToken || ""));
 
     const url = `${redirectBase.replace(/\/$/, "")}/preview/${encodeURIComponent(String(safeState.vendorId || ""))}/${encodeURIComponent(String(safeState.categoryId || ""))}?${params.toString()}`;
     return res.redirect(url);

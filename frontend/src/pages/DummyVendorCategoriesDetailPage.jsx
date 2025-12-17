@@ -3,6 +3,10 @@ import { useParams } from "react-router-dom";
 import axios from "axios";
 import API_BASE_URL, { PREVIEW_BASE_URL, NIKS_PREVIEW_BASE_URL } from "../config";
 
+const normTermsKey = (s) => String(s || "").replace(/\s+/g, " ").trim();
+
+const norm = (s) => String(s || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+
 function flattenTree(node, rows = [], parentLevels = [], parentIds = []) {
   if (!node) return rows;
   const levels = [...parentLevels, node.name ?? "Unnamed"];
@@ -15,6 +19,7 @@ function flattenTree(node, rows = [], parentLevels = [], parentIds = []) {
       price: typeof node.vendorPrice === "number" ? node.vendorPrice : node.price ?? "-",
       categoryId: node._id ?? node.id,
       pricingStatus: node.pricingStatus,
+      terms: node.terms,
     });
   } else {
     node.children.forEach((child) => flattenTree(child, rows, levels, ids));
@@ -178,6 +183,8 @@ export default function DummyVendorCategoriesDetailPage() {
   const [showEnquiriesModal, setShowEnquiriesModal] = useState(false);
   const [enquiryStatusConfig, setEnquiryStatusConfig] = useState([]);
   const [selectedStatusFilter, setSelectedStatusFilter] = useState("All"); // dropdown filter for admin view
+  const [termsSelectionsByNode, setTermsSelectionsByNode] = useState({}); // { [categoryId]: number[] }
+  const [comboTermsSelectionsByText, setComboTermsSelectionsByText] = useState({}); // { [normalizedTermsText]: number[] }
 
   const fetchTree = async () => {
     try {
@@ -324,6 +331,10 @@ export default function DummyVendorCategoriesDetailPage() {
           v.location.nearbyLocations = v.location.nearbyLocations || [];
         } catch {}
         setVendor(v);
+        try {
+          setTermsSelectionsByNode(v?.termsSelectionsByNode && typeof v.termsSelectionsByNode === 'object' ? v.termsSelectionsByNode : {});
+          setComboTermsSelectionsByText(v?.comboTermsSelectionsByText && typeof v.comboTermsSelectionsByText === 'object' ? v.comboTermsSelectionsByText : {});
+        } catch {}
       } catch {
         setVendor(null);
       }
@@ -427,13 +438,74 @@ export default function DummyVendorCategoriesDetailPage() {
       const hasSpecific = Array.isArray(la[keySpecific]) && la[keySpecific].length > 0;
       const hasGeneric = Array.isArray(la[keyGeneric]) && la[keyGeneric].length > 0;
       if (hasSpecific || hasGeneric) return;
-      const next = { ...la, [keySpecific]: ['ALL'] };
+      const next = { ...la, [keySpecific]: ["ALL"] };
       await axios.put(`${API_BASE_URL}/api/dummy-categories/${cid}`, { linkedAttributes: next });
       setLinkedAttributes(next);
-    } catch { /* ignore */ }
+    } catch {}
   };
 
-  const norm = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+  // Toggle a specific term index for a combo (keyed by normalized full terms text)
+  const toggleComboTermSelection = async (termsKey, termIndex) => {
+    try {
+      if (!vendorId) return;
+      const key = normTermsKey(termsKey);
+      if (!key) return;
+      const current = Array.isArray(comboTermsSelectionsByText[key]) ? comboTermsSelectionsByText[key] : [];
+      const nextArr = current.includes(termIndex)
+        ? current.filter((i) => i !== termIndex)
+        : [...current, termIndex].sort((a, b) => a - b);
+      const nextMap = { ...comboTermsSelectionsByText, [key]: nextArr };
+      setComboTermsSelectionsByText(nextMap);
+      try {
+        await axios.put(
+          `${API_BASE_URL}/api/dummy-vendors/${vendorId}`,
+          { comboTermsSelectionsByText: nextMap },
+          {
+            headers: {
+              'Content-Type': 'application/json',
+              'x-actor-role': 'admin',
+              'x-vendor-id': vendorId,
+              'x-root-category-id': categoryId,
+            },
+          }
+        );
+        setVendor((prev) => ({ ...(prev || {}), comboTermsSelectionsByText: nextMap }));
+      } catch (e) {
+        alert(e?.response?.data?.message || 'Failed to save selected package terms');
+      }
+    } catch {}
+  };
+
+  // Toggle a specific term index for a category node (used by Categories table checkboxes)
+  const toggleNodeTermSelection = async (nodeId, termIndex) => {
+    try {
+      if (!vendorId || nodeId == null) return;
+      const key = String(nodeId);
+      const current = Array.isArray(termsSelectionsByNode[key]) ? termsSelectionsByNode[key] : [];
+      const nextArr = current.includes(termIndex)
+        ? current.filter((i) => i !== termIndex)
+        : [...current, termIndex].sort((a, b) => a - b);
+      const nextMap = { ...termsSelectionsByNode, [key]: nextArr };
+      setTermsSelectionsByNode(nextMap);
+      try {
+        await axios.put(
+          `${API_BASE_URL}/api/dummy-vendors/${vendorId}`,
+          { termsSelectionsByNode: nextMap },
+          {
+            headers: {
+              'Content-Type': 'application/json',
+              'x-actor-role': 'admin',
+              'x-vendor-id': vendorId,
+              'x-root-category-id': categoryId,
+            },
+          },
+        );
+        setVendor((prev) => ({ ...(prev || {}), termsSelectionsByNode: nextMap }));
+      } catch (e) {
+        alert(e?.response?.data?.message || 'Failed to save selected terms');
+      }
+    } catch {}
+  };
 
   const fetchModelsForFamily = async (familyKey) => {
     try {
@@ -569,6 +641,23 @@ export default function DummyVendorCategoriesDetailPage() {
 
   // rows from tree
   const rows = useMemo(() => tree.flatMap((root) => flattenTree(root)), [tree]);
+  
+  // Split rows into Individual and Packages based on first-level subcategory name
+  const { individualRows, packageCategoryRows } = useMemo(() => {
+    const individual = [];
+    const packages = [];
+    rows.forEach((row) => {
+      // Check if the first-level subcategory (levels[1]) is "Packages"
+      const firstLevelName = row.levels && row.levels.length > 1 ? String(row.levels[1] || "").toLowerCase().trim() : "";
+      if (firstLevelName === "packages") {
+        packages.push(row);
+      } else {
+        individual.push(row);
+      }
+    });
+    return { individualRows: individual, packageCategoryRows: packages };
+  }, [rows]);
+
   const maxLevels = rows.reduce((max, row) => Math.max(max, row.levels.length), 0);
   const levelHeaders = Array.from({ length: maxLevels }, (_, idx) => (idx === 0 ? "Category" : `Level ${idx + 1}`));
 
@@ -600,13 +689,24 @@ export default function DummyVendorCategoriesDetailPage() {
 
   const expandedRows = useMemo(() => {
     const out = [];
-    rows.forEach((row) => {
+    individualRows.forEach((row) => {
       const matches = rowMatches[row.id] || [];
       if (matches.length === 0) out.push({ base: row, match: null, idx: 0 });
       else matches.forEach((m, i) => out.push({ base: row, match: m, idx: i }));
     });
     return out;
-  }, [rows, rowMatches]);
+  }, [individualRows, rowMatches]);
+
+  // Expanded rows for package categories (from category tree, not combos)
+  const expandedPackageCategoryRows = useMemo(() => {
+    const out = [];
+    packageCategoryRows.forEach((row) => {
+      const matches = rowMatches[row.id] || [];
+      if (matches.length === 0) out.push({ base: row, match: null, idx: 0 });
+      else matches.forEach((m, i) => out.push({ base: row, match: m, idx: i }));
+    });
+    return out;
+  }, [packageCategoryRows, rowMatches]);
 
   const packageRows = useMemo(() => {
     try {
@@ -779,7 +879,6 @@ export default function DummyVendorCategoriesDetailPage() {
         </div>
       </div>
       <div style={{ height: 4 }} />
-      {/* Packages Table (Dummy combos) */}
       {combosLoading ? (
         <div style={{ marginTop: 20 }}><p>Loading combos...</p></div>
       ) : combosError ? (
@@ -794,6 +893,7 @@ export default function DummyVendorCategoriesDetailPage() {
                 <th style={{ border: '1px solid #ccc', padding: 8 }}>Combo Includes</th>
                 <th style={{ border: '1px solid #ccc', padding: 8 }}>Size</th>
                 <th style={{ border: '1px solid #ccc', padding: 8 }}>Price</th>
+                <th style={{ border: '1px solid #ccc', padding: 8 }}>Terms</th>
                 <th style={{ border: '1px solid #ccc', padding: 8 }}>Pricing Status</th>
                 <th style={{ border: '1px solid #ccc', padding: 8 }}>Action</th>
                 <th style={{ border: '1px solid #ccc', padding: 8 }}>Logs</th>
@@ -807,7 +907,7 @@ export default function DummyVendorCategoriesDetailPage() {
                 items.forEach((it) => {
                   const vs = Array.isArray(it.variants) ? it.variants : [];
                   if (vs.length === 0) sizeSet.add(null);
-                  vs.forEach((v) => sizeSet.add(v.size || null));
+                  vs.forEach((v) => sizeSet.add(v?.size ?? null));
                 });
                 const sizes = sizeSet.size ? Array.from(sizeSet) : [null];
                 const allItemsLabel = (() => {
@@ -830,7 +930,7 @@ export default function DummyVendorCategoriesDetailPage() {
                   let rep = null;
                   for (const it of items) {
                     const vs = Array.isArray(it.variants) ? it.variants : [];
-                    const v = vs.find((vv) => (vv.size || null) === (sz || null));
+                    const v = vs.find((vv) => (vv?.size ?? null) === (sz ?? null));
                     if (v) { rep = v; break; }
                   }
                   const repPrice = (rep && rep.price != null && rep.price !== '') ? Number(rep.price) : null;
@@ -842,12 +942,35 @@ export default function DummyVendorCategoriesDetailPage() {
                   const mapKey = `${comboId}|${sizeKey}`;
                   const baseStatus = (combo.pricingStatusPerSize && combo.pricingStatusPerSize[sizeKey]) || 'Inactive';
                   const comboStatus = comboPricingStatusByRow[mapKey] || baseStatus;
+                  const rawTerms = (() => {
+                    const t = (rep && rep.terms) ? rep.terms : (combo && combo.terms ? combo.terms : '');
+                    return String(t || '');
+                  })();
                   return (
                     <tr key={`${(comboId || comboName)}-${idx}`}>
                       <td style={{ border: '1px solid #ccc', padding: 8 }}>{comboName}</td>
                       <td style={{ border: '1px solid #ccc', padding: 8 }}>{allItemsLabel}</td>
                       <td style={{ border: '1px solid #ccc', padding: 8 }}>{sz || '—'}</td>
                       <td style={{ border: '1px solid #ccc', padding: 8 }}>{priceText}</td>
+                      <td style={{ border: '1px solid #ccc', padding: 8 }}>
+                        {(() => {
+                          const parts = rawTerms
+                            .split(',')
+                            .map((s) => s.trim())
+                            .filter(Boolean);
+                          if (!parts.length) return '—';
+                          return (
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                              {parts.map((label, i) => (
+                                <label key={i} style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 12 }}>
+                                  <input type="checkbox" disabled style={{ width: 12, height: 12 }} />
+                                  <span>{label}</span>
+                                </label>
+                              ))}
+                            </div>
+                          );
+                        })()}
+                      </td>
                       <td style={{ border: '1px solid #ccc', padding: 8 }}>
                         <select
                           value={comboStatus}
@@ -953,13 +1076,13 @@ export default function DummyVendorCategoriesDetailPage() {
         </div>
       ) : null}
        <div style={{ marginTop: 30 }}>
-        <h2 style={{ marginBottom: 8 }}>Categories</h2>
+        <h2 style={{ marginBottom: 8 }}>Individual</h2>
       {loading ? (
         <div>Loading...</div>
       ) : error ? (
         <div style={{ color: "#991b1b", background: "#fee2e2", border: "1px solid #fecaca", padding: 10, borderRadius: 8 }}>{error}</div>
-      ) : rows.length === 0 ? (
-        <div>No categories found</div>
+      ) : individualRows.length === 0 ? (
+        <div>No individual categories found</div>
         ) : (
         <table style={{ borderCollapse: "collapse", width: "100%" }}>
           <thead>
@@ -974,6 +1097,7 @@ export default function DummyVendorCategoriesDetailPage() {
                 <th style={{ border: '1px solid #ccc', padding: 8 }}>Images</th>
               ) : null}
               <th style={{ border: "1px solid #ccc", padding: "8px" }}>Price</th>
+              <th style={{ border: "1px solid #ccc", padding: "8px" }}>Terms</th>
               <th style={{ border: "1px solid #ccc", padding: "8px" }}>Pricing Status</th>
               <th style={{ border: "1px solid #ccc", padding: "8px" }}>Action</th>
               <th style={{ border: "1px solid #ccc", padding: "8px" }}>Logs</th>
@@ -1101,23 +1225,74 @@ export default function DummyVendorCategoriesDetailPage() {
                 </td>
                 <td style={{ border: '1px solid #ccc', padding: 8 }}>
                   {(() => {
+                    try {
+                      const raw = row && row.terms != null ? row.terms : '';
+                      const txt = String(raw || '');
+                      const parts = txt
+                        .split(',')
+                        .map((s) => s.trim())
+                        .filter(Boolean);
+                      if (!parts.length) return '—';
+                      const sel = (() => {
+                        try {
+                          const key = String(row.categoryId || row.id || '');
+                          const arr = Array.isArray(termsSelectionsByNode?.[key]) ? termsSelectionsByNode[key] : [];
+                          return arr;
+                        } catch { return []; }
+                      })();
+                      return (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                          {parts.map((label, i) => (
+                            <label key={i} style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 12 }}>
+                              <input
+                                type="checkbox"
+                                checked={sel.includes(i)}
+                                onChange={() => toggleNodeTermSelection(row.categoryId || row.id, i)}
+                                style={{ width: 12, height: 12 }}
+                              />
+                              <span>{label}</span>
+                            </label>
+                          ))}
+                        </div>
+                      );
+                    } catch {
+                      return '—';
+                    }
+                  })()}
+                </td>
+                <td style={{ border: "1px solid #ccc", padding: "8px" }}>
+                  {(() => {
                     const isInventoryRow = Boolean(match);
                     const rowKey = Array.isArray(row.levelIds) && row.levelIds.length ? row.levelIds.map(String).join('|') : String(row.id);
                     const key = isInventoryRow
                       ? `inv:${String(match._id || match.at)}|${rowKey}` 
                       : `cat:${row.categoryId}`;
                     const baseStatus = (() => {
+                      const nodeMap = (vendor && vendor.nodePricingStatus && typeof vendor.nodePricingStatus === 'object') ? vendor.nodePricingStatus : {};
+                      const firstSubcatId = (() => {
+                        try {
+                          const lvlIds = Array.isArray(row.levelIds) ? row.levelIds.map((x) => String(x)) : [];
+                          const firstIdx = (lvlIds[0] === 'root') ? 2 : 1;
+                          return lvlIds.length > firstIdx ? String(lvlIds[firstIdx]) : null;
+                        } catch { return null; }
+                      })();
+                      const nodeFallback = (() => {
+                        try {
+                          const leafId = String(row.categoryId || row.id || '');
+                          const vLeaf = leafId ? nodeMap[leafId] : undefined;
+                          const vLvl1 = firstSubcatId ? nodeMap[String(firstSubcatId)] : undefined;
+                          return vLeaf || vLvl1 || undefined;
+                        } catch { return undefined; }
+                      })();
                       if (!isInventoryRow) {
                         try {
-                          const map = (vendor && vendor.nodePricingStatus && typeof vendor.nodePricingStatus === 'object') ? vendor.nodePricingStatus : {};
-                          const v = map[row.categoryId] || map[row.id];
-                          return v || row.pricingStatus || 'Inactive';
+                          return nodeFallback || row.pricingStatus || 'Inactive';
                         } catch {
                           return row.pricingStatus || 'Inactive';
                         }
                       }
                       const map = (match.pricingStatusByRow && typeof match.pricingStatusByRow === 'object') ? match.pricingStatusByRow : {};
-                      return map[rowKey] || 'Inactive';
+                      return map[rowKey] || nodeFallback || 'Inactive';
                     })();
                     const current = pricingStatusByRow[key] || baseStatus || 'Inactive';
                     return (
@@ -1255,6 +1430,129 @@ export default function DummyVendorCategoriesDetailPage() {
         </table>
       )}
       </div>
+
+      {/* Packages Categories Table (from category tree under "Packages" subcategory) */}
+      {packageCategoryRows.length > 0 && (
+        <div style={{ marginTop: 30 }}>
+          <h2 style={{ marginBottom: 8 }}>Packages (Categories)</h2>
+          <table style={{ borderCollapse: "collapse", width: "100%" }}>
+            <thead>
+              <tr>
+                {levelHeaders.map((header, idx) => (
+                  <th key={idx} style={{ border: "1px solid #ccc", padding: "8px" }}>{header}</th>
+                ))}
+                {hasInventory ? (
+                  <th style={{ border: '1px solid #ccc', padding: 8 }}>Attributes</th>
+                ) : null}
+                {!hasInventory ? (
+                  <th style={{ border: '1px solid #ccc', padding: 8 }}>Images</th>
+                ) : null}
+                <th style={{ border: "1px solid #ccc", padding: "8px" }}>Price</th>
+                <th style={{ border: "1px solid #ccc", padding: "8px" }}>Terms</th>
+                <th style={{ border: "1px solid #ccc", padding: "8px" }}>Pricing Status</th>
+                <th style={{ border: "1px solid #ccc", padding: "8px" }}>Action</th>
+                <th style={{ border: "1px solid #ccc", padding: "8px" }}>Logs</th>
+              </tr>
+            </thead>
+            <tbody>
+              {expandedPackageCategoryRows.map(({ base: row, match, idx }) => (
+                <tr key={`pkg-${row.id}-${idx}`}>
+                  {levelHeaders.map((_, i) => (
+                    <td key={i} style={{ border: '1px solid #ccc', padding: 8 }}>{row.levels[i] ?? '-'}</td>
+                  ))}
+                  {hasInventory ? (
+                    <td style={{ border: '1px solid #ccc', padding: 8 }}>
+                      {match ? (
+                        (() => {
+                          const blocks = Object.entries(match.selections || {}).flatMap(([fam, fields]) => {
+                            const famLower = String(fam || '').toLowerCase();
+                            let pairsAll = Object.entries(fields || {}).filter(([k, v]) => {
+                              const fn = String(k).toLowerCase().replace(/[^a-z0-9]/g, '');
+                              return fn !== 'modelfields' && v != null && String(v).trim() !== '';
+                            });
+                            if (famLower === 'bikes') {
+                              const hasBikeBrand = pairsAll.some(([k]) => String(k).toLowerCase() === 'bikebrand');
+                              if (hasBikeBrand) pairsAll = pairsAll.filter(([k]) => String(k).toLowerCase() !== 'brand');
+                            }
+                            return pairsAll.map(([k, v]) => ({ key: `${fam}:${k}`, label: `${k}:`, value: String(v) }));
+                          });
+                          return (
+                            <div style={{ border: '1px solid #e5e7eb', borderRadius: 6, padding: 6, background: '#f8fafc' }}>
+                              {blocks.length === 0 ? (
+                                <div style={{ fontSize: 12, color: '#64748b' }}>No attributes</div>
+                              ) : (
+                                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))', gap: 6 }}>
+                                  {blocks.map((b) => (
+                                    <div key={b.key} style={{ fontSize: 12, color: '#334155' }}>
+                                      <span style={{ fontWeight: 600 }}>{b.label}</span> <span>{b.value}</span>
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })()
+                      ) : (
+                        <span style={{ color: '#94a3b8' }}>—</span>
+                      )}
+                    </td>
+                  ) : null}
+                  {!hasInventory ? (
+                    <td style={{ border: '1px solid #ccc', padding: 8 }}>—</td>
+                  ) : null}
+                  <td style={{ border: '1px solid #ccc', padding: 8 }}>
+                    {match ? (
+                      (() => {
+                        try {
+                          const rowKey = Array.isArray(row.levelIds) && row.levelIds.length ? row.levelIds.map(String).join('|') : String(row.id);
+                          const pbr = match && match.pricesByRow && typeof match.pricesByRow === 'object' ? match.pricesByRow : null;
+                          const rowPrice = pbr && (pbr[rowKey] !== undefined && pbr[rowKey] !== null) ? pbr[rowKey] : (match.price ?? null);
+                          return <span>{rowPrice === undefined || rowPrice === null || rowPrice === '-' ? '-' : rowPrice}</span>;
+                        } catch { return <span>-</span>; }
+                      })()
+                    ) : (
+                      <span>{row.price === undefined || row.price === null || row.price === '-' ? '-' : row.price}</span>
+                    )}
+                  </td>
+                  <td style={{ border: '1px solid #ccc', padding: 8 }}>
+                    {(() => {
+                      try {
+                        const raw = row && row.terms != null ? row.terms : '';
+                        const txt = String(raw || '');
+                        const parts = txt.split(',').map((s) => s.trim()).filter(Boolean);
+                        if (!parts.length) return '—';
+                        return parts.join(', ');
+                      } catch { return '—'; }
+                    })()}
+                  </td>
+                  <td style={{ border: "1px solid #ccc", padding: "8px" }}>
+                    <span style={{ color: '#6b7280' }}>{row.pricingStatus || 'Inactive'}</span>
+                  </td>
+                  <td style={{ border: '1px solid #ccc', padding: 8 }}>
+                    <button
+                      onClick={() => onEdit(row)}
+                      style={{ padding: '6px 10px', borderRadius: 6, background: '#0ea5e9', color: '#fff', border: 'none' }}
+                    >Edit</button>
+                  </td>
+                  <td style={{ border: '1px solid #ccc', padding: 8 }}>
+                    <button
+                      onClick={() => {
+                        const label = row.levels?.join(' / ') || 'Category';
+                        loadLogs({
+                          entityType: 'dummy_category',
+                          entityId: String(row.categoryId || row.id),
+                          label,
+                        });
+                      }}
+                      style={{ padding: '4px 8px', borderRadius: 4, background: '#f97316', color: '#fff', border: 'none', fontSize: 12 }}
+                    >See Logs</button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
 
       {showEnquiriesModal && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1300 }}>

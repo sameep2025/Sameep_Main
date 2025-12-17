@@ -12,10 +12,14 @@ const checkAuthentication = (vendorId, categoryId) => {
     const token = window.localStorage.getItem(tokenKey);
     const identityStr = window.localStorage.getItem(identityKey);
 
-    if (!token || !identityStr) return false;
+    if (!identityStr) return false;
 
     const identity = JSON.parse(identityStr);
-    return !!(identity && identity.loggedIn === true);
+    if (!(identity && identity.loggedIn === true)) return false;
+
+    const role = String(identity?.role || "").trim().toLowerCase();
+    if (role === "vendor") return true;
+    return !!token;
   } catch {
     return false;
   }
@@ -70,6 +74,7 @@ export default function MyIndividualServicesDetailPage() {
     // Check authentication first
     if (!checkAuthentication(vendorId, categoryId)) {
       setSessionExpired(true);
+      setLoading(false);
       return;
     }
     
@@ -243,6 +248,29 @@ export default function MyIndividualServicesDetailPage() {
         : String(base.id);
       let statusKey;
       let baseStatus;
+      const nodeMap =
+        vendor && vendor.nodePricingStatus && typeof vendor.nodePricingStatus === "object"
+          ? vendor.nodePricingStatus
+          : {};
+      const firstSubcatId = (() => {
+        try {
+          const lvlIds = Array.isArray(base.levelIds) ? base.levelIds.map((x) => String(x)) : [];
+          const firstIdx = lvlIds[0] === "root" ? 2 : 1;
+          return lvlIds.length > firstIdx ? String(lvlIds[firstIdx]) : null;
+        } catch {
+          return null;
+        }
+      })();
+      const nodeFallback = (() => {
+        try {
+          const leafId = String(base.categoryId || base.id || "");
+          const vLeaf = leafId ? nodeMap[leafId] : undefined;
+          const vLvl1 = firstSubcatId ? nodeMap[String(firstSubcatId)] : undefined;
+          return vLeaf || vLvl1 || undefined;
+        } catch {
+          return undefined;
+        }
+      })();
       if (isInventoryRow) {
         statusKey = `inv:${String(match._id || match.at)}|${levelIdsKey}`;
         const map =
@@ -250,16 +278,10 @@ export default function MyIndividualServicesDetailPage() {
           typeof match.pricingStatusByRow === "object"
             ? match.pricingStatusByRow
             : {};
-        baseStatus = map[levelIdsKey] || "Inactive";
+        baseStatus = map[levelIdsKey] || nodeFallback || "Inactive";
       } else {
         statusKey = `cat:${base.categoryId}`;
-        const nodeMap =
-          vendor && vendor.nodePricingStatus &&
-          typeof vendor.nodePricingStatus === "object"
-            ? vendor.nodePricingStatus
-            : {};
-        const v = nodeMap[base.categoryId] || nodeMap[base.id];
-        baseStatus = v || base.pricingStatus || "Inactive";
+        baseStatus = nodeFallback || base.pricingStatus || "Inactive";
       }
       const currentStatus = statusByRow[statusKey] || baseStatus || "Inactive";
       return {

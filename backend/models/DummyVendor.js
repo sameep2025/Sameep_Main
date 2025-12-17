@@ -14,10 +14,14 @@ const dummyVendorSchema = new mongoose.Schema({
       "Pending",
       "Rejected",
       "Waiting for Approval",
+      "Registered",
+      "Profile Setup",
+      "Preview",
+      "Published",
       "Inactive",
       "Active",
     ],
-    default: "Waiting for Approval",
+    default: "Registered",
   },
 
   location: {

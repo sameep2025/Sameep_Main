@@ -19,7 +19,7 @@ const BusinessHoursModal = dynamic(() => import("../../../components/BusinessHou
 
 export default function PreviewPage() {
   const router = useRouter();
-  const { vendorId, categoryId, lat, lng, homeLocs, mode } = router.query;
+  const { vendorId, categoryId, lat, lng, homeLocs, mode, setupTimerKey } = router.query;
 
   const parsedHomeLocations = homeLocs ? JSON.parse(homeLocs) : [];
 
@@ -78,6 +78,68 @@ export default function PreviewPage() {
   const [myEnquiriesError, setMyEnquiriesError] = useState("");
   const [enquiryStatusConfig, setEnquiryStatusConfig] = useState([]);
   const [expandedEnquiryGroup, setExpandedEnquiryGroup] = useState(null); // track which group's table is visible
+  const [showSetupCategoryModal, setShowSetupCategoryModal] = useState(false);
+  const [setupCategories, setSetupCategories] = useState([]);
+  const [setupCategoriesLoading, setSetupCategoriesLoading] = useState(false);
+  const [setupCategoriesError, setSetupCategoriesError] = useState("");
+  const [setupSelectedCategory, setSetupSelectedCategory] = useState(null);
+  const [setupPlaceQuery, setSetupPlaceQuery] = useState("");
+  const [setupPlaceResults, setSetupPlaceResults] = useState([]);
+  const [setupPlaceLoading, setSetupPlaceLoading] = useState(false);
+  const [setupPlaceError, setSetupPlaceError] = useState("");
+  const [setupSelectedPlace, setSetupSelectedPlace] = useState(null);
+  const [setupShowPlacesStep, setSetupShowPlacesStep] = useState(false);
+  const [setupOtpPhoneInfo, setSetupOtpPhoneInfo] = useState(null); // { countryCode, phone, full }
+  const [setupOtpSending, setSetupOtpSending] = useState(false);
+  const [setupOtpSendError, setSetupOtpSendError] = useState("");
+  const [setupOtpSent, setSetupOtpSent] = useState(false);
+  const [setupOtpCode, setSetupOtpCode] = useState("");
+  const [setupOtpVerifying, setSetupOtpVerifying] = useState(false);
+  const [setupOtpVerifyError, setSetupOtpVerifyError] = useState("");
+  const [setupOtpVerified, setSetupOtpVerified] = useState(false);
+  const [setupOtpBypass, setSetupOtpBypass] = useState(false);
+  const [setupMobileFlowOpen, setSetupMobileFlowOpen] = useState(false);
+  const [setupMobileCountryCode, setSetupMobileCountryCode] = useState("91");
+  const [setupMobilePhone, setSetupMobilePhone] = useState("");
+  const [setupVerifiedCustomerId, setSetupVerifiedCustomerId] = useState("");
+  const [setupVerifiedToken, setSetupVerifiedToken] = useState("");
+  const [setupGeneratedDummyVendorId, setSetupGeneratedDummyVendorId] = useState("");
+  const [setupGeneratePreviewError, setSetupGeneratePreviewError] = useState("");
+  const [showSetupPreviewPrompt, setShowSetupPreviewPrompt] = useState(false);
+  const [setupPreviewPromptLoading, setSetupPreviewPromptLoading] = useState(false);
+  const [setupPreviewPromptError, setSetupPreviewPromptError] = useState("");
+  // Subcategory selection popup state
+  const [showSubcategoryPopup, setShowSubcategoryPopup] = useState(false);
+  const [setupSubcategories, setSetupSubcategories] = useState([]); // first-level children of selected category
+  const [setupSelectedSubcategories, setSetupSelectedSubcategories] = useState({}); // { [id]: true/false }
+  const [setupSubcategoriesLoading, setSetupSubcategoriesLoading] = useState(false);
+  // Vehicle count popup state for inventory model categories
+  const [showVehicleCountPopup, setShowVehicleCountPopup] = useState(false);
+  const [setupVehicleCounts, setSetupVehicleCounts] = useState({}); // { [serviceId]: count }
+  // Setup inventory selection popup state (after vehicle count)
+  const [showSetupInventoryPopup, setShowSetupInventoryPopup] = useState(false);
+  const [setupInventoryScopes, setSetupInventoryScopes] = useState([]); // [{ serviceId, serviceName, family, label, maxCount }]
+  const [setupCurrentScopeIndex, setSetupCurrentScopeIndex] = useState(0);
+  const [setupInventoryItems, setSetupInventoryItems] = useState({}); // { [serviceId]: [items] }
+  const [setupInventoryDraft, setSetupInventoryDraft] = useState({}); // { [family]: { field: value } }
+  const [setupModelsByFamily, setSetupModelsByFamily] = useState({}); // cache of models for setup flow
+  // Profile setup confirmation popups
+  const [showProfileSetupConfirm, setShowProfileSetupConfirm] = useState(false); // "Your profile has been set" popup
+  const [showPreviewConfirm, setShowPreviewConfirm] = useState(false); // "Do you want preview?" popup
+  const [setupProfileStatus, setSetupProfileStatus] = useState(""); // "", "profile_setup", "preview"
+
+  const [setupCreationTimerRunning, setSetupCreationTimerRunning] = useState(false);
+  const [setupCreationTimerStartMs, setSetupCreationTimerStartMs] = useState(null);
+  const [setupCreationElapsedMs, setSetupCreationElapsedMs] = useState(0);
+  const [setupCreationTimerKey, setSetupCreationTimerKey] = useState("");
+  const [setupCreationFinalMs, setSetupCreationFinalMs] = useState(null);
+  const setupTimerReportedRef = useRef(false);
+
+  const [setupResumeCategoryId, setSetupResumeCategoryId] = useState("");
+  const setupResumeTriggeredRef = useRef(false);
+
+  const [setupGoogleAuthToken, setSetupGoogleAuthToken] = useState("");
+  const setupProgressSaveRef = useRef({ t: null, pending: null });
 
   // OTP flow state for preview booking (country code + mobile + OTP)
   const [showOtpModal, setShowOtpModal] = useState(false);
@@ -100,6 +162,97 @@ export default function PreviewPage() {
 
   const loading = loadingVendor || loadingCategories;
 
+  const formatElapsed = useCallback((ms) => {
+    try {
+      const safe = Number.isFinite(ms) && ms > 0 ? Math.floor(ms / 1000) : 0;
+      const mm = String(Math.floor(safe / 60)).padStart(2, "0");
+      const ss = String(safe % 60).padStart(2, "0");
+      return `${mm}:${ss}`;
+    } catch {
+      return "00:00";
+    }
+  }, []);
+
+  const startSetupCreationTimer = useCallback(() => {
+    try {
+      const now = Date.now();
+      setSetupCreationTimerStartMs(now);
+      setSetupCreationElapsedMs(0);
+      setSetupCreationTimerRunning(true);
+      setSetupCreationFinalMs(null);
+      setSetupCreationTimerKey(`${now}-${Math.random().toString(16).slice(2)}`);
+    } catch {}
+  }, []);
+
+  const stopSetupCreationTimer = useCallback(() => {
+    try {
+      setSetupCreationTimerRunning(false);
+    } catch {}
+  }, []);
+
+  useEffect(() => {
+    if (!setupCreationTimerRunning) return;
+    if (!setupCreationTimerStartMs) return;
+
+    const id = window.setInterval(() => {
+      try {
+        setSetupCreationElapsedMs(Date.now() - setupCreationTimerStartMs);
+      } catch {}
+    }, 250);
+
+    return () => {
+      try {
+        window.clearInterval(id);
+      } catch {}
+    };
+  }, [setupCreationTimerRunning, setupCreationTimerStartMs]);
+
+  useEffect(() => {
+    try {
+      if (typeof window === "undefined") return;
+      if (!setupCreationTimerKey) return;
+
+      const doneKey = `setupTimerDone:${setupCreationTimerKey}`;
+      const onStorage = (e) => {
+        try {
+          if (!e) return;
+          if (String(e.key || "") !== doneKey) return;
+          const payload = e.newValue ? JSON.parse(e.newValue) : null;
+          const doneAt = payload && typeof payload.doneAt === "number" ? payload.doneAt : null;
+          if (!doneAt) return;
+          if (!setupCreationTimerStartMs) return;
+
+          const finalMs = Math.max(0, doneAt - setupCreationTimerStartMs);
+          setSetupCreationElapsedMs(finalMs);
+          setSetupCreationFinalMs(finalMs);
+          setSetupCreationTimerRunning(false);
+          try {
+            window.localStorage.removeItem(doneKey);
+          } catch {}
+        } catch {}
+      };
+
+      window.addEventListener("storage", onStorage);
+      return () => {
+        try {
+          window.removeEventListener("storage", onStorage);
+        } catch {}
+      };
+    } catch {}
+  }, [setupCreationTimerKey, setupCreationTimerStartMs]);
+
+  useEffect(() => {
+    try {
+      if (typeof window === "undefined") return;
+      if (!setupTimerKey) return;
+      if (setupTimerReportedRef.current) return;
+      if (loading) return;
+      setupTimerReportedRef.current = true;
+      const doneKey = `setupTimerDone:${setupTimerKey}`;
+      window.localStorage.setItem(doneKey, JSON.stringify({ doneAt: Date.now() }));
+    } catch {}
+  }, [setupTimerKey, loading]);
+
   const makePreviewSessionKey = useCallback((venId, catId) => {
     try {
       const v = venId || "";
@@ -109,6 +262,50 @@ export default function PreviewPage() {
       return "previewSession:unknown:unknown";
     }
   }, []);
+
+  const makeSetupResumeKey = useCallback((venId, catId) => {
+    try {
+      const v = venId || "";
+      const c = catId || "";
+      return `setupResume:${v}:${c}`;
+    } catch {
+      return "setupResume:unknown:unknown";
+    }
+  }, []);
+
+  const makeSetupGoogleAuthKey = useCallback((venId, catId) => {
+    try {
+      const v = venId || "";
+      const c = catId || "";
+      return `setupGoogleAuth:${v}:${c}`;
+    } catch {
+      return "setupGoogleAuth:unknown:unknown";
+    }
+  }, []);
+
+  const getStoredSetupGoogleAuthToken = useCallback(() => {
+    try {
+      if (typeof window === "undefined") return "";
+      const key = makeSetupGoogleAuthKey(vendorId, categoryId);
+      const raw = window.localStorage.getItem(key);
+      return raw ? String(raw) : "";
+    } catch {
+      return "";
+    }
+  }, [makeSetupGoogleAuthKey, vendorId, categoryId]);
+
+  const saveStoredSetupGoogleAuthToken = useCallback((token) => {
+    try {
+      if (typeof window === "undefined") return;
+      const t = token ? String(token) : "";
+      const key = makeSetupGoogleAuthKey(vendorId, categoryId);
+      if (t) {
+        window.localStorage.setItem(key, t);
+      } else {
+        window.localStorage.removeItem(key);
+      }
+    } catch {}
+  }, [makeSetupGoogleAuthKey, vendorId, categoryId]);
 
   const getStoredCustomerId = useCallback(() => {
     try {
@@ -120,6 +317,558 @@ export default function PreviewPage() {
       return "";
     }
   }, [makePreviewSessionKey, vendorId, categoryId]);
+
+  const handleOpenSetupBusiness = useCallback(async (opts) => {
+    try {
+      const shouldReadResumeKey = !!(opts && opts.resume);
+
+      startSetupCreationTimer();
+      setShowSetupCategoryModal(true);
+      setSetupCategoriesError("");
+      setSetupCategories([]);
+      setSetupSelectedCategory(null);
+      try {
+        if (shouldReadResumeKey && typeof window !== "undefined" && vendorId && categoryId) {
+          const resumeKey = makeSetupResumeKey(vendorId, categoryId);
+          const raw = window.localStorage.getItem(resumeKey);
+          if (raw) {
+            try {
+              const parsed = JSON.parse(raw);
+              const catId = parsed && (parsed.selectedCategoryId || parsed.categoryId)
+                ? String(parsed.selectedCategoryId || parsed.categoryId)
+                : "";
+              if (catId) {
+                setSetupResumeCategoryId(String(catId));
+              }
+            } catch {}
+          }
+        }
+      } catch {}
+      setSetupPlaceQuery("");
+      setSetupPlaceResults([]);
+      setSetupPlaceError("");
+      setSetupSelectedPlace(null);
+      setSetupShowPlacesStep(false);
+      setSetupOtpPhoneInfo(null);
+      setSetupOtpSending(false);
+      setSetupOtpSendError("");
+      setSetupOtpSent(false);
+      setSetupOtpCode("");
+      setSetupOtpVerifying(false);
+      setSetupOtpVerifyError("");
+      setSetupOtpVerified(false);
+      setSetupOtpBypass(false);
+      setSetupMobileFlowOpen(false);
+      setSetupMobileCountryCode("91");
+      setSetupMobilePhone("");
+      setSetupVerifiedCustomerId("");
+      setSetupVerifiedToken("");
+      setSetupGeneratedDummyVendorId("");
+      setSetupGeneratePreviewError("");
+      setShowSetupPreviewPrompt(false);
+      setSetupPreviewPromptLoading(false);
+      setSetupPreviewPromptError("");
+      setShowSubcategoryPopup(false);
+      setSetupSubcategories([]);
+      setSetupSelectedSubcategories({});
+      setSetupSubcategoriesLoading(false);
+      setSetupCategoriesLoading(true);
+      const res = await fetch(`${API_BASE_URL}/api/dummy-categories`);
+      if (!res.ok) {
+        throw new Error("Failed to load categories");
+      }
+      const data = await res.json();
+      const list = Array.isArray(data) ? data : [];
+      setSetupCategories(list);
+    } catch (e) {
+      console.error("Setup My Business categories error", e);
+      setSetupCategoriesError("Failed to load categories");
+    } finally {
+      setSetupCategoriesLoading(false);
+    }
+  }, [startSetupCreationTimer, vendorId, categoryId, makeSetupResumeKey]);
+
+  const persistSetupDummyVendor = useCallback(async (placeOverride) => {
+    try {
+      const customerId = setupVerifiedCustomerId;
+      const token = setupVerifiedToken;
+      const catId = setupSelectedCategory?._id || setupSelectedCategory?.id || null;
+      const place = placeOverride || setupSelectedPlace;
+      const businessName = (place && place.name) ? String(place.name) : "";
+      const placeLocation = place?.location || null;
+      const placeAddress = place?.address || "";
+      const openingHoursText = Array.isArray(place?.openingHoursText) ? place.openingHoursText : [];
+      const phoneFull = setupOtpPhoneInfo ? `+${setupOtpPhoneInfo.countryCode}${setupOtpPhoneInfo.phone}` : "";
+
+      if (!customerId || !catId || !businessName || !phoneFull) return false;
+
+      const dvRes = await fetch(`${API_BASE_URL}/api/dummy-vendors`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          customerId: String(customerId),
+          phone: String(phoneFull),
+          businessName: String(businessName),
+          contactName: String(businessName),
+          categoryId: String(catId),
+          status: "Registered",
+          location: {
+            lat: typeof placeLocation?.lat === "number" ? placeLocation.lat : undefined,
+            lng: typeof placeLocation?.lng === "number" ? placeLocation.lng : undefined,
+            address: String(placeAddress || ""),
+          },
+          openingHoursText,
+        }),
+      });
+
+      const dvJson = await dvRes.json().catch(() => ({}));
+      const dvId = dvJson?._id || dvJson?.id || "";
+      if (!dvId) return false;
+
+      setSetupGeneratedDummyVendorId(String(dvId));
+      try {
+        if (typeof window !== "undefined") {
+          if (token) {
+            window.localStorage.setItem(`previewToken:${dvId}:${catId}`, String(token));
+          }
+          const identityKey = `previewIdentity:${dvId}:${catId}`;
+          const existingIdentity = window.localStorage.getItem(identityKey);
+          if (!existingIdentity) {
+            window.localStorage.setItem(
+              identityKey,
+              JSON.stringify({
+                role: "vendor",
+                displayName: businessName || "Vendor",
+                loggedIn: true,
+              })
+            );
+          }
+        }
+      } catch {}
+
+      setShowSetupPreviewPrompt(true);
+
+      try {
+        scheduleSaveSetupProgress({
+          currentStep: "REGISTERED",
+          generatedDummyVendorId: String(dvId),
+          payload: {
+            setupSelectedSubcategories,
+            setupVehicleCounts,
+            setupInventoryScopes,
+            setupCurrentScopeIndex,
+            setupInventoryDraft,
+            setupInventoryItems,
+          },
+        });
+      } catch {}
+
+      return true;
+    } catch (e) {
+      console.error("Failed to persist setup dummy vendor", e);
+      return false;
+    }
+  }, [setupVerifiedCustomerId, setupVerifiedToken, setupSelectedCategory, setupSelectedPlace, setupOtpPhoneInfo, setupSelectedSubcategories, setupVehicleCounts, setupInventoryScopes, setupCurrentScopeIndex, setupInventoryDraft, setupInventoryItems]);
+
+  const handleSetupPlacesSearch = async () => {
+    const q = (setupPlaceQuery || "").trim();
+    if (!q) return;
+    try {
+      setSetupPlaceLoading(true);
+      setSetupPlaceError("");
+      setSetupPlaceResults([]);
+      setSetupSelectedPlace(null);
+      const res = await fetch(
+        `${API_BASE_URL}/api/google/places/search?query=${encodeURIComponent(q)}`
+      );
+      if (!res.ok) {
+        throw new Error("Failed to search places");
+      }
+      const data = await res.json();
+      const results = Array.isArray(data?.results) ? data.results : [];
+      setSetupPlaceResults(results);
+    } catch (e) {
+      console.error("Setup My Business Places search error", e);
+      setSetupPlaceError("Failed to search places");
+    } finally {
+      setSetupPlaceLoading(false);
+    }
+  };
+
+  const handleSetupBypassOtp = async (phoneInfoOverride) => {
+    const phoneInfo = phoneInfoOverride || setupOtpPhoneInfo;
+    if (!phoneInfo) {
+      setSetupOtpSendError("Please enter a valid phone number");
+      return;
+    }
+    try {
+      setSetupOtpVerifying(true);
+      setSetupOtpSendError("");
+      setSetupOtpVerifyError("");
+
+      const bypassRes = await fetch(`/api/customers/bypass-otp`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          countryCode: phoneInfo.countryCode,
+          phone: phoneInfo.phone,
+        }),
+      });
+      const bypassJson = await bypassRes.json().catch(() => ({}));
+      if (!bypassRes.ok) {
+        const msg = bypassJson?.message || `OTP bypass failed (status ${bypassRes.status})`;
+        throw new Error(msg);
+      }
+
+      const customerId = bypassJson?.customer?._id || bypassJson?.customer?.id || "";
+      const token = bypassJson && bypassJson.token ? String(bypassJson.token) : "";
+      setSetupVerifiedCustomerId(customerId ? String(customerId) : "");
+      setSetupVerifiedToken(token);
+
+      setSetupOtpVerified(true);
+      setSetupOtpBypass(true);
+      setSetupOtpSent(false);
+      setSetupOtpCode("");
+
+      try {
+        if (setupSelectedPlace && customerId && !setupGeneratedDummyVendorId) {
+          await persistSetupDummyVendor(setupSelectedPlace);
+        }
+        if (!setupSelectedPlace) setSetupShowPlacesStep(true);
+      } catch {}
+    } catch (e) {
+      console.error("Setup My Business bypass OTP error", e);
+      setSetupOtpSendError(e?.message || "OTP bypass failed");
+      setSetupOtpBypass(false);
+      if (!setupGeneratedDummyVendorId) {
+        setSetupOtpVerified(false);
+        setSetupVerifiedCustomerId("");
+        setSetupVerifiedToken("");
+      }
+    } finally {
+      setSetupOtpVerifying(false);
+    }
+  };
+
+  const handleSetupSelectPlace = async (placeId) => {
+    try {
+      setSetupPlaceLoading(true);
+      setSetupPlaceError("");
+
+      // Fetch place details and progress in parallel for faster resume
+      const catId = setupSelectedCategory?._id || setupSelectedCategory?.id || "";
+      const [placeRes, progressResult] = await Promise.all([
+        fetch(`${API_BASE_URL}/api/google/places/details?placeId=${encodeURIComponent(placeId)}`),
+        catId ? fetchSetupProgress(String(catId), String(placeId)).catch(() => null) : Promise.resolve(null),
+      ]);
+
+      if (!placeRes.ok) {
+        throw new Error("Failed to fetch place details");
+      }
+      const data = await placeRes.json();
+      const place = data?.place || null;
+      setSetupSelectedPlace(place);
+
+      try {
+        const pId = place?.placeId || place?.place_id || placeId || "";
+        if (catId && pId) {
+          // Use already-fetched progress
+          if (progressResult) {
+            const restored = await applySetupProgressRestore(progressResult);
+            if (restored) {
+              try {
+                if (typeof window !== "undefined" && vendorId && categoryId) {
+                  const resumeKey = makeSetupResumeKey(vendorId, categoryId);
+                  window.localStorage.removeItem(resumeKey);
+                }
+              } catch {}
+              return;
+            }
+          }
+
+          scheduleSaveSetupProgress({
+            currentStep: "PLACE_SELECTED",
+            payload: {
+              setupSelectedPlace: {
+                placeId: String(pId),
+                name: String(place?.name || ""),
+                address: String(place?.address || ""),
+                location: place?.location || null,
+              },
+            },
+          });
+        }
+      } catch {}
+
+      // Derive phone number for OTP from place.phone (expected formats like +91XXXXXXXXXX)
+      try {
+        if (!setupMobileFlowOpen) {
+          const raw =
+            (place && (place.internationalPhoneNumber || place.phone || place.formattedPhoneNumber || "")) || "";
+          const clean = String(raw).replace(/[\s\-()]/g, "");
+
+          // If Google gives E.164/international (starts with +), parse it.
+          const intlMatch = clean.match(/^\+(\d{1,3})(\d{6,15})$/);
+          if (intlMatch) {
+            const cc = intlMatch[1];
+            const local = intlMatch[2];
+            setSetupOtpPhoneInfo({ countryCode: cc, phone: local, full: clean });
+          } else {
+            // Otherwise treat as national format; use selected/default country code.
+            const cc = String(setupMobileCountryCode || "").replace(/\D/g, "") || "91";
+            const digits = String(clean).replace(/\D/g, "");
+            const local = digits.replace(/^0+/, "");
+            if (local && local.length >= 6) {
+              setSetupOtpPhoneInfo({ countryCode: cc, phone: local, full: `+${cc}${local}` });
+            } else {
+              setSetupOtpPhoneInfo(null);
+            }
+          }
+        }
+      } catch {
+        if (!setupMobileFlowOpen) {
+          setSetupOtpPhoneInfo(null);
+        }
+      }
+
+      try {
+        if (setupOtpVerified && setupVerifiedCustomerId && !setupGeneratedDummyVendorId) {
+          await persistSetupDummyVendor(place);
+        }
+      } catch {}
+    } catch (e) {
+      console.error("Setup My Business Places details error", e);
+      setSetupPlaceError("Failed to fetch place details");
+    } finally {
+      setSetupPlaceLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    try {
+      if (!showSubcategoryPopup) return;
+      scheduleSaveSetupProgress({
+        currentStep: "SUBCATEGORY_POPUP",
+        payload: { setupSelectedSubcategories },
+      });
+    } catch {}
+  }, [showSubcategoryPopup, setupSelectedSubcategories]);
+
+  useEffect(() => {
+    try {
+      if (!showVehicleCountPopup) return;
+      scheduleSaveSetupProgress({
+        currentStep: "VEHICLE_COUNT_POPUP",
+        payload: { setupSelectedSubcategories, setupVehicleCounts },
+      });
+    } catch {}
+  }, [showVehicleCountPopup, setupSelectedSubcategories, setupVehicleCounts]);
+
+  useEffect(() => {
+    try {
+      if (!showSetupInventoryPopup) return;
+      const safeItems = (() => {
+        try {
+          const out = {};
+          const src = setupInventoryItems && typeof setupInventoryItems === "object" ? setupInventoryItems : {};
+          Object.keys(src).forEach((k) => {
+            const arr = Array.isArray(src[k]) ? src[k] : [];
+            out[k] = arr.map((it) => {
+              const cp = { ...(it || {}) };
+              try { delete cp.pendingFiles; } catch {}
+              return cp;
+            });
+          });
+          return out;
+        } catch {
+          return setupInventoryItems;
+        }
+      })();
+
+      scheduleSaveSetupProgress({
+        currentStep: "INVENTORY_POPUP",
+        payload: {
+          setupSelectedSubcategories,
+          setupVehicleCounts,
+          setupInventoryScopes,
+          setupCurrentScopeIndex,
+          setupInventoryDraft,
+          setupInventoryItems: safeItems,
+        },
+      });
+    } catch {}
+  }, [showSetupInventoryPopup, setupSelectedSubcategories, setupVehicleCounts, setupInventoryScopes, setupCurrentScopeIndex, setupInventoryDraft, setupInventoryItems]);
+
+  const handleSetupSendOtp = async (phoneInfoOverride) => {
+    const phoneInfo = phoneInfoOverride || setupOtpPhoneInfo;
+    if (!phoneInfo) {
+      setSetupOtpSendError("Please enter a valid phone number");
+      return;
+    }
+    try {
+      setSetupOtpSending(true);
+      setSetupOtpSendError("");
+      const res = await fetch(`${API_BASE_URL}/api/customers/request-otp`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          countryCode: phoneInfo.countryCode,
+          phone: phoneInfo.phone,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data?.message || "Failed to send OTP");
+      }
+      setSetupOtpSent(true);
+    } catch (e) {
+      console.error("Setup My Business send OTP error", e);
+      setSetupOtpSendError(e?.message || "Failed to send OTP");
+    } finally {
+      setSetupOtpSending(false);
+    }
+  };
+
+  const handleSetupVerifyOtp = async () => {
+    if (!setupOtpPhoneInfo || !setupOtpCode) {
+      setSetupOtpVerifyError("Please enter the OTP");
+      return;
+    }
+    try {
+      setSetupOtpVerifying(true);
+      setSetupOtpVerifyError("");
+      const res = await fetch(`${API_BASE_URL}/api/customers/verify-otp`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          countryCode: setupOtpPhoneInfo.countryCode,
+          phone: setupOtpPhoneInfo.phone,
+          otp: setupOtpCode,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data?.message || "OTP verification failed");
+      }
+
+      let customerId = "";
+      let token = "";
+      try {
+        customerId = data?.customer?._id || data?.customer?.id || "";
+        token = data && data.token ? String(data.token) : "";
+        setSetupVerifiedCustomerId(customerId ? String(customerId) : "");
+        setSetupVerifiedToken(token);
+      } catch {}
+
+      setSetupOtpVerified(true);
+      try {
+        if (setupSelectedPlace && customerId && !setupGeneratedDummyVendorId) {
+          await persistSetupDummyVendor(setupSelectedPlace);
+        }
+        if (!setupSelectedPlace) setSetupShowPlacesStep(true);
+      } catch {}
+    } catch (e) {
+      console.error("Setup My Business verify OTP error", e);
+      setSetupOtpVerifyError(e?.message || "OTP verification failed");
+    } finally {
+      setSetupOtpVerifying(false);
+    }
+  };
+
+  const loadSetupFirstLevelServices = useCallback(async () => {
+    try {
+      const opts = (arguments && arguments.length > 0 ? arguments[0] : null) || {};
+      const openPopup = opts && typeof opts.openPopup === "boolean" ? opts.openPopup : true;
+      const preserveSelection = opts && typeof opts.preserveSelection === "boolean" ? opts.preserveSelection : false;
+      const overrideDvId = opts && typeof opts.overrideDvId === "string" ? opts.overrideDvId : "";
+      const overrideCatId = opts && (typeof opts.overrideCatId === "string" || typeof opts.overrideCatId === "number")
+        ? String(opts.overrideCatId)
+        : "";
+
+      setSetupGeneratePreviewError("");
+      const dvId = overrideDvId || setupGeneratedDummyVendorId;
+      const catId = overrideCatId || setupSelectedCategory?._id || setupSelectedCategory?.id;
+      if (!catId) {
+        setSetupGeneratePreviewError("Preview link not ready yet");
+        return false;
+      }
+      setSetupSubcategoriesLoading(true);
+      try {
+        const res = await fetch(`${API_BASE_URL}/api/dummy-categories?parentId=${catId}`);
+        if (res.ok) {
+          const children = await res.json();
+          const childrenArr = Array.isArray(children) ? children : [];
+          // Filter out "Packages" subcategory - only show individual services
+          const filteredChildren = childrenArr.filter((c) => {
+            const name = String(c.name || "").toLowerCase().trim();
+            return name !== "packages";
+          });
+          setSetupSubcategories(filteredChildren);
+          if (!preserveSelection) {
+            const defaultSelected = {};
+            filteredChildren.forEach((c) => {
+              const id = c._id || c.id;
+              if (id) defaultSelected[id] = true;
+            });
+            setSetupSelectedSubcategories(defaultSelected);
+          } else {
+            setSetupSelectedSubcategories((prev) => {
+              try {
+                const base = prev && typeof prev === "object" ? prev : {};
+                const out = { ...base };
+                filteredChildren.forEach((c) => {
+                  const id = c._id || c.id;
+                  if (!id) return;
+                  if (typeof out[id] === "undefined") out[id] = true;
+                });
+                return out;
+              } catch {
+                return prev;
+              }
+            });
+          }
+        } else {
+          setSetupSubcategories([]);
+          setSetupSelectedSubcategories({});
+        }
+      } catch {
+        setSetupSubcategories([]);
+        setSetupSelectedSubcategories({});
+      } finally {
+        setSetupSubcategoriesLoading(false);
+      }
+      if (openPopup) {
+        setShowSubcategoryPopup(true);
+      }
+      return true;
+    } catch (e) {
+      setSetupGeneratePreviewError("Failed to load services");
+      return false;
+    }
+  }, [setupGeneratedDummyVendorId, setupSelectedCategory]);
+
+  const handleSetupPreviewPromptYes = useCallback(async () => {
+    try {
+      setSetupPreviewPromptError("");
+      setSetupPreviewPromptLoading(true);
+      const dvId = setupGeneratedDummyVendorId;
+      const catId = setupSelectedCategory?._id || setupSelectedCategory?.id;
+      if (!dvId || !catId) {
+        setSetupPreviewPromptError("Preview link not ready yet");
+        return;
+      }
+      setShowSetupPreviewPrompt(false);
+      await loadSetupFirstLevelServices();
+    } finally {
+      setSetupPreviewPromptLoading(false);
+    }
+  }, [setupGeneratedDummyVendorId, setupSelectedCategory, loadSetupFirstLevelServices]);
+
+  const handleSetupPreviewPromptNo = useCallback(() => {
+    try {
+      setShowSetupPreviewPrompt(false);
+    } catch {}
+  }, []);
 
   const postEnquiry = useCallback(
     async ({ source, serviceName, price, terms, categoryPath, categoryIds, attributes }) => {
@@ -434,6 +1183,7 @@ export default function PreviewPage() {
   useEffect(() => {
     try {
       if (typeof window === "undefined") return;
+      if (!vendorId || !categoryId) return;
       const key = makePreviewIdentityKey(vendorId, categoryId);
       const raw = window.localStorage.getItem(key);
       if (!raw) return;
@@ -452,33 +1202,267 @@ export default function PreviewPage() {
   useEffect(() => {
     try {
       if (typeof window === "undefined") return;
+      if (!vendorId || !categoryId) return;
       const url = new URL(window.location.href);
       const gNameParam = url.searchParams.get("googleName");
       const gEmailParam = url.searchParams.get("googleEmail");
-      if (!gNameParam && !gEmailParam) return;
+      const gAuthTokenParam = url.searchParams.get("googleAuthToken");
+      if (!gNameParam && !gEmailParam && !gAuthTokenParam) return;
 
-      const name = decodeURIComponent(gNameParam || "").trim();
-      const email = decodeURIComponent(gEmailParam || "").trim();
-      const displayName = name || email || "Guest";
-
-      const identity = {
-        role: "guest",
-        displayName,
-        loggedIn: true,
-      };
-
+      // During Setup My Business, Google login is used only for verification.
+      // Do not log the user into preview navbar as a guest.
       try {
         const key = makePreviewIdentityKey(vendorId, categoryId);
-        window.localStorage.setItem(key, JSON.stringify(identity));
+        window.localStorage.removeItem(key);
       } catch {}
-
-      setNavIdentity(identity);
+      setNavIdentity({ role: "guest", displayName: "Guest", loggedIn: false });
 
       url.searchParams.delete("googleName");
       url.searchParams.delete("googleEmail");
+      url.searchParams.delete("googleAuthToken");
       window.history.replaceState(null, "", url.toString());
+
+      try {
+        if (gAuthTokenParam) {
+          const token = decodeURIComponent(String(gAuthTokenParam));
+          setSetupGoogleAuthToken(token);
+          saveStoredSetupGoogleAuthToken(token);
+        }
+      } catch {}
+
+      // After Google OAuth, resume the setup flow with category pre-selected
+      try {
+        setupResumeTriggeredRef.current = true;
+        const resumeKey = makeSetupResumeKey(vendorId, categoryId);
+        const raw = window.localStorage.getItem(resumeKey);
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          const catId = parsed && (parsed.selectedCategoryId || parsed.categoryId)
+            ? String(parsed.selectedCategoryId || parsed.categoryId)
+            : "";
+          if (catId) {
+            setSetupResumeCategoryId(catId);
+          }
+        }
+        handleOpenSetupBusiness({ resume: true });
+      } catch {}
     } catch {}
-  }, [vendorId, categoryId, makePreviewIdentityKey]);
+  }, [vendorId, categoryId, makePreviewIdentityKey, saveStoredSetupGoogleAuthToken, makeSetupResumeKey, handleOpenSetupBusiness]);
+
+  useEffect(() => {
+    try {
+      if (setupGoogleAuthToken) return;
+      const token = getStoredSetupGoogleAuthToken();
+      if (token) setSetupGoogleAuthToken(token);
+    } catch {}
+  }, [setupGoogleAuthToken, getStoredSetupGoogleAuthToken]);
+
+  const fetchSetupProgress = useCallback(async (catId, placeId) => {
+    try {
+      const token = setupGoogleAuthToken || getStoredSetupGoogleAuthToken();
+      if (!token) return null;
+      const c = catId ? String(catId) : "";
+      const p = placeId ? String(placeId) : "";
+      if (!c || !p) return null;
+
+      const res = await fetch(
+        `${API_BASE_URL}/api/setup-progress?categoryId=${encodeURIComponent(c)}&placeId=${encodeURIComponent(p)}`,
+        {
+          method: "GET",
+          headers: { Authorization: `Bearer ${token}` },
+        }
+      );
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) return null;
+      if (!json || !json.exists) return null;
+      return json.progress || null;
+    } catch {
+      return null;
+    }
+  }, [setupGoogleAuthToken, getStoredSetupGoogleAuthToken]);
+
+  const saveSetupProgress = useCallback(async ({ catId, placeId, currentStep, generatedDummyVendorId, payload }) => {
+    try {
+      const token = setupGoogleAuthToken || getStoredSetupGoogleAuthToken();
+      if (!token) return false;
+      const c = catId ? String(catId) : "";
+      const p = placeId ? String(placeId) : "";
+      if (!c || !p) return false;
+
+      const res = await fetch(`${API_BASE_URL}/api/setup-progress`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({
+          categoryId: c,
+          placeId: p,
+          currentStep: typeof currentStep === "string" ? currentStep : "",
+          generatedDummyVendorId: typeof generatedDummyVendorId === "string" ? generatedDummyVendorId : "",
+          payload: payload && typeof payload === "object" ? payload : {},
+        }),
+      });
+      return res.ok;
+    } catch {
+      return false;
+    }
+  }, [setupGoogleAuthToken, getStoredSetupGoogleAuthToken]);
+
+  const scheduleSaveSetupProgress = useCallback((next) => {
+    try {
+      if (!next || typeof next !== "object") return;
+      const catId = setupSelectedCategory?._id || setupSelectedCategory?.id || "";
+      const placeId = setupSelectedPlace?.placeId || setupSelectedPlace?.place_id || "";
+      if (!catId || !placeId) return;
+      const base = setupProgressSaveRef.current?.pending || {};
+      const mergedPayload = { ...(base.payload || {}), ...(next.payload || {}) };
+
+      const effectiveDvId = (() => {
+        try {
+          if (typeof next.generatedDummyVendorId === "string" && next.generatedDummyVendorId.trim()) return next.generatedDummyVendorId.trim();
+          if (typeof base.generatedDummyVendorId === "string" && base.generatedDummyVendorId.trim()) return base.generatedDummyVendorId.trim();
+          if (typeof setupGeneratedDummyVendorId === "string" && setupGeneratedDummyVendorId.trim()) return setupGeneratedDummyVendorId.trim();
+          return "";
+        } catch {
+          return "";
+        }
+      })();
+
+      const pending = {
+        ...base,
+        ...next,
+        catId: String(catId),
+        placeId: String(placeId),
+        generatedDummyVendorId: effectiveDvId,
+        payload: mergedPayload,
+      };
+      setupProgressSaveRef.current.pending = pending;
+      if (setupProgressSaveRef.current.t) {
+        clearTimeout(setupProgressSaveRef.current.t);
+      }
+      setupProgressSaveRef.current.t = setTimeout(() => {
+        try {
+          const toSend = setupProgressSaveRef.current.pending;
+          setupProgressSaveRef.current.pending = null;
+          setupProgressSaveRef.current.t = null;
+          if (!toSend) return;
+          saveSetupProgress(toSend);
+        } catch {}
+      }, 150);
+    } catch {}
+  }, [saveSetupProgress, setupSelectedCategory, setupSelectedPlace, setupGeneratedDummyVendorId]);
+
+  const applySetupProgressRestore = useCallback(async (progress) => {
+    try {
+      if (!progress || typeof progress !== "object") return false;
+      const step = String(progress.currentStep || "").trim();
+      const dvId = progress.generatedDummyVendorId ? String(progress.generatedDummyVendorId) : "";
+      if (dvId) setSetupGeneratedDummyVendorId(dvId);
+
+      const payload = progress.payload && typeof progress.payload === "object" ? progress.payload : {};
+      const savedSubcats = payload.setupSelectedSubcategories && typeof payload.setupSelectedSubcategories === "object"
+        ? payload.setupSelectedSubcategories
+        : null;
+      const savedCounts = payload.setupVehicleCounts && typeof payload.setupVehicleCounts === "object"
+        ? payload.setupVehicleCounts
+        : null;
+      const savedScopes = Array.isArray(payload.setupInventoryScopes) ? payload.setupInventoryScopes : null;
+      const savedIdx = Number.isFinite(payload.setupCurrentScopeIndex) ? payload.setupCurrentScopeIndex : null;
+      const savedDraft = payload.setupInventoryDraft && typeof payload.setupInventoryDraft === "object" ? payload.setupInventoryDraft : null;
+      const savedItems = payload.setupInventoryItems && typeof payload.setupInventoryItems === "object" ? payload.setupInventoryItems : null;
+
+      setShowSetupPreviewPrompt(false);
+      if (step === "SUBCATEGORY_POPUP") {
+        if (savedSubcats) setSetupSelectedSubcategories(savedSubcats);
+        setShowVehicleCountPopup(false);
+        setShowSetupInventoryPopup(false);
+        setShowSubcategoryPopup(true);
+        // Load services in background (non-blocking)
+        loadSetupFirstLevelServices({ openPopup: false, preserveSelection: true, overrideDvId: dvId }).catch(() => {});
+        return true;
+      }
+
+      if (step === "VEHICLE_COUNT_POPUP") {
+        if (savedSubcats) setSetupSelectedSubcategories(savedSubcats);
+        if (savedCounts) setSetupVehicleCounts(savedCounts);
+        setShowSubcategoryPopup(false);
+        setShowSetupInventoryPopup(false);
+        setShowVehicleCountPopup(true);
+        // Load services in background (non-blocking)
+        loadSetupFirstLevelServices({ openPopup: false, preserveSelection: true, overrideDvId: dvId }).catch(() => {});
+        return true;
+      }
+
+      if (step === "INVENTORY_POPUP") {
+        if (savedSubcats) setSetupSelectedSubcategories(savedSubcats);
+        if (savedCounts) setSetupVehicleCounts(savedCounts);
+        if (savedScopes) setSetupInventoryScopes(savedScopes);
+        if (savedDraft) setSetupInventoryDraft(savedDraft);
+        if (savedItems) setSetupInventoryItems(savedItems);
+        if (savedIdx != null) setSetupCurrentScopeIndex(Math.max(0, savedIdx));
+        setShowSubcategoryPopup(false);
+        setShowVehicleCountPopup(false);
+        setShowSetupInventoryPopup(true);
+        // Load services and models in background (non-blocking)
+        loadSetupFirstLevelServices({ openPopup: false, preserveSelection: true, overrideDvId: dvId }).catch(() => {});
+        try {
+          const scopes = savedScopes || [];
+          const idx = savedIdx != null ? savedIdx : 0;
+          const scope = scopes[idx];
+          if (scope && scope.family) {
+            fetchSetupModelsForFamily(scope.family).catch(() => {});
+          }
+        } catch {}
+        return true;
+      }
+
+      return false;
+    } catch {
+      return false;
+    }
+  }, [loadSetupFirstLevelServices]);
+
+  useEffect(() => {
+    try {
+      if (typeof window === "undefined") return;
+      if (!vendorId || !categoryId) return;
+      if (setupResumeTriggeredRef.current) return;
+
+      // Skip auto-resume if returning from Google OAuth (has googleAuthToken in URL)
+      const url = new URL(window.location.href);
+      if (url.searchParams.get("googleAuthToken")) return;
+
+      // Only auto-resume on dummy/setup vendor pages, not on existing vendor pages
+      const vId = String(vendorId || "").toLowerCase();
+      const isDummyVendor = vId.startsWith("dummyvendor-") || vId === "dummyvendor";
+      if (!isDummyVendor) return;
+
+      const resumeKey = makeSetupResumeKey(vendorId, categoryId);
+      const raw = window.localStorage.getItem(resumeKey);
+      if (!raw) return;
+      const parsed = JSON.parse(raw);
+      const catId = parsed && (parsed.selectedCategoryId || parsed.categoryId) ? String(parsed.selectedCategoryId || parsed.categoryId) : "";
+      if (!catId) return;
+
+      setupResumeTriggeredRef.current = true;
+      setSetupResumeCategoryId(catId);
+      handleOpenSetupBusiness({ resume: true });
+    } catch {}
+  }, [vendorId, categoryId, makeSetupResumeKey, handleOpenSetupBusiness]);
+
+  useEffect(() => {
+    try {
+      if (!showSetupCategoryModal) return;
+      if (!setupResumeCategoryId) return;
+      if (!Array.isArray(setupCategories) || setupCategories.length === 0) return;
+
+      const cat = setupCategories.find((c) => String(c?._id || c?.id || "") === String(setupResumeCategoryId));
+      if (!cat) return;
+
+      setSetupSelectedCategory(cat);
+      setSetupShowPlacesStep(true);
+
+      setSetupResumeCategoryId("");
+    } catch {}
+  }, [showSetupCategoryModal, setupResumeCategoryId, setupCategories, vendorId, categoryId, makeSetupResumeKey]);
 
   const handleLogout = useCallback(() => {
     try {
@@ -486,6 +1470,34 @@ export default function PreviewPage() {
       const identityKey = makePreviewIdentityKey(vendorId, categoryId);
       const tokenKey = makePreviewTokenKey(vendorId, categoryId);
       const sessionKey = makePreviewSessionKey(vendorId, categoryId);
+
+      const extraKeysToClear = (() => {
+        try {
+          const out = [];
+          const path = String(window.location?.pathname || "");
+          const parts = path.split("/").filter(Boolean);
+          const idx = parts.indexOf("preview");
+          const vFromPath = idx >= 0 && parts.length > idx + 1 ? parts[idx + 1] : "";
+          const cFromPath = idx >= 0 && parts.length > idx + 2 ? parts[idx + 2] : "";
+          const pairs = [
+            { v: String(vendorId || ""), c: String(categoryId || "") },
+            { v: String(vFromPath || ""), c: String(cFromPath || "") },
+          ];
+          const seen = new Set();
+          pairs.forEach(({ v, c }) => {
+            if (!v || !c) return;
+            const k = `${v}::${c}`;
+            if (seen.has(k)) return;
+            seen.add(k);
+            out.push(`previewIdentity:${v}:${c}`);
+            out.push(`previewToken:${v}:${c}`);
+            out.push(`previewSession:${v}:${c}`);
+          });
+          return out;
+        } catch {
+          return [];
+        }
+      })();
 
       try {
         const token = window.localStorage.getItem(tokenKey);
@@ -505,6 +1517,13 @@ export default function PreviewPage() {
       } catch {}
       try {
         window.localStorage.removeItem(sessionKey);
+      } catch {}
+      try {
+        extraKeysToClear.forEach((k) => {
+          try {
+            window.localStorage.removeItem(k);
+          } catch {}
+        });
       } catch {}
       setNavIdentity({ role: "guest", displayName: "Guest", loggedIn: false });
     } catch {}
@@ -679,27 +1698,13 @@ export default function PreviewPage() {
       if (!loggedIn) {
         await handleOpenOtpModal();
         return false;
-      }
+    }
 
-      // Logged-in non-vendor (customer): allow enquiry
-      return true;
-    } catch {
+    // Logged-in non-vendor (customer): allow enquiry
+    return true;
+  } catch {
       return false;
-    }
-  };
-
-  const handleGoogleLogin = () => {
-    try {
-      if (typeof window === "undefined") return;
-      const params = new URLSearchParams();
-      if (vendorId) params.set("vendorId", String(vendorId));
-      if (categoryId) params.set("categoryId", String(categoryId));
-      const base = `${API_BASE_URL}/auth/google/login`;
-      const qs = params.toString();
-      window.location.href = qs ? `${base}?${qs}` : base;
-    } catch (e) {
-      console.error("Failed to start Google login from preview", e);
-    }
+  }
   };
 
   const requestOtp = async () => {
@@ -1044,6 +2049,202 @@ export default function PreviewPage() {
     [modelsByFamily]
   );
 
+  // Fetch models for setup inventory flow (uses separate cache)
+  const fetchSetupModelsForFamily = useCallback(
+    async (familyKey) => {
+      try {
+        const orig = String(familyKey || "").trim();
+        if (!orig) return [];
+        const cached = setupModelsByFamily[orig];
+        if (Array.isArray(cached) && cached.length > 0) return cached;
+        const lower = orig.toLowerCase();
+        const singular = lower.endsWith("s") ? lower.slice(0, -1) : lower;
+        const noSpaces = lower.replace(/\s+/g, "");
+        const candidates = Array.from(new Set([orig, lower, singular, noSpaces]));
+        let models = [];
+        for (const c of candidates) {
+          try {
+            const res = await fetch(`${API_BASE_URL}/api/models?category=${encodeURIComponent(c)}`, {
+              cache: "no-store",
+            });
+            if (!res.ok) continue;
+            const data = await res.json().catch(() => []);
+            const arr = Array.isArray(data) ? data : [];
+            if (arr.length) {
+              models = arr.map((d) => ({ _id: d._id || d.id, name: d.name || d.model || "", raw: d }));
+              break;
+            }
+          } catch {}
+        }
+        setSetupModelsByFamily((prev) => ({ ...prev, [orig]: models }));
+        return models;
+      } catch {
+        return [];
+      }
+    },
+    [setupModelsByFamily]
+  );
+
+  // Get cascade lists for setup inventory flow
+  const getSetupCascadeLists = useCallback(
+    (familyKey, parentLinkedAttr) => {
+      const norm = (s) => String(s || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+      let models = setupModelsByFamily[familyKey] || [];
+      if (!models.length) {
+        const orig = String(familyKey || "");
+        const lower = orig.toLowerCase();
+        const singular = lower.endsWith("s") ? lower.slice(0, -1) : lower;
+        const noSpaces = lower.replace(/\s+/g, "");
+        const keys = [orig, lower, singular, noSpaces];
+        for (let i = 0; i < keys.length; i += 1) {
+          const k = keys[i];
+          const m = setupModelsByFamily[k];
+          if (Array.isArray(m) && m.length) {
+            models = m;
+            break;
+          }
+        }
+      }
+
+      const la = parentLinkedAttr || {};
+      let selectedFields = Array.isArray(la[familyKey]) ? la[familyKey] : [];
+      const famLower = String(familyKey || "").toLowerCase();
+      const brandFieldForFamily = famLower === "bikes" ? "bikeBrand" : "brand";
+      const modelFieldsKey = `${familyKey}:modelFields`;
+      const modelFields = Array.isArray(la[modelFieldsKey]) ? la[modelFieldsKey] : [];
+      if (modelFields.length) {
+        const canon = (s) => String(s).trim();
+        const set = new Set((selectedFields || []).map((f) => canon(f)));
+        modelFields.forEach((mf) => {
+          const c = canon(mf);
+          if (c && !set.has(c)) {
+            set.add(c);
+            selectedFields.push(c);
+          }
+        });
+      }
+
+      const keysInFirst = models.length ? Object.keys(models[0].raw || models[0]) : [];
+      if (!selectedFields || selectedFields.length === 0) {
+        const candidates = ["brand", "model", "variant", "transmission", "fuelType", "bodyType", "seats"];
+        selectedFields = candidates.filter((k) => keysInFirst.includes(k));
+        if (!selectedFields.includes(brandFieldForFamily) && (keysInFirst.includes("brand") || keysInFirst.includes("bikeBrand")))
+          selectedFields.unshift(brandFieldForFamily);
+        if (!selectedFields.includes("model") && (keysInFirst.includes("model") || keysInFirst.includes("modelName")))
+          selectedFields.splice(1, 0, "model");
+      } else {
+        const low = selectedFields.map((s) => String(s).toLowerCase());
+        if (!low.includes(String(brandFieldForFamily).toLowerCase())) selectedFields.unshift(brandFieldForFamily);
+        if (!low.includes("model")) selectedFields.splice(1, 0, "model");
+      }
+
+      const curr = setupInventoryDraft[familyKey] || {};
+      const pickFirst = (obj, arr) => {
+        for (let i = 0; i < arr.length; i += 1) {
+          const k = arr[i];
+          if (obj && obj[k] != null && String(obj[k]).trim() !== "") return String(obj[k]);
+        }
+        return "";
+      };
+      const selectedBrand = pickFirst(
+        curr,
+        famLower === "bikes" ? ["bikeBrand", "brand", "Brand", "make", "Make"] : ["brand", "Brand", "make", "Make"]
+      );
+      const selectedModel = pickFirst(curr, ["model", "Model", "modelName", "model_name", "name"]);
+
+      const listsByField = {};
+      if (famLower === "bikes") {
+        const lowSet = new Set((selectedFields || []).map((s) => String(s).toLowerCase()));
+        if (lowSet.has("bikebrand") && lowSet.has("brand")) {
+          selectedFields = selectedFields.filter((s) => String(s).toLowerCase() !== "brand");
+        }
+      }
+      const fields = selectedFields
+        .map((f) => String(f).trim())
+        .filter((f) => f && norm(f) !== "modelfields");
+
+      // Helper to get key candidates for a field (same logic as getCascadeLists)
+      const getKeyCandidates = (field) => {
+        const fieldNorm = norm(field);
+        const canonicalJsKey =
+          fieldNorm.endsWith("bodytype") ? "bodyType" :
+          fieldNorm.endsWith("fueltype") ? "fuelType" :
+          fieldNorm.endsWith("seats") ? "seats" :
+          fieldNorm.endsWith("transmission") ? "transmission" :
+          fieldNorm;
+        if (canonicalJsKey === "brand" || (famLower === "bikes" && fieldNorm === "bikebrand"))
+          return ["brand", "bikeBrand", "make", "Brand", "Make"];
+        if (canonicalJsKey === "model" || fieldNorm === "model")
+          return ["model", "modelName", "Model", "model_name", "name"];
+        if (canonicalJsKey === "variant") return ["variant", "Variant", "trim", "Trim"];
+        if (canonicalJsKey === "transmission" || fieldNorm.includes("transmission"))
+          return ["transmission", "Transmission", "gearbox", "gear_type", "gearType", "bikeTransmission"];
+        if (canonicalJsKey === "bodyType")
+          return ["bodyType", "BodyType", "body_type", "type"];
+        if (canonicalJsKey === "fuelType")
+          return ["fuelType", "FuelType", "fueltype", "Fuel", "fuel_type"];
+        if (canonicalJsKey === "seats")
+          return ["seats", "Seats", "seatCapacity", "SeatCapacity", "seatingCapacity", "SeatingCapacity"];
+        return [field];
+      };
+
+      fields.forEach((heading) => {
+        const hLower = norm(heading);
+        const isBrand = hLower.endsWith("brand");
+        const isModel = hLower.endsWith("model") || hLower === "model";
+        const keyCandidates = getKeyCandidates(heading);
+        let vals = [];
+        if (isBrand) {
+          const set = new Set();
+          models.forEach((m) => {
+            const raw = m.raw || m;
+            const v = raw.bikeBrand || raw.brand || raw.Brand || raw.make || raw.Make || "";
+            if (v) set.add(String(v));
+          });
+          vals = Array.from(set).sort();
+        } else if (isModel) {
+          if (selectedBrand) {
+            const set = new Set();
+            models.forEach((m) => {
+              const raw = m.raw || m;
+              const b = raw.bikeBrand || raw.brand || raw.Brand || raw.make || raw.Make || "";
+              if (String(b).toLowerCase() === String(selectedBrand).toLowerCase()) {
+                const v = raw.model || raw.Model || raw.modelName || raw.name || "";
+                if (v) set.add(String(v));
+              }
+            });
+            vals = Array.from(set).sort();
+          }
+        } else {
+          const set = new Set();
+          models.forEach((m) => {
+            const raw = m.raw || m;
+            const b = raw.bikeBrand || raw.brand || raw.Brand || raw.make || raw.Make || "";
+            const md = raw.model || raw.Model || raw.modelName || raw.name || "";
+            const brandMatch = !selectedBrand || String(b).toLowerCase() === String(selectedBrand).toLowerCase();
+            const modelMatch = !selectedModel || String(md).toLowerCase() === String(selectedModel).toLowerCase();
+            if (brandMatch && modelMatch) {
+              // Try all key candidates to find the value
+              let v = null;
+              for (const k of keyCandidates) {
+                if (raw[k] != null && String(raw[k]).trim() !== "") {
+                  v = raw[k];
+                  break;
+                }
+              }
+              if (v != null && String(v).trim() !== "") set.add(String(v));
+            }
+          });
+          vals = Array.from(set).sort();
+        }
+        listsByField[heading] = vals;
+      });
+
+      return { fields, listsByField };
+    },
+    [setupModelsByFamily, setupInventoryDraft]
+  );
+
   const getCascadeLists = useCallback(
     (familyKey) => {
       const norm = (s) => String(s || "").toLowerCase().replace(/[^a-z0-9]/g, "");
@@ -1268,10 +2469,16 @@ export default function PreviewPage() {
     try {
       const isVendorAcceptedLocal =
         String(vendor?.status || "").trim().toLowerCase() === "accepted".toLowerCase();
+      const nodePricingStatusMap = (vendor && vendor.nodePricingStatus && typeof vendor.nodePricingStatus === 'object')
+        ? vendor.nodePricingStatus
+        : {};
+      const hasAnyPricingStatus = Object.keys(nodePricingStatusMap).length > 0;
       const children = Array.isArray(categoryTree?.children) ? categoryTree.children : [];
 
       const source = (() => {
-        if (!isVendorAcceptedLocal) return children; // no filtering before acceptance
+        // Before acceptance, if pricing has been configured via nodePricingStatus
+        // (Setup My Business checkbox flow), filter just like accepted vendors.
+        if (!isVendorAcceptedLocal && !hasAnyPricingStatus) return children;
 
         // For accepted vendors, mirror the shouldShowLvl1 logic used in the
         // card renderer so that any top-level service that shows a card also
@@ -1318,9 +2525,14 @@ export default function PreviewPage() {
     try {
       const isVendorAcceptedLocal =
         String(vendor?.status || "").trim().toLowerCase() === "accepted".toLowerCase();
+      const nodePricingStatusMap = (vendor && vendor.nodePricingStatus && typeof vendor.nodePricingStatus === 'object')
+        ? vendor.nodePricingStatus
+        : {};
+      const hasAnyPricingStatus = Object.keys(nodePricingStatusMap).length > 0;
       const children = Array.isArray(categoryTree?.children) ? categoryTree.children : [];
       // Before acceptance: if there is any L1 child at all, keep heading visible
-      if (!isVendorAcceptedLocal) return children.length > 0;
+      if (!isVendorAcceptedLocal && !hasAnyPricingStatus) return children.length > 0;
+      if (!isVendorAcceptedLocal && hasAnyPricingStatus) return children.some((n) => isNodePricingActive(n));
 
       // After acceptance: reuse isNodePricingActive so heading visibility matches
       // the same logic used for the actual cards (including inventory rows).
@@ -2135,8 +3347,50 @@ export default function PreviewPage() {
       
       const isVendorAcceptedLocal = String(vendor?.status || "").trim().toLowerCase() === "accepted";
       
-      // For non-accepted vendors, show all nodes
-      if (!isVendorAcceptedLocal) return true;
+      // For dummy mode vendors with nodePricingStatus set, respect the status even if not "accepted"
+      const nodePricingStatusMap = vendor?.nodePricingStatus || {};
+      const hasAnyPricingStatus = Object.keys(nodePricingStatusMap).length > 0;
+      
+      // For non-accepted vendors WITHOUT nodePricingStatus, show all nodes (legacy behavior)
+      if (!isVendorAcceptedLocal && !hasAnyPricingStatus) return true;
+      
+      // For non-accepted vendors WITH nodePricingStatus (e.g., Setup My Business flow),
+      // check if this node or its parent is explicitly set
+      if (!isVendorAcceptedLocal && hasAnyPricingStatus) {
+        const vendorNodeStatus = nodePricingStatusMap[nodeId];
+        if (vendorNodeStatus !== undefined) {
+          const vendorStatusRaw = String(vendorNodeStatus).trim().toLowerCase();
+          if (vendorStatusRaw === "active") return true;
+          if (vendorStatusRaw === "inactive") return false;
+        }
+        // For child nodes (nested subcategories), they don't have direct status
+        // Check if this node is a descendant of an active first-level category
+        // by looking at the categoryTree structure
+        try {
+          const firstLevelChildren = Array.isArray(categoryTree?.children) ? categoryTree.children : [];
+          for (const lvl1 of firstLevelChildren) {
+            const lvl1Id = String(lvl1?._id || lvl1?.id || "");
+            const lvl1Status = nodePricingStatusMap[lvl1Id];
+            const isLvl1Active = String(lvl1Status || "").trim().toLowerCase() === "active";
+            
+            // Check if current node is this lvl1 or a descendant of it
+            const isDescendant = (parent, targetId) => {
+              if (!parent) return false;
+              const parentId = String(parent?._id || parent?.id || "");
+              if (parentId === targetId) return true;
+              const children = Array.isArray(parent?.children) ? parent.children : [];
+              return children.some((child) => isDescendant(child, targetId));
+            };
+            
+            if (isDescendant(lvl1, nodeId)) {
+              // This node is a descendant of lvl1
+              return isLvl1Active;
+            }
+          }
+        } catch {}
+        // If we can't determine ancestry, default to hidden
+        return false;
+      }
       
       // For accepted vendors, check pricing status
       // First check node-level pricingStatus
@@ -2180,7 +3434,6 @@ export default function PreviewPage() {
       }
       
       // For non-inventory categories, check vendor.nodePricingStatus map
-      const nodePricingStatusMap = vendor?.nodePricingStatus || {};
       const vendorNodeStatus = nodePricingStatusMap[nodeId];
       
       if (vendorNodeStatus !== undefined) {
@@ -2223,8 +3476,8 @@ export default function PreviewPage() {
       // For accepted vendors, if nodePricingStatusMap has ANY entries, 
       // nodes without status should be hidden (they weren't explicitly activated)
       // If nodePricingStatusMap is empty, show all (legacy/no pricing set up yet)
-      const hasAnyPricingStatus = Object.keys(nodePricingStatusMap).length > 0;
-      if (hasAnyPricingStatus) {
+      const hasAnyPricingStatusForAccepted = Object.keys(nodePricingStatusMap).length > 0;
+      if (hasAnyPricingStatusForAccepted) {
         // Some nodes have status set, but this node/subtree doesn't - hide it
         return false;
       }
@@ -2680,12 +3933,12 @@ export default function PreviewPage() {
                       return true;
                     }
                   });
-                  // Do NOT auto-allow families not configured; they will render only if an explicit mapping exists.
-                  // First try strict linkedAttributes-based entries; then, if nothing matches, fall back to any entries
-                  // whose pricesByRow target this card's node ids.
+                  // Filter inventory entries based on linkedAttributes mapping and active status
                   // IMPORTANT: Use the specific current node ID for row-level active status check
                   const currentDisplayNodeId = String(displayNode?.id || selectedParent?.id || node?.id || '');
-                  let entriesAll = invPriceList.filter((e) => {
+                  
+                  // Helper to check if entry matches linkedAttributes mapping
+                  const matchesLinkedAttrs = (e) => {
                     const famLower = String(e?.scopeFamily || '').toLowerCase();
                     if (!familiesAllLower.has(famLower)) return false;
                     const fam = String(e?.scopeFamily || '');
@@ -2697,63 +3950,58 @@ export default function PreviewPage() {
                     if (Array.isArray(linked[specificKey]) && linked[specificKey].length) mapped = String(linked[specificKey][0] || '');
                     else if (Array.isArray(linked[genericLabelKey]) && linked[genericLabelKey].length) mapped = String(linked[genericLabelKey][0] || '');
                     else if (Array.isArray(linked[familyKey]) && linked[familyKey].length) mapped = String(linked[familyKey][0] || '');
-                    if (!mapped) return false; // require explicit mapping to show
-                    const matchesSub = mapped === 'ALL' || targetIdsLinkedAttrs.some((tid) => tid && String(mapped) === String(tid));
-                    if (!matchesSub) return false;
-
-                    // Require the row for the CURRENT display node to be Active
-                    try {
-                      const pbr = e && e.pricesByRow && typeof e.pricesByRow === 'object' ? e.pricesByRow : null;
-                      const statusMap = e && e.pricingStatusByRow && typeof e.pricingStatusByRow === 'object' ? e.pricingStatusByRow : {};
-                      if (!pbr) return false;
-                      const hasStatusMap = Object.keys(statusMap).length > 0;
-                      for (const [rk] of Object.entries(pbr)) {
-                        const parts = String(rk).split('|');
-                        // Only check rows that target the CURRENT display node
-                        if (!parts.some((id) => String(id) === currentDisplayNodeId)) continue;
-                        if (!hasStatusMap) return true; // legacy data without status
-                        const raw = String(statusMap[rk] || '').trim().toLowerCase();
-                        if (raw === 'active') return true;
-                      }
-                      return false;
-                    } catch {
-                      return false;
+                    if (!mapped) return false;
+                    return mapped === 'ALL' || targetIdsLinkedAttrs.some((tid) => tid && String(mapped) === String(tid));
+                  };
+                  
+                  // Helper to check if entry has active pricing for current node
+                  const hasActivePricing = (e) => {
+                    const pbr = e && e.pricesByRow && typeof e.pricesByRow === 'object' ? e.pricesByRow : null;
+                    const statusMap = e && e.pricingStatusByRow && typeof e.pricingStatusByRow === 'object' ? e.pricingStatusByRow : {};
+                    if (!pbr) return false; // no prices
+                    const hasStatusMap = Object.keys(statusMap).length > 0;
+                    for (const [rk] of Object.entries(pbr)) {
+                      const parts = String(rk).split('|');
+                      if (!parts.some((id) => String(id) === currentDisplayNodeId)) continue;
+                      if (!hasStatusMap) return true;
+                      const raw = String(statusMap[rk] || '').trim().toLowerCase();
+                      if (raw === 'active') return true;
                     }
-                  });
-
-                  if (entriesAll.length === 0 && invPriceList.length > 0) {
-                    // Fallback: any inventory entry that has a pricesByRow targeting the current node.
-                    // Always require Active status for the specific current node.
+                    return false;
+                  };
+                  
+                  // First: entries with linkedAttributes mapping AND active pricing
+                  let entriesAll = invPriceList.filter((e) => matchesLinkedAttrs(e) && hasActivePricing(e));
+                  
+                  // Second: if none found, try entries with linkedAttributes mapping (with or without prices)
+                  if (entriesAll.length === 0) {
+                    entriesAll = invPriceList.filter((e) => matchesLinkedAttrs(e));
+                  }
+                  
+                  // Third: if still none, try any entry with active pricing for this node
+                  if (entriesAll.length === 0) {
+                    entriesAll = invPriceList.filter((e) => hasActivePricing(e));
+                  }
+                  
+                  // Fourth: if still none, show all inventory entries (no prices required)
+                  if (entriesAll.length === 0) {
                     entriesAll = invPriceList.filter((e) => {
-                      try {
-                        const pbr = e && e.pricesByRow && typeof e.pricesByRow === 'object' ? e.pricesByRow : null;
-                        const statusMap = e && e.pricingStatusByRow && typeof e.pricingStatusByRow === 'object' ? e.pricingStatusByRow : {};
-                        if (!pbr) return false;
-                        const hasStatusMap = Object.keys(statusMap).length > 0;
-                        for (const [rk] of Object.entries(pbr)) {
-                          const parts = String(rk).split('|');
-                          // Only check rows that target the CURRENT display node
-                          if (!parts.some((id) => String(id) === currentDisplayNodeId)) continue;
-                          if (!hasStatusMap) return true; // legacy data
-                          const raw = String(statusMap[rk] || '').trim().toLowerCase();
-                          if (raw === 'active') return true;
-                        }
-                        return false;
-                      } catch { return false; }
+                      const famLower = String(e?.scopeFamily || '').toLowerCase();
+                      return familiesAllLower.has(famLower);
                     });
                   }
+                  
                   // Prefer entries that have a pricesByRow targeting this card's node ids
                   const entriesMatched = entriesAll.filter((entry) => {
                     try {
                       const pbr = entry && entry.pricesByRow && typeof entry.pricesByRow === 'object' ? entry.pricesByRow : null;
-                      if (!pbr) return false;
+                      if (!pbr) return true; // include entries without prices
                       for (const rk of Object.keys(pbr)) {
                         const parts = String(rk).split('|');
                         const matchesIds = targetIds.some(
                           (tid) => tid && parts.some((id) => String(id) === tid)
                         );
                         if (!matchesIds) continue;
-                        // Only treat this row as a match if its pricing status is Active
                         if (typeof rowPricingIsActive === 'function' && !rowPricingIsActive(entry, rk)) {
                           continue;
                         }
@@ -2764,20 +4012,21 @@ export default function PreviewPage() {
                   });
                   const entries = entriesMatched.length > 0 ? entriesMatched : entriesAll;
                   
-                  // Additional filter: ensure we only include entries with active row for the CURRENT display node
-                  // This is critical: we must check the specific node ID, not all parent IDs
+                  // Final filter: for entries WITH prices, ensure active row for current node
+                  // For entries WITHOUT prices, allow them through
                   const currentNodeId = String(displayNode?.id || selectedParent?.id || node?.id || '');
                   const filteredEntries = entries.filter((entry) => {
-                        // Ensure an active row exists specifically for the current node
                         try {
                           const pbr = entry && entry.pricesByRow && typeof entry.pricesByRow === 'object' ? entry.pricesByRow : null;
                           const statusMap = entry && entry.pricingStatusByRow && typeof entry.pricingStatusByRow === 'object' ? entry.pricingStatusByRow : {};
-                          if (!pbr) return false;
+                          
+                          // If no pricesByRow, allow the entry
+                          if (!pbr) return true;
+                          
                           // If no status map, allow entry (legacy data)
                           if (Object.keys(statusMap).length === 0) return true;
                           for (const [rk] of Object.entries(pbr)) {
                             const parts = String(rk).split('|');
-                            // Check if this row targets the CURRENT node specifically
                             if (!parts.some((id) => String(id) === currentNodeId)) continue;
                             const raw = String(statusMap[rk] || '').trim().toLowerCase();
                             if (raw === 'active') return true;
@@ -6458,6 +7707,86 @@ export default function PreviewPage() {
         <meta name="viewport" content="width=device-width, initial-scale=1" />
         <link rel="stylesheet" href="/redesignr.css?v=23" />
       </Head>
+      <style jsx global>{`
+        @keyframes setupTimerPulse {
+          0% { transform: scale(1); opacity: 0.75; }
+          50% { transform: scale(1.55); opacity: 0.2; }
+          100% { transform: scale(1); opacity: 0.75; }
+        }
+        @keyframes setupTimerSlideIn {
+          from { transform: translateY(-6px); opacity: 0; }
+          to { transform: translateY(0); opacity: 1; }
+        }
+      `}</style>
+      {setupCreationFinalMs != null && (
+        <div
+          style={{
+            position: "fixed",
+            top: 96,
+            right: 16,
+            zIndex: 2600,
+            background: "linear-gradient(135deg, #ffffff, #ecfdf5)",
+            border: "1px solid rgba(16,185,129,0.25)",
+            borderRadius: 12,
+            boxShadow: "0 18px 40px rgba(15,23,42,0.18)",
+            padding: "12px 12px",
+            fontFamily: "Poppins, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif",
+            display: "flex",
+            alignItems: "center",
+            gap: 10,
+            minWidth: 250,
+            animation: "setupTimerSlideIn 220ms ease-out",
+          }}
+        >
+          <div
+            style={{
+              width: 10,
+              height: 42,
+              borderRadius: 999,
+              background: "linear-gradient(180deg, #10b981, #06b6d4)",
+              boxShadow: "0 10px 18px rgba(16,185,129,0.25)",
+              flexShrink: 0,
+            }}
+          />
+          <div style={{ display: "flex", flexDirection: "column", lineHeight: 1.1 }}>
+            <div style={{ fontSize: 12, color: "#065f46", fontWeight: 700 }}>
+              Preview ready
+            </div>
+            <div
+              style={{
+                fontSize: 14,
+                color: "#0f172a",
+                fontWeight: 700,
+                fontVariantNumeric: "tabular-nums",
+                letterSpacing: 0.2,
+              }}
+            >
+              {formatElapsed(setupCreationFinalMs)}
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={() => {
+              try {
+                setSetupCreationFinalMs(null);
+                setSetupCreationTimerKey("");
+              } catch {}
+            }}
+            style={{
+              border: "none",
+              background: "transparent",
+              cursor: "pointer",
+              color: "#6b7280",
+              fontSize: 18,
+              lineHeight: 1,
+              padding: "2px 6px",
+              borderRadius: 8,
+            }}
+          >
+            ×
+          </button>
+        </div>
+      )}
       {loading ? (
         <FullPageShimmer />
       ) : (
@@ -6503,6 +7832,7 @@ export default function PreviewPage() {
               }
             }}
             onOpenLogin={handleOpenOtpModal}
+            onOpenSetupBusiness={handleOpenSetupBusiness}
             onLogout={handleLogout}
             services={serviceLabels}
             categoryTree={categoryTree}
@@ -7185,6 +8515,901 @@ export default function PreviewPage() {
             ) : null}
             {renderTree(categoryTree)}
           </main>
+
+          {showSetupCategoryModal && (
+            <div
+              style={{
+                position: "fixed",
+                inset: 0,
+                backgroundColor: "rgba(0,0,0,0.45)",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                zIndex: 1400,
+              }}
+            >
+              <div
+                style={{
+                  width: "90%",
+                  maxWidth: 520,
+                  maxHeight: "80vh",
+                  overflowY: "auto",
+                  background: "#ffffff",
+                  borderRadius: 16,
+                  padding: 20,
+                  boxShadow: "0 18px 36px rgba(15,23,42,0.3)",
+                  fontFamily: "Poppins, sans-serif",
+                }}
+              >
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    marginBottom: 12,
+                  }}
+                >
+                  <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+                    <h2 style={{ margin: 0, fontSize: 20 }}>Choose a Category</h2>
+                    {setupCreationFinalMs != null ? (
+                      <div
+                        style={{
+                          display: "inline-flex",
+                          alignItems: "center",
+                          gap: 8,
+                          alignSelf: "flex-start",
+                          padding: "6px 10px",
+                          borderRadius: 999,
+                          background: "linear-gradient(135deg, #ecfdf5, #ffffff)",
+                          border: "1px solid rgba(16,185,129,0.25)",
+                          color: "#065f46",
+                          fontSize: 12,
+                          fontWeight: 700,
+                        }}
+                      >
+                        <span
+                          style={{
+                            width: 8,
+                            height: 8,
+                            borderRadius: 999,
+                            background: "#10b981",
+                            boxShadow: "0 0 0 4px rgba(16,185,129,0.18)",
+                          }}
+                        />
+                        Preview ready in
+                        <span style={{ fontVariantNumeric: "tabular-nums" }}>
+                          {formatElapsed(setupCreationFinalMs)}
+                        </span>
+                      </div>
+                    ) : setupCreationTimerRunning ? (
+                      <div
+                        style={{
+                          display: "inline-flex",
+                          alignItems: "center",
+                          gap: 8,
+                          alignSelf: "flex-start",
+                          padding: "6px 10px",
+                          borderRadius: 999,
+                          background: "#f8fafc",
+                          border: "1px solid #e2e8f0",
+                          color: "#0f172a",
+                          fontSize: 12,
+                          fontWeight: 600,
+                        }}
+                      >
+                        <span style={{ position: "relative", width: 10, height: 10, display: "inline-block" }}>
+                          <span
+                            style={{
+                              position: "absolute",
+                              inset: 0,
+                              borderRadius: 999,
+                              background: "rgba(16,185,129,0.25)",
+                              animation: "setupTimerPulse 1.1s ease-in-out infinite",
+                            }}
+                          />
+                          <span
+                            style={{
+                              position: "absolute",
+                              inset: 2,
+                              borderRadius: 999,
+                              background: "#10b981",
+                            }}
+                          />
+                        </span>
+                        Creating preview
+                        <span style={{ fontVariantNumeric: "tabular-nums" }}>
+                          {formatElapsed(setupCreationElapsedMs)}
+                        </span>
+                      </div>
+                    ) : null}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      try {
+                        if (typeof window !== "undefined" && vendorId && categoryId) {
+                          const selectedCategoryId = setupSelectedCategory?._id || setupSelectedCategory?.id || "";
+                          if (selectedCategoryId) {
+                            const resumeKey = makeSetupResumeKey(vendorId, categoryId);
+                            window.localStorage.setItem(
+                              resumeKey,
+                              JSON.stringify({ selectedCategoryId: String(selectedCategoryId) })
+                            );
+                          }
+                        }
+                      } catch {}
+                      setShowSetupCategoryModal(false);
+                      stopSetupCreationTimer();
+                    }}
+                    style={{
+                      border: "none",
+                      background: "transparent",
+                      fontSize: 20,
+                      cursor: "pointer",
+                    }}
+                  >
+                    ×
+                  </button>
+                </div>
+                <p style={{ marginTop: 0, marginBottom: 12, fontSize: 13, color: "#6b7280" }}>
+                  Select the category that best matches your business. (This is a preview; selection is not saved yet.)
+                </p>
+                {setupCategoriesLoading && (
+                  <div style={{ fontSize: 14, color: "#4b5563" }}>Loading categories...</div>
+                )}
+                {setupCategoriesError && (
+                  <div style={{ fontSize: 13, color: "#b91c1c", marginBottom: 8 }}>
+                    {setupCategoriesError}
+                  </div>
+                )}
+                {!setupCategoriesLoading && setupCategories.length === 0 && !setupCategoriesError && (
+                  <div style={{ fontSize: 13, color: "#6b7280" }}>No categories found.</div>
+                )}
+                {setupCategories.length > 0 && (
+                  <div style={{ marginTop: 8 }}>
+                    <select
+                      value={setupSelectedCategory ? String(setupSelectedCategory._id || setupSelectedCategory.id || "") : ""}
+                      onChange={(e) => {
+                        const id = e.target.value;
+                        const cat = setupCategories.find((c) => String(c._id) === id);
+                        if (!cat) return;
+                        console.log("Setup My Business - selected category", cat);
+                        setSetupSelectedCategory(cat);
+                        try {
+                          if (typeof window !== "undefined" && vendorId && categoryId) {
+                            const selectedCategoryId = cat?._id || cat?.id || "";
+                            if (selectedCategoryId) {
+                              const resumeKey = makeSetupResumeKey(vendorId, categoryId);
+                              window.localStorage.setItem(
+                                resumeKey,
+                                JSON.stringify({ selectedCategoryId: String(selectedCategoryId) })
+                              );
+                            }
+                          }
+                        } catch {}
+                      }}
+                      style={{
+                        width: "100%",
+                        padding: "10px 12px",
+                        borderRadius: 999,
+                        border: "1px solid #e5e7eb",
+                        background: "#f9fafb",
+                        fontSize: 14,
+                        cursor: "pointer",
+                      }}
+                    >
+                      <option value="" disabled>
+                        Select a category
+                      </option>
+                      {setupCategories.map((cat) => (
+                        <option key={cat._id} value={cat._id}>
+                          {cat.name}
+                        </option>
+                      ))}
+                    </select>
+                    {setupSelectedCategory && (
+                      <div
+                        style={{
+                          marginTop: 12,
+                          display: "flex",
+                          flexDirection: "column",
+                          gap: 8,
+                        }}
+                      >
+                        <button
+                          type="button"
+                          onClick={() => {
+                            try {
+                              if (typeof window !== "undefined" && vendorId && categoryId) {
+                                const resumeKey = makeSetupResumeKey(vendorId, categoryId);
+                                const selectedCategoryId = setupSelectedCategory?._id || setupSelectedCategory?.id || "";
+                                if (selectedCategoryId) {
+                                  window.localStorage.setItem(
+                                    resumeKey,
+                                    JSON.stringify({ selectedCategoryId: String(selectedCategoryId) })
+                                  );
+                                }
+                              }
+                              setSetupShowPlacesStep(true);
+                            } catch {
+                              setSetupShowPlacesStep(true);
+                            }
+                          }}
+                          disabled={!setupSelectedCategory}
+                          style={{
+                            width: "100%",
+                            padding: 10,
+                            borderRadius: 999,
+                            border: "none",
+                            background: setupSelectedCategory ? "#2563eb" : "#9ca3af",
+                            color: "#ffffff",
+                            fontWeight: 600,
+                            fontSize: 14,
+                            cursor: setupSelectedCategory ? "pointer" : "not-allowed",
+                          }}
+                        >
+                          Connect Your Google Business
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            try {
+                              try {
+                                if (typeof window !== "undefined" && vendorId && categoryId) {
+                                  const selectedCategoryId = setupSelectedCategory?._id || setupSelectedCategory?.id || "";
+                                  if (selectedCategoryId) {
+                                    const resumeKey = makeSetupResumeKey(vendorId, categoryId);
+                                    window.localStorage.setItem(
+                                      resumeKey,
+                                      JSON.stringify({ selectedCategoryId: String(selectedCategoryId) })
+                                    );
+                                  }
+                                }
+                              } catch {}
+                              setSetupMobileFlowOpen(true);
+                              setSetupOtpPhoneInfo(null);
+                              setSetupOtpSent(false);
+                              setSetupOtpSending(false);
+                              setSetupOtpSendError("");
+                              setSetupOtpCode("");
+                              setSetupOtpVerifying(false);
+                              setSetupOtpVerifyError("");
+                              setSetupOtpVerified(false);
+                              setSetupOtpBypass(false);
+                              setSetupShowPlacesStep(false);
+                            } catch (e) {
+                              console.error("Failed to open mobile login from setup modal", e);
+                            }
+                          }}
+                          style={{
+                            width: "100%",
+                            padding: 10,
+                            borderRadius: 999,
+                            border: "1px solid #e5e7eb",
+                            background: "#ffffff",
+                            color: "#111827",
+                            fontWeight: 500,
+                            fontSize: 14,
+                            cursor: "pointer",
+                          }}
+                        >
+                          Continue With Mobile Number
+                        </button>
+                        {setupMobileFlowOpen && (
+                          <div
+                            style={{
+                              marginTop: 10,
+                              padding: 12,
+                              borderRadius: 14,
+                              border: "1px solid #e5e7eb",
+                              background: "#f9fafb",
+                            }}
+                          >
+                            <div style={{ fontSize: 13, fontWeight: 700, color: "#111827", marginBottom: 8 }}>
+                              Verify your mobile number
+                            </div>
+                            <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
+                              <select
+                                value={setupMobileCountryCode}
+                                onChange={(e) => {
+                                  const v = String(e.target.value || "").replace(/[^0-9]/g, "");
+                                  setSetupMobileCountryCode(v);
+                                  setSetupOtpSent(false);
+                                  setSetupOtpSendError("");
+                                }}
+                                disabled={countriesLoading}
+                                style={{
+                                  width: 140,
+                                  padding: 8,
+                                  borderRadius: 999,
+                                  border: "1px solid #d1d5db",
+                                  fontSize: 13,
+                                  background: "#ffffff",
+                                  cursor: countriesLoading ? "not-allowed" : "pointer",
+                                }}
+                              >
+                                {countries.length === 0 ? (
+                                  <option value={setupMobileCountryCode}>+{setupMobileCountryCode}</option>
+                                ) : (
+                                  countries.map((c) => (
+                                    <option key={`${c.code}-${c.name}`} value={c.code}>
+                                      +{c.code} {c.name ? `(${c.name})` : ""}
+                                    </option>
+                                  ))
+                                )}
+                              </select>
+                              <input
+                                type="text"
+                                value={setupMobilePhone}
+                                onChange={(e) => {
+                                  const v = String(e.target.value || "").replace(/[^0-9]/g, "");
+                                  setSetupMobilePhone(v);
+                                  setSetupOtpSent(false);
+                                  setSetupOtpSendError("");
+                                }}
+                                placeholder="Mobile number"
+                                style={{
+                                  flex: 1,
+                                  padding: 8,
+                                  borderRadius: 999,
+                                  border: "1px solid #d1d5db",
+                                  fontSize: 13,
+                                  background: "#ffffff",
+                                }}
+                              />
+                            </div>
+                            {!setupOtpSent ? (
+                              <>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    try {
+                                      const cc = String(setupMobileCountryCode || "").trim();
+                                      const ph = String(setupMobilePhone || "").trim();
+                                      if (!cc || !ph) {
+                                        setSetupOtpSendError("Please enter country code and phone");
+                                        return;
+                                      }
+                                      const info = { countryCode: cc, phone: ph, full: `+${cc}${ph}` };
+                                      setSetupOtpPhoneInfo(info);
+                                      setSetupOtpBypass(false);
+                                      setSetupOtpVerified(false);
+                                      handleSetupSendOtp(info);
+                                    } catch {}
+                                  }}
+                                  disabled={setupOtpSending || setupOtpBypass}
+                                  style={{
+                                    padding: "8px 14px",
+                                    borderRadius: 999,
+                                    border: "none",
+                                    background: "#059669",
+                                    color: "#fff",
+                                    fontSize: 13,
+                                    fontWeight: 600,
+                                    cursor: setupOtpSending || setupOtpBypass ? "not-allowed" : "pointer",
+                                  }}
+                                >
+                                  {setupOtpSending ? "Sending..." : "Send OTP"}
+                                </button>
+                                <label
+                                  style={{
+                                    display: "flex",
+                                    alignItems: "center",
+                                    gap: 8,
+                                    marginTop: 10,
+                                    fontSize: 12,
+                                    color: "#111827",
+                                    userSelect: "none",
+                                  }}
+                                >
+                                  <input
+                                    type="checkbox"
+                                    checked={setupOtpBypass}
+                                    onChange={(e) => {
+                                      const checked = !!e.target.checked;
+                                      setSetupOtpBypass(checked);
+                                      if (!checked) {
+                                        if (!setupGeneratedDummyVendorId) {
+                                          setSetupOtpVerified(false);
+                                          setSetupVerifiedCustomerId("");
+                                          setSetupVerifiedToken("");
+                                        }
+                                        return;
+                                      }
+
+                                      try {
+                                        const cc = String(setupMobileCountryCode || "").trim();
+                                        const ph = String(setupMobilePhone || "").trim();
+                                        if (!cc || !ph) {
+                                          setSetupOtpSendError("Please enter country code and phone");
+                                          setSetupOtpBypass(false);
+                                          return;
+                                        }
+                                        const info = { countryCode: cc, phone: ph, full: `+${cc}${ph}` };
+                                        setSetupOtpPhoneInfo(info);
+                                        setSetupOtpSent(false);
+                                        setSetupOtpSending(false);
+                                        setSetupOtpSendError("");
+                                        setSetupOtpCode("");
+                                        setSetupOtpVerifyError("");
+                                        setSetupOtpVerified(false);
+                                        handleSetupBypassOtp(info);
+                                      } catch {}
+                                    }}
+                                  />
+                                  Bypass OTP
+                                </label>
+                              </>
+                            ) : (
+                              <>
+                                <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                                  <input
+                                    type="text"
+                                    value={setupOtpCode}
+                                    onChange={(e) => setSetupOtpCode(e.target.value)}
+                                    placeholder="Enter OTP"
+                                    maxLength={6}
+                                    disabled={setupOtpBypass}
+                                    style={{
+                                      flex: 1,
+                                      padding: 8,
+                                      borderRadius: 999,
+                                      border: "1px solid #d1d5db",
+                                      fontSize: 13,
+                                      background: "#ffffff",
+                                    }}
+                                  />
+                                  <button
+                                    type="button"
+                                    onClick={handleSetupVerifyOtp}
+                                    disabled={setupOtpVerifying || setupOtpBypass}
+                                    style={{
+                                      padding: "8px 14px",
+                                      borderRadius: 999,
+                                      border: "none",
+                                      background: "#2563eb",
+                                      color: "#fff",
+                                      fontSize: 13,
+                                      fontWeight: 600,
+                                      cursor: setupOtpVerifying || setupOtpBypass ? "not-allowed" : "pointer",
+                                    }}
+                                  >
+                                    {setupOtpVerifying ? "Verifying..." : "Verify"}
+                                  </button>
+                                </div>
+                                <label
+                                  style={{
+                                    display: "flex",
+                                    alignItems: "center",
+                                    gap: 8,
+                                    marginTop: 10,
+                                    fontSize: 12,
+                                    color: "#111827",
+                                    userSelect: "none",
+                                  }}
+                                >
+                                  <input
+                                    type="checkbox"
+                                    checked={setupOtpBypass}
+                                    onChange={(e) => {
+                                      const checked = !!e.target.checked;
+                                      setSetupOtpBypass(checked);
+                                      if (!checked) {
+                                        if (!setupGeneratedDummyVendorId) {
+                                          setSetupOtpVerified(false);
+                                          setSetupVerifiedCustomerId("");
+                                          setSetupVerifiedToken("");
+                                        }
+                                        return;
+                                      }
+
+                                      try {
+                                        const cc = String(setupMobileCountryCode || "").trim();
+                                        const ph = String(setupMobilePhone || "").trim();
+                                        if (!cc || !ph) {
+                                          setSetupOtpSendError("Please enter country code and phone");
+                                          setSetupOtpBypass(false);
+                                          return;
+                                        }
+                                        const info = { countryCode: cc, phone: ph, full: `+${cc}${ph}` };
+                                        setSetupOtpPhoneInfo(info);
+                                        setSetupOtpSent(false);
+                                        setSetupOtpSending(false);
+                                        setSetupOtpSendError("");
+                                        setSetupOtpCode("");
+                                        setSetupOtpVerifyError("");
+                                        setSetupOtpVerified(false);
+                                        handleSetupBypassOtp(info);
+                                      } catch {}
+                                    }}
+                                  />
+                                  Bypass OTP
+                                </label>
+                              </>
+                            )}
+                            {setupOtpSendError && (
+                              <div style={{ color: "#b91c1c", fontSize: 12, marginTop: 6 }}>
+                                {setupOtpSendError}
+                              </div>
+                            )}
+                            {setupOtpVerifyError && (
+                              <div style={{ color: "#b91c1c", fontSize: 12, marginTop: 6 }}>
+                                {setupOtpVerifyError}
+                              </div>
+                            )}
+                            {setupOtpVerified && (
+                              <div style={{ color: "#065f46", fontSize: 12, marginTop: 8, fontWeight: 700 }}>
+                                ✓ Phone verified
+                              </div>
+                            )}
+                          </div>
+                        )}
+                        {setupShowPlacesStep && (!setupMobileFlowOpen || setupOtpVerified || setupOtpBypass) && (
+                          <div
+                            style={{
+                              marginTop: 12,
+                              paddingTop: 12,
+                              borderTop: "1px solid #e5e7eb",
+                            }}
+                          >
+                            <div
+                              style={{
+                                fontSize: 13,
+                                fontWeight: 500,
+                                marginBottom: 6,
+                                color: "#111827",
+                              }}
+                            >
+                              Enter your business name to find it on Google
+                            </div>
+                            <div style={{ display: "flex", gap: 6, marginBottom: 8 }}>
+                              <input
+                                type="text"
+                                value={setupPlaceQuery}
+                                onChange={(e) => setSetupPlaceQuery(e.target.value)}
+                                placeholder="e.g. Tirumala Motor Driving School"
+                                style={{
+                                  flex: 1,
+                                  padding: 8,
+                                  borderRadius: 999,
+                                  border: "1px solid #d1d5db",
+                                  fontSize: 13,
+                                }}
+                              />
+                              <button
+                                type="button"
+                                onClick={handleSetupPlacesSearch}
+                                style={{
+                                  padding: "8px 12px",
+                                  borderRadius: 999,
+                                  border: "none",
+                                  background: "#059669",
+                                  color: "#ffffff",
+                                  fontSize: 13,
+                                  fontWeight: 500,
+                                  cursor: "pointer",
+                                }}
+                              >
+                                {setupPlaceLoading ? "Searching..." : "Search"}
+                              </button>
+                            </div>
+                            {setupPlaceError && (
+                              <div style={{ fontSize: 12, color: "#b91c1c", marginBottom: 4 }}>
+                                {setupPlaceError}
+                              </div>
+                            )}
+                            {setupPlaceResults.length > 0 && (
+                              <div
+                                style={{
+                                  maxHeight: 140,
+                                  overflowY: "auto",
+                                  fontSize: 12,
+                                  borderRadius: 12,
+                                  border: "1px solid #e5e7eb",
+                                  padding: 6,
+                                  background: "#f9fafb",
+                                }}
+                              >
+                                {setupPlaceResults.map((r) => (
+                                  <div
+                                    key={r.placeId}
+                                    style={{
+                                      padding: "6px 4px",
+                                      borderBottom: "1px solid #e5e7eb",
+                                      cursor: "pointer",
+                                    }}
+                                    onClick={() => handleSetupSelectPlace(r.placeId)}
+                                  >
+                                    <div style={{ fontWeight: 600 }}>{r.name}</div>
+                                    <div style={{ color: "#6b7280" }}>{r.address}</div>
+                                    <div style={{ color: "#9ca3af" }}>
+                                      Rating: {r.rating ?? "-"} ({r.userRatingsTotal ?? 0} reviews)
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                            {setupSelectedPlace && (
+                              <div
+                                style={{
+                                  marginTop: 8,
+                                  padding: 8,
+                                  borderRadius: 12,
+                                  background: "#f3f4f6",
+                                  fontSize: 12,
+                                }}
+                              >
+                                <div style={{ fontWeight: 600, marginBottom: 4 }}>
+                                  Auto-populated details
+                                </div>
+                                <div style={{ color: "#111827" }}>
+                                  <strong>Business Name:</strong> {setupSelectedPlace.name || "-"}
+                                </div>
+                                <div style={{ color: "#111827" }}>
+                                  <strong>Category:</strong> {setupSelectedCategory?.name || "-"}
+                                </div>
+                                <div style={{ color: "#111827" }}>
+                                  <strong>Address:</strong> {setupSelectedPlace.address || "-"}
+                                </div>
+                                <div style={{ color: "#111827" }}>
+                                  <strong>Latitude / Longitude:</strong>{" "}
+                                  {setupSelectedPlace.location
+                                    ? `${setupSelectedPlace.location.lat}, ${setupSelectedPlace.location.lng}`
+                                    : "-"}
+                                </div>
+                                <div style={{ color: "#111827" }}>
+                                  <strong>Phone:</strong> {setupSelectedPlace.phone || "-"}
+                                </div>
+                                <div style={{ color: "#111827" }}>
+                                  <strong>Website:</strong>{" "}
+                                  {setupSelectedPlace.website || "-"}
+                                </div>
+                                <div style={{ color: "#111827" }}>
+                                  <strong>Google Rating:</strong>{" "}
+                                  {typeof setupSelectedPlace.rating === "number"
+                                    ? setupSelectedPlace.rating
+                                    : "-"}
+                                </div>
+                                <div style={{ color: "#111827" }}>
+                                  <strong>Total Ratings:</strong>{" "}
+                                  {typeof setupSelectedPlace.userRatingsTotal === "number"
+                                    ? setupSelectedPlace.userRatingsTotal
+                                    : "-"}
+                                </div>
+
+                                {/* OTP Verification Section */}
+                                {!setupMobileFlowOpen && setupOtpPhoneInfo && !setupOtpVerified && (
+                                  <div
+                                    style={{
+                                      marginTop: 12,
+                                      paddingTop: 12,
+                                      borderTop: "1px solid #d1d5db",
+                                    }}
+                                  >
+                                    <div style={{ fontWeight: 600, marginBottom: 6, color: "#111827" }}>
+                                      Verify Phone: +{setupOtpPhoneInfo.countryCode}{setupOtpPhoneInfo.phone}
+                                    </div>
+                                    {!setupOtpSent ? (
+                                      <>
+                                        <button
+                                          type="button"
+                                          onClick={() => handleSetupSendOtp()}
+                                          disabled={setupOtpSending || setupOtpBypass}
+                                          style={{
+                                            padding: "8px 14px",
+                                            borderRadius: 999,
+                                            border: "none",
+                                            background: "#059669",
+                                            color: "#fff",
+                                            fontSize: 13,
+                                            fontWeight: 500,
+                                            cursor: setupOtpSending ? "not-allowed" : "pointer",
+                                          }}
+                                        >
+                                          {setupOtpSending ? "Sending..." : "Send OTP"}
+                                        </button>
+                                        <label
+                                          style={{
+                                            display: "flex",
+                                            alignItems: "center",
+                                            gap: 8,
+                                            marginTop: 10,
+                                            fontSize: 12,
+                                            color: "#111827",
+                                            userSelect: "none",
+                                          }}
+                                        >
+                                          <input
+                                            type="checkbox"
+                                            checked={setupOtpBypass}
+                                            onChange={(e) => {
+                                              const checked = !!e.target.checked;
+                                              setSetupOtpBypass(checked);
+                                              if (checked) {
+                                                setSetupOtpSent(false);
+                                                setSetupOtpSending(false);
+                                                setSetupOtpSendError("");
+                                                setSetupOtpCode("");
+                                                setSetupOtpVerifying(false);
+                                                setSetupOtpVerifyError("");
+                                                (async () => {
+                                                  try {
+                                                    if (!setupOtpPhoneInfo) {
+                                                      setSetupOtpSendError("Phone number not available from Google");
+                                                      return;
+                                                    }
+                                                    const bypassRes = await fetch(`/api/customers/bypass-otp`, {
+                                                      method: "POST",
+                                                      headers: { "Content-Type": "application/json" },
+                                                      body: JSON.stringify({
+                                                        countryCode: setupOtpPhoneInfo.countryCode,
+                                                        phone: setupOtpPhoneInfo.phone,
+                                                      }),
+                                                    });
+                                                    const bypassJson = await bypassRes.json().catch(() => ({}));
+                                                    if (!bypassRes.ok) {
+                                                      const msg =
+                                                        bypassJson?.message ||
+                                                        `OTP bypass failed (status ${bypassRes.status})`;
+                                                      throw new Error(msg);
+                                                    }
+
+                                                    const customerId = bypassJson?.customer?._id || bypassJson?.customer?.id || null;
+                                                    const catId = setupSelectedCategory?._id || setupSelectedCategory?.id || null;
+                                                    const businessName = setupSelectedPlace?.name || "";
+                                                    const placeLocation = setupSelectedPlace?.location || null;
+                                                    const placeAddress = setupSelectedPlace?.address || "";
+                                                    const openingHoursText = Array.isArray(setupSelectedPlace?.openingHoursText)
+                                                      ? setupSelectedPlace.openingHoursText
+                                                      : [];
+                                                    const phoneFull = setupOtpPhoneInfo
+                                                      ? `+${setupOtpPhoneInfo.countryCode}${setupOtpPhoneInfo.phone}`
+                                                      : "";
+
+                                                    if (customerId && catId && businessName && phoneFull) {
+                                                      const dvRes = await fetch(`${API_BASE_URL}/api/dummy-vendors`, {
+                                                        method: "POST",
+                                                        headers: { "Content-Type": "application/json" },
+                                                        body: JSON.stringify({
+                                                          customerId: String(customerId),
+                                                          phone: String(phoneFull),
+                                                          businessName: String(businessName),
+                                                          contactName: String(businessName),
+                                                          categoryId: String(catId),
+                                                          status: "Registered",
+                                                          location: {
+                                                            lat: typeof placeLocation?.lat === "number" ? placeLocation.lat : undefined,
+                                                            lng: typeof placeLocation?.lng === "number" ? placeLocation.lng : undefined,
+                                                            address: String(placeAddress || ""),
+                                                          },
+                                                          openingHoursText,
+                                                        }),
+                                                      });
+                                                      const dvJson = await dvRes.json().catch(() => ({}));
+                                                      const dvId = dvJson?._id || dvJson?.id || "";
+                                                      if (dvId) {
+                                                        setSetupGeneratedDummyVendorId(String(dvId));
+                                                        try {
+                                                          if (typeof window !== "undefined") {
+                                                            const token = bypassJson && bypassJson.token ? String(bypassJson.token) : "";
+                                                            if (token) {
+                                                              window.localStorage.setItem(`previewToken:${dvId}:${catId}`, token);
+                                                            }
+                                                            const identityKey = `previewIdentity:${dvId}:${catId}`;
+                                                            const existingIdentity = window.localStorage.getItem(identityKey);
+                                                            if (!existingIdentity) {
+                                                              window.localStorage.setItem(
+                                                                identityKey,
+                                                                JSON.stringify({
+                                                                  role: "vendor",
+                                                                  displayName: businessName || "Vendor",
+                                                                  loggedIn: true,
+                                                                })
+                                                              );
+                                                            }
+                                                          }
+                                                        } catch {}
+                                                      }
+                                                    }
+
+                                                    setSetupOtpVerified(true);
+                                                    setShowSetupPreviewPrompt(true);
+                                                  } catch (err) {
+                                                    console.error("Bypass OTP flow failed", err);
+                                                    setSetupOtpSendError(err?.message || "OTP bypass failed");
+                                                    setSetupOtpBypass(false);
+                                                    setSetupOtpVerified(false);
+                                                  }
+                                                })();
+                                              } else {
+                                                setSetupOtpVerified(false);
+                                              }
+                                            }}
+                                          />
+                                          Bypass OTP
+                                        </label>
+                                        {setupOtpSendError && (
+                                          <div style={{ color: "#b91c1c", fontSize: 11, marginTop: 4 }}>
+                                            {setupOtpSendError}
+                                          </div>
+                                        )}
+                                      </>
+                                    ) : (
+                                      <>
+                                        <div style={{ display: "flex", gap: 6, marginBottom: 6 }}>
+                                          <input
+                                            type="text"
+                                            value={setupOtpCode}
+                                            onChange={(e) => setSetupOtpCode(e.target.value)}
+                                            placeholder="Enter OTP"
+                                            maxLength={6}
+                                            style={{
+                                              flex: 1,
+                                              padding: 8,
+                                              borderRadius: 999,
+                                              border: "1px solid #d1d5db",
+                                              fontSize: 13,
+                                            }}
+                                          />
+                                          <button
+                                            type="button"
+                                            onClick={handleSetupVerifyOtp}
+                                            disabled={setupOtpVerifying}
+                                            style={{
+                                              padding: "8px 14px",
+                                              borderRadius: 999,
+                                              border: "none",
+                                              background: "#2563eb",
+                                              color: "#fff",
+                                              fontSize: 13,
+                                              fontWeight: 500,
+                                              cursor: setupOtpVerifying ? "not-allowed" : "pointer",
+                                            }}
+                                          >
+                                            {setupOtpVerifying ? "Verifying..." : "Verify"}
+                                          </button>
+                                        </div>
+                                        {setupOtpVerifyError && (
+                                          <div style={{ color: "#b91c1c", fontSize: 11 }}>
+                                            {setupOtpVerifyError}
+                                          </div>
+                                        )}
+                                      </>
+                                    )}
+                                  </div>
+                                )}
+                                {setupOtpVerified && (
+                                  <div
+                                    style={{
+                                      marginTop: 12,
+                                      padding: 8,
+                                      borderRadius: 8,
+                                      background: "#d1fae5",
+                                      color: "#065f46",
+                                      fontSize: 12,
+                                      fontWeight: 600,
+                                    }}
+                                  >
+                                    ✓ Phone verified successfully!
+                                  </div>
+                                )}
+
+                                {setupGeneratePreviewError && (
+                                  <div style={{ color: "#b91c1c", fontSize: 11, marginTop: 10 }}>
+                                    {setupGeneratePreviewError}
+                                  </div>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
           <BenefitsSection
             categoryName={String(categoryTree?.name || "").toLowerCase()}
             businessName={vendor?.businessName}
@@ -7206,6 +9431,1290 @@ export default function PreviewPage() {
               setVendor((prev) => ({ ...prev, location: newLoc }));
             }}
           />
+          {showSetupPreviewPrompt && (
+            <div
+              style={{
+                position: "fixed",
+                inset: 0,
+                background: "rgba(0,0,0,0.4)",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                zIndex: 2500,
+              }}
+            >
+              <div
+                style={{
+                  width: 360,
+                  maxWidth: "92vw",
+                  borderRadius: 16,
+                  background: "#ffffff",
+                  padding: "18px 16px 14px",
+                  boxShadow: "0 20px 40px rgba(0,0,0,0.25)",
+                  fontFamily: "Poppins, sans-serif",
+                }}
+                onClick={(e) => e.stopPropagation()}
+              >
+                <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 6, color: "#111827" }}>
+                  Your profile has been registered
+                </div>
+                <div style={{ fontSize: 13, color: "#6b7280", marginBottom: 14 }}>
+                  Continue to select your services.
+                </div>
+                {setupPreviewPromptError && (
+                  <div style={{ color: "#b91c1c", fontSize: 12, marginBottom: 10 }}>
+                    {setupPreviewPromptError}
+                  </div>
+                )}
+                <div style={{ display: "flex", gap: 10 }}>
+                  <button
+                    type="button"
+                    onClick={handleSetupPreviewPromptNo}
+                    disabled={setupPreviewPromptLoading}
+                    style={{
+                      flex: 1,
+                      padding: "10px 12px",
+                      borderRadius: 10,
+                      border: "1px solid #d1d5db",
+                      background: "#ffffff",
+                      color: "#111827",
+                      fontWeight: 600,
+                      fontSize: 13,
+                      cursor: setupPreviewPromptLoading ? "not-allowed" : "pointer",
+                    }}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleSetupPreviewPromptYes}
+                    disabled={setupPreviewPromptLoading}
+                    style={{
+                      flex: 1,
+                      padding: "10px 12px",
+                      borderRadius: 10,
+                      border: "none",
+                      background: "#111827",
+                      color: "#ffffff",
+                      fontWeight: 700,
+                      fontSize: 13,
+                      cursor: setupPreviewPromptLoading ? "not-allowed" : "pointer",
+                    }}
+                  >
+                    {setupPreviewPromptLoading ? "Please wait..." : "Next"}
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+          {/* Subcategory Selection Popup for Generate Preview Page */}
+          {showSubcategoryPopup && (
+            <div
+              style={{
+                position: "fixed",
+                top: 0,
+                left: 0,
+                right: 0,
+                bottom: 0,
+                background: "rgba(0,0,0,0.4)",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                zIndex: 2400,
+              }}
+              onClick={() => setShowSubcategoryPopup(false)}
+            >
+              <div
+                style={{
+                  background: "#fff",
+                  padding: 24,
+                  borderRadius: 16,
+                  width: 420,
+                  maxHeight: "80vh",
+                  overflowY: "auto",
+                  fontFamily: "Poppins, sans-serif",
+                  boxShadow: "0 20px 40px rgba(0,0,0,0.25)",
+                }}
+                onClick={(e) => e.stopPropagation()}
+              >
+                <h3 style={{ margin: 0, marginBottom: 16, fontSize: 18, fontWeight: 600, color: "#111827" }}>
+                  Select Services to Show
+                </h3>
+                <p style={{ margin: 0, marginBottom: 16, fontSize: 13, color: "#6b7280" }}>
+                  Choose which services you want to display on your preview page. Only selected services will be shown as active.
+                </p>
+                {setupSubcategoriesLoading ? (
+                  <div style={{ textAlign: "center", padding: 20, color: "#6b7280" }}>Loading services...</div>
+                ) : setupSubcategories.length === 0 ? (
+                  <div style={{ textAlign: "center", padding: 20, color: "#6b7280" }}>No services found for this category.</div>
+                ) : (
+                  <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                    {setupSubcategories.map((subcat) => {
+                      const id = subcat._id || subcat.id;
+                      const name = subcat.name || "Unnamed Service";
+                      const isChecked = !!setupSelectedSubcategories[id];
+                      return (
+                        <label
+                          key={id}
+                          style={{
+                            display: "flex",
+                            alignItems: "center",
+                            gap: 10,
+                            padding: "10px 12px",
+                            borderRadius: 8,
+                            border: isChecked ? "2px solid #2563eb" : "1px solid #e5e7eb",
+                            background: isChecked ? "#eff6ff" : "#fff",
+                            cursor: "pointer",
+                            transition: "all 0.15s",
+                          }}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={isChecked}
+                            onChange={() => {
+                              setSetupSelectedSubcategories((prev) => ({
+                                ...prev,
+                                [id]: !prev[id],
+                              }));
+                            }}
+                            style={{ width: 18, height: 18, accentColor: "#2563eb" }}
+                          />
+                          <span style={{ fontSize: 14, fontWeight: 500, color: "#111827" }}>{name}</span>
+                        </label>
+                      );
+                    })}
+                  </div>
+                )}
+                <div style={{ display: "flex", gap: 10, marginTop: 20 }}>
+                  <button
+                    type="button"
+                    onClick={() => setShowSubcategoryPopup(false)}
+                    style={{
+                      flex: 1,
+                      padding: "10px 14px",
+                      borderRadius: 8,
+                      border: "1px solid #d1d5db",
+                      background: "#fff",
+                      color: "#374151",
+                      fontSize: 13,
+                      fontWeight: 500,
+                      cursor: "pointer",
+                    }}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    disabled={Object.values(setupSelectedSubcategories).filter(Boolean).length === 0}
+                    onClick={async () => {
+                      try {
+                        const dvId = setupGeneratedDummyVendorId;
+                        const catId = setupSelectedCategory?._id || setupSelectedCategory?.id;
+                        if (!dvId || !catId) {
+                          setSetupGeneratePreviewError("Preview link not ready");
+                          setShowSubcategoryPopup(false);
+                          return;
+                        }
+                        // Check if selected category is inventory model
+                        const rawModels = Array.isArray(setupSelectedCategory?.categoryModel)
+                          ? setupSelectedCategory.categoryModel
+                          : setupSelectedCategory?.categoryModel
+                          ? [setupSelectedCategory.categoryModel]
+                          : [];
+                        const normModels = rawModels
+                          .map((m) => (m == null ? "" : String(m)))
+                          .map((s) => s.trim().toLowerCase())
+                          .filter(Boolean);
+                        const isInventory = normModels.includes("inventory");
+
+                        // Check if parent category has linkedAttributes or inventoryLabelName
+                        const parentLinkedAttr = setupSelectedCategory?.linkedAttributes;
+                        const parentHasLinkedAttr = parentLinkedAttr && typeof parentLinkedAttr === 'object' && Object.keys(parentLinkedAttr).length > 0;
+                        const parentInvLabel = setupSelectedCategory?.inventoryLabelName;
+                        const parentHasInvLabel = typeof parentInvLabel === 'string' && parentInvLabel.trim() !== '';
+
+                        console.log("DEBUG: setupSelectedCategory", setupSelectedCategory);
+                        console.log("DEBUG: isInventory", isInventory, "rawModels", rawModels);
+                        console.log("DEBUG: parentHasLinkedAttr", parentHasLinkedAttr, "parentLinkedAttr", parentLinkedAttr);
+                        console.log("DEBUG: parentHasInvLabel", parentHasInvLabel, "parentInvLabel", parentInvLabel);
+
+                        if (isInventory && (parentHasLinkedAttr || parentHasInvLabel)) {
+                          // Get all selected services
+                          const selectedServices = setupSubcategories.filter((subcat) => {
+                            const id = subcat._id || subcat.id;
+                            return !!setupSelectedSubcategories[id];
+                          });
+
+                          if (selectedServices.length > 0) {
+                            // Initialize vehicle counts for all selected services
+                            const initialCounts = {};
+                            selectedServices.forEach((subcat) => {
+                              const id = subcat._id || subcat.id;
+                              initialCounts[id] = 1; // default count
+                            });
+                            setSetupVehicleCounts(initialCounts);
+                            setShowSubcategoryPopup(false);
+                            setShowVehicleCountPopup(true);
+                            return;
+                          }
+                        }
+
+                        // Non-inventory model or no services with inventory config - proceed directly
+                        // Build nodePricingStatus map: selected = Active, unselected = Inactive
+                        const nodePricingStatus = {};
+                        setupSubcategories.forEach((subcat) => {
+                          const id = subcat._id || subcat.id;
+                          if (id) {
+                            nodePricingStatus[id] = setupSelectedSubcategories[id] ? "Active" : "Inactive";
+                          }
+                        });
+                        // Save nodePricingStatus to dummy vendor
+                        try {
+                          await fetch(`${API_BASE_URL}/api/dummy-vendors/${dvId}`, {
+                            method: "PUT",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({ nodePricingStatus }),
+                          });
+                        } catch (e) {
+                          console.error("Failed to save nodePricingStatus", e);
+                        }
+                        // Set vendor identity in localStorage so the new tab logs in as vendor
+                        const identityKey = `previewIdentity:${dvId}:${catId}`;
+                        const vendorIdentity = {
+                          role: "vendor",
+                          displayName: setupSelectedPlace?.name || setupBusinessName || "Vendor",
+                          loggedIn: true,
+                        };
+                        try {
+                          window.localStorage.setItem(identityKey, JSON.stringify(vendorIdentity));
+                        } catch {}
+                        // Build URL same as DummyVendorCategoriesDetailPage Preview button
+                        const homeLocs = Array.isArray(setupSelectedPlace?.nearbyLocations)
+                          ? setupSelectedPlace.nearbyLocations.filter(Boolean)
+                          : [];
+                        const params = new URLSearchParams();
+                        params.set("mode", "dummy");
+                        if (setupCreationTimerKey) {
+                          params.set("setupTimerKey", String(setupCreationTimerKey));
+                        }
+                        if (homeLocs.length) {
+                          params.set("homeLocs", JSON.stringify(homeLocs));
+                        }
+                        params.set("t", String(Date.now()));
+                        const url = `/preview/${dvId}/${catId}?${params.toString()}`;
+                        setShowSubcategoryPopup(false);
+                        window.open(url, "_blank");
+                      } catch (e) {
+                        setSetupGeneratePreviewError("Failed to generate preview");
+                        setShowSubcategoryPopup(false);
+                      }
+                    }}
+                    style={{
+                      flex: 1,
+                      padding: "10px 14px",
+                      borderRadius: 8,
+                      border: "none",
+                      background: Object.values(setupSelectedSubcategories).filter(Boolean).length === 0 ? "#9ca3af" : "#111827",
+                      color: "#fff",
+                      fontSize: 13,
+                      fontWeight: 600,
+                      cursor: Object.values(setupSelectedSubcategories).filter(Boolean).length === 0 ? "not-allowed" : "pointer",
+                    }}
+                  >
+                    Next
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+          {/* Vehicle Count Popup for inventory model categories */}
+          {showVehicleCountPopup && (
+            <div
+              style={{
+                position: "fixed",
+                top: 0,
+                left: 0,
+                right: 0,
+                bottom: 0,
+                background: "rgba(0,0,0,0.4)",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                zIndex: 2500,
+              }}
+              onClick={() => setShowVehicleCountPopup(false)}
+            >
+              <div
+                style={{
+                  background: "#fff",
+                  padding: 24,
+                  borderRadius: 16,
+                  width: 420,
+                  maxHeight: "80vh",
+                  overflowY: "auto",
+                  fontFamily: "Poppins, sans-serif",
+                  boxShadow: "0 20px 40px rgba(0,0,0,0.25)",
+                }}
+                onClick={(e) => e.stopPropagation()}
+              >
+                <h3 style={{ margin: 0, marginBottom: 16, fontSize: 18, fontWeight: 600, color: "#111827" }}>
+                  Vehicle Count
+                </h3>
+                <p style={{ margin: 0, marginBottom: 16, fontSize: 13, color: "#6b7280" }}>
+                  Enter the number of vehicle types for each service (max 3).
+                </p>
+                <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+                  {setupSubcategories
+                    .filter((subcat) => {
+                      const id = subcat._id || subcat.id;
+                      if (!setupSelectedSubcategories[id]) return false;
+                      // Only show subcategories that have inventoryLabels mapping in linkedAttributes
+                      const parentLinkedAttr = setupSelectedCategory?.linkedAttributes || {};
+                      let hasInventoryLabel = false;
+                      Object.entries(parentLinkedAttr).forEach(([key, value]) => {
+                        if (!String(key || "").endsWith(":inventoryLabels:linkedSubcategory")) return;
+                        const arr = Array.isArray(value) ? value : [];
+                        if (arr.some((v) => String(v) === String(id))) {
+                          hasInventoryLabel = true;
+                        }
+                      });
+                      return hasInventoryLabel;
+                    })
+                    .map((subcat) => {
+                      const id = subcat._id || subcat.id;
+                      const name = subcat.name || "Unnamed Service";
+                      // Look up inventory label from linkedAttributes based on subcategory ID
+                      const parentLinkedAttr = setupSelectedCategory?.linkedAttributes || {};
+                      let invLabel = "";
+                      // Find the inventory label that maps to this subcategory ID
+                      Object.entries(parentLinkedAttr).forEach(([key, value]) => {
+                        if (!String(key || "").endsWith(":inventoryLabels:linkedSubcategory")) return;
+                        const arr = Array.isArray(value) ? value : [];
+                        if (arr.some((v) => String(v) === String(id))) {
+                          // Found matching subcategory, get the family name and look up its inventoryLabels
+                          const fam = String(key).split(":")[0];
+                          const labelsKey = `${fam}:inventoryLabels`;
+                          const labels = parentLinkedAttr[labelsKey];
+                          if (Array.isArray(labels) && labels.length > 0) {
+                            invLabel = String(labels[0]);
+                          }
+                        }
+                      });
+                      const currentCount = setupVehicleCounts[id] || 1;
+                      return (
+                        <div
+                          key={id}
+                          style={{
+                            padding: "12px 14px",
+                            borderRadius: 8,
+                            border: "1px solid #e5e7eb",
+                            background: "#f9fafb",
+                          }}
+                        >
+                          <div style={{ fontSize: 14, fontWeight: 500, color: "#111827", marginBottom: 8 }}>
+                            How many {name} {invLabel} type do you have?
+                          </div>
+                          <input
+                            type="number"
+                            min={1}
+                            max={3}
+                            value={currentCount}
+                            onChange={(e) => {
+                              let val = parseInt(e.target.value, 10);
+                              if (isNaN(val) || val < 1) val = 1;
+                              if (val > 3) val = 3;
+                              setSetupVehicleCounts((prev) => ({ ...prev, [id]: val }));
+                            }}
+                            style={{
+                              width: "100%",
+                              padding: "8px 12px",
+                              borderRadius: 6,
+                              border: "1px solid #d1d5db",
+                              fontSize: 14,
+                              outline: "none",
+                            }}
+                          />
+                        </div>
+                      );
+                    })}
+                </div>
+                <div style={{ display: "flex", gap: 10, marginTop: 20 }}>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowVehicleCountPopup(false);
+                      setShowSubcategoryPopup(true);
+                    }}
+                    style={{
+                      flex: 1,
+                      padding: "10px 14px",
+                      borderRadius: 8,
+                      border: "1px solid #d1d5db",
+                      background: "#fff",
+                      color: "#374151",
+                      fontSize: 13,
+                      fontWeight: 500,
+                      cursor: "pointer",
+                    }}
+                  >
+                    Back
+                  </button>
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      try {
+                        const dvId = setupGeneratedDummyVendorId;
+                        const catId = setupSelectedCategory?._id || setupSelectedCategory?.id;
+                        if (!dvId || !catId) {
+                          setSetupGeneratePreviewError("Preview link not ready");
+                          setShowVehicleCountPopup(false);
+                          return;
+                        }
+                        // Build nodePricingStatus map: selected = Active, unselected = Inactive
+                        const nodePricingStatus = {};
+                        setupSubcategories.forEach((subcat) => {
+                          const id = subcat._id || subcat.id;
+                          if (id) {
+                            nodePricingStatus[id] = setupSelectedSubcategories[id] ? "Active" : "Inactive";
+                          }
+                        });
+                        // Save nodePricingStatus and vehicleCounts to dummy vendor
+                        try {
+                          await fetch(`${API_BASE_URL}/api/dummy-vendors/${dvId}`, {
+                            method: "PUT",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({ nodePricingStatus, vehicleCounts: setupVehicleCounts }),
+                          });
+                        } catch (e) {
+                          console.error("Failed to save nodePricingStatus/vehicleCounts", e);
+                        }
+
+                        // Build inventory scopes for services that have inventoryLabels mapping
+                        const parentLinkedAttr = setupSelectedCategory?.linkedAttributes || {};
+                        const scopes = [];
+                        setupSubcategories
+                          .filter((subcat) => {
+                            const id = subcat._id || subcat.id;
+                            if (!setupSelectedSubcategories[id]) return false;
+                            // Check if this subcategory has inventoryLabels mapping
+                            let hasMapping = false;
+                            Object.entries(parentLinkedAttr).forEach(([key, value]) => {
+                              if (!String(key || "").endsWith(":inventoryLabels:linkedSubcategory")) return;
+                              const arr = Array.isArray(value) ? value : [];
+                              if (arr.some((v) => String(v) === String(id))) {
+                                hasMapping = true;
+                              }
+                            });
+                            return hasMapping;
+                          })
+                          .forEach((subcat) => {
+                            const id = subcat._id || subcat.id;
+                            const name = subcat.name || "Unnamed Service";
+                            const maxCount = setupVehicleCounts[id] || 1;
+                            // Find the family and label for this subcategory
+                            Object.entries(parentLinkedAttr).forEach(([key, value]) => {
+                              if (!String(key || "").endsWith(":inventoryLabels:linkedSubcategory")) return;
+                              const arr = Array.isArray(value) ? value : [];
+                              if (arr.some((v) => String(v) === String(id))) {
+                                const fam = String(key).split(":")[0];
+                                const labelsKey = `${fam}:inventoryLabels`;
+                                const labels = parentLinkedAttr[labelsKey];
+                                const label = Array.isArray(labels) && labels.length > 0 ? String(labels[0]) : fam;
+                                scopes.push({ serviceId: id, serviceName: name, family: fam, label, maxCount });
+                              }
+                            });
+                          });
+
+                        if (scopes.length > 0) {
+                          // Show inventory selection popup
+                          setSetupInventoryScopes(scopes);
+                          setSetupCurrentScopeIndex(0);
+                          setSetupInventoryItems({});
+                          setSetupInventoryDraft({});
+                          setShowVehicleCountPopup(false);
+                          setShowSetupInventoryPopup(true);
+                          // Fetch models for the first scope
+                          try {
+                            await fetchSetupModelsForFamily(scopes[0].family);
+                          } catch {}
+                        } else {
+                          // No inventory scopes, go directly to preview
+                          const identityKey = `previewIdentity:${dvId}:${catId}`;
+                          const vendorIdentity = {
+                            role: "vendor",
+                            displayName: setupSelectedPlace?.name || setupBusinessName || "Vendor",
+                            loggedIn: true,
+                          };
+                          try {
+                            window.localStorage.setItem(identityKey, JSON.stringify(vendorIdentity));
+                          } catch {}
+                          const homeLocs = Array.isArray(setupSelectedPlace?.nearbyLocations)
+                            ? setupSelectedPlace.nearbyLocations.filter(Boolean)
+                            : [];
+                          const params = new URLSearchParams();
+                          params.set("mode", "dummy");
+                          if (setupCreationTimerKey) {
+                            params.set("setupTimerKey", String(setupCreationTimerKey));
+                          }
+                          if (homeLocs.length) {
+                            params.set("homeLocs", JSON.stringify(homeLocs));
+                          }
+                          params.set("t", String(Date.now()));
+                          const url = `/preview/${dvId}/${catId}?${params.toString()}`;
+                          setShowVehicleCountPopup(false);
+                          window.open(url, "_blank");
+                        }
+                      } catch (e) {
+                        setSetupGeneratePreviewError("Failed to generate preview");
+                        setShowVehicleCountPopup(false);
+                      }
+                    }}
+                    style={{
+                      flex: 1,
+                      padding: "10px 14px",
+                      borderRadius: 8,
+                      border: "none",
+                      background: "#111827",
+                      color: "#fff",
+                      fontSize: 13,
+                      fontWeight: 600,
+                      cursor: "pointer",
+                    }}
+                  >
+                    Next
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+          {/* Setup Inventory Selection Popup (after Vehicle Count) */}
+          {showSetupInventoryPopup && setupInventoryScopes.length > 0 && (
+            <div
+              style={{
+                position: "fixed",
+                inset: 0,
+                background: "rgba(0,0,0,0.45)",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                zIndex: 2200,
+              }}
+            >
+              <div
+                style={{
+                  background: "#ffffff",
+                  padding: 16,
+                  borderRadius: 10,
+                  width: "95vw",
+                  maxWidth: 800,
+                  maxHeight: "85vh",
+                  overflow: "auto",
+                  fontFamily: "Poppins, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif",
+                }}
+              >
+                {(() => {
+                  const currentScope = setupInventoryScopes[setupCurrentScopeIndex];
+                  if (!currentScope) return null;
+                  const { serviceId, serviceName, family, label, maxCount } = currentScope;
+                  const currentItems = setupInventoryItems[serviceId] || [];
+                  const parentLinkedAttr = setupSelectedCategory?.linkedAttributes || {};
+                  const { fields, listsByField } = getSetupCascadeLists(family, parentLinkedAttr);
+                  const curr = setupInventoryDraft[family] || {};
+
+                  return (
+                    <>
+                      <h3 style={{ marginTop: 0, marginBottom: 8 }}>
+                        {label} - {serviceName}
+                      </h3>
+                      <p style={{ margin: 0, marginBottom: 12, fontSize: 13, color: "#6b7280" }}>
+                        Select up to {maxCount} {label.toLowerCase()} for this service ({currentItems.length}/{maxCount} added)
+                      </p>
+
+                      <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                        <div
+                          style={{
+                            border: "1px solid #e5e7eb",
+                            borderRadius: 8,
+                            padding: 10,
+                          }}
+                        >
+                          <div style={{ fontWeight: 700, marginBottom: 6 }}>{family}</div>
+                          <div
+                            style={{
+                              display: "grid",
+                              gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))",
+                              gap: 10,
+                            }}
+                          >
+                            {fields.map((heading) => {
+                              const values = Array.isArray(listsByField[heading]) ? listsByField[heading] : [];
+                              const val = curr[heading] || "";
+                              const hLower = String(heading).toLowerCase().replace(/[^a-z0-9]/g, "");
+                              const isBrand = hLower.endsWith("brand");
+                              const isModel = hLower.endsWith("model") || hLower === "model";
+                              const brandSelected = Boolean(
+                                curr.bikeBrand || curr.brand || curr.Brand || curr.make || curr.Make
+                              );
+                              const isDisabled = isModel && !brandSelected;
+                              return (
+                                <label
+                                  key={`${family}:${heading}`}
+                                  style={{ display: "flex", flexDirection: "column", gap: 6 }}
+                                >
+                                  <span style={{ fontSize: 12, color: "#475569" }}>{heading}</span>
+                                  <select
+                                    value={val}
+                                    disabled={isDisabled}
+                                    onChange={(e) => {
+                                      const v = e.target.value;
+                                      setSetupInventoryDraft((prev) => {
+                                        const nextFam = { ...(prev[family] || {}), [heading]: v };
+                                        if (isBrand) {
+                                          delete nextFam.model;
+                                          delete nextFam.Model;
+                                          delete nextFam.transmission;
+                                          delete nextFam.bodyType;
+                                        } else if (isModel) {
+                                          delete nextFam.transmission;
+                                          delete nextFam.bodyType;
+                                        }
+                                        return { ...prev, [family]: nextFam };
+                                      });
+                                      if (isBrand) {
+                                        try {
+                                          fetchSetupModelsForFamily(family);
+                                        } catch {}
+                                      }
+                                    }}
+                                    style={{ padding: 8, border: "1px solid #ddd", borderRadius: 6 }}
+                                  >
+                                    <option value="">Select</option>
+                                    {values.map((v) => (
+                                      <option key={`${family}:${heading}:${v}`} value={v}>
+                                        {v}
+                                      </option>
+                                    ))}
+                                  </select>
+                                </label>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Selected Data Table */}
+                      <div style={{ marginTop: 12 }}>
+                        <div style={{ fontWeight: 700, marginBottom: 6 }}>Selected Data</div>
+                        {currentItems.length === 0 ? (
+                          <div
+                            style={{
+                              fontSize: 13,
+                              color: "#64748b",
+                              padding: "20px",
+                              textAlign: "center",
+                              background: "#f8fafc",
+                              borderRadius: 8,
+                            }}
+                          >
+                            No items added yet. Use the selectors above and click Add Data.
+                          </div>
+                        ) : (
+                          <div style={{ overflowX: "auto" }}>
+                            <table style={{ borderCollapse: "collapse", width: "100%", minWidth: "600px" }}>
+                              <thead>
+                                <tr style={{ background: "#f1f5f9" }}>
+                                  <th style={{ border: "1px solid #e2e8f0", padding: "10px 12px", textAlign: "left", fontWeight: 600 }}>No</th>
+                                  <th style={{ border: "1px solid #e2e8f0", padding: "10px 12px", textAlign: "left", fontWeight: 600 }}>Scope</th>
+                                  {fields.map((heading) => (
+                                    <th key={heading} style={{ border: "1px solid #e2e8f0", padding: "10px 12px", textAlign: "left", fontWeight: 600 }}>
+                                      {heading}
+                                    </th>
+                                  ))}
+                                  <th style={{ border: "1px solid #e2e8f0", padding: "10px 12px", textAlign: "left", fontWeight: 600 }}>Images</th>
+                                  <th style={{ border: "1px solid #e2e8f0", padding: "10px 12px", textAlign: "left", fontWeight: 600 }}>Actions</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {currentItems.map((it, idx) => {
+                                  const rowData = it.selections?.[family] || {};
+                                  const images = Array.isArray(it.images) ? it.images : [];
+                                  return (
+                                    <tr key={it.at || idx} style={{ borderBottom: "1px solid #e2e8f0" }}>
+                                      <td style={{ border: "1px solid #e2e8f0", padding: "10px 12px" }}>{idx + 1}</td>
+                                      <td style={{ border: "1px solid #e2e8f0", padding: "10px 12px" }}>{family}</td>
+                                      {fields.map((heading) => (
+                                        <td key={heading} style={{ border: "1px solid #e2e8f0", padding: "10px 12px" }}>
+                                          {rowData[heading] || "—"}
+                                        </td>
+                                      ))}
+                                      <td style={{ border: "1px solid #e2e8f0", padding: "10px 12px" }}>
+                                        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                                          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                                            {images.map((src, i) => {
+                                              const raw = String(src || "");
+                                              const url = raw.startsWith("http") ? raw : `${ASSET_BASE_URL || API_BASE_URL}${raw}`;
+                                              return (
+                                                <div key={i} style={{ position: "relative", width: 40 }}>
+                                                  <img
+                                                    src={url}
+                                                    alt={`img-${i}`}
+                                                    style={{ width: 40, height: 40, objectFit: "cover", borderRadius: 4, border: "1px solid #eee" }}
+                                                  />
+                                                  <button
+                                                    type="button"
+                                                    title="Delete image"
+                                                    onClick={() => {
+                                                      setSetupInventoryItems((prev) => ({
+                                                        ...prev,
+                                                        [serviceId]: (prev[serviceId] || []).map((item, itemIdx) =>
+                                                          itemIdx === idx
+                                                            ? { ...item, images: (item.images || []).filter((_, imgIdx) => imgIdx !== i) }
+                                                            : item
+                                                        ),
+                                                      }));
+                                                    }}
+                                                    style={{
+                                                      position: "absolute",
+                                                      top: 0,
+                                                      right: 0,
+                                                      padding: 1,
+                                                      borderRadius: 3,
+                                                      border: "none",
+                                                      background: "rgba(255,255,255,0.9)",
+                                                      cursor: "pointer",
+                                                      fontSize: 8,
+                                                    }}
+                                                  >
+                                                    🗑️
+                                                  </button>
+                                                </div>
+                                              );
+                                            })}
+                                          </div>
+                                          <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
+                                            <span style={{ fontSize: 10, color: "#475569" }}>
+                                              {images.length}/5
+                                            </span>
+                                            <input
+                                              type="file"
+                                              accept="image/*"
+                                              multiple
+                                              disabled={images.length >= 5}
+                                              onChange={(e) => {
+                                                const remaining = Math.max(0, 5 - images.length);
+                                                const files = Array.from(e.target.files || []).slice(0, remaining);
+                                                if (!files.length) return;
+                                                // Convert files to base64 for local preview (will be uploaded on save)
+                                                Promise.all(
+                                                  files.map(
+                                                    (f) =>
+                                                      new Promise((resolve) => {
+                                                        const reader = new FileReader();
+                                                        reader.onload = () => resolve({ dataUrl: reader.result, file: f });
+                                                        reader.readAsDataURL(f);
+                                                      })
+                                                  )
+                                                ).then((results) => {
+                                                  setSetupInventoryItems((prev) => ({
+                                                    ...prev,
+                                                    [serviceId]: (prev[serviceId] || []).map((item, itemIdx) =>
+                                                      itemIdx === idx
+                                                        ? {
+                                                            ...item,
+                                                            images: [...(item.images || []), ...results.map((r) => r.dataUrl)],
+                                                            pendingFiles: [...(item.pendingFiles || []), ...results.map((r) => r.file)],
+                                                          }
+                                                        : item
+                                                    ),
+                                                  }));
+                                                });
+                                                e.target.value = "";
+                                              }}
+                                              style={{ fontSize: 10, width: 80 }}
+                                            />
+                                          </div>
+                                        </div>
+                                      </td>
+                                      <td style={{ border: "1px solid #e2e8f0", padding: "10px 12px" }}>
+                                        <div style={{ display: "flex", gap: 4, flexDirection: "column" }}>
+                                          <button
+                                            type="button"
+                                            onClick={() => {
+                                              // Edit: populate draft with this item's data
+                                              setSetupInventoryDraft((prev) => ({
+                                                ...prev,
+                                                [family]: { ...rowData },
+                                              }));
+                                              // Remove this item (will be re-added when user clicks Add Data)
+                                              setSetupInventoryItems((prev) => ({
+                                                ...prev,
+                                                [serviceId]: (prev[serviceId] || []).filter((_, i) => i !== idx),
+                                              }));
+                                            }}
+                                            style={{
+                                              padding: "4px 8px",
+                                              borderRadius: 4,
+                                              border: "1px solid #3b82f6",
+                                              background: "#eff6ff",
+                                              color: "#3b82f6",
+                                              fontSize: 11,
+                                              cursor: "pointer",
+                                            }}
+                                          >
+                                            Edit
+                                          </button>
+                                          <button
+                                            type="button"
+                                            onClick={() => {
+                                              setSetupInventoryItems((prev) => ({
+                                                ...prev,
+                                                [serviceId]: (prev[serviceId] || []).filter((_, i) => i !== idx),
+                                              }));
+                                            }}
+                                            style={{
+                                              padding: "4px 8px",
+                                              borderRadius: 4,
+                                              border: "1px solid #ef4444",
+                                              background: "#fef2f2",
+                                              color: "#ef4444",
+                                              fontSize: 11,
+                                              cursor: "pointer",
+                                            }}
+                                          >
+                                            Delete
+                                          </button>
+                                        </div>
+                                      </td>
+                                    </tr>
+                                  );
+                                })}
+                              </tbody>
+                            </table>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Action Buttons */}
+                      <div style={{ display: "flex", gap: 10, marginTop: 16, flexWrap: "wrap" }}>
+                        <button
+                          type="button"
+                          disabled={currentItems.length >= maxCount}
+                          onClick={() => {
+                            const sel = setupInventoryDraft[family] || {};
+                            const hasSelection = Object.values(sel).some((v) => v && String(v).trim() !== "");
+                            if (!hasSelection) return;
+                            const famLower = String(family).toLowerCase();
+                            let selNorm = { ...sel };
+                            if (famLower === "bikes") {
+                              if (selNorm.brand && !selNorm.bikeBrand) {
+                                selNorm = { ...selNorm, bikeBrand: selNorm.brand };
+                              }
+                              if (selNorm.brand) {
+                                const { brand, ...rest } = selNorm;
+                                selNorm = rest;
+                              }
+                            }
+                            const snapshot = {
+                              at: Date.now(),
+                              selections: { [family]: selNorm },
+                              scopeFamily: family,
+                              scopeLabel: label,
+                            };
+                            setSetupInventoryItems((prev) => ({
+                              ...prev,
+                              [serviceId]: [...(prev[serviceId] || []), snapshot],
+                            }));
+                            setSetupInventoryDraft((prev) => ({ ...prev, [family]: {} }));
+                          }}
+                          style={{
+                            padding: "6px 12px",
+                            borderRadius: 6,
+                            background: currentItems.length >= maxCount ? "#9ca3af" : "#16a34a",
+                            color: "#fff",
+                            border: "none",
+                            cursor: currentItems.length >= maxCount ? "not-allowed" : "pointer",
+                            fontSize: 13,
+                          }}
+                        >
+                          Add Data {currentItems.length >= maxCount ? "(Limit reached)" : ""}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (setupCurrentScopeIndex > 0) {
+                              setSetupCurrentScopeIndex((prev) => prev - 1);
+                              const prevScope = setupInventoryScopes[setupCurrentScopeIndex - 1];
+                              if (prevScope) {
+                                try {
+                                  fetchSetupModelsForFamily(prevScope.family);
+                                } catch {}
+                              }
+                            } else {
+                              setShowSetupInventoryPopup(false);
+                              setShowVehicleCountPopup(true);
+                            }
+                          }}
+                          style={{
+                            padding: "6px 12px",
+                            borderRadius: 6,
+                            background: "#e5e7eb",
+                            border: "none",
+                            cursor: "pointer",
+                            fontSize: 13,
+                          }}
+                        >
+                          Back
+                        </button>
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            if (setupCurrentScopeIndex < setupInventoryScopes.length - 1) {
+                              // Move to next scope
+                              setSetupCurrentScopeIndex((prev) => prev + 1);
+                              const nextScope = setupInventoryScopes[setupCurrentScopeIndex + 1];
+                              if (nextScope) {
+                                try {
+                                  await fetchSetupModelsForFamily(nextScope.family);
+                                } catch {}
+                              }
+                            } else {
+                              // All scopes done, save inventory and show profile setup confirmation
+                              try {
+                                const dvId = setupGeneratedDummyVendorId;
+                                const catId = setupSelectedCategory?._id || setupSelectedCategory?.id;
+                                console.log("Next clicked - saving profile", { dvId, catId, setupGeneratedDummyVendorId, setupSelectedCategory });
+                                if (!dvId || !catId) {
+                                  console.error("Preview link not ready", { dvId, catId });
+                                  setSetupGeneratePreviewError("Preview link not ready");
+                                  setShowSetupInventoryPopup(false);
+                                  return;
+                                }
+
+                                // Build nodePricingStatus map: selected = Active, unselected = Inactive
+                                const nodePricingStatus = {};
+                                setupSubcategories.forEach((subcat) => {
+                                  const sid = subcat._id || subcat.id;
+                                  if (sid) {
+                                    nodePricingStatus[sid] = setupSelectedSubcategories[sid] ? "Active" : "Inactive";
+                                  }
+                                });
+
+                                // Save all vendor data (business name, phone, location, hours, services)
+                                const businessName = setupSelectedPlace?.name || setupBusinessName || "";
+                                const placeLocation = setupSelectedPlace?.location || null;
+                                const placeAddress = setupSelectedPlace?.address || "";
+                                const openingHoursText = Array.isArray(setupSelectedPlace?.openingHoursText)
+                                  ? setupSelectedPlace.openingHoursText
+                                  : [];
+                                const phoneFull = setupOtpPhoneInfo
+                                  ? `+${setupOtpPhoneInfo.countryCode}${setupOtpPhoneInfo.phone}`
+                                  : "";
+
+                                console.log("Saving vendor data...", { businessName, phoneFull, placeLocation, placeAddress, nodePricingStatus, setupVehicleCounts });
+                                try {
+                                  const vendorRes = await fetch(`${API_BASE_URL}/api/dummy-vendors/${dvId}`, {
+                                    method: "PUT",
+                                    headers: { "Content-Type": "application/json" },
+                                    body: JSON.stringify({
+                                      businessName: String(businessName),
+                                      contactName: String(businessName),
+                                      phone: String(phoneFull),
+                                      location: {
+                                        lat: typeof placeLocation?.lat === "number" ? placeLocation.lat : undefined,
+                                        lng: typeof placeLocation?.lng === "number" ? placeLocation.lng : undefined,
+                                        address: String(placeAddress || ""),
+                                      },
+                                      openingHoursText,
+                                      nodePricingStatus,
+                                      vehicleCounts: setupVehicleCounts,
+                                    }),
+                                  });
+                                  console.log("Vendor data save response:", vendorRes.status, await vendorRes.text().catch(() => ""));
+                                } catch (e) {
+                                  console.error("Failed to save vendor data", e);
+                                }
+
+                                // Save all inventory items to dummy vendor using same format as existing inventory modal
+                                const allItems = [];
+                                Object.entries(setupInventoryItems).forEach(([svcId, items]) => {
+                                  const scope = setupInventoryScopes.find((s) => s.serviceId === svcId);
+                                  if (scope && Array.isArray(items)) {
+                                    items.forEach((item) => {
+                                      // Ensure item has categoryId and correct structure
+                                      const itemWithCatId = {
+                                        at: item.at || Date.now(),
+                                        categoryId: catId,
+                                        selections: item.selections || {},
+                                        scopeFamily: scope.family,
+                                        scopeLabel: scope.label,
+                                        images: item.images || [],
+                                      };
+                                      allItems.push(itemWithCatId);
+                                    });
+                                  }
+                                });
+
+                                console.log("Saving inventory items:", allItems);
+                                if (allItems.length > 0) {
+                                  try {
+                                    // Use same format as saveDummyInventorySelections: inventorySelections: { [categoryId]: items }
+                                    const inventoryRes = await fetch(`${API_BASE_URL}/api/dummy-vendors/${dvId}`, {
+                                      method: "PUT",
+                                      headers: { "Content-Type": "application/json" },
+                                      body: JSON.stringify({ inventorySelections: { [catId]: allItems } }),
+                                    });
+                                    console.log("Inventory save response:", inventoryRes.status);
+                                  } catch (e) {
+                                    console.error("Failed to save inventory", e);
+                                  }
+                                }
+
+                                // Update vendor status to "Profile Setup"
+                                try {
+                                  await fetch(`${API_BASE_URL}/api/dummy-vendors/${dvId}`, {
+                                    method: "PUT",
+                                    headers: { "Content-Type": "application/json" },
+                                    body: JSON.stringify({ status: "Profile Setup" }),
+                                  });
+                                  console.log("Status updated to Profile Setup");
+                                } catch (e) {
+                                  console.error("Failed to update status to Profile Setup", e);
+                                }
+
+                                // Close inventory popup and show profile setup confirmation
+                                setShowSetupInventoryPopup(false);
+                                setSetupProfileStatus("profile_setup");
+                                setShowProfileSetupConfirm(true);
+                              } catch (e) {
+                                console.error("Next button error:", e);
+                                setSetupGeneratePreviewError("Failed to save profile");
+                                setShowSetupInventoryPopup(false);
+                              }
+                            }
+                          }}
+                          style={{
+                            padding: "6px 12px",
+                            borderRadius: 6,
+                            background: "#111827",
+                            color: "#fff",
+                            border: "none",
+                            cursor: "pointer",
+                            fontSize: 13,
+                          }}
+                        >
+                          {setupCurrentScopeIndex < setupInventoryScopes.length - 1 ? "Next Service" : "Next"}
+                        </button>
+                      </div>
+
+                      {/* Progress indicator */}
+                      <div style={{ marginTop: 12, fontSize: 12, color: "#6b7280", textAlign: "center" }}>
+                        Service {setupCurrentScopeIndex + 1} of {setupInventoryScopes.length}
+                      </div>
+                    </>
+                  );
+                })()}
+              </div>
+            </div>
+          )}
+          {/* Profile Setup Confirmation Popup */}
+          {showProfileSetupConfirm && (
+            <div
+              style={{
+                position: "fixed",
+                inset: 0,
+                backgroundColor: "rgba(0,0,0,0.5)",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                zIndex: 10000,
+              }}
+            >
+              <div
+                style={{
+                  background: "#fff",
+                  padding: 24,
+                  borderRadius: 12,
+                  width: 380,
+                  fontFamily: "Poppins, sans-serif",
+                  boxShadow: "0 20px 40px rgba(0,0,0,0.25)",
+                  textAlign: "center",
+                }}
+              >
+                <div style={{ marginBottom: 20 }}>
+                  <div style={{ fontSize: 48, marginBottom: 12 }}>✅</div>
+                  <h3 style={{ margin: 0, fontSize: 18, fontWeight: 600, color: "#111827" }}>
+                    Your profile has been set!
+                  </h3>
+                  <p style={{ margin: "8px 0 0", fontSize: 14, color: "#6b7280" }}>
+                    Your business profile and inventory have been saved successfully.
+                  </p>
+                </div>
+                <div style={{ display: "flex", gap: 12, justifyContent: "center" }}>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      // Cancel - just close popup, status stays as profile_setup
+                      setShowProfileSetupConfirm(false);
+                    }}
+                    style={{
+                      padding: "10px 24px",
+                      borderRadius: 8,
+                      background: "#f3f4f6",
+                      color: "#374151",
+                      border: "1px solid #d1d5db",
+                      cursor: "pointer",
+                      fontSize: 14,
+                      fontWeight: 500,
+                    }}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      // Next - close this popup and show preview confirmation
+                      setShowProfileSetupConfirm(false);
+                      setShowPreviewConfirm(true);
+                    }}
+                    style={{
+                      padding: "10px 24px",
+                      borderRadius: 8,
+                      background: "#111827",
+                      color: "#fff",
+                      border: "none",
+                      cursor: "pointer",
+                      fontSize: 14,
+                      fontWeight: 500,
+                    }}
+                  >
+                    Next
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+          {/* Preview Confirmation Popup */}
+          {showPreviewConfirm && (
+            <div
+              style={{
+                position: "fixed",
+                inset: 0,
+                backgroundColor: "rgba(0,0,0,0.5)",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                zIndex: 10000,
+              }}
+            >
+              <div
+                style={{
+                  background: "#fff",
+                  padding: 24,
+                  borderRadius: 12,
+                  width: 380,
+                  fontFamily: "Poppins, sans-serif",
+                  boxShadow: "0 20px 40px rgba(0,0,0,0.25)",
+                  textAlign: "center",
+                }}
+              >
+                <div style={{ marginBottom: 20 }}>
+                  <div style={{ fontSize: 48, marginBottom: 12 }}>👁️</div>
+                  <h3 style={{ margin: 0, fontSize: 18, fontWeight: 600, color: "#111827" }}>
+                    Do you want to preview?
+                  </h3>
+                  <p style={{ margin: "8px 0 0", fontSize: 14, color: "#6b7280" }}>
+                    Preview your business page to see how it looks to customers.
+                  </p>
+                </div>
+                <div style={{ display: "flex", gap: 12, justifyContent: "center" }}>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      // No - just close popup, do nothing
+                      setShowPreviewConfirm(false);
+                    }}
+                    style={{
+                      padding: "10px 24px",
+                      borderRadius: 8,
+                      background: "#f3f4f6",
+                      color: "#374151",
+                      border: "1px solid #d1d5db",
+                      cursor: "pointer",
+                      fontSize: 14,
+                      fontWeight: 500,
+                    }}
+                  >
+                    No
+                  </button>
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      // Yes - update status to Preview and open preview page
+                      const dvId = setupGeneratedDummyVendorId;
+                      const catId = setupSelectedCategory?._id || setupSelectedCategory?.id;
+                      
+                      // Update vendor status to "Preview"
+                      if (dvId) {
+                        try {
+                          await fetch(`${API_BASE_URL}/api/dummy-vendors/${dvId}`, {
+                            method: "PUT",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({ status: "Preview" }),
+                          });
+                          console.log("Status updated to Preview");
+                        } catch (e) {
+                          console.error("Failed to update status to Preview", e);
+                        }
+                      }
+                      
+                      setShowPreviewConfirm(false);
+                      setSetupProfileStatus("preview");
+                      
+                      // Open preview page
+                      if (dvId && catId) {
+                        const identityKey = `previewIdentity:${dvId}:${catId}`;
+                        const vendorIdentity = {
+                          role: "vendor",
+                          displayName: setupSelectedPlace?.name || setupBusinessName || "Vendor",
+                          loggedIn: true,
+                        };
+                        try {
+                          window.localStorage.setItem(identityKey, JSON.stringify(vendorIdentity));
+                        } catch {}
+                        const homeLocs = Array.isArray(setupSelectedPlace?.nearbyLocations)
+                          ? setupSelectedPlace.nearbyLocations.filter(Boolean)
+                          : [];
+                        const params = new URLSearchParams();
+                        params.set("mode", "dummy");
+                        if (setupCreationTimerKey) {
+                          params.set("setupTimerKey", String(setupCreationTimerKey));
+                        }
+                        if (homeLocs.length) {
+                          params.set("homeLocs", JSON.stringify(homeLocs));
+                        }
+                        params.set("t", String(Date.now()));
+                        const url = `/preview/${dvId}/${catId}?${params.toString()}`;
+                        console.log("Opening preview URL:", url);
+                        window.open(url, "_blank");
+                      }
+                    }}
+                    style={{
+                      padding: "10px 24px",
+                      borderRadius: 8,
+                      background: "#111827",
+                      color: "#fff",
+                      border: "none",
+                      cursor: "pointer",
+                      fontSize: 14,
+                      fontWeight: 500,
+                    }}
+                  >
+                    Yes
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
           {/* OTP Modal for preview booking (login dialog) */}
           {showOtpModal && (
             <div
@@ -7339,45 +10848,6 @@ export default function PreviewPage() {
                           disabled={otpLoading}
                         >
                           {otpLoading ? "Sending..." : "Continue"}
-                        </button>
-
-                        <div
-                          style={{
-                            marginTop: 12,
-                            marginBottom: 8,
-                            display: "flex",
-                            alignItems: "center",
-                            gap: 8,
-                            fontSize: 12,
-                            color: "#9ca3af",
-                          }}
-                        >
-                          <span style={{ flex: 1, height: 1, background: "#e5e7eb" }} />
-                          <span>or</span>
-                          <span style={{ flex: 1, height: 1, background: "#e5e7eb" }} />
-                        </div>
-
-                        <button
-                          type="button"
-                          onClick={handleGoogleLogin}
-                          style={{
-                            width: "100%",
-                            padding: 10,
-                            borderRadius: 999,
-                            border: "1px solid #e5e7eb",
-                            background: "#ffffff",
-                            color: "#111827",
-                            fontWeight: 500,
-                            cursor: "pointer",
-                            fontSize: 14,
-                            display: "flex",
-                            alignItems: "center",
-                            justifyContent: "center",
-                            gap: 8,
-                          }}
-                          disabled={otpLoading}
-                        >
-                          <span>Continue with Google</span>
                         </button>
                       </>
                     )}

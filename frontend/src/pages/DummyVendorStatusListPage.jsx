@@ -12,6 +12,7 @@ const STATUSES = [
   "Rejected",
   "Waiting for Approval",
   "Registered",
+  "Profile Setup",
 ];
 
 export default function DummyVendorStatusListPage() {

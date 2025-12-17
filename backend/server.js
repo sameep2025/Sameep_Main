@@ -4,6 +4,7 @@ const cors = require('cors');
 const path = require('path');
 const fs = require('fs');
 const mongoose = require('mongoose');
+const qs = require("querystring");
 const axios = require('axios');
 
 const connectDB = require('./config/db');
@@ -23,6 +24,8 @@ const appConfigRoutes = require('./routes/appConfigRoutes');
 const auditLogRoutes = require('./routes/auditLogRoutes');
 const enquiryRoutes = require('./routes/enquiryRoutes');
 const authRoutes = require('./routes/authRoutes');
+const googlePlacesRoutes = require('./routes/googlePlacesRoutes');
+const setupProgressRoutes = require('./routes/setupProgressRoutes');
 
 const app = express();
 
@@ -157,6 +160,8 @@ app.use('/api/enquiries', enquiryRoutes);
 app.use('/api', uploadRoutes);
 app.use('/api/app-config', appConfigRoutes);
 app.use('/api/audit-logs', auditLogRoutes);
+app.use('/api/google/places', googlePlacesRoutes);
+app.use('/api/setup-progress', setupProgressRoutes);
 app.use('/', authRoutes);
 
 // Debug: DB connection info
@@ -179,6 +184,138 @@ app.use((err, req, res, next) => {
     });
 });
 
+
+const {
+  GOOGLE_CLIENT_ID,
+  GOOGLE_CLIENT_SECRET,
+} = process.env;
+
+const GOOGLE_OAUTH_URL = 'https://accounts.google.com/o/oauth2/v2/auth';
+const GOOGLE_TOKEN_URL = 'https://oauth2.googleapis.com/token';
+
+// TEMP: store tokens in memory just to test
+let latestBusinessTokens = null;
+
+// 1) Start Google Business OAuth
+app.get('/auth/google-business', (req, res) => {
+  const params = {
+    client_id: GOOGLE_CLIENT_ID,
+    redirect_uri: 'http://localhost:5000/auth/google-business/callback',
+    response_type: 'code',
+    scope: 'https://www.googleapis.com/auth/business.manage',
+    access_type: 'offline',
+    prompt: 'consent',
+  };
+
+  const url = `${GOOGLE_OAUTH_URL}?${qs.stringify(params)}`;
+  res.redirect(url);
+});
+
+// 2) Callback from Google with ?code=
+app.get('/auth/google-business/callback', async (req, res) => {
+  const { code } = req.query;
+  if (!code) return res.status(400).send('Missing code');
+
+  try {
+    const tokenRes = await axios.post(
+      GOOGLE_TOKEN_URL,
+      qs.stringify({
+        code,
+        client_id: GOOGLE_CLIENT_ID,
+        client_secret: GOOGLE_CLIENT_SECRET,
+        redirect_uri: 'http://localhost:5000/auth/google-business/callback',
+        grant_type: 'authorization_code',
+      }),
+      { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } }
+    );
+
+    const { access_token, refresh_token, expires_in } = tokenRes.data;
+    latestBusinessTokens = { access_token, refresh_token, expires_in };
+
+    console.log('GOOGLE BUSINESS TOKENS:', latestBusinessTokens);
+
+    res.send('Google Business connected! Check backend console for tokens.');
+  } catch (err) {
+    console.error('Error exchanging code', err.response?.data || err.message);
+    res.status(500).send('Failed to exchange code for Google Business');
+  }
+});
+
+
+async function listAccounts(accessToken) {
+  const res = await axios.get(
+    "https://mybusinessaccountmanagement.googleapis.com/v1/accounts",
+    {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    }
+  );
+  return res.data;
+}
+
+async function listLocations(accessToken, accountName) {
+  const url = `https://mybusinessaccountmanagement.googleapis.com/v1/${accountName}/locations`;
+  const res = await axios.get(url, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+  return res.data;
+}
+
+async function getLocationDetails(accessToken, locationId) {
+  const url = `https://mybusinessbusinessinformation.googleapis.com/v1/locations/${locationId}`;
+  const res = await axios.get(url, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+    params: {
+      readMask: "title,address,websiteUri,regularHours",
+    },
+  });
+  return res.data;
+}
+
+
+app.get("/api/google-business/test", async (req, res) => {
+  try {
+    if (!latestBusinessTokens?.access_token) {
+      return res.status(400).json({ message: "No Google Business token stored. Connect first." });
+    }
+
+    const accessToken = latestBusinessTokens.access_token;
+
+    // 1) Get accounts
+    const accountsData = await listAccounts(accessToken);
+    const accounts = accountsData.accounts || [];
+    if (accounts.length === 0) {
+      return res.status(200).json({ message: "No accounts found", raw: accountsData });
+    }
+
+    const account = accounts[0]; // pick first for now
+
+    // 2) Get locations for that account
+    const locationsData = await listLocations(accessToken, account.name);
+    const locations = locationsData.locations || [];
+    if (locations.length === 0) {
+      return res
+        .status(200)
+        .json({ message: "No locations found", account, raw: locationsData });
+    }
+
+    const location = locations[0]; // pick first location
+
+    // 3) Get business details for that location
+    const locationId = location.name.split("/").pop().replace("locations/", "") || location.name;
+    const details = await getLocationDetails(accessToken, locationId);
+
+    return res.json({
+      account,
+      location,
+      details,
+    });
+  } catch (err) {
+    console.error("Error in /api/google-business/test", err.response?.data || err.message);
+    res
+      .status(500)
+      .json({ message: "Failed to fetch Google Business data", error: err.response?.data || err.message });
+  }
+});
 // Start server
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => console.log(`Server running on port ${PORT}`));

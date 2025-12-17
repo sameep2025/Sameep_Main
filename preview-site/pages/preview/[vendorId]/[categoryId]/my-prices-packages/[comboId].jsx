@@ -12,10 +12,14 @@ const checkAuthentication = (vendorId, categoryId) => {
     const token = window.localStorage.getItem(tokenKey);
     const identityStr = window.localStorage.getItem(identityKey);
 
-    if (!token || !identityStr) return false;
+    if (!identityStr) return false;
 
     const identity = JSON.parse(identityStr);
-    return !!(identity && identity.loggedIn === true);
+    if (!(identity && identity.loggedIn === true)) return false;
+
+    const role = String(identity?.role || "").trim().toLowerCase();
+    if (role === "vendor") return true;
+    return !!token;
   } catch {
     return false;
   }
@@ -44,6 +48,7 @@ export default function MyPackageDetailPage() {
     // Check authentication first
     if (!checkAuthentication(vendorId, categoryId)) {
       setSessionExpired(true);
+      setLoading(false);
       return;
     }
     

@@ -316,10 +316,35 @@ router.get("/:vendorId/inventory/:categoryId/:entryKey/images", async (req, res)
 // Create dummy vendor
 router.post("/", async (req, res) => {
   try {
-    const { customerId, phone, businessName, contactName, categoryId } = req.body;
+    const { customerId, phone, businessName, contactName, categoryId, location, businessHours, openingHoursText, status } = req.body;
     if (!customerId || !phone || !businessName || !contactName || !categoryId) {
       return res.status(400).json({ message: "customerId, phone, businessName, contactName, categoryId are required" });
     }
+
+    const normalizeBusinessHours = () => {
+      if (Array.isArray(businessHours) && businessHours.length) {
+        return businessHours
+          .map((h) => ({
+            day: typeof h?.day === "string" ? h.day : "",
+            hours: typeof h?.hours === "string" ? h.hours : "",
+          }))
+          .filter((h) => h.day && h.hours);
+      }
+      if (Array.isArray(openingHoursText) && openingHoursText.length) {
+        return openingHoursText
+          .map((line) => {
+            const s = String(line || "").trim();
+            const idx = s.indexOf(":");
+            if (idx <= 0) return null;
+            const day = s.slice(0, idx).trim();
+            const hrs = s.slice(idx + 1).trim();
+            if (!day || !hrs) return null;
+            return { day, hours: hrs };
+          })
+          .filter(Boolean);
+      }
+      return [];
+    };
 
     if (!mongoose.Types.ObjectId.isValid(categoryId)) {
       return res.status(400).json({ message: "Invalid categoryId" });
@@ -328,15 +353,52 @@ router.post("/", async (req, res) => {
     const cat = await DummyCategory.findById(categoryId).lean();
     if (!cat) return res.status(404).json({ message: "Dummy category not found" });
 
+    // Idempotent: avoid duplicate vendors for same customer + category
+    const existing = await DummyVendor.findOne({
+      customerId,
+      categoryId,
+    });
+
+    if (existing) {
+      existing.phone = phone;
+      existing.businessName = businessName;
+      existing.contactName = contactName;
+      if (typeof status === 'string' && status.trim()) {
+        existing.status = status.trim();
+      }
+      if (location && typeof location === 'object') {
+        existing.location = {
+          lat: typeof location.lat === 'number' ? location.lat : existing.location?.lat,
+          lng: typeof location.lng === 'number' ? location.lng : existing.location?.lng,
+          address: typeof location.address === 'string' ? location.address : existing.location?.address,
+          nearbyLocations: Array.isArray(location.nearbyLocations)
+            ? location.nearbyLocations
+            : (existing.location?.nearbyLocations || []),
+        };
+      }
+      const bh = normalizeBusinessHours();
+      if (bh.length) existing.businessHours = bh;
+      await existing.save();
+      return res.json(existing);
+    }
+
     const vendor = await DummyVendor.create({
       customerId,
       phone,
       businessName,
       contactName,
       categoryId,
+      status: (typeof status === 'string' && status.trim()) ? status.trim() : 'Registered',
+      location: (location && typeof location === 'object') ? {
+        lat: typeof location.lat === 'number' ? location.lat : undefined,
+        lng: typeof location.lng === 'number' ? location.lng : undefined,
+        address: typeof location.address === 'string' ? location.address : undefined,
+        nearbyLocations: Array.isArray(location.nearbyLocations) ? location.nearbyLocations : [],
+      } : undefined,
+      businessHours: normalizeBusinessHours(),
     });
 
-    res.status(201).json(vendor);
+    return res.status(201).json(vendor);
   } catch (err) {
     console.error("POST /dummy-vendors error:", err);
     res.status(500).json({ message: "Server error" });
@@ -638,7 +700,7 @@ router.get("/categories/counts", async (req, res) => {
     const statusMap = new Map();
     statusAgg.forEach((d) => {
       const catId = String(d._id.categoryId);
-      const st = d._id.status || "Waiting for Approval";
+      const st = d._id.status || "Registered";
       if (!statusMap.has(catId)) statusMap.set(catId, {});
       statusMap.get(catId)[st] = d.count;
     });

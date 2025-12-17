@@ -9,6 +9,9 @@ const STATUSES = [
   "Rejected",
   "Waiting for Approval",
   "Registered",
+  "Profile Setup",
+  "Preview",
+  "Published",
 ];
 
 export default function DummyVendorStatusPage() {

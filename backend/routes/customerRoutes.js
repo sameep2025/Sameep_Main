@@ -19,7 +19,15 @@ if (!MSG91_AUTH) console.warn("MSG91_AUTHKEY not set in .env");
 if (!MSG91_SENDER) console.warn("MSG91_SENDER not set in .env");
 
 // helper to build full number
-const buildFull = (countryCode, phone) => `${countryCode}${phone.replace(/\D/g, "")}`;
+const buildFull = (countryCode, phone) => {
+  const cc = String(countryCode || "")
+    .replace(/\D/g, "")
+    .replace(/^0+/, "");
+  const ph = String(phone || "")
+    .replace(/\D/g, "")
+    .replace(/^0+/, "");
+  return `${cc}${ph}`;
+};
 
 // helper: log duration
 function logApi(req, res, label) {
@@ -67,6 +75,49 @@ router.post("/request-otp", async (req, res) => {
     console.error("request-otp error:", err?.response?.data || err.message);
     const msg = err?.response?.data?.message || "Failed to request OTP";
     res.status(500).json({ message: msg });
+  }
+});
+
+/* ---------------- 1a) Bypass OTP (dev only) ---------------- */
+router.post("/bypass-otp", async (req, res) => {
+  logApi(req, res, "bypass-otp");
+  try {
+    // Safety: do not allow in production unless explicitly enabled
+    const allow =
+      process.env.ALLOW_OTP_BYPASS === "true" ||
+      String(process.env.NODE_ENV || "").toLowerCase() !== "production";
+    if (!allow) {
+      return res.status(403).json({ message: "OTP bypass disabled" });
+    }
+
+    const { countryCode, phone } = req.body || {};
+    const cc = typeof countryCode === "string" ? countryCode.trim() : String(countryCode || "").trim();
+    const ph = typeof phone === "string" ? phone.trim() : String(phone || "").trim();
+    if (!cc || !ph) {
+      return res.status(400).json({ message: "countryCode and phone required" });
+    }
+
+    const mobile = buildFull(cc, ph);
+    const fullNumber = mobile;
+
+    // Use upsert to avoid race/duplicate-key errors when multiple requests happen quickly.
+    let customer = null;
+    try {
+      customer = await Customer.findOneAndUpdate(
+        { fullNumber },
+        { $setOnInsert: { countryCode: cc, phone: ph, fullNumber } },
+        { new: true, upsert: true }
+      );
+    } catch (upErr) {
+      // If upsert hit a duplicate key race, fall back to a regular find.
+      customer = await Customer.findOne({ fullNumber });
+      if (!customer) throw upErr;
+    }
+
+    return res.json({ message: "bypassed", customer });
+  } catch (err) {
+    console.error("bypass-otp error:", err?.message || err);
+    return res.status(500).json({ message: err?.message || "Failed to bypass OTP" });
   }
 });
 

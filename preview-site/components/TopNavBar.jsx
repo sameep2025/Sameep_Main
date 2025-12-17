@@ -23,6 +23,7 @@ export default function TopNavBar({
   onNavigateInventory,
   onNavigateMyEnquiries,
   onOpenLogin,
+  onOpenSetupBusiness,
   onLogout,
   services = [
     "Driving Packages",
@@ -69,6 +70,49 @@ export default function TopNavBar({
   const effectiveServices = hasPackages
     ? ["Packages", ...services]
     : services;
+
+  const activeServicesForMyPrices = useMemo(() => {
+    try {
+      const nodeMap = (vendor && vendor.nodePricingStatus && typeof vendor.nodePricingStatus === "object")
+        ? vendor.nodePricingStatus
+        : {};
+      const hasAny = Object.keys(nodeMap).length > 0;
+
+      // Legacy behavior: if no explicit nodePricingStatus configured, treat all as active.
+      if (!hasAny) return effectiveServices;
+
+      const out = [];
+      if (hasPackages) out.push("Packages");
+
+      const children = Array.isArray(categoryTree?.children) ? categoryTree.children : [];
+      const isActiveInSubtree = (node) => {
+        try {
+          const ids = [];
+          const visit = (cur) => {
+            if (!cur) return;
+            const id = String(cur?._id || cur?.id || "");
+            if (id) ids.push(id);
+            const kids = Array.isArray(cur?.children) ? cur.children : [];
+            kids.forEach(visit);
+          };
+          visit(node);
+          return ids.some((id) => String(nodeMap[id] || "").trim().toLowerCase() === "active");
+        } catch {
+          return false;
+        }
+      };
+
+      children.forEach((n) => {
+        if (!isActiveInSubtree(n)) return;
+        const name = (n && typeof n.name === "string" ? n.name.trim() : "") || "";
+        if (name) out.push(name);
+      });
+
+      return out;
+    } catch {
+      return effectiveServices;
+    }
+  }, [vendor, categoryTree, hasPackages, effectiveServices]);
 
   const firstLevelSubcategoryLabels = useMemo(() => {
     try {
@@ -394,39 +438,66 @@ export default function TopNavBar({
             })}
 
             {/* Identity display at the end.
-               - Not logged in: Log In icon + text
+               - Not logged in: Log In + Setup My Business text
                - Logged-in guest: User icon + text "Guest"
                - Logged-in vendor: vendor menu dropdown */}
             {!identityLoggedIn ? (
-              <button
-                type="button"
-                onClick={() => {
-                  if (typeof onOpenLogin === "function") {
-                    onOpenLogin();
-                  }
-                }}
-                style={{
-                  border: "none",
-                  background: "transparent",
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  cursor: "pointer",
-                  padding: 0,
-                }}
-              >
-                <User size={22} color="#111827" />
-                <span
+              <div style={{ display: "flex", alignItems: "center" }}>
+                <button
+                  className="preview-auth-btn"
+                  type="button"
+                  onClick={() => {
+                    if (typeof onOpenLogin === "function") {
+                      onOpenLogin();
+                    }
+                  }}
                   style={{
-                    marginLeft: 6,
-                    fontSize: 16,
+                    border: "none",
+                    background: "transparent",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    cursor: "pointer",
+                    padding: 0,
+                  }}
+                >
+                  <User size={22} color="#111827" />
+                  <span
+                    style={{
+                      marginLeft: 6,
+                      fontSize: 18,
+                      fontWeight: 500,
+                      color: "#111827",
+                    }}
+                  >
+                    Log In
+                  </span>
+                </button>
+                <button
+                  className="preview-auth-btn"
+                  type="button"
+                  onClick={() => {
+                    if (typeof onOpenSetupBusiness === "function") {
+                      onOpenSetupBusiness();
+                    }
+                  }}
+                  style={{
+                    marginLeft: 18,
+                    border: "none",
+                    background: "transparent",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    cursor: typeof onOpenSetupBusiness === "function" ? "pointer" : "default",
+                    padding: 0,
+                    fontSize: 18,
                     fontWeight: 500,
                     color: "#111827",
                   }}
                 >
-                  Log In
-                </span>
-              </button>
+                  Setup My Business
+                </button>
+              </div>
             ) : identityRole === "guest" ? (
               <div
                 style={{
@@ -511,7 +582,7 @@ export default function TopNavBar({
                   onNavigateInventory={onNavigateInventory}
                   onNavigateMyEnquiries={onNavigateMyEnquiries}
                   servicesForMyPrices={firstLevelSubcategoryLabels}
-                  activeServicesForMyPrices={effectiveServices}
+                  activeServicesForMyPrices={activeServicesForMyPrices}
                   socialHandles={socialHandles}
                 />
                 {typeof onLogout === "function" && (
@@ -864,23 +935,51 @@ export default function TopNavBar({
                     display: "flex",
                     alignItems: "center",
                     gap: 8,
-                  }}
-                  onClick={() => {
-                    if (typeof onOpenLogin === "function") {
-                      onOpenLogin();
-                    }
+                    justifyContent: "space-between",
+                    width: "100%",
                   }}
                 >
-                  <User size={20} color="#111827" />
-                  <span
+                  <div
                     style={{
-                      fontSize: 18,
-                      fontWeight: 600,
-                      color: "#111827",
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 8,
+                    }}
+                    onClick={() => {
+                      if (typeof onOpenLogin === "function") {
+                        onOpenLogin();
+                      }
                     }}
                   >
-                    Log In
-                  </span>
+                    <User size={20} color="#111827" />
+                    <span
+                      style={{
+                        fontSize: 18,
+                        fontWeight: 600,
+                        color: "#111827",
+                      }}
+                    >
+                      Log In
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (typeof onOpenSetupBusiness === "function") {
+                        onOpenSetupBusiness();
+                      }
+                    }}
+                    style={{
+                      padding: 0,
+                      border: "none",
+                      background: "transparent",
+                      color: "#111827",
+                      fontSize: 14,
+                      fontWeight: 500,
+                    }}
+                  >
+                    Setup My Business
+                  </button>
                 </div>
               ) : identityRole === "guest" ? (
                 <div

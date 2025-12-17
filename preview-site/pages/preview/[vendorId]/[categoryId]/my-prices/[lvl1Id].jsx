@@ -12,10 +12,18 @@ const checkAuthentication = (vendorId, categoryId) => {
     const token = window.localStorage.getItem(tokenKey);
     const identityStr = window.localStorage.getItem(identityKey);
 
-    if (!token || !identityStr) return false;
+    if (!identityStr) return false;
 
     const identity = JSON.parse(identityStr);
-    return !!(identity && identity.loggedIn === true);
+    if (!(identity && identity.loggedIn === true)) return false;
+
+    // Vendor My Prices pages should work for SetupMyBusiness previews even when
+    // there is no customer session token.
+    const role = String(identity?.role || "").trim().toLowerCase();
+    if (role === "vendor") return true;
+
+    // For any non-vendor identity, require a token.
+    return !!token;
   } catch {
     return false;
   }
@@ -60,6 +68,7 @@ export default function Level2SelectorPage() {
     // Check authentication first
     if (!checkAuthentication(vendorId, categoryId)) {
       setSessionExpired(true);
+      setLoading(false);
       return;
     }
     
