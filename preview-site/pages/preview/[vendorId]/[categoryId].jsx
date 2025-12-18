@@ -253,6 +253,109 @@ export default function PreviewPage() {
     } catch {}
   }, [setupTimerKey, loading]);
 
+  // Auto-add data when all required fields are selected for cars and bikes families
+  useEffect(() => {
+    try {
+      if (!showSetupInventoryPopup) return;
+      if (!setupInventoryScopes.length) return;
+      
+      const currentScope = setupInventoryScopes[setupCurrentScopeIndex];
+      if (!currentScope) return;
+      
+      const { serviceId, family, maxCount } = currentScope;
+      const currentItems = setupInventoryItems[serviceId] || [];
+      
+      // Check if limit has been reached
+      if (currentItems.length >= maxCount) return;
+      
+      // Apply auto-add for both cars and bikes families
+      const famLower = String(family).toLowerCase();
+      if (famLower !== 'cars' && famLower !== 'bikes') return;
+      
+      const sel = setupInventoryDraft[family] || {};
+      const hasSelection = Object.values(sel).some((v) => v && String(v).trim() !== "");
+      if (!hasSelection) return;
+      
+      // Debounce check - prevent rapid successive triggers
+      const now = Date.now();
+      if (window.__lastAutoAddTime && now - window.__lastAutoAddTime < 500) {
+        return;
+      }
+      
+      // Check if all required fields are selected
+      let requiredFields;
+      if (famLower === 'cars') {
+        // For cars: check brand and model, then auto-fill bodyType
+        const brand = sel.brand || sel.Brand || '';
+        const model = sel.model || sel.Model || '';
+        
+        if (brand && model) {
+          // Auto-fill bodyType with first available option
+          const parentLinkedAttr = setupSelectedCategory?.linkedAttributes || {};
+          const { fields, listsByField } = getSetupCascadeLists(family, parentLinkedAttr);
+          const bodyTypeOptions = Array.isArray(listsByField.bodyType) ? listsByField.bodyType : [];
+          
+          if (bodyTypeOptions.length > 0 && !sel.bodyType) {
+            // Auto-fill bodyType with first option
+            setSetupInventoryDraft((prev) => ({
+              ...prev,
+              [family]: { ...sel, bodyType: bodyTypeOptions[0] }
+            }));
+            window.__lastAutoAddTime = now;
+            return; // Wait for next effect cycle to check all fields
+          }
+        }
+        
+        requiredFields = ['brand', 'model', 'transmission', 'bodyType'];
+      } else if (famLower === 'bikes') {
+        requiredFields = ['bikeBrand', 'model', 'bikeTransmission'];
+      } else {
+        return;
+      }
+      
+      const allFieldsSelected = requiredFields.every(field => 
+        sel[field] && String(sel[field]).trim() !== ''
+      );
+      
+      if (!allFieldsSelected) return;
+      
+      // Normalize selections for bikes
+      let selNorm = { ...sel };
+      if (famLower === "bikes") {
+        if (selNorm.brand && !selNorm.bikeBrand) {
+          selNorm = { ...selNorm, bikeBrand: selNorm.brand };
+        }
+        if (selNorm.brand) {
+          const { brand, ...rest } = selNorm;
+          selNorm = rest;
+        }
+      }
+      
+      // Create snapshot and add to items
+      const snapshot = {
+        at: Date.now(),
+        selections: { [family]: selNorm },
+        scopeFamily: family,
+        scopeLabel: currentScope.label,
+      };
+      
+      // Batch state updates for better performance
+      setSetupInventoryItems((prev) => ({
+        ...prev,
+        [serviceId]: [...(prev[serviceId] || []), snapshot],
+      }));
+      
+      // Clear the draft for next selection
+      setSetupInventoryDraft((prev) => ({ ...prev, [family]: {} }));
+      
+      // Update debounce timestamp
+      window.__lastAutoAddTime = now;
+      
+    } catch (error) {
+      console.error('Error in auto-add data effect:', error);
+    }
+  }, [showSetupInventoryPopup, setupInventoryScopes, setupCurrentScopeIndex, setupInventoryDraft, setupInventoryItems]);
+
   const makePreviewSessionKey = useCallback((venId, catId) => {
     try {
       const v = venId || "";
@@ -668,7 +771,11 @@ export default function PreviewPage() {
       } catch {}
     } catch (e) {
       console.error("Setup My Business Places details error", e);
-      setSetupPlaceError("Failed to fetch place details");
+      if (e.name === 'TypeError' && e.message.includes('fetch')) {
+        setSetupPlaceError("Network error. Please check your internet connection and try again.");
+      } else {
+        setSetupPlaceError(e.message || "Failed to fetch place details");
+      }
     } finally {
       setSetupPlaceLoading(false);
     }
@@ -828,10 +935,10 @@ export default function PreviewPage() {
         if (res.ok) {
           const children = await res.json();
           const childrenArr = Array.isArray(children) ? children : [];
-          // Filter out "Packages" subcategory - only show individual services
+          // Include all subcategories - allow packages and other categories to show
           const filteredChildren = childrenArr.filter((c) => {
             const name = String(c.name || "").toLowerCase().trim();
-            return name !== "packages";
+            return true; // Show all categories including packages
           });
           setSetupSubcategories(filteredChildren);
           if (!preserveSelection) {
@@ -3542,12 +3649,13 @@ export default function PreviewPage() {
       
       // No inventory and no explicit status found in subtree
       // For accepted vendors, if nodePricingStatusMap has ANY entries, 
-      // nodes without status should be hidden (they weren't explicitly activated)
-      // If nodePricingStatusMap is empty, show all (legacy/no pricing set up yet)
+      // nodes without status should still be shown if they don't have inventory filtering
+      // This allows packages, commercial, and other categories to render
       const hasAnyPricingStatusForAccepted = Object.keys(nodePricingStatusMap).length > 0;
       if (hasAnyPricingStatusForAccepted) {
-        // Some nodes have status set, but this node/subtree doesn't - hide it
-        return false;
+        // Some nodes have status set, but this node/subtree doesn't - show it anyway
+        // This allows categories without inventory (packages, commercial, etc.) to appear
+        return true;
       }
       
       // No pricing status set up at all - default to showing
@@ -3595,7 +3703,7 @@ export default function PreviewPage() {
             const rootNameForCard = String(categoryTree?.name || '').toLowerCase();
             const isDriving = rootNameForCard === 'driving school';
             if (isDriving) {
-              return hasActivePricingForNode(ch);
+              return isNodePricingActive(ch) || hasActivePricingForNode(ch);
             }
             return isNodePricingActive(ch);
           } catch {
@@ -4105,8 +4213,8 @@ export default function PreviewPage() {
                   console.log('[DEBUG] nodeName:', nodeName, 'linkedFamilyForNode:', linkedFamilyForNode);
                   console.log('[DEBUG] entriesAll:', entriesAll.map(e => ({ scopeFamily: e?.scopeFamily, scopeLabel: e?.scopeLabel })));
                   
-                  // If no family mapping exists for this node, show NO inventory (empty list)
-                  // This handles cases like Commercial Vehicles which has no inventory
+                  // If no family mapping exists, show all entries (allows categories without inventory to render)
+                  // This handles cases like packages, commercial that may not have scopeFamily filtering
                   const filteredEntries = linkedFamilyForNode 
                     ? entriesAll.filter((entry) => {
                         const entryScopeFamily = String(entry?.scopeFamily || '').trim().toLowerCase();
@@ -4115,7 +4223,7 @@ export default function PreviewPage() {
                         console.log('[DEBUG] Family filter:', entryScopeFamily, '===', linkedFamilyForNode, '=', match);
                         return match;
                       })
-                    : []; // No mapping = no inventory for this node
+                    : entriesAll; // No mapping = show all entries for this node
                   
                   // Use filtered entries directly - don't fall back to all entries
                   // This ensures nodes without inventory mapping show empty dropdown
@@ -7161,7 +7269,8 @@ export default function PreviewPage() {
 
     // If this first-level node has no active category pricing and no active inventory
     // rows under it, hide the entire card section (e.g., Two Wheeler / Four Wheeler)
-    if (!hasCategoryActive && !hasInventoryActive) {
+    // BUT allow categories without inventory to show (packages, commercial, etc.)
+    if (!hasCategoryActive && !hasInventoryActive && !hasActivePricingForNode(enriched)) {
       return null;
     }
 
@@ -7448,8 +7557,9 @@ export default function PreviewPage() {
               if (livePrice == null) {
                 livePrice = vendor?.pricing?.[enriched.id] ?? vendor?.pricing?.[root?.id] ?? enriched.vendorPrice ?? enriched.price ?? null;
               }
-              // If vendor is accepted and there is no active pricing flag and no price, hide the card; otherwise show it.
-              if (isVendorAccepted && !hasCategoryActiveLeaf && !hasInventoryActiveLeaf && livePrice == null) return null;
+              // If vendor is accepted and there is no active pricing flag and no price, show the card anyway
+              // This allows packages, commercial, and other categories without inventory to appear
+              if (isVendorAccepted && !hasCategoryActiveLeaf && !hasInventoryActiveLeaf && livePrice == null && !hasActivePricingForNode(enriched)) return null;
               const imgSrc = (() => {
                 const s = String(enriched?.imageUrl || '');
                 if (!s) return null;
@@ -7570,8 +7680,9 @@ export default function PreviewPage() {
                   enriched.price ??
                   null;
               }
-              // If vendor is accepted and there is no active pricing flag and no price, hide the card; otherwise show it.
-              if (isVendorAccepted && !hasCategoryActiveLeaf && !hasInventoryActiveLeaf && livePrice == null) return null;
+              // If vendor is accepted and there is no active pricing flag and no price, show the card anyway
+              // This allows packages, commercial, and other categories without inventory to appear
+              if (isVendorAccepted && !hasCategoryActiveLeaf && !hasInventoryActiveLeaf && livePrice == null && !hasActivePricingForNode(enriched)) return null;
               const nodeWithLivePrice = { ...enriched, vendorPrice: livePrice, price: livePrice };
               return (
                 <ParentWithSizesCard
@@ -10207,7 +10318,7 @@ export default function PreviewPage() {
                               borderRadius: 8,
                             }}
                           >
-                            No items added yet. Use the selectors above and click Add Data.
+                            No items added yet. Make selections above and data will be added automatically.
                           </div>
                         ) : (
                           <div style={{ overflowX: "auto" }}>
@@ -10385,50 +10496,8 @@ export default function PreviewPage() {
                         )}
                       </div>
 
-                      {/* Action Buttons */}
+                      {/* Navigation Buttons */}
                       <div style={{ display: "flex", gap: 10, marginTop: 16, flexWrap: "wrap" }}>
-                        <button
-                          type="button"
-                          disabled={currentItems.length >= maxCount}
-                          onClick={() => {
-                            const sel = setupInventoryDraft[family] || {};
-                            const hasSelection = Object.values(sel).some((v) => v && String(v).trim() !== "");
-                            if (!hasSelection) return;
-                            const famLower = String(family).toLowerCase();
-                            let selNorm = { ...sel };
-                            if (famLower === "bikes") {
-                              if (selNorm.brand && !selNorm.bikeBrand) {
-                                selNorm = { ...selNorm, bikeBrand: selNorm.brand };
-                              }
-                              if (selNorm.brand) {
-                                const { brand, ...rest } = selNorm;
-                                selNorm = rest;
-                              }
-                            }
-                            const snapshot = {
-                              at: Date.now(),
-                              selections: { [family]: selNorm },
-                              scopeFamily: family,
-                              scopeLabel: label,
-                            };
-                            setSetupInventoryItems((prev) => ({
-                              ...prev,
-                              [serviceId]: [...(prev[serviceId] || []), snapshot],
-                            }));
-                            setSetupInventoryDraft((prev) => ({ ...prev, [family]: {} }));
-                          }}
-                          style={{
-                            padding: "6px 12px",
-                            borderRadius: 6,
-                            background: currentItems.length >= maxCount ? "#9ca3af" : "#16a34a",
-                            color: "#fff",
-                            border: "none",
-                            cursor: currentItems.length >= maxCount ? "not-allowed" : "pointer",
-                            fontSize: 13,
-                          }}
-                        >
-                          Add Data {currentItems.length >= maxCount ? "(Limit reached)" : ""}
-                        </button>
                         <button
                           type="button"
                           onClick={() => {
@@ -11449,8 +11518,8 @@ export default function PreviewPage() {
                             borderRadius: 8,
                           }}
                         >
-                          No items added yet. Use the selectors above and click
-                          Add Data to add.
+                          No items added yet. Make selections above and data will be added
+                          automatically.
                         </div>
                       );
                     }
