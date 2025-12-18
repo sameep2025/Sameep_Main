@@ -478,18 +478,31 @@ export default function PreviewPage() {
       setSetupPlaceError("");
       setSetupPlaceResults([]);
       setSetupSelectedPlace(null);
+      
       const res = await fetch(
         `${API_BASE_URL}/api/google/places/search?query=${encodeURIComponent(q)}`
       );
+      
       if (!res.ok) {
-        throw new Error("Failed to search places");
+        if (res.status === 429) {
+          throw new Error("Too many requests. Please try again later.");
+        } else if (res.status >= 500) {
+          throw new Error("Server is temporarily unavailable. Please try again later.");
+        } else {
+          throw new Error(`Failed to search places (Status: ${res.status})`);
+        }
       }
+      
       const data = await res.json();
       const results = Array.isArray(data?.results) ? data.results : [];
       setSetupPlaceResults(results);
     } catch (e) {
       console.error("Setup My Business Places search error", e);
-      setSetupPlaceError("Failed to search places");
+      if (e.name === 'TypeError' && e.message.includes('fetch')) {
+        setSetupPlaceError("Network error. Please check your internet connection and try again.");
+      } else {
+        setSetupPlaceError(e.message || "Failed to search places");
+      }
     } finally {
       setSetupPlaceLoading(false);
     }
@@ -555,6 +568,9 @@ export default function PreviewPage() {
       setSetupPlaceLoading(true);
       setSetupPlaceError("");
 
+      // Find the search result to preserve rating data
+      const searchResult = setupPlaceResults.find(r => r.placeId === placeId);
+      
       // Fetch place details and progress in parallel for faster resume
       const catId = setupSelectedCategory?._id || setupSelectedCategory?.id || "";
       const [placeRes, progressResult] = await Promise.all([
@@ -563,10 +579,24 @@ export default function PreviewPage() {
       ]);
 
       if (!placeRes.ok) {
-        throw new Error("Failed to fetch place details");
+        if (placeRes.status === 429) {
+          throw new Error("Too many requests. Please try again later.");
+        } else if (placeRes.status >= 500) {
+          throw new Error("Server is temporarily unavailable. Please try again later.");
+        } else {
+          throw new Error(`Failed to fetch place details (Status: ${placeRes.status})`);
+        }
       }
+      
       const data = await placeRes.json();
       const place = data?.place || null;
+      
+      // Merge rating data from search results with detailed place data
+      if (place && searchResult) {
+        place.rating = searchResult.rating;
+        place.userRatingsTotal = searchResult.userRatingsTotal;
+      }
+      
       setSetupSelectedPlace(place);
 
       try {
@@ -1918,11 +1948,32 @@ export default function PreviewPage() {
             entry && entry.pricesByRow && typeof entry.pricesByRow === "object"
               ? entry.pricesByRow
               : null;
-          if (!pbr) continue;
           const statusMap =
             entry && entry.pricingStatusByRow && typeof entry.pricingStatusByRow === "object"
               ? entry.pricingStatusByRow
               : {};
+
+          // If there's no pricing data but there's status data, check status without price
+          if (!pbr) {
+            // Check if this entry has any status that matches our node IDs
+            for (const statusKey of Object.keys(statusMap)) {
+              const keyIds = String(statusKey).split("|");
+              const hasMatchingId = keyIds.some((id) => idsToMatch.has(String(id)));
+              if (hasMatchingId) {
+                const rawStatus = String(statusMap[statusKey] || "").trim().toLowerCase();
+                console.log('DEBUG found matching status without price', {
+                  nodeName: node?.name,
+                  statusKey,
+                  keyIds,
+                  rawStatus
+                });
+                if (rawStatus === "active") {
+                  return true;
+                }
+              }
+            }
+            continue;
+          }
 
           for (const key of Object.keys(pbr)) {
             const keyIds = String(key).split("|");
@@ -3392,9 +3443,21 @@ export default function PreviewPage() {
         return false;
       }
       
-      // For accepted vendors, check pricing status
-      // First check node-level pricingStatus
+      // For accepted vendors, check vendor's nodePricingStatus FIRST (higher priority)
+      // For non-inventory categories, check vendor.nodePricingStatus map
+      const vendorNodeStatus = nodePricingStatusMap[nodeId];
+      console.log(`[DEBUG isNodePricingActive] nodeId: ${nodeId}, vendorNodeStatus: ${vendorNodeStatus}`);
+      
+      if (vendorNodeStatus !== undefined) {
+        const vendorStatusRaw = String(vendorNodeStatus).trim().toLowerCase();
+        console.log(`[DEBUG isNodePricingActive] vendorStatusRaw: ${vendorStatusRaw}`);
+        if (vendorStatusRaw === "active") return true;
+        if (vendorStatusRaw === "inactive") return false;
+      }
+      
+      // Then check node-level pricingStatus as fallback
       const nodeStatusRaw = String(node?.pricingStatus || "").trim().toLowerCase();
+      console.log(`[DEBUG isNodePricingActive] nodeStatusRaw: ${nodeStatusRaw}`);
       if (nodeStatusRaw === "active") return true;
       if (nodeStatusRaw === "inactive") return false;
       
@@ -3409,8 +3472,22 @@ export default function PreviewPage() {
         const hasActiveInventory = (() => {
           for (const entry of invList) {
             const pbr = entry?.pricesByRow;
-            if (!pbr) continue;
             const statusMap = entry?.pricingStatusByRow || {};
+            
+            // If there's no pricing data but there's status data, check status without price
+            if (!pbr) {
+              // Check if this entry has any status that matches our node ID
+              for (const statusKey of Object.keys(statusMap)) {
+                const keyParts = String(statusKey).split("|");
+                if (keyParts.includes(nodeId)) {
+                  const rawStatus = String(statusMap[statusKey] || "").trim().toLowerCase();
+                  if (rawStatus === "active") {
+                    return true;
+                  }
+                }
+              }
+              continue;
+            }
             
             for (const key of Object.keys(pbr)) {
               // Check if the key contains this node's ID anywhere
@@ -3431,15 +3508,6 @@ export default function PreviewPage() {
         
         // For all nodes, check if any descendant has active inventory
         return hasActivePricingForNode(node);
-      }
-      
-      // For non-inventory categories, check vendor.nodePricingStatus map
-      const vendorNodeStatus = nodePricingStatusMap[nodeId];
-      
-      if (vendorNodeStatus !== undefined) {
-        const vendorStatusRaw = String(vendorNodeStatus).trim().toLowerCase();
-        if (vendorStatusRaw === "active") return true;
-        if (vendorStatusRaw === "inactive") return false;
       }
       
       // Collect ALL node IDs in this subtree (including this node and all descendants)
@@ -3958,7 +4026,12 @@ export default function PreviewPage() {
                   const hasActivePricing = (e) => {
                     const pbr = e && e.pricesByRow && typeof e.pricesByRow === 'object' ? e.pricesByRow : null;
                     const statusMap = e && e.pricingStatusByRow && typeof e.pricingStatusByRow === 'object' ? e.pricingStatusByRow : {};
-                    if (!pbr) return false; // no prices
+                    
+                    // If no pricing data, allow the entry through
+                    if (!pbr) {
+                      return true; // Allow entries without prices
+                    }
+                    
                     const hasStatusMap = Object.keys(statusMap).length > 0;
                     for (const [rk] of Object.entries(pbr)) {
                       const parts = String(rk).split('|');
@@ -4012,32 +4085,44 @@ export default function PreviewPage() {
                   });
                   const entries = entriesMatched.length > 0 ? entriesMatched : entriesAll;
                   
-                  // Final filter: for entries WITH prices, ensure active row for current node
-                  // For entries WITHOUT prices, allow them through
-                  const currentNodeId = String(displayNode?.id || selectedParent?.id || node?.id || '');
-                  const filteredEntries = entries.filter((entry) => {
-                        try {
-                          const pbr = entry && entry.pricesByRow && typeof entry.pricesByRow === 'object' ? entry.pricesByRow : null;
-                          const statusMap = entry && entry.pricingStatusByRow && typeof entry.pricingStatusByRow === 'object' ? entry.pricingStatusByRow : {};
-                          
-                          // If no pricesByRow, allow the entry
-                          if (!pbr) return true;
-                          
-                          // If no status map, allow entry (legacy data)
-                          if (Object.keys(statusMap).length === 0) return true;
-                          for (const [rk] of Object.entries(pbr)) {
-                            const parts = String(rk).split('|');
-                            if (!parts.some((id) => String(id) === currentNodeId)) continue;
-                            const raw = String(statusMap[rk] || '').trim().toLowerCase();
-                            if (raw === 'active') return true;
-                          }
-                          return false;
-                        } catch {
-                          return false;
-                        }
-                      });
+                  // FIX: Filter entries by scopeFamily matching the node's family
+                  // Map node names to inventory scopeFamily values
+                  const nodeIdForFamily = String(node?.id || '');
+                  const nodeName = String(node?.name || '').trim().toLowerCase();
                   
-                  let blocks = filteredEntries.map((entry, idx) => {
+                  // Direct mapping from node name to scopeFamily
+                  // Based on category structure: Four Wheeler->cars, Two Wheeler->bikes
+                  // Commercial Vehicles has NO inventory in this vendor's data
+                  const nodeNameToFamily = {
+                    'four wheeler': 'cars',
+                    'two wheeler': 'bikes',
+                    // 'commercial vehicles' intentionally NOT mapped - has no inventory
+                  };
+                  
+                  const linkedFamilyForNode = nodeNameToFamily[nodeName] || null;
+                  
+                  console.log('[DEBUG] nodeIdForFamily:', nodeIdForFamily, 'node.name:', node?.name);
+                  console.log('[DEBUG] nodeName:', nodeName, 'linkedFamilyForNode:', linkedFamilyForNode);
+                  console.log('[DEBUG] entriesAll:', entriesAll.map(e => ({ scopeFamily: e?.scopeFamily, scopeLabel: e?.scopeLabel })));
+                  
+                  // If no family mapping exists for this node, show NO inventory (empty list)
+                  // This handles cases like Commercial Vehicles which has no inventory
+                  const filteredEntries = linkedFamilyForNode 
+                    ? entriesAll.filter((entry) => {
+                        const entryScopeFamily = String(entry?.scopeFamily || '').trim().toLowerCase();
+                        if (!entryScopeFamily) return false;
+                        const match = entryScopeFamily === linkedFamilyForNode;
+                        console.log('[DEBUG] Family filter:', entryScopeFamily, '===', linkedFamilyForNode, '=', match);
+                        return match;
+                      })
+                    : []; // No mapping = no inventory for this node
+                  
+                  // Use filtered entries directly - don't fall back to all entries
+                  // This ensures nodes without inventory mapping show empty dropdown
+                  const finalEntries = filteredEntries;
+                  console.log('[DEBUG] filteredEntries count:', filteredEntries.length, 'finalEntries count:', finalEntries.length);
+                  
+                  let blocks = finalEntries.map((entry, idx) => {
                     const fam = String(entry?.scopeFamily || '');
                     const famLower = fam.toLowerCase();
                     let sel = {};
@@ -6075,7 +6160,23 @@ export default function PreviewPage() {
       });
       for (const entry of priceRows) {
         const pbr = (entry && entry.pricesByRow && typeof entry.pricesByRow === 'object') ? entry.pricesByRow : null;
-        if (!pbr) continue;
+        const statusMap = entry?.pricingStatusByRow || {};
+        
+        // Check if this entry has a status match for this node even without prices
+        if (!pbr) {
+          for (const statusKey of Object.keys(statusMap)) {
+            const ids = String(statusKey).split('|');
+            if (ids.some((id) => String(id) === String(node?.id))) {
+              const raw = String(statusMap[statusKey] || '').trim().toLowerCase();
+              if (raw === 'active') {
+                // This entry is active but has no price, continue to check other entries
+                continue;
+              }
+            }
+          }
+          continue;
+        }
+        
         for (const [key, value] of Object.entries(pbr)) {
           const ids = String(key).split('|');
           if (!ids.some((id) => String(id) === String(node?.id))) continue;
@@ -6085,6 +6186,8 @@ export default function PreviewPage() {
         }
         if (livePrice != null) break;
       }
+      
+      // Use fallback pricing if no specific price found
       if (livePrice == null) {
         livePrice = vendor?.pricing?.[node?.id] ?? vendor?.pricing?.[parentNode?.id] ?? node?.vendorPrice ?? node?.price ?? null;
       }
@@ -6217,22 +6320,23 @@ export default function PreviewPage() {
         {root.children.map((lvl1) => {
           const serviceKey = makeServiceKey(lvl1?.name || "");
           // Check if the lvl1 node itself should be displayed
-          const shouldShowLvl1 = !isVendorAccepted || isNodePricingActive(lvl1) || hasActivePricingForNode(lvl1);
+          const shouldShowLvl1 = !shouldFilterByStatus || isNodePricingActive(lvl1) || hasActivePricingForNode(lvl1);
           console.log(`[DEBUG] Lvl1 ${lvl1.name}: isVendorAccepted=${isVendorAccepted}, shouldShow=${shouldShowLvl1}`);
           if (!shouldShowLvl1) return null;
           
       const lvl2KidsRaw = Array.isArray(lvl1.children) ? lvl1.children : [];
-      // Filter lvl2Kids to only show those with active inventory records for accepted vendors
-      const lvl2Kids = isVendorAccepted
-        ? lvl2KidsRaw.filter((kid) => {
-            try {
-              // Check if this subcategory has any active inventory records specifically for this node
-              return hasActivePricingForNode(kid);
-            } catch {
-              return false;
-            }
+      // Filter lvl2Kids by active status for accepted and preview vendors
+      const shouldFilterByStatus = isVendorAccepted || String(vendor?.status || "").trim().toLowerCase() === "preview";
+      console.log(`[DEBUG] Vendor status: ${vendor?.status}, shouldFilterByStatus: ${shouldFilterByStatus}`);
+      console.log(`[DEBUG] lvl2KidsRaw for ${lvl1.name}:`, lvl2KidsRaw.map(c => ({ name: c.name, id: c.id })));
+      const lvl2Kids = shouldFilterByStatus 
+        ? lvl2KidsRaw.filter(child => {
+            const isActive = isNodePricingActive(child);
+            console.log(`[DEBUG] Child ${child.name} (${child.id}): isNodePricingActive = ${isActive}`);
+            return isActive;
           })
         : lvl2KidsRaw;
+      console.log(`[DEBUG] Filtered lvl2Kids for ${lvl1.name}:`, lvl2Kids.map(c => ({ name: c.name, id: c.id })));
       // Sort L2 by min subtree price
       const sortedLvl2Kids = [...lvl2Kids].sort((a, b) => {
         const pa = localMinPriceInSubtree(a);
@@ -6244,19 +6348,9 @@ export default function PreviewPage() {
       const selState = taxiSelections[lvl1.id] || {};
       const selectedLvl2 = sortedLvl2Kids.find((c) => String(c.id) === String(selState.lvl2)) || sortedLvl2Kids[0] || lvl2KidsRaw[0] || null;
       const lvl3KidsRaw = Array.isArray(selectedLvl2?.children) ? selectedLvl2.children : [];
-      // Filter lvl3Kids to only show those with active inventory records for accepted vendors
-      const lvl3Kids = isVendorAccepted
-        ? lvl3KidsRaw.filter((kid) => {
-            try {
-              // Check if this subcategory has any active inventory records specifically for this node
-              const isActive = hasActivePricingForNode(kid);
-              console.log(`[DEBUG] lvl3Kid: ${kid.name}, isActive: ${isActive}`);
-              return isActive;
-            } catch {
-              console.log(`[DEBUG] lvl3Kid: ${kid.name}, error in check, returning false`);
-              return false;
-            }
-          })
+      // Filter lvl3Kids by active status for accepted and preview vendors
+      const lvl3Kids = shouldFilterByStatus 
+        ? lvl3KidsRaw.filter(child => isNodePricingActive(child))
         : lvl3KidsRaw;
       const sortedLvl3Kids = [...lvl3Kids].sort((a, b) => {
         const pa = localMinPriceInSubtree(a);
@@ -9166,15 +9260,11 @@ export default function PreviewPage() {
                                 </div>
                                 <div style={{ color: "#111827" }}>
                                   <strong>Google Rating:</strong>{" "}
-                                  {typeof setupSelectedPlace.rating === "number"
-                                    ? setupSelectedPlace.rating
-                                    : "-"}
+                                  {setupSelectedPlace.rating != null ? setupSelectedPlace.rating : "-"}
                                 </div>
                                 <div style={{ color: "#111827" }}>
                                   <strong>Total Ratings:</strong>{" "}
-                                  {typeof setupSelectedPlace.userRatingsTotal === "number"
-                                    ? setupSelectedPlace.userRatingsTotal
-                                    : "-"}
+                                  {setupSelectedPlace.userRatingsTotal != null ? setupSelectedPlace.userRatingsTotal : "-"}
                                 </div>
 
                                 {/* OTP Verification Section */}
@@ -9422,6 +9512,7 @@ export default function PreviewPage() {
           />
           <ContactSection
             contactNumber={vendor?.customerId?.fullNumber || vendor?.phone || "-"}
+            countryCode={vendor?.customerId?.countryCode || ""}
             location={location}
             vendorId={vendorId}
             businessHours={vendor?.businessHours || []}

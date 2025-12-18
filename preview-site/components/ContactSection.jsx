@@ -14,6 +14,7 @@ export default function ContactSection({
   businessHours = [], // ✅ accept from parent
   onLocationUpdate,
   contact,
+  countryCode, // ✅ accept country code from parent
 }) {
   const [areaCity, setAreaCity] = useState("");
   const [isOpenNow, setIsOpenNow] = useState({ open: false, closes: "", nextOpen: "" });
@@ -319,14 +320,14 @@ export default function ContactSection({
               }}
             >
               <a
-                href={contactNumber ? `tel:+91${contactNumber}` : undefined}
+                href={contactNumber ? `tel:${contactNumber}` : undefined}
                 style={{
                   color: "#111827",
                   textDecoration: "none",
                   fontWeight: 600,
                 }}
               >
-                {contactNumber ? `+91 ${contactNumber}` : "-"}
+                {contactNumber ? (countryCode ? `+${countryCode} ${contactNumber.replace(/^\+/, '')}` : contactNumber) : "-"}
               </a>
             </p>
           </div>
