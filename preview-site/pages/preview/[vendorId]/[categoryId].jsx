@@ -23,6 +23,8 @@ export default function PreviewPage() {
 
   const parsedHomeLocations = homeLocs ? JSON.parse(homeLocs) : [];
 
+  const isDummyMode = String(mode || "").trim().toLowerCase() === "dummy";
+
   const [vendor, setVendor] = useState(null);
   const [categoryTree, setCategoryTree] = useState(null);
   const [loadingVendor, setLoadingVendor] = useState(true);
@@ -476,12 +478,35 @@ export default function PreviewPage() {
       setSetupSelectedSubcategories({});
       setSetupSubcategoriesLoading(false);
       setSetupCategoriesLoading(true);
+      console.log("🚀 Fetching dummy categories");
       const res = await fetch(`${API_BASE_URL}/api/dummy-categories`);
+      console.log('[DEBUG dummy-categories response]', {
+        ok: res?.ok,
+        status: res?.status,
+        statusText: res?.statusText,
+        url: res?.url,
+      });
       if (!res.ok) {
         throw new Error("Failed to load categories");
       }
       const data = await res.json();
+      console.log('[DEBUG dummy-categories json]', data);
       const list = Array.isArray(data) ? data : [];
+      try {
+        const drivingSchoolMatches = list.filter((c) => {
+          const nm = c && c.name != null ? String(c.name) : '';
+          return nm.trim().toLowerCase() === 'driving school';
+        });
+        console.log('[DEBUG driving-school categories count]', drivingSchoolMatches.length);
+        
+        console.log(
+          '[DEBUG driving-school categories items]',
+          drivingSchoolMatches.map((c) => ({
+            id: String(c?._id || c?.id || ''),
+            name: String(c?.name || ''),
+          }))
+        );
+      } catch {}
       setSetupCategories(list);
     } catch (e) {
       console.error("Setup My Business categories error", e);
@@ -2001,115 +2026,80 @@ export default function PreviewPage() {
     }
   }, [categoryTree]);
 
+  // SIMPLIFIED: Always return true - show all nodes
   const hasActiveLeaf = useCallback((node) => {
-    try {
-      if (!node) return false;
-      const children = Array.isArray(node.children) ? node.children : [];
-      if (children.length === 0) {
-        const selfStatus = String(node?.pricingStatus || "").trim().toLowerCase();
-        return selfStatus === "active".toLowerCase();
-      }
-      return children.some((ch) => hasActiveLeaf(ch));
-    } catch {
-      return false;
-    }
+    return true;
   }, []);
 
+  // SIMPLIFIED: Always return true - show all nodes
+  // Dummy mode: consider inventory row-level pricing status for the node
   const hasActivePricingForNode = useCallback((node) => {
     try {
-      const rootId = (() => {
-        try { return String(node?.id || node?._id || ""); } catch { return ""; }
-      })();
-      if (!rootId) return false;
+      if (!isDummyMode) return true;
+      if (!node) return false;
 
-      // Collect this node's id plus all descendant ids so that a parent
-      // category is treated as active when any child inventory row is active.
-      const idsToMatch = new Set();
-      const collectIds = (n) => {
-        if (!n) return;
-        try {
-          const nid = String(n.id || n._id || "");
-          if (nid) idsToMatch.add(nid);
-        } catch {}
-        const kids = Array.isArray(n.children) ? n.children : [];
-        kids.forEach(collectIds);
+      const normalizeId = (val) => {
+        if (val == null) return '';
+        if (typeof val === 'string' || typeof val === 'number') return String(val);
+        if (typeof val === 'object') {
+          if (val.$oid) return String(val.$oid);
+          if (val.oid) return String(val.oid);
+          if (val._id) return normalizeId(val._id);
+          if (val.id) return normalizeId(val.id);
+        }
+        return String(val);
       };
-      collectIds(node);
 
-      const allInv =
-        vendor && vendor.inventorySelections && typeof vendor.inventorySelections === "object"
-          ? vendor.inventorySelections
-          : {};
-      const lists = Object.values(allInv);
+      const collectIds = (root) => {
+        const out = new Set();
+        const stack = [root];
+        while (stack.length) {
+          const cur = stack.pop();
+          const id = normalizeId(cur?.id ?? cur?._id);
+          if (id) out.add(String(id));
+          const kids = Array.isArray(cur?.children) ? cur.children : [];
+          for (const ch of kids) stack.push(ch);
+        }
+        return Array.from(out);
+      };
 
-      console.log('DEBUG hasActivePricingForNode', {
-        nodeName: node?.name,
-        nodeId: rootId,
-        idsToMatch: Array.from(idsToMatch)
-      });
+      const targetIds = collectIds(node);
+      if (targetIds.length === 0) return false;
 
-      for (const listRaw of lists) {
-        const inv = Array.isArray(listRaw) ? listRaw : [];
-        for (const entry of inv) {
-          const pbr =
-            entry && entry.pricesByRow && typeof entry.pricesByRow === "object"
-              ? entry.pricesByRow
-              : null;
-          const statusMap =
-            entry && entry.pricingStatusByRow && typeof entry.pricingStatusByRow === "object"
-              ? entry.pricingStatusByRow
-              : {};
+      const catKey = String(categoryId || '');
+      const invRaw = Array.isArray(vendor?.inventorySelections?.[catKey]) ? vendor.inventorySelections[catKey] : [];
 
-          // If there's no pricing data but there's status data, check status without price
-          if (!pbr) {
-            // Check if this entry has any status that matches our node IDs
-            for (const statusKey of Object.keys(statusMap)) {
-              const keyIds = String(statusKey).split("|");
-              const hasMatchingId = keyIds.some((id) => idsToMatch.has(String(id)));
-              if (hasMatchingId) {
-                const rawStatus = String(statusMap[statusKey] || "").trim().toLowerCase();
-                console.log('DEBUG found matching status without price', {
-                  nodeName: node?.name,
-                  statusKey,
-                  keyIds,
-                  rawStatus
-                });
-                if (rawStatus === "active") {
-                  return true;
-                }
-              }
-            }
-            continue;
-          }
+      const rowKeyIsActive = (entry, rk) => {
+        try {
+          const map = entry?.pricingStatusByRow && typeof entry.pricingStatusByRow === 'object' ? entry.pricingStatusByRow : {};
+          if (!Object.prototype.hasOwnProperty.call(map, rk)) return false;
+          return String(map[rk] || '').trim().toLowerCase() === 'active';
+        } catch {
+          return false;
+        }
+      };
 
-          for (const key of Object.keys(pbr)) {
-            const keyIds = String(key).split("|");
-            // Match this node or any of its descendants against ANY id segment
-            // in the composite key so that parents stay active when a child row
-            // is active.
-            const hasMatchingId = keyIds.some((id) => idsToMatch.has(String(id)));
-            if (!hasMatchingId) continue;
-
-            const rawStatus = String(statusMap[key] || "").trim().toLowerCase();
-            console.log('DEBUG found matching row', {
-              nodeName: node?.name,
-              key,
-              keyIds,
-              rawStatus
-            });
-            if (rawStatus === "active") {
-              return true;
-            }
-          }
+      for (const entry of invRaw) {
+        const pbr = entry?.pricesByRow;
+        const statusMap =
+          entry?.pricingStatusByRow && typeof entry.pricingStatusByRow === 'object'
+            ? entry.pricingStatusByRow
+            : {};
+        const keys = new Set([
+          ...((pbr && typeof pbr === 'object') ? Object.keys(pbr) : []),
+          ...Object.keys(statusMap),
+        ]);
+        for (const rk of keys) {
+          const ids = String(rk).split('|');
+          if (!ids.some((id) => targetIds.includes(String(id)))) continue;
+          if (rowKeyIsActive(entry, rk)) return true;
         }
       }
-      
-      console.log('DEBUG no active rows found for', node?.name);
       return false;
     } catch {
       return false;
     }
-  }, [vendor]);
+  }, [isDummyMode, vendor, categoryId]);
 
   // ----------------- Inventory helpers (dummy vendors) -----------------
 
@@ -2612,12 +2602,179 @@ export default function PreviewPage() {
           return;
         }
         const list = await loadDummyInventorySelections(vendorId, categoryId);
-        setInvItems(Array.isArray(list) ? list : []);
+        const safe = Array.isArray(list) ? list : [];
+        setInvItems(safe);
+        try {
+          console.log("[PREVIEW] Dummy inventorySelections rows", {
+            vendorId,
+            categoryId,
+            count: safe.length,
+            rows: safe,
+          });
+        } catch {}
       } catch {
         setInvItems([]);
       }
     })();
   }, [vendorId, categoryId, loadDummyInventorySelections]);
+
+  useEffect(() => {
+    try {
+      const isDummy = String(mode || '').toLowerCase() === 'dummy';
+      if (!isDummy) return;
+      if (!vendorId || !categoryId) return;
+      if (!categoryTree) return;
+
+      const flattenTree = (node, rows = [], parentLevels = [], parentIds = []) => {
+        try {
+          if (!node) return rows;
+          const levels = [...parentLevels, node.name ?? "Unnamed"];
+          const ids = [...parentIds, (node._id ?? node.id)];
+          const kids = Array.isArray(node.children) ? node.children : [];
+          if (kids.length === 0) {
+            rows.push({
+              id: node._id ?? node.id,
+              levels,
+              levelIds: ids,
+              price: (typeof node.vendorPrice === "number") ? node.vendorPrice : (node.price ?? "-"),
+              pricingStatus: node.pricingStatus,
+              terms: node.terms,
+              node,
+            });
+          } else {
+            kids.forEach((child) => flattenTree(child, rows, levels, ids));
+          }
+          return rows;
+        } catch {
+          return rows;
+        }
+      };
+
+      const baseRows = flattenTree(categoryTree, []);
+      const items = Array.isArray(invItems) ? invItems : [];
+      const la = (linkedAttributes && typeof linkedAttributes === 'object') ? linkedAttributes : {};
+
+      const matchesForRow = (row) => {
+        try {
+          const lvlIds = Array.isArray(row.levelIds) ? row.levelIds.map((x) => String(x)) : [];
+          const firstIdx = (lvlIds[0] === 'root') ? 2 : 1;
+          const firstSubcatId = lvlIds.length > firstIdx ? lvlIds[firstIdx] : null;
+
+          return items.filter((it) => {
+            try {
+              const hasScope = it && it.scopeFamily && it.scopeLabel;
+              const keyCandidates = hasScope
+                ? [
+                    `${it.scopeFamily}:${it.scopeLabel}:linkedSubcategory`,
+                    `${it.scopeFamily}:inventoryLabels:linkedSubcategory`,
+                  ]
+                : [];
+              let linked = [];
+              for (const k of keyCandidates) {
+                const arr = la?.[k];
+                if (Array.isArray(arr) && arr.length) {
+                  linked = arr;
+                  break;
+                }
+              }
+              const val = (Array.isArray(linked) && linked.length) ? String(linked[0]) : '';
+              if (val === 'ALL') return true;
+              if (!firstSubcatId) return false;
+              return String(firstSubcatId) === val;
+            } catch {
+              return false;
+            }
+          });
+        } catch {
+          return [];
+        }
+      };
+
+      const expandedRows = [];
+      baseRows.forEach((row) => {
+        const matches = matchesForRow(row);
+        const computeEffective = (inv) => {
+          try {
+            const statusMap = inv && inv.pricingStatusByRow && typeof inv.pricingStatusByRow === 'object' ? inv.pricingStatusByRow : {};
+            const keys = Object.keys(statusMap);
+            if (!keys.length) return { status: row.pricingStatus, rowKey: null };
+            const ids = Array.isArray(row.levelIds) ? row.levelIds.map((x) => String(x)) : [];
+            const leafId = ids.length ? String(ids[ids.length - 1]) : '';
+            let bestKey = null;
+            for (const k of keys) {
+              const parts = String(k).split('|').map((s) => s.trim()).filter(Boolean);
+              if (leafId && parts.includes(leafId)) { bestKey = k; break; }
+            }
+            if (!bestKey) {
+              for (const k of keys) {
+                const parts = String(k).split('|').map((s) => s.trim()).filter(Boolean);
+                if (parts.some((p) => ids.includes(p))) { bestKey = k; break; }
+              }
+            }
+            if (!bestKey) return { status: row.pricingStatus, rowKey: null };
+            const raw = statusMap[bestKey];
+            const status = raw == null ? row.pricingStatus : String(raw);
+            return { status, rowKey: bestKey };
+          } catch {
+            return { status: row.pricingStatus, rowKey: null };
+          }
+        };
+        if (!matches.length) {
+          expandedRows.push({
+            categoryPath: row.levels,
+            categoryIds: row.levelIds,
+            price: row.price,
+            pricingStatus: row.pricingStatus,
+            terms: row.terms,
+            effectivePricingStatus: row.pricingStatus,
+            matchedRowKey: null,
+            inventory: null,
+          });
+        } else {
+          matches.forEach((m, idx) => {
+            const eff = computeEffective(m);
+            expandedRows.push({
+              categoryPath: row.levels,
+              categoryIds: row.levelIds,
+              price: row.price,
+              pricingStatus: row.pricingStatus,
+              effectivePricingStatus: eff.status,
+              matchedRowKey: eff.rowKey,
+              terms: row.terms,
+              inventory: m,
+              inventoryIndex: idx,
+            });
+          });
+        }
+      });
+
+      let activeRows = expandedRows;
+      try {
+        const isActive = (r) => {
+          const s = (r && r.effectivePricingStatus != null) ? String(r.effectivePricingStatus).trim().toLowerCase() : '';
+          return s === 'active';
+        };
+        const inactiveRows = expandedRows.filter((r) => !isActive(r));
+        activeRows = expandedRows.filter((r) => isActive(r));
+        console.log("[PREVIEW] Dummy removed inactive rows (effectivePricingStatus)", {
+          vendorId,
+          categoryId,
+          before: expandedRows.length,
+          removed: inactiveRows.length,
+          after: activeRows.length,
+          removedRows: inactiveRows,
+        });
+      } catch {}
+
+      console.log("[PREVIEW] Dummy expanded row data (like admin rows)", {
+        vendorId,
+        categoryId,
+        baseLeafCount: baseRows.length,
+        expandedCount: activeRows.length,
+        rows: activeRows,
+      });
+    } catch {}
+  }, [mode, vendorId, categoryId, categoryTree, invItems, linkedAttributes]);
 
   // Build dynamic service labels from top-level category children (product card sections).
   // For accepted vendors, use the same visibility rule as the product cards (shouldShowLvl1),
@@ -2625,39 +2782,31 @@ export default function PreviewPage() {
   // active pricing. For non-accepted vendors, include all top-level services.
   const serviceLabels = useMemo(() => {
     try {
-      const isVendorAcceptedLocal =
-        String(vendor?.status || "").trim().toLowerCase() === "accepted".toLowerCase();
-      const nodePricingStatusMap = (vendor && vendor.nodePricingStatus && typeof vendor.nodePricingStatus === 'object')
-        ? vendor.nodePricingStatus
-        : {};
-      const hasAnyPricingStatus = Object.keys(nodePricingStatusMap).length > 0;
+
       const children = Array.isArray(categoryTree?.children) ? categoryTree.children : [];
+      console.log("Service Labels - Top-level children count:", children.length);
+      console.log("Top-level children:", children);
+      console.log("Top-level active children:", children.filter((n) => {
+        try {
+          return isNodePricingActive(n) || hasActivePricingForNode(n);
+        } catch {
+          return false;
+        }
+      }));
+      const source = children.filter((n) => {
+        try {
+          return isNodePricingActive(n) || hasActivePricingForNode(n);
+        } catch {
+          return false;
+        }
+      });
 
-      const source = (() => {
-        // Before acceptance, if pricing has been configured via nodePricingStatus
-        // (Setup My Business checkbox flow), filter just like accepted vendors.
-        if (!isVendorAcceptedLocal && !hasAnyPricingStatus) return children;
-
-        // For accepted vendors, mirror the shouldShowLvl1 logic used in the
-        // card renderer so that any top-level service that shows a card also
-        // appears in the Our Services dropdown.
-        return children.filter((n) => {
-          try {
-            return isNodePricingActive(n) || hasActivePricingForNode(n);
-          } catch {
-            return false;
-          }
-        });
-      })();
 
       const labels = source
         .map((n) => (n && typeof n.name === "string" ? n.name.trim() : ""))
         .filter((name) => !!name);
       if (labels.length > 0) return labels;
 
-      // If vendor is accepted and no active services were found, return empty so
-      // Our Services dropdown is hidden.
-      if (isVendorAcceptedLocal) return [];
     } catch {}
 
     // Fallback for non-accepted or error cases: derive labels from top-level names.
@@ -2681,20 +2830,15 @@ export default function PreviewPage() {
 
   const hasActiveIndividualsForNav = useMemo(() => {
     try {
-      const isVendorAcceptedLocal =
-        String(vendor?.status || "").trim().toLowerCase() === "accepted".toLowerCase();
-      const nodePricingStatusMap = (vendor && vendor.nodePricingStatus && typeof vendor.nodePricingStatus === 'object')
-        ? vendor.nodePricingStatus
-        : {};
-      const hasAnyPricingStatus = Object.keys(nodePricingStatusMap).length > 0;
       const children = Array.isArray(categoryTree?.children) ? categoryTree.children : [];
-      // Before acceptance: if there is any L1 child at all, keep heading visible
-      if (!isVendorAcceptedLocal && !hasAnyPricingStatus) return children.length > 0;
-      if (!isVendorAcceptedLocal && hasAnyPricingStatus) return children.some((n) => isNodePricingActive(n));
 
-      // After acceptance: reuse isNodePricingActive so heading visibility matches
-      // the same logic used for the actual cards (including inventory rows).
-      return children.some((n) => isNodePricingActive(n));
+      return children.some((n) => {
+        try {
+          return isNodePricingActive(n) || hasActivePricingForNode(n);
+        } catch {
+          return false;
+        }
+      });
     } catch {
       return false;
     }
@@ -2760,6 +2904,12 @@ export default function PreviewPage() {
       if (!id || visited.has(id)) return null;
       visited.add(id);
       try {
+        console.log("🚀 Fetching dummy categories");
+        
+const data = await res.json();
+const list = Array.isArray(data) ? data : [];
+
+console.log("✅ Total dummy categories count:", list.length);
         const res = await fetch(`${API_BASE_URL}/api/dummy-categories/${id}`, { cache: 'no-store' });
         if (!res.ok) return null;
         const json = await res.json().catch(() => null);
@@ -2796,6 +2946,14 @@ export default function PreviewPage() {
     setLoadingVendor(true);
     setLoadingCategories(true);
     try {
+      try {
+        console.log("[PREVIEW] fetchData start", {
+          vendorId,
+          categoryId,
+          mode,
+          routerReady: router.isReady,
+        });
+      } catch {}
       // Try to read webMenu and categoryType from dummy category config (if it exists)
       try {
         if (categoryId) {
@@ -2955,6 +3113,7 @@ export default function PreviewPage() {
 
       const forceDummy = String(mode || '').toLowerCase() === 'dummy';
       if (forceDummy) {
+        try { console.log("[PREVIEW] Branch selected: forceDummy", { vendorId, categoryId, mode }); } catch {}
         // Dummy vendor flow (forced by query)
         try {
           const dvRes = await fetch(`${API_BASE_URL}/api/dummy-vendors/${vendorId}/categories`, { cache: 'no-store' });
@@ -2982,6 +3141,39 @@ export default function PreviewPage() {
           if (categoriesWithLinked) {
             try { categoriesWithLinked = await augmentTreeWithDummyLabels(categoriesWithLinked); } catch {}
           }
+
+          try {
+            const records = categoriesWithLinked;
+            const count = Array.isArray(records)
+              ? records.length
+              : (records && typeof records === "object" ? Object.keys(records).length : 0);
+            console.log("[PREVIEW] Dummy category records", {
+              vendorId,
+              categoryId,
+              count,
+              records,
+            });
+          } catch {}
+
+          try {
+            const root = categoriesWithLinked;
+            const flattenLeafCount = (node) => {
+              try {
+                if (!node) return 0;
+                const kids = Array.isArray(node.children) ? node.children : [];
+                if (kids.length === 0) return 1;
+                return kids.reduce((sum, ch) => sum + flattenLeafCount(ch), 0);
+              } catch {
+                return 0;
+              }
+            };
+            const leafCount = flattenLeafCount(root);
+            console.log("[PREVIEW] Dummy flattened leaf rows", {
+              vendorId,
+              categoryId,
+              count: leafCount,
+            });
+          } catch {}
           setCategoryTree(categoriesWithLinked);
           if (dvVendor?.location) setLocation(dvVendor.location);
           // Compute hero title/description from dummy category/vendor freeTexts
@@ -3032,6 +3224,7 @@ export default function PreviewPage() {
         let vendorData = {};
         try { vendorData = await vendorRes.json(); } catch { vendorData = {}; }
         const isDummy = (!vendorRes.ok || vendorData?.message);
+        try { console.log("[PREVIEW] Branch selected", { vendorId, categoryId, mode, isDummy }); } catch {}
         if (isDummy) {
           // Fallback to dummy
           try {
@@ -3113,12 +3306,25 @@ export default function PreviewPage() {
             fetch(`${API_BASE_URL}/api/categories/${categoryId}`, { cache: 'no-store' }),
             fetch(`${API_BASE_URL}/api/categories/${categoryId}/tree`, { cache: 'no-store' }),
           ]);
-
+          console.log("total response of individual category tree:", categoryRes);
+          console.log("total response of individual category meta:", catMetaRes);
+          console.log("total response of individual server tree:", serverTreeRes);
           const categoryData = await categoryRes.json().catch(() => ({}));
           const catMeta = await catMetaRes.json().catch(() => ({}));
           const serverTree = await serverTreeRes.json().catch(() => null);
           let locationData = null;
           try { locationData = await locationRes.json(); } catch { locationData = null; }
+
+          try {
+            const records = categoryData?.categories || categoryData;
+            const count = Array.isArray(records) ? records.length : (records && typeof records === "object" ? Object.keys(records).length : 0);
+            console.log("[PREVIEW] Category API all records", {
+              vendorId,
+              categoryId,
+              count,
+              records,
+            });
+          } catch {}
 
           const linkedAttributes = (catMeta && catMeta.linkedAttributes) ? catMeta.linkedAttributes : {};
           let categoriesWithLinked = categoryData?.categories ? { ...categoryData.categories, linkedAttributes } : null;
@@ -3256,7 +3462,9 @@ export default function PreviewPage() {
               return false;
             }
             return true;
-          } catch { return true; }
+          } catch {
+            return !isDummyMode;
+          }
         });
 
         let best = { price: null, entry: null };
@@ -3419,249 +3627,83 @@ export default function PreviewPage() {
     return node.children?.some((c) => containsId(c, id)) || false;
   };
 
-  const isDummyMode = String(mode || "").trim().toLowerCase() === "dummy";
-
-  const isVendorAccepted =
-    String(vendor?.status || "").trim().toLowerCase() === "accepted".toLowerCase();
-
+  // SIMPLIFIED: Show packages if any combos exist
   const hasPackagesForNav = useMemo(() => {
-    try {
-      if (!Array.isArray(combos) || combos.length === 0) return false;
-      // For non-accepted vendors, keep showing Packages as long as there is any combo.
-      if (!isVendorAccepted) return true;
+    return Array.isArray(combos) && combos.length > 0;
+  }, [combos]);
 
-      // For accepted vendors, check if any combo has Active status
-      const hasAnyActive = combos.some((combo) => {
+  // SIMPLIFIED: Always return true - show all nodes
+  const hasVendorActiveForNode = (node) => {
+    return true;
+  };
+
+  // Check if a node's pricing status is Active based on vendor.nodePricingStatus
+  function isNodePricingActive(node) {
+    try {
+      if (!node) return false;
+
+      const normalizeId = (val) => {
+        if (val == null) return '';
+        if (typeof val === 'string' || typeof val === 'number') return String(val);
+        if (typeof val === 'object') {
+          if (val.$oid) return String(val.$oid);
+          if (val.oid) return String(val.oid);
+          if (val._id) return normalizeId(val._id);
+          if (val.id) return normalizeId(val.id);
+        }
+        return String(val);
+      };
+
+      const nodeId = normalizeId(node._id ?? node.id);
+      if (!nodeId) return !isDummyMode;
+
+      const statusMap = vendor?.nodePricingStatus;
+      const hasStatusMap = statusMap && typeof statusMap === 'object';
+
+      const readStatus = (id) => {
         try {
-          const statusMap =
-            combo && combo.pricingStatusPerSize && typeof combo.pricingStatusPerSize === "object"
-              ? combo.pricingStatusPerSize
-              : {};
-          
-          // Check pricingStatusPerSize values
-          const statusValues = Object.values(statusMap);
-          const comboLevelStatus = String(combo?.pricingStatus || '').trim().toLowerCase();
-          
-          // Debug log
-          console.log('[hasPackagesForNav] combo check:', {
-            comboName: combo?.name,
-            statusMap,
-            statusValues,
-            comboLevelStatus,
-            pricingStatus: combo?.pricingStatus
-          });
-          
-          // Has explicit active status
-          if (statusValues.some((v) => String(v || "").trim().toLowerCase() === "active")) {
-            console.log('[hasPackagesForNav] Found active in statusValues');
-            return true;
+          if (!hasStatusMap) return undefined;
+          return statusMap[String(id)];
+        } catch {
+          return undefined;
+        }
+      };
+
+      const status = readStatus(nodeId);
+      const isActive = (s) => String(s || '').trim().toLowerCase() === 'active';
+
+      if (status !== undefined && status !== null) {
+        return isActive(status);
+      }
+
+      const hasActiveDescendant = (n) => {
+        try {
+          const kids = Array.isArray(n?.children) ? n.children : [];
+          for (const ch of kids) {
+            const cid = normalizeId(ch?._id ?? ch?.id);
+            const st = cid ? readStatus(cid) : undefined;
+            if (st !== undefined && st !== null) {
+              if (isActive(st)) return true;
+            } else {
+              if (hasActiveDescendant(ch)) return true;
+            }
           }
-          if (comboLevelStatus === 'active') {
-            console.log('[hasPackagesForNav] Found active in comboLevelStatus');
-            return true;
-          }
-          
-          // Has explicit inactive status - skip this combo
-          if (comboLevelStatus === 'inactive') {
-            return false;
-          }
-          if (statusValues.length > 0 && statusValues.every((v) => String(v || "").trim().toLowerCase() === "inactive")) {
-            return false;
-          }
-          
-          // No status set at all - for accepted vendors, require explicit active
-          console.log('[hasPackagesForNav] No status found, returning false');
           return false;
         } catch {
           return false;
         }
-      });
-      console.log('[hasPackagesForNav] Final result:', hasAnyActive);
-      return hasAnyActive;
-    } catch {
-      return false;
-    }
-  }, [combos, isVendorAccepted]);
+      };
 
-  const hasVendorActiveForNode = (node) => {
-    try {
-      const id = (() => {
-        try { return String(node?.id || node?._id || ""); } catch { return ""; }
-      })();
-      if (!id) return false;
-      const map = (vendor && vendor.nodePricingStatus && typeof vendor.nodePricingStatus === 'object') ? vendor.nodePricingStatus : {};
-      const raw = String(map[id] || "").trim().toLowerCase();
-      return raw === 'active';
-    } catch {
-      return false;
-    }
-  };
-
-  function isNodePricingActive(node) {
-    try {
-      const nodeId = (() => {
-        try { return String(node?.id || node?._id || ""); } catch { return ""; }
-      })();
-      
-      const isVendorAcceptedLocal = String(vendor?.status || "").trim().toLowerCase() === "accepted";
-      
-      // For dummy mode vendors with nodePricingStatus set, respect the status even if not "accepted"
-      const nodePricingStatusMap = vendor?.nodePricingStatus || {};
-      const hasAnyPricingStatus = Object.keys(nodePricingStatusMap).length > 0;
-      
-      // For non-accepted vendors WITHOUT nodePricingStatus, show all nodes (legacy behavior)
-      if (!isVendorAcceptedLocal && !hasAnyPricingStatus) return true;
-      
-      // For non-accepted vendors WITH nodePricingStatus (e.g., Setup My Business flow),
-      // check if this node or its parent is explicitly set
-      if (!isVendorAcceptedLocal && hasAnyPricingStatus) {
-        const vendorNodeStatus = nodePricingStatusMap[nodeId];
-        if (vendorNodeStatus !== undefined) {
-          const vendorStatusRaw = String(vendorNodeStatus).trim().toLowerCase();
-          if (vendorStatusRaw === "active") return true;
-          if (vendorStatusRaw === "inactive") return false;
-        }
-        // For child nodes (nested subcategories), they don't have direct status
-        // Check if this node is a descendant of an active first-level category
-        // by looking at the categoryTree structure
-        try {
-          const firstLevelChildren = Array.isArray(categoryTree?.children) ? categoryTree.children : [];
-          for (const lvl1 of firstLevelChildren) {
-            const lvl1Id = String(lvl1?._id || lvl1?.id || "");
-            const lvl1Status = nodePricingStatusMap[lvl1Id];
-            const isLvl1Active = String(lvl1Status || "").trim().toLowerCase() === "active";
-            
-            // Check if current node is this lvl1 or a descendant of it
-            const isDescendant = (parent, targetId) => {
-              if (!parent) return false;
-              const parentId = String(parent?._id || parent?.id || "");
-              if (parentId === targetId) return true;
-              const children = Array.isArray(parent?.children) ? parent.children : [];
-              return children.some((child) => isDescendant(child, targetId));
-            };
-            
-            if (isDescendant(lvl1, nodeId)) {
-              // This node is a descendant of lvl1
-              return isLvl1Active;
-            }
-          }
-        } catch {}
-        // If we can't determine ancestry, default to hidden
+      // Dummy mode: strict (only explicitly Active nodes or parents of Active nodes)
+      if (isDummyMode) {
+        if (hasActiveDescendant(node)) return true;
         return false;
       }
-      
-      // For accepted vendors, check vendor's nodePricingStatus FIRST (higher priority)
-      // For non-inventory categories, check vendor.nodePricingStatus map
-      const vendorNodeStatus = nodePricingStatusMap[nodeId];
-      console.log(`[DEBUG isNodePricingActive] nodeId: ${nodeId}, vendorNodeStatus: ${vendorNodeStatus}`);
-      
-      if (vendorNodeStatus !== undefined) {
-        const vendorStatusRaw = String(vendorNodeStatus).trim().toLowerCase();
-        console.log(`[DEBUG isNodePricingActive] vendorStatusRaw: ${vendorStatusRaw}`);
-        if (vendorStatusRaw === "active") return true;
-        if (vendorStatusRaw === "inactive") return false;
-      }
-      
-      // Then check node-level pricingStatus as fallback
-      const nodeStatusRaw = String(node?.pricingStatus || "").trim().toLowerCase();
-      console.log(`[DEBUG isNodePricingActive] nodeStatusRaw: ${nodeStatusRaw}`);
-      if (nodeStatusRaw === "active") return true;
-      if (nodeStatusRaw === "inactive") return false;
-      
-      // Check if this category has inventory FIRST
-      const catKey = String(categoryId || '');
-      const invList = vendor?.inventorySelections?.[catKey];
-      const hasInventory = Array.isArray(invList) && invList.length > 0;
-      
-      // For inventory-based categories, check if this specific node has active inventory rows
-      if (hasInventory) {
-        // Check if this node (not its subtree) has active inventory
-        const hasActiveInventory = (() => {
-          for (const entry of invList) {
-            const pbr = entry?.pricesByRow;
-            const statusMap = entry?.pricingStatusByRow || {};
-            
-            // If there's no pricing data but there's status data, check status without price
-            if (!pbr) {
-              // Check if this entry has any status that matches our node ID
-              for (const statusKey of Object.keys(statusMap)) {
-                const keyParts = String(statusKey).split("|");
-                if (keyParts.includes(nodeId)) {
-                  const rawStatus = String(statusMap[statusKey] || "").trim().toLowerCase();
-                  if (rawStatus === "active") {
-                    return true;
-                  }
-                }
-              }
-              continue;
-            }
-            
-            for (const key of Object.keys(pbr)) {
-              // Check if the key contains this node's ID anywhere
-              const keyParts = String(key).split("|");
-              if (keyParts.includes(nodeId)) {
-                const rawStatus = String(statusMap[key] || "").trim().toLowerCase();
-                if (rawStatus === "active") {
-                  return true;
-                }
-              }
-            }
-          }
-          return false;
-        })();
-        
-        // If this node has active inventory, return true
-        if (hasActiveInventory) return true;
-        
-        // For all nodes, check if any descendant has active inventory
-        return hasActivePricingForNode(node);
-      }
-      
-      // Collect ALL node IDs in this subtree (including this node and all descendants)
-      const collectAllNodeIds = (n) => {
-        if (!n) return [];
-        const ids = [];
-        const nId = String(n?.id || n?._id || "");
-        if (nId) ids.push(nId);
-        const children = Array.isArray(n.children) ? n.children : [];
-        for (const child of children) {
-          ids.push(...collectAllNodeIds(child));
-        }
-        return ids;
-      };
-      
-      const allNodeIds = collectAllNodeIds(node);
-      
-      // Check if any node in this subtree has a status in nodePricingStatusMap
-      const statusesInSubtree = allNodeIds
-        .map(id => nodePricingStatusMap[id])
-        .filter(s => s !== undefined)
-        .map(s => String(s).trim().toLowerCase());
-      
-      if (statusesInSubtree.length > 0) {
-        // If ALL statuses are inactive, this node is inactive
-        const allInactive = statusesInSubtree.every(s => s === 'inactive');
-        const hasAnyActive = statusesInSubtree.some(s => s === 'active');
-        
-        if (allInactive) return false;
-        if (hasAnyActive) return true;
-      }
-      
-      // No inventory and no explicit status found in subtree
-      // For accepted vendors, if nodePricingStatusMap has ANY entries, 
-      // nodes without status should still be shown if they don't have inventory filtering
-      // This allows packages, commercial, and other categories to render
-      const hasAnyPricingStatusForAccepted = Object.keys(nodePricingStatusMap).length > 0;
-      if (hasAnyPricingStatusForAccepted) {
-        // Some nodes have status set, but this node/subtree doesn't - show it anyway
-        // This allows categories without inventory (packages, commercial, etc.) to appear
-        return true;
-      }
-      
-      // No pricing status set up at all - default to showing
+
+      // Non-dummy: keep permissive behavior when status is missing
       return true;
     } catch {
-      return false;
+      return !isDummyMode;
     }
   }
 
@@ -3690,18 +3732,15 @@ export default function PreviewPage() {
     })();
 
     const rawChildren = Array.isArray(node.children) ? node.children : [];
-    const isVendorAcceptedLocal = String(vendor?.status || "")
-      .trim()
-      .toLowerCase() === "accepted".toLowerCase();
-
     const parentCandidates = (() => {
       try {
-        if (!isVendorAcceptedLocal) return rawChildren;
+        
         const filtered = rawChildren.filter((ch) => {
           try {
             // For driving school, use hasActivePricingForNode which checks descendants
             const rootNameForCard = String(categoryTree?.name || '').toLowerCase();
-            const isDriving = rootNameForCard === 'driving school';
+            // const isDriving = rootNameForCard === 'driving school';
+            // ch = {};
             if (isDriving) {
               return isNodePricingActive(ch) || hasActivePricingForNode(ch);
             }
@@ -3710,15 +3749,9 @@ export default function PreviewPage() {
             return false;
           }
         });
-        console.log('DEBUG parentCandidates', {
-          nodeName: node?.name,
-          rawChildren: rawChildren.map(c => ({ name: c?.name, id: c?.id })),
-          filtered: filtered.map(c => ({ name: c?.name, id: c?.id }))
-        });
-        // For accepted vendors, only show filtered results (no fallback)
         return filtered;
       } catch {
-        return rawChildren;
+        return isDummyMode ? [] : rawChildren;
       }
     })();
 
@@ -3739,20 +3772,22 @@ export default function PreviewPage() {
     let attributeDropdown = null;
 
     const getUiForLocal = (nodeOrId) => ({ mode: 'buttons', includeLeafChildren: true });
-
+    
     // Resolve selector display type from the NODE'S OWN config
     const mapToSelectorMode = (dt) => {
       const x = String(dt || '').toLowerCase();
-      if (x === 'dropdown' || x === 'select') return 'dropdown';
+      // if (x === 'dropdown' || x === 'select') return 'dropdown';
+      // return 'buttons';
+      if (x === 'dropdown' ) return 'dropdown';
       return 'buttons';
     };
+  
     const pickDtArr = (arr) => Array.isArray(arr) && arr.length > 0 ? String(arr[0]).toLowerCase() : null;
     const getNodeMode = (n) => pickDtArr(n?.displayType) || getUiForLocal(n).mode || 'buttons';
     // Parent selector (for node's immediate children) comes from node's own displayType
     const parentSelectorMode = mapToSelectorMode(getNodeMode(node));
     // Child selector (for selected parent's children) comes from selectedParent's own displayType
     const childSelectorMode = mapToSelectorMode(getNodeMode(selectedParent));
-    try { console.log('[preview] in-card modes', { node: node?.name, parentSelectorMode, childOf: selectedParent?.name, childSelectorMode }); } catch {}
 
     const [imgIdx, setImgIdx] = useState(0);
     const [extraRowImages, setExtraRowImages] = useState({}); // { [id]: string[] }
@@ -3910,12 +3945,36 @@ export default function PreviewPage() {
                 try {
                   const catKey = String(categoryId || '');
                   const invRaw = Array.isArray(vendor?.inventorySelections?.[catKey]) ? vendor.inventorySelections[catKey] : [];
-                  // Filter out inventory entries where ALL rows are inactive
+                  
+                  if (isDummyMode) {
+                    console.log('[DEBUG invRaw count]', invRaw.length);
+                    invRaw.forEach((entry, idx) => {
+                      const label = String(entry?.scopeLabel || '');
+                      const fam = String(entry?.scopeFamily || '');
+                      const sels = entry?.selections || {};
+                      const carSel = sels?.cars || {};
+                      const brand = String(carSel?.brand || '');
+                      const model = String(carSel?.model || '');
+                      
+                      if (brand.includes('MAHINDRA') || model.includes('XUV') || label.includes('MAHINDRA')) {
+                        const statusMap = entry?.pricingStatusByRow || {};
+                        const statusKeys = Object.keys(statusMap);
+                        const statusValues = statusKeys.map(k => ({ key: k, status: statusMap[k] }));
+                        console.log('[DEBUG MAHINDRA FOUND]', idx, { 
+                          label, fam, brand, model, 
+                          statusKeys, 
+                          statusValues,
+                          hasActiveRow: statusValues.some(v => String(v.status || '').trim().toLowerCase() === 'active')
+                        });
+                      }
+                    });
+                  }
+                  
                   const inv = invRaw.filter((entry) => {
                     try {
                       const statusMap = entry?.pricingStatusByRow || {};
                       const keys = Object.keys(statusMap);
-                      if (keys.length === 0) return true; // no status defined, allow
+                      if (keys.length === 0) return true;
                       for (const key of keys) {
                         const raw = String(statusMap[key] || '').trim().toLowerCase();
                         if (raw === 'active') return true;
@@ -3925,6 +3984,10 @@ export default function PreviewPage() {
                       return true;
                     }
                   });
+                  
+                  if (isDummyMode) {
+                    console.log('[DEBUG inv filtered count]', inv.length);
+                  }
                   const ids = [displayNode?.id, selectedParent?.id, node?.id].map((x) => String(x || ''));
                   const rootNameLocal = String(categoryTree?.name || '').toLowerCase();
                   const isDrivingLocal = rootNameLocal === 'driving school';
@@ -3964,21 +4027,22 @@ export default function PreviewPage() {
                         const sels = entry?.selections || {};
                         let sel = sels[fam] || sels.cars || sels.bikes || {};
                         if (!sel || typeof sel !== 'object') sel = {};
+                        
+                        if (isDummyMode && entry?.scopeLabel && String(entry.scopeLabel).includes('MAHINDRA')) {
+                          console.log('[DEBUG MAHINDRA]', { fam, sel, entry });
+                        }
+                        
                         if (fam === 'bikes') {
                           const brand = sel.bikeBrand != null ? String(sel.bikeBrand).trim() : (sel.brand != null ? String(sel.brand).trim() : '');
                           const transmission = sel.bikeTransmission != null ? String(sel.bikeTransmission).trim() : (sel.transmission != null ? String(sel.transmission).trim() : '');
                           const model = sel.model != null ? String(sel.model).trim() : '';
-                          if (brand || model || transmission) {
-                            normalized.push({ family: fam, brand, model, transmission, bodyType: null, entry });
-                          }
+                          normalized.push({ family: fam, brand, model, transmission, bodyType: null, entry });
                         } else if (fam === 'cars') {
                           const brand = sel.brand != null ? String(sel.brand).trim() : '';
                           const transmission = sel.transmission != null ? String(sel.transmission).trim() : '';
                           const model = sel.model != null ? String(sel.model).trim() : '';
                           const bodyType = sel.bodyType != null ? String(sel.bodyType).trim() : '';
-                          if (brand || model || transmission || bodyType) {
-                            normalized.push({ family: fam, brand, model, transmission, bodyType, entry });
-                          }
+                          normalized.push({ family: fam, brand, model, transmission, bodyType, entry });
                         }
                       } catch {}
                     });
@@ -4045,9 +4109,6 @@ export default function PreviewPage() {
               {(() => {
                 try {
                   const linked = (categoryTree && categoryTree.linkedAttributes && typeof categoryTree.linkedAttributes === 'object') ? categoryTree.linkedAttributes : {};
-                  const isVendorAcceptedLocal = String(vendor?.status || '')
-                    .trim()
-                    .toLowerCase() === 'accepted';
                   // Build case-insensitive index of families from linkedAttributes
                   const famIndex = new Map(); // famLower -> { base, fields, modelFields, linkedSub, specificSubs: Set }
                   Object.keys(linked).forEach((k) => {
@@ -4076,7 +4137,7 @@ export default function PreviewPage() {
                   });
                   // Families allowed to render with precedence: specific match > family-level match; treat 'ALL' as global only if no specific mappings exist
                   const targetIdsLinkedAttrs = [displayNode?.id, selectedParent?.id, node?.id].map((x) => String(x || ''));
-                  const familiesAllLower = new Set(
+                  let familiesAllLower = new Set(
                     Array.from(famIndex.entries())
                       .filter(([, v]) => {
                         // Specific mappings take precedence
@@ -4086,29 +4147,19 @@ export default function PreviewPage() {
                         }
                         // Then check family-level
                         const ls = v.linkedSub;
-                        if (!ls) return false; // require explicit mapping
+                        if (!ls) return true; // Include families without explicit mapping
                         if (ls === 'ALL') return true;
                         return targetIdsLinkedAttrs.some((tid) => tid && String(ls) === String(tid));
                       })
                       .map(([k]) => k)
                   );
+                  if (familiesAllLower.size === 0) {
+                    familiesAllLower = new Set(Array.from(famIndex.keys()));
+                  }
                   const catKey = String(categoryId || '');
                   const invPriceListRaw = Array.isArray(vendor?.inventorySelections?.[catKey]) ? vendor.inventorySelections[catKey] : [];
                   // Filter out entries where ALL rows are inactive
-                  const invPriceList = invPriceListRaw.filter((entry) => {
-                    try {
-                      const statusMap = entry?.pricingStatusByRow || {};
-                      const keys = Object.keys(statusMap);
-                      if (keys.length === 0) return true;
-                      for (const key of keys) {
-                        const raw = String(statusMap[key] || '').trim().toLowerCase();
-                        if (raw === 'active') return true;
-                      }
-                      return false;
-                    } catch {
-                      return true;
-                    }
-                  });
+                  const invPriceList = invPriceListRaw;
                   // Filter inventory entries based on linkedAttributes mapping and active status
                   // IMPORTANT: Use the specific current node ID for row-level active status check
                   const currentDisplayNodeId = String(displayNode?.id || selectedParent?.id || node?.id || '');
@@ -4116,6 +4167,10 @@ export default function PreviewPage() {
                   // Helper to check if entry matches linkedAttributes mapping
                   const matchesLinkedAttrs = (e) => {
                     const famLower = String(e?.scopeFamily || '').toLowerCase();
+                    // If scopeFamily is missing, don't exclude the inventory entry.
+                    // Some inventories (especially those without pricing) may not have scopeFamily filled,
+                    // but they should still show in preview.
+                    if (!famLower) return true;
                     if (!familiesAllLower.has(famLower)) return false;
                     const fam = String(e?.scopeFamily || '');
                     const label = String(e?.scopeLabel || '');
@@ -4135,41 +4190,38 @@ export default function PreviewPage() {
                     const pbr = e && e.pricesByRow && typeof e.pricesByRow === 'object' ? e.pricesByRow : null;
                     const statusMap = e && e.pricingStatusByRow && typeof e.pricingStatusByRow === 'object' ? e.pricingStatusByRow : {};
                     
-                    // If no pricing data, allow the entry through
-                    if (!pbr) {
-                      return true; // Allow entries without prices
-                    }
+                    if (!pbr) return false;
                     
                     const hasStatusMap = Object.keys(statusMap).length > 0;
                     for (const [rk] of Object.entries(pbr)) {
                       const parts = String(rk).split('|');
                       if (!parts.some((id) => String(id) === currentDisplayNodeId)) continue;
-                      if (!hasStatusMap) return true;
+                      if (!hasStatusMap) return false;
+                      if (!Object.prototype.hasOwnProperty.call(statusMap, rk)) continue;
                       const raw = String(statusMap[rk] || '').trim().toLowerCase();
                       if (raw === 'active') return true;
                     }
                     return false;
                   };
                   
-                  // First: entries with linkedAttributes mapping AND active pricing
-                  let entriesAll = invPriceList.filter((e) => matchesLinkedAttrs(e) && hasActivePricing(e));
+                  // UPDATED: Show all inventory entries by family first (no price required)
+                  // This ensures active inventories without prices are always displayed
+                  let entriesAll = invPriceList.filter((e) => {
+                    const famLower = String(e?.scopeFamily || '').toLowerCase();
+                    // If scopeFamily is missing, include the entry instead of dropping it.
+                    // This prevents active inventories without pricing/family metadata from disappearing.
+                    if (!famLower) return true;
+                    return familiesAllLower.has(famLower);
+                  });
                   
-                  // Second: if none found, try entries with linkedAttributes mapping (with or without prices)
+                  // If no entries by family, try linkedAttributes mapping
                   if (entriesAll.length === 0) {
                     entriesAll = invPriceList.filter((e) => matchesLinkedAttrs(e));
                   }
                   
-                  // Third: if still none, try any entry with active pricing for this node
+                  // If still none, try any entry with active pricing
                   if (entriesAll.length === 0) {
                     entriesAll = invPriceList.filter((e) => hasActivePricing(e));
-                  }
-                  
-                  // Fourth: if still none, show all inventory entries (no prices required)
-                  if (entriesAll.length === 0) {
-                    entriesAll = invPriceList.filter((e) => {
-                      const famLower = String(e?.scopeFamily || '').toLowerCase();
-                      return familiesAllLower.has(famLower);
-                    });
                   }
                   
                   // Prefer entries that have a pricesByRow targeting this card's node ids
@@ -4209,26 +4261,17 @@ export default function PreviewPage() {
                   
                   const linkedFamilyForNode = nodeNameToFamily[nodeName] || null;
                   
-                  console.log('[DEBUG] nodeIdForFamily:', nodeIdForFamily, 'node.name:', node?.name);
-                  console.log('[DEBUG] nodeName:', nodeName, 'linkedFamilyForNode:', linkedFamilyForNode);
-                  console.log('[DEBUG] entriesAll:', entriesAll.map(e => ({ scopeFamily: e?.scopeFamily, scopeLabel: e?.scopeLabel })));
-                  
                   // If no family mapping exists, show all entries (allows categories without inventory to render)
-                  // This handles cases like packages, commercial that may not have scopeFamily filtering
                   const filteredEntries = linkedFamilyForNode 
                     ? entriesAll.filter((entry) => {
                         const entryScopeFamily = String(entry?.scopeFamily || '').trim().toLowerCase();
-                        if (!entryScopeFamily) return false;
-                        const match = entryScopeFamily === linkedFamilyForNode;
-                        console.log('[DEBUG] Family filter:', entryScopeFamily, '===', linkedFamilyForNode, '=', match);
-                        return match;
+                        // If the entry has no scopeFamily, keep it (can't reliably map it to a family).
+                        if (!entryScopeFamily) return true;
+                        return entryScopeFamily === linkedFamilyForNode;
                       })
-                    : entriesAll; // No mapping = show all entries for this node
+                    : entriesAll;
                   
-                  // Use filtered entries directly - don't fall back to all entries
-                  // This ensures nodes without inventory mapping show empty dropdown
                   const finalEntries = filteredEntries;
-                  console.log('[DEBUG] filteredEntries count:', filteredEntries.length, 'finalEntries count:', finalEntries.length);
                   
                   let blocks = finalEntries.map((entry, idx) => {
                     const fam = String(entry?.scopeFamily || '');
@@ -4273,25 +4316,28 @@ export default function PreviewPage() {
                     if (pairs.length === 0) {
                       pairs = Object.entries(sel).filter(([k, v]) => v != null && String(v).trim() !== '');
                     }
-                    return { key: entry._id || entry.at || idx, pairs, sel, fam: famLower };
-                  }).filter((b) => b.pairs.length > 0);
-                  // Fallback: if nothing matched, render first inventory selection raw pairs
-                  // Only use active entries for accepted vendors
+                    return { key: entry._id || entry.at || idx, pairs, sel, fam: famLower, entry };
+                  });
+                  // Fallback: if no blocks created, create blocks for ALL filteredEntries
+                  // This ensures all active inventory entries appear even without attribute pairs
                   if (blocks.length === 0 && filteredEntries.length > 0) {
-                    const first = filteredEntries[0];
-                    const fam = String(first?.scopeFamily || '');
-                    const famLower = fam.toLowerCase();
-                    const sels = first?.selections || {};
-                    let sel = {};
-                    if (sels[fam]) sel = sels[fam];
-                    else {
-                      const key = Object.keys(sels).find((k) => String(k).toLowerCase() === famLower);
-                      if (key) sel = sels[key];
-                    }
-                    const pairs = Object.entries(sel).filter(([k, v]) => v != null && String(v).trim() !== '');
-                    if (pairs.length > 0) blocks = [{ key: first._id || first.at || 'first', pairs, sel, fam: famLower }];
+                    blocks = filteredEntries.map((entry, idx) => {
+                      const fam = String(entry?.scopeFamily || '');
+                      const famLower = fam.toLowerCase();
+                      const sels = entry?.selections || {};
+                      let sel = {};
+                      if (sels[fam]) sel = sels[fam];
+                      else {
+                        const key = Object.keys(sels).find((k) => String(k).toLowerCase() === famLower);
+                        if (key) sel = sels[key];
+                      }
+                      const pairs = Object.entries(sel).filter(([k, v]) => v != null && String(v).trim() !== '');
+                      return { key: entry._id || entry.at || idx, pairs, sel, fam: famLower, entry };
+                    });
                   }
-                  if (blocks.length === 0) return null;
+                  if (blocks.length === 0) {
+                    return null;
+                  }
 
                   // Build combo options: each inventory selection becomes one combo
                   const dropdownKey = String(node?.id || 'global');
@@ -4318,9 +4364,11 @@ export default function PreviewPage() {
                       bodyType: String(bodyType || '').trim(),
                       isBike,
                     };
-                  }).filter((c) => c.brand || c.model || c.transmission || c.bodyType);
+                  });
 
-                  if (!combos.length) return null;
+                  if (!combos.length) {
+                    return null;
+                  }
 
                   const current = attrSelections || {};
                   const activeIndex = combos.findIndex((c) => {
@@ -4382,27 +4430,27 @@ export default function PreviewPage() {
                     } catch {}
                   }
 
-                  const buildLabel = (c) => {
+                  const buildLabel = (c, idx) => {
                     const parts = [];
                     if (c.brand) parts.push(c.brand);
                     if (c.model) parts.push(c.model);
                     if (c.transmission) parts.push(c.transmission);
                     if (!c.isBike && c.bodyType) parts.push(c.bodyType);
-                    if (!parts.length) return 'Select Vehicle';
+                    if (!parts.length) return idx !== undefined ? `Vehicle ${idx + 1}` : 'Select Vehicle';
                     return parts.join(' ');
                   };
 
                   const triggerLabel = activeCombo
-                    ? buildLabel(activeCombo)
+                    ? buildLabel(activeCombo, combos.indexOf(activeCombo))
                     : (Array.isArray(combos) && combos.length
-                        ? buildLabel(combos[0])
+                        ? buildLabel(combos[0], 0)
                         : 'Select Vehicle');
 
-                  const handleSelectCombo = (combo) => {
+                  const handleSelectCombo = (combo, idx) => {
                     setAttrSelections((prev) => {
                       const next = { ...(prev || {}) };
                       // Store the full inventory name for enquiries
-                      const fullLabel = buildLabel(combo);
+                      const fullLabel = buildLabel(combo, idx);
                       next.inventoryName = fullLabel || undefined;
                       
                       if (combo.isBike) {
@@ -4495,13 +4543,13 @@ export default function PreviewPage() {
                               overscrollBehavior: 'contain',
                             }}
                           >
-                            {combos.map((combo) => {
-                              const lineText = buildLabel(combo);
+                            {combos.map((combo, idx) => {
+                              const lineText = buildLabel(combo, idx);
                               return (
                                 <button
                                   key={combo.key}
                                   type="button"
-                                  onClick={() => handleSelectCombo(combo)}
+                                  onClick={() => handleSelectCombo(combo, idx)}
                                   style={{
                                     width: '100%',
                                     textAlign: 'left',
@@ -5500,15 +5548,13 @@ export default function PreviewPage() {
           {includeLeafChildren && selectedParent?.children?.length > 0 && (
             (() => {
               // Filter child buttons for driving school
-              const filteredChildren = isVendorAcceptedLocal && isDriving
-                ? selectedParent.children.filter((child) => {
-                    try {
-                      return hasActivePricingForNode(child);
-                    } catch {
-                      return false;
-                    }
-                  })
-                : selectedParent.children;
+              const filteredChildren = selectedParent.children.filter((child) => {
+                try {
+                  return isNodePricingActive(child) || hasActivePricingForNode(child);
+                } catch {
+                  return false;
+                }
+              });
               
               return filteredChildren.length > 0 ? (
                 childSelectorMode === "buttons" ? (
@@ -5659,17 +5705,13 @@ export default function PreviewPage() {
                             const brand = sel.bikeBrand != null ? String(sel.bikeBrand).trim() : (sel.brand != null ? String(sel.brand).trim() : '');
                             const transmission = sel.bikeTransmission != null ? String(sel.bikeTransmission).trim() : (sel.transmission != null ? String(sel.transmission).trim() : '');
                             const model = sel.model != null ? String(sel.model).trim() : '';
-                            if (brand || model || transmission) {
-                              normalized.push({ family: fam, brand, model, transmission, bodyType: null, entry });
-                            }
+                            normalized.push({ family: fam, brand, model, transmission, bodyType: null, entry });
                           } else if (fam === 'cars') {
                             const brand = sel.brand != null ? String(sel.brand).trim() : '';
                             const transmission = sel.transmission != null ? String(sel.transmission).trim() : '';
                             const model = sel.model != null ? String(sel.model).trim() : '';
                             const bodyType = sel.bodyType != null ? String(sel.bodyType).trim() : '';
-                            if (brand || model || transmission || bodyType) {
-                              normalized.push({ family: fam, brand, model, transmission, bodyType, entry });
-                            }
+                            normalized.push({ family: fam, brand, model, transmission, bodyType, entry });
                           }
                         } catch {}
                       });
@@ -5896,17 +5938,13 @@ export default function PreviewPage() {
                         const brand = sel.bikeBrand != null ? String(sel.bikeBrand).trim() : (sel.brand != null ? String(sel.brand).trim() : '');
                         const transmission = sel.bikeTransmission != null ? String(sel.bikeTransmission).trim() : (sel.transmission != null ? String(sel.transmission).trim() : '');
                         const model = sel.model != null ? String(sel.model).trim() : '';
-                        if (brand || model || transmission) {
-                          normalized.push({ family: fam, brand, model, transmission, bodyType: null, entry });
-                        }
+                        normalized.push({ family: fam, brand, model, transmission, bodyType: null, entry });
                       } else if (fam === 'cars') {
                         const brand = sel.brand != null ? String(sel.brand).trim() : '';
                         const transmission = sel.transmission != null ? String(sel.transmission).trim() : '';
                         const model = sel.model != null ? String(sel.model).trim() : '';
                         const bodyType = sel.bodyType != null ? String(sel.bodyType).trim() : '';
-                        if (brand || model || transmission || bodyType) {
-                          normalized.push({ family: fam, brand, model, transmission, bodyType, entry });
-                        }
+                        normalized.push({ family: fam, brand, model, transmission, bodyType, entry });
                       }
                     } catch {}
                   });
@@ -6025,7 +6063,7 @@ export default function PreviewPage() {
     try {
       const statusMap = entry?.pricingStatusByRow || {};
       const keys = Object.keys(statusMap);
-      if (keys.length === 0) return true; // no status defined, allow
+      if (keys.length === 0) return !isDummyMode;
       // Check if at least one row is active
       for (const key of keys) {
         const raw = String(statusMap[key] || '').trim().toLowerCase();
@@ -6033,7 +6071,7 @@ export default function PreviewPage() {
       }
       return false; // all rows are inactive
     } catch {
-      return true;
+      return !isDummyMode;
     }
   });
   // Build attribute fields/options from inventory selections
@@ -6172,8 +6210,8 @@ export default function PreviewPage() {
       .filter((v) => v != null && String(v).trim() !== '')));
 
     const modelBrandPairsFromList = (list) => Array.from(new Set(list
-      .filter((n) => n.model && n.brand)
-      .map((n) => `${n.model}|${n.brand}`)));
+      .filter((n) => n.model != null || n.brand != null)
+      .map((n) => `${n.model || ''}|${n.brand || ''}`)));
 
     const uiRow = (label, control) => (
       <div
@@ -6228,13 +6266,15 @@ export default function PreviewPage() {
             try {
               const statusMap = entry?.pricingStatusByRow || {};
               const keys = Object.keys(statusMap);
-              if (keys.length === 0) return true;
+              if (keys.length === 0) return !isDummyMode;
               for (const key of keys) {
                 const raw = String(statusMap[key] || '').trim().toLowerCase();
                 if (raw === 'active') return true;
               }
               return false;
-            } catch { return true; }
+            } catch {
+              return !isDummyMode;
+            }
           });
           inv.forEach((entry) => {
             const pbr = entry && entry.pricesByRow && typeof entry.pricesByRow === 'object' ? entry.pricesByRow : null;
@@ -6258,13 +6298,15 @@ export default function PreviewPage() {
         try {
           const statusMap = entry?.pricingStatusByRow || {};
           const keys = Object.keys(statusMap);
-          if (keys.length === 0) return true;
+          if (keys.length === 0) return !isDummyMode;
           for (const key of keys) {
             const raw = String(statusMap[key] || '').trim().toLowerCase();
             if (raw === 'active') return true;
           }
           return false;
-        } catch { return true; }
+        } catch {
+          return !isDummyMode;
+        }
       });
       for (const entry of priceRows) {
         const pbr = (entry && entry.pricesByRow && typeof entry.pricesByRow === 'object') ? entry.pricesByRow : null;
@@ -6302,118 +6344,61 @@ export default function PreviewPage() {
       return livePrice;
     };
 
+    // SIMPLIFIED: Always return true - show all nodes
     const hasNodeActiveInventory = (node) => {
-    try {
-      const nodeId = String(node?.id || node?._id || "");
-      if (!nodeId) return false;
-      
-      const catKey = String(categoryId || '');
-      const invList = vendor?.inventorySelections?.[catKey];
-      if (!Array.isArray(invList) || invList.length === 0) return false;
-      
-      console.log(`[DEBUG] Checking node: ${node.name} (ID: ${nodeId})`);
-      console.log(`[DEBUG] Inventory list length:`, invList.length);
-      
-      // Check if this node has any active inventory rows
-      for (const entry of invList) {
-        const pbr = entry?.pricesByRow;
-        if (!pbr) continue;
-        const statusMap = entry?.pricingStatusByRow || {};
-        
-        console.log(`[DEBUG] Entry pricesByRow keys:`, Object.keys(pbr));
-        console.log(`[DEBUG] Entry pricingStatusByRow:`, statusMap);
-        
-        for (const key of Object.keys(pbr)) {
-          const keyParts = String(key).split('|');
-          // Check if this row is for this specific node OR any of its descendants
-          // This is important because inventory might be stored at parent level
-          if (keyParts.includes(nodeId)) {
-            const rawStatus = String(statusMap[key] || "").trim().toLowerCase();
-            console.log(`[DEBUG] Found key ${key} for node ${node.name}, status: ${rawStatus}`);
-            if (rawStatus === "active" || rawStatus === "") {
-              console.log(`[DEBUG] Node ${node.name} has active inventory`);
-              return true;
-            }
-          }
-        }
-      }
-      
-      // Also check if any parent has active inventory for this node
-      // This handles cases where inventory is stored at parent level
-      for (const entry of invList) {
-        const pbr = entry?.pricesByRow;
-        if (!pbr) continue;
-        const statusMap = entry?.pricingStatusByRow || {};
-        
-        for (const key of Object.keys(pbr)) {
-          const keyParts = String(key).split('|');
-          // Check if any parent of this node has active inventory
-          for (const part of keyParts) {
-            // Check if this part is a parent of the current node
-            if (part && part !== nodeId) {
-              // This is a simplified check - in reality we'd need to traverse the tree
-              // For now, let's be more permissive
-              const rawStatus = String(statusMap[key] || "").trim().toLowerCase();
-              if (rawStatus === "active" || rawStatus === "") {
-                console.log(`[DEBUG] Node ${node.name} found active inventory in parent ${part}`);
-                return true;
-              }
-            }
-          }
-        }
-      }
-      
-      console.log(`[DEBUG] Node ${node.name} has no active inventory`);
-      return false;
-    } catch (error) {
-      console.log(`[DEBUG] Error checking node ${node.name}:`, error);
-      return false;
-    }
-  };
+      return !isDummyMode;
+    };
 
+    // Dummy mode: consider inventory row-level pricing status for the node
     const hasActivePricingForNode = (node) => {
       try {
-        const rootId = (() => {
-          try { return String(node?.id || node?._id || ""); } catch { return ""; }
-        })();
-        if (!rootId) return false;
+        if (!isDummyMode) return true;
+        if (!node) return false;
 
-        // Collect this node's id plus all descendant ids so that a parent
-        // category is treated as active when any child inventory row is active.
-        const idsToMatch = new Set();
-        const collectIds = (n) => {
-          if (!n) return;
-          try {
-            const nid = String(n.id || n._id || "");
-            if (nid) idsToMatch.add(nid);
-          } catch {}
-          const kids = Array.isArray(n.children) ? n.children : [];
-          kids.forEach(collectIds);
+        const normalizeId = (val) => {
+          if (val == null) return '';
+          if (typeof val === 'string' || typeof val === 'number') return String(val);
+          if (typeof val === 'object') {
+            if (val.$oid) return String(val.$oid);
+            if (val.oid) return String(val.oid);
+            if (val._id) return normalizeId(val._id);
+            if (val.id) return normalizeId(val.id);
+          }
+          return String(val);
         };
-        collectIds(node);
 
-        const allInv = vendor && vendor.inventorySelections && typeof vendor.inventorySelections === 'object'
-          ? vendor.inventorySelections
-          : {};
-        const lists = Object.values(allInv);
-        for (const listRaw of lists) {
-          const inv = Array.isArray(listRaw) ? listRaw : [];
-          for (const entry of inv) {
-            const pbr =
-              entry && entry.pricesByRow && typeof entry.pricesByRow === "object"
-                ? entry.pricesByRow
-                : null;
-            if (!pbr) continue;
-            const statusMap =
-              entry && entry.pricingStatusByRow && typeof entry.pricingStatusByRow === "object"
-                ? entry.pricingStatusByRow
-                : {};
-            for (const key of Object.keys(pbr)) {
-              const keyIds = String(key).split('|');
-              if (!keyIds.some((id) => idsToMatch.has(String(id)))) continue;
-              const rawStatus = String(statusMap[key] || '').trim().toLowerCase();
-              if (rawStatus === 'active') return true;
-            }
+        const collectIds = (root) => {
+          const out = new Set();
+          const stack = [root];
+          while (stack.length) {
+            const cur = stack.pop();
+            const id = normalizeId(cur?.id ?? cur?._id);
+            if (id) out.add(String(id));
+            const kids = Array.isArray(cur?.children) ? cur.children : [];
+            for (const ch of kids) stack.push(ch);
+          }
+          return Array.from(out);
+        };
+
+        const targetIds = collectIds(node);
+        if (targetIds.length === 0) return false;
+
+        const catKey = String(categoryId || '');
+        const invRaw = Array.isArray(vendor?.inventorySelections?.[catKey]) ? vendor.inventorySelections[catKey] : [];
+        for (const entry of invRaw) {
+          const pbr = entry?.pricesByRow;
+          const statusMap =
+            entry?.pricingStatusByRow && typeof entry.pricingStatusByRow === 'object'
+              ? entry.pricingStatusByRow
+              : {};
+          const keys = new Set([
+            ...((pbr && typeof pbr === 'object') ? Object.keys(pbr) : []),
+            ...Object.keys(statusMap),
+          ]);
+          for (const rk of keys) {
+            const ids = String(rk).split('|');
+            if (!ids.some((id) => targetIds.includes(String(id)))) continue;
+            if (rowPricingIsActive(entry, rk)) return true;
           }
         }
         return false;
@@ -6427,24 +6412,19 @@ export default function PreviewPage() {
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 30, alignItems: 'stretch' }}>
         {root.children.map((lvl1) => {
           const serviceKey = makeServiceKey(lvl1?.name || "");
-          // Check if the lvl1 node itself should be displayed
-          const shouldShowLvl1 = !shouldFilterByStatus || isNodePricingActive(lvl1) || hasActivePricingForNode(lvl1);
-          console.log(`[DEBUG] Lvl1 ${lvl1.name}: isVendorAccepted=${isVendorAccepted}, shouldShow=${shouldShowLvl1}`);
-          if (!shouldShowLvl1) return null;
+          if (isDummyMode && !(isNodePricingActive(lvl1) || hasActivePricingForNode(lvl1))) return null;
           
+      // Filter L2 in dummy mode so With/Without License only shows when active
       const lvl2KidsRaw = Array.isArray(lvl1.children) ? lvl1.children : [];
-      // Filter lvl2Kids by active status for accepted and preview vendors
-      const shouldFilterByStatus = isVendorAccepted || String(vendor?.status || "").trim().toLowerCase() === "preview";
-      console.log(`[DEBUG] Vendor status: ${vendor?.status}, shouldFilterByStatus: ${shouldFilterByStatus}`);
-      console.log(`[DEBUG] lvl2KidsRaw for ${lvl1.name}:`, lvl2KidsRaw.map(c => ({ name: c.name, id: c.id })));
-      const lvl2Kids = shouldFilterByStatus 
-        ? lvl2KidsRaw.filter(child => {
-            const isActive = isNodePricingActive(child);
-            console.log(`[DEBUG] Child ${child.name} (${child.id}): isNodePricingActive = ${isActive}`);
-            return isActive;
+      const lvl2Kids = isDummyMode
+        ? lvl2KidsRaw.filter((k) => {
+            try {
+              return isNodePricingActive(k) || hasActivePricingForNode(k);
+            } catch {
+              return false;
+            }
           })
         : lvl2KidsRaw;
-      console.log(`[DEBUG] Filtered lvl2Kids for ${lvl1.name}:`, lvl2Kids.map(c => ({ name: c.name, id: c.id })));
       // Sort L2 by min subtree price
       const sortedLvl2Kids = [...lvl2Kids].sort((a, b) => {
         const pa = localMinPriceInSubtree(a);
@@ -6454,11 +6434,17 @@ export default function PreviewPage() {
         return va - vb;
       });
       const selState = taxiSelections[lvl1.id] || {};
-      const selectedLvl2 = sortedLvl2Kids.find((c) => String(c.id) === String(selState.lvl2)) || sortedLvl2Kids[0] || lvl2KidsRaw[0] || null;
+      const selectedLvl2 = sortedLvl2Kids.find((c) => String(c.id) === String(selState.lvl2)) || sortedLvl2Kids[0] || null;
+      // Filter L3 in dummy mode too
       const lvl3KidsRaw = Array.isArray(selectedLvl2?.children) ? selectedLvl2.children : [];
-      // Filter lvl3Kids by active status for accepted and preview vendors
-      const lvl3Kids = shouldFilterByStatus 
-        ? lvl3KidsRaw.filter(child => isNodePricingActive(child))
+      const lvl3Kids = isDummyMode
+        ? lvl3KidsRaw.filter((k) => {
+            try {
+              return isNodePricingActive(k) || hasActivePricingForNode(k);
+            } catch {
+              return false;
+            }
+          })
         : lvl3KidsRaw;
       const sortedLvl3Kids = [...lvl3Kids].sort((a, b) => {
         const pa = localMinPriceInSubtree(a);
@@ -6467,7 +6453,7 @@ export default function PreviewPage() {
         const vb = pb == null ? Number.POSITIVE_INFINITY : Number(pb);
         return va - vb;
       });
-      const selectedLvl3 = sortedLvl3Kids.find((c) => String(c.id) === String(selState.lvl3)) || sortedLvl3Kids[0] || lvl3KidsRaw[0] || null;
+      const selectedLvl3 = sortedLvl3Kids.find((c) => String(c.id) === String(selState.lvl3)) || sortedLvl3Kids[0] || null;
 
       const belongsToLvl1 = (entry) => {
         try {
@@ -6493,9 +6479,7 @@ export default function PreviewPage() {
       // correctly scoped to the selected size. Only keep the old dummy
       // shortcut (no partition) for non-accepted vendors so they can see a
       // loose preview even without configured rows.
-      const normalizedForLvl1 = (isInventoryModel && isDummyMode && !isVendorAccepted)
-        ? normalized
-        : normalized.filter((n) => belongsToLvl1(n.entry));
+      const normalizedForLvl1 = normalized.filter((n) => belongsToLvl1(n.entry));
 
       // Further restrict to rows that actually include the current target
       // node (selected size / sub-size) and are Active. This ensures that
@@ -6504,20 +6488,60 @@ export default function PreviewPage() {
       const normalizedForTarget = targetNodeId
         ? normalizedForLvl1.filter((n) => {
             try {
+              const statusMap =
+                n.entry && n.entry.pricingStatusByRow && typeof n.entry.pricingStatusByRow === 'object'
+                  ? n.entry.pricingStatusByRow
+                  : {};
               const pbr =
                 n.entry &&
                 n.entry.pricesByRow &&
                 typeof n.entry.pricesByRow === 'object'
                   ? n.entry.pricesByRow
                   : null;
-              if (!pbr) return false;
-              for (const key of Object.keys(pbr)) {
+              const keys = new Set([
+                ...((pbr && typeof pbr === 'object') ? Object.keys(pbr) : []),
+                ...Object.keys(statusMap),
+              ]);
+              for (const key of keys) {
                 const ids = String(key).split('|');
                 if (!ids.some((id) => String(id) === targetNodeId)) continue;
-                if (!rowPricingIsActive(n.entry, key)) continue;
+                if (!Object.prototype.hasOwnProperty.call(statusMap, key)) continue;
+                const raw = String(statusMap[key] || '').trim().toLowerCase();
+                if (raw !== 'active') continue;
                 return true;
               }
-              return false;
+
+              const anyActive = Object.values(statusMap).some(
+                (v) => String(v || '').trim().toLowerCase() === 'active'
+              );
+              if (!anyActive) return false;
+
+              const linked =
+                categoryTree && categoryTree.linkedAttributes && typeof categoryTree.linkedAttributes === 'object'
+                  ? categoryTree.linkedAttributes
+                  : {};
+
+              const fam = String(n.entry?.scopeFamily || '');
+              const label = String(n.entry?.scopeLabel || '');
+              if (!fam) return false;
+
+              const specificKey = `${fam}:${label}:linkedSubcategory`;
+              const genericLabelKey = `${fam}:inventoryLabels:linkedSubcategory`;
+              const familyKey = `${fam}:linkedSubcategory`;
+
+              const pickFirst = (raw) => {
+                if (Array.isArray(raw)) return String(raw[0] || '');
+                return String(raw || '');
+              };
+
+              const mapped =
+                (label && linked && Object.prototype.hasOwnProperty.call(linked, specificKey) ? pickFirst(linked[specificKey]) : '') ||
+                (linked && Object.prototype.hasOwnProperty.call(linked, genericLabelKey) ? pickFirst(linked[genericLabelKey]) : '') ||
+                (linked && Object.prototype.hasOwnProperty.call(linked, familyKey) ? pickFirst(linked[familyKey]) : '');
+
+              if (!mapped) return false;
+              if (String(mapped) === 'ALL') return true;
+              return String(mapped) === String(targetNodeId);
             } catch {
               return false;
             }
@@ -6534,7 +6558,7 @@ export default function PreviewPage() {
           }
           return true;
         } catch {
-          return true;
+          return !isDummyMode;
         }
       });
 
@@ -6661,13 +6685,6 @@ export default function PreviewPage() {
           return false;
         }
       })();
-      console.log("[preview] node", {
-  id: displayNode?.id,
-  name: displayNode?.name,
-  pricingStatus: displayNode?.pricingStatus,
-  hasCategoryActive,
-  hasInventoryActive,
-});
       return (
         <section key={lvl1.id} style={{
       marginBottom: 16,
@@ -6694,32 +6711,15 @@ export default function PreviewPage() {
             >
               {lvl1.name}
             </h2>
-            {sortedLvl2KidsRaw.length > 0 ? (
+            {sortedLvl2Kids.length > 0 ? (
               (() => {
                 // For driving school, render buttons instead of dropdown if there are only 2 options (With/Without License)
-                const shouldRenderButtons = sortedLvl2KidsRaw.length <= 2 && 
-                  sortedLvl2KidsRaw.every(k => k.name && (k.name.includes('License') || k.name.includes('licence')));
-                
-                console.log(`[DEBUG] shouldRenderButtons: ${shouldRenderButtons}, lvl2KidsRaw.length: ${sortedLvl2KidsRaw.length}`);
-                console.log(`[DEBUG] lvl2KidsRaw names:`, sortedLvl2KidsRaw.map(k => k.name));
+                const shouldRenderButtons = sortedLvl2Kids.length <= 2 && 
+                  sortedLvl2Kids.every(k => k.name && (k.name.includes('License') || k.name.includes('licence')));
                 
                 if (shouldRenderButtons) {
-                  console.log(`[DEBUG] Should render buttons for ${lvl1.name}`);
-                  console.log(`[DEBUG] Raw lvl2Kids:`, sortedLvl2KidsRaw.map(k => ({ name: k.name, id: k.id })));
-                  
-                  // Filter buttons to show only those with active inventory records for accepted vendors
-                  const filteredButtons = isVendorAccepted
-                    ? sortedLvl2KidsRaw.filter((kid) => {
-                        try {
-                          // Check if this subcategory has any active inventory records specifically for this node
-                          return hasActivePricingForNode(kid);
-                        } catch {
-                          return false;
-                        }
-                      })
-                    : sortedLvl2KidsRaw;
-                  
-                  console.log(`[DEBUG] Filtered buttons:`, filteredButtons.map(k => ({ name: k.name, id: k.id })));
+                  // SIMPLIFIED: Show all buttons without filtering
+                  const filteredButtons = sortedLvl2Kids;
                   
                   // Only render buttons section if there are any active buttons
                   if (filteredButtons.length > 0) {
@@ -6775,7 +6775,7 @@ export default function PreviewPage() {
                                 });
                                 const bestFuel = fuelWithPrice2[0]?.opt;
                                 const listAfterFuel = bestFuel ? listAfterBody.filter((n)=> String(n.fuel??'')===String(bestFuel)) : listAfterBody;
-                                const mbPairs2 = Array.from(new Set(listAfterFuel.filter((n)=> n.model && n.brand).map((n)=> `${n.model}|${n.brand}`)));
+                                const mbPairs2 = Array.from(new Set(listAfterFuel.filter((n)=> n.model != null || n.brand != null).map((n)=> `${n.model || ''}|${n.brand || ''}`)));
                                 const mbWithPrice2 = mbPairs2.map((opt)=>{
                                   const [m,b] = String(opt).split('|');
                                   const lst = listAfterFuel.filter((n)=> String(n.model)===String(m||'') && String(n.brand)===String(b||''));
@@ -6869,7 +6869,7 @@ export default function PreviewPage() {
                         });
                         const bestFuel = fuelWithPrice2[0]?.opt;
                         const listAfterFuel = bestFuel ? listAfterBody.filter((n)=> String(n.fuel??'')===String(bestFuel)) : listAfterBody;
-                        const mbPairs2 = Array.from(new Set(listAfterFuel.filter((n)=> n.model && n.brand).map((n)=> `${n.model}|${n.brand}`)));
+                        const mbPairs2 = Array.from(new Set(listAfterFuel.filter((n)=> n.model != null || n.brand != null).map((n)=> `${n.model || ''}|${n.brand || ''}`)));
                         const mbWithPrice2 = mbPairs2.map((opt)=>{
                           const [m,b] = String(opt).split('|');
                           const lst = listAfterFuel.filter((n)=> String(n.model)===String(m||'') && String(n.brand)===String(b||''));
@@ -7058,8 +7058,9 @@ export default function PreviewPage() {
                 <option value="">Any</option>
                 {sortedModelBrandOptions.map((opt) => {
                   const [model, brand] = String(opt).split('|');
+                  const display = [brand, model].filter(v => v && String(v).trim()).join(' | ') || '(No details)';
                   return (
-                    <option key={opt} value={opt}>{`${brand || ''} | ${model || ''}`.trim()}</option>
+                    <option key={opt} value={opt}>{display}</option>
                   );
                 })}
               </select>
@@ -7213,7 +7214,7 @@ export default function PreviewPage() {
         const raw = String(map[key] || "").trim().toLowerCase();
         return raw === "active";
       }
-      return true;
+      return !isDummyMode;
     } catch {
       return false;
     }
@@ -7250,31 +7251,10 @@ export default function PreviewPage() {
     const enriched = enrichNode(lvl1);
     const children = Array.isArray(enriched?.children) ? enriched.children : [];
     const hasDeeperLevels = children.some((c) => Array.isArray(c?.children) && c.children.length > 0);
-    console.log("LVL1:", lvl1.name);
-    console.log("LVL1:", lvl1.name, "childrenCount:", children.length);
-    let hasCategoryActive = false;
-    let hasInventoryActive = false;
-    try {
-      const displayNode = enriched;
-      hasCategoryActive = isNodePricingActive(displayNode);
-      hasInventoryActive = hasActivePricingForNode(displayNode);
-      console.log("[preview] node", {
-        id: displayNode?.id,
-        name: displayNode?.name,
-        pricingStatus: displayNode?.pricingStatus,
-        hasCategoryActive,
-        hasInventoryActive,
-      });
-    } catch {}
-
-    // If this first-level node has no active category pricing and no active inventory
-    // rows under it, hide the entire card section (e.g., Two Wheeler / Four Wheeler)
-    // BUT allow categories without inventory to show (packages, commercial, etc.)
-    if (!hasCategoryActive && !hasInventoryActive && !hasActivePricingForNode(enriched)) {
-      return null;
-    }
+    // SIMPLIFIED: Show all nodes without filtering
 
     const serviceKey = makeServiceKey(lvl1?.name);
+    if (isDummyMode && !(isNodePricingActive(enriched) || hasActivePricingForNode(enriched))) return null;
     return (
       <section
         key={lvl1.id}
@@ -7313,16 +7293,12 @@ export default function PreviewPage() {
             };
 
             const renderNode = (child, parentNode) => {
+              if (isDummyMode && !(isNodePricingActive(child) || hasActivePricingForNode(child))) return null;
               const pick = (arr) => Array.isArray(arr) && arr.length > 0 ? String(arr[0]).toLowerCase() : null;
               // Precedence: node.displayType -> parent.displayType -> root.displayType -> card
               let dt = pick(child?.displayType) || pick(parentNode?.displayType) || pick(lvl1?.displayType) || 'card';
 
               // Debug trace
-              try {
-                const id = child?.id || child?._id || '';
-                const name = child?.name || '';
-                console.log('[preview] layout', { id, name, resolvedDt: dt });
-              } catch {}
 
               // Card: keep existing rich card behavior
               if (dt === 'card') {
@@ -7540,7 +7516,7 @@ export default function PreviewPage() {
             if (kidsTop.length === 0) {
               // Render the first-level node itself as a card (leaf L1)
               const hasCategoryActiveLeaf = isNodePricingActive(enriched);
-              const hasInventoryActiveLeaf = hasInventoryActive;
+              const hasInventoryActiveLeaf = false; // Inventory active check is done via hasActivePricingForNode
               let livePrice = null;
               try {
                 const priceRows = vendor?.inventorySelections?.[categoryId] || [];
@@ -7557,9 +7533,7 @@ export default function PreviewPage() {
               if (livePrice == null) {
                 livePrice = vendor?.pricing?.[enriched.id] ?? vendor?.pricing?.[root?.id] ?? enriched.vendorPrice ?? enriched.price ?? null;
               }
-              // If vendor is accepted and there is no active pricing flag and no price, show the card anyway
-              // This allows packages, commercial, and other categories without inventory to appear
-              if (isVendorAccepted && !hasCategoryActiveLeaf && !hasInventoryActiveLeaf && livePrice == null && !hasActivePricingForNode(enriched)) return null;
+              if (!hasCategoryActiveLeaf && !hasInventoryActiveLeaf && !hasActivePricingForNode(enriched)) return null;
               const imgSrc = (() => {
                 const s = String(enriched?.imageUrl || '');
                 if (!s) return null;
@@ -7652,7 +7626,7 @@ export default function PreviewPage() {
               kidsTop.every((k) => !Array.isArray(k.children) || k.children.length === 0);
             if (allKidsAreLeaves) {
               const hasCategoryActiveLeaf = isNodePricingActive(enriched);
-              const hasInventoryActiveLeaf = hasInventoryActive;
+              const hasInventoryActiveLeaf = false; // Inventory active check is done via hasActivePricingForNode
               let livePrice = null;
               try {
                 const priceRows = vendor?.inventorySelections?.[categoryId] || [];
@@ -7680,9 +7654,7 @@ export default function PreviewPage() {
                   enriched.price ??
                   null;
               }
-              // If vendor is accepted and there is no active pricing flag and no price, show the card anyway
-              // This allows packages, commercial, and other categories without inventory to appear
-              if (isVendorAccepted && !hasCategoryActiveLeaf && !hasInventoryActiveLeaf && livePrice == null && !hasActivePricingForNode(enriched)) return null;
+              if (!hasCategoryActiveLeaf && !hasInventoryActiveLeaf && !hasActivePricingForNode(enriched)) return null;
               const nodeWithLivePrice = { ...enriched, vendorPrice: livePrice, price: livePrice };
               return (
                 <ParentWithSizesCard
@@ -7704,11 +7676,11 @@ export default function PreviewPage() {
             // Sort children by minimum price in their subtree
             // Filter out inactive children for accepted vendors
             const filteredKids = kidsTop.filter((child) => {
-              // For accepted vendors, check if child is active
-              if (isVendorAccepted) {
-                return isNodePricingActive(child);
+              try {
+                return isNodePricingActive(child) || hasActivePricingForNode(child);
+              } catch {
+                return false;
               }
-              return true; // For non-accepted vendors, show all
             });
             const sortedKids = [...filteredKids].sort((a, b) => {
               const pa = minPriceInSubtree(a);
@@ -8200,87 +8172,30 @@ export default function PreviewPage() {
                     })();
                     // Treat only non-placeholder entries as real combo types for the UI selector
                     // and hide any size that is explicitly marked as inactive in pricingStatusPerSize.
-                    // For categories without inventory, be more lenient with size filtering.
-                    // IMPORTANT: Only filter by active status for ACCEPTED vendors
-                    const catKey = String(categoryId || '');
-                    const hasInventoryForCat = Array.isArray(vendor?.inventorySelections?.[catKey]) && vendor.inventorySelections[catKey].length > 0;
-                    const isVendorAcceptedLocal = String(vendor?.status || '').trim().toLowerCase() === 'accepted';
-                    
-                    // Debug log
-                    console.log('[Package Card]', {
-                      comboName: combo?.name,
-                      statusMap,
-                      rawSizes,
-                      hasInventoryForCat,
-                      isVendorAcceptedLocal
-                    });
-                    
-                    // For accepted vendors, check if this combo should be shown
-                    if (isVendorAcceptedLocal) {
-                      const statusValues = Object.values(statusMap);
-                      const comboLevelStatus = String(combo?.pricingStatus || '').trim().toLowerCase();
-                      
-                      // Check if combo has any active status
-                      const hasAnyActive = statusValues.some((v) => String(v || '').trim().toLowerCase() === 'active') ||
-                                          comboLevelStatus === 'active';
-                      const hasExplicitInactive = (statusValues.length > 0 && 
-                        statusValues.every((v) => String(v || '').trim().toLowerCase() === 'inactive')) ||
-                        comboLevelStatus === 'inactive';
-                      
-                      console.log('[Package Card] Status check:', {
-                        comboName: combo?.name,
-                        statusValues,
-                        comboLevelStatus,
-                        hasAnyActive,
-                        hasExplicitInactive
-                      });
-                      
-                      // If explicitly inactive, hide
-                      if (hasExplicitInactive) {
-                        console.log('[Package Card] Hiding - explicitly inactive');
-                        return null;
-                      }
-                      
-                      // If no status set at all, hide for accepted vendors (require explicit active)
-                      if (!hasAnyActive && statusValues.length === 0 && !comboLevelStatus) {
-                        console.log('[Package Card] Hiding - no status set');
-                        return null;
-                      }
-                    }
-                    
                     const sizes = rawSizes.filter((s) => {
                       const v = String(s || '').trim();
                       if (!v) return false;
-                      // For categories without inventory, allow placeholder sizes
-                      const isPlaceholder = v === '—' || v.toLowerCase() === 'na' || v.toLowerCase() === 'n/a';
-                      if (isPlaceholder && hasInventoryForCat) return false;
-                      // Only filter by active status for accepted vendors with explicit inactive status
-                      if (isVendorAcceptedLocal) {
-                        const statusRaw = statusMap[v];
-                        if (statusRaw != null) {
-                          const st = String(statusRaw).trim().toLowerCase();
-                          if (st === 'inactive') return false;
-                        }
-                      }
-                      return true;
+
+                      const isPlaceholder = (() => {
+                        const x = v.toLowerCase();
+                        return x === '—' || x === '-' || x === 'na' || x === 'n/a' || x === 'none';
+                      })();
+
+                      // Check if this size is marked as Active in pricingStatusPerSize
+                      const sizeKey = isPlaceholder ? 'default' : v;
+                      const sizeStatus = String(statusMap[sizeKey] || '').trim().toLowerCase();
+
+                      // Require explicit Active
+                      if (sizeStatus === 'active') return true;
+                      return false;
                     });
                     
-                    console.log('[Package Card] Sizes filter:', {
-                      comboName: combo?.name,
-                      rawSizes,
-                      sizes,
-                      hasInventoryForCat
-                    });
+                    // No fallback - only show active sizes
+                    const effectiveSizes = sizes;
                     
-                    // If there are no active sizes left (all inactive), skip rendering this card
-                    // But for categories without inventory, if rawSizes had entries, allow the card
-                    // For non-accepted vendors, always show the card
-                    if (!sizes.length && isVendorAcceptedLocal && (hasInventoryForCat || rawSizes.length === 0)) {
-                      console.log('[Package Card] Hiding - no sizes left');
-                      return null;
-                    }
-                    // Fallback: if sizes is empty but rawSizes had placeholder entries, use them
-                    const effectiveSizes = sizes.length > 0 ? sizes : rawSizes.filter(s => s);
+                    // Skip rendering this combo if no active sizes
+                    if (effectiveSizes.length === 0) return null;
+                    
                     // Check if all sizes are just placeholders (should hide Size section)
                     const hasRealSizes = effectiveSizes.some((s) => {
                       const v = String(s || '').trim();
@@ -9834,11 +9749,6 @@ export default function PreviewPage() {
                         const parentHasLinkedAttr = parentLinkedAttr && typeof parentLinkedAttr === 'object' && Object.keys(parentLinkedAttr).length > 0;
                         const parentInvLabel = setupSelectedCategory?.inventoryLabelName;
                         const parentHasInvLabel = typeof parentInvLabel === 'string' && parentInvLabel.trim() !== '';
-
-                        console.log("DEBUG: setupSelectedCategory", setupSelectedCategory);
-                        console.log("DEBUG: isInventory", isInventory, "rawModels", rawModels);
-                        console.log("DEBUG: parentHasLinkedAttr", parentHasLinkedAttr, "parentLinkedAttr", parentLinkedAttr);
-                        console.log("DEBUG: parentHasInvLabel", parentHasInvLabel, "parentInvLabel", parentInvLabel);
 
                         if (isInventory && (parentHasLinkedAttr || parentHasInvLabel)) {
                           // Get all selected services
