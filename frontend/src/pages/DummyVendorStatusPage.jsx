@@ -3,7 +3,7 @@ import { useNavigate, useParams } from "react-router-dom";
 import axios from "axios";
 import API_BASE_URL from "../config";
 
-const STATUSES = [
+const FALLBACK_STATUSES = [
   "Accepted",
   "Pending",
   "Rejected",
@@ -18,6 +18,7 @@ export default function DummyVendorStatusPage() {
   const { categoryId } = useParams();
   const [category, setCategory] = useState(null);
   const [counts, setCounts] = useState({});
+  const [statuses, setStatuses] = useState(FALLBACK_STATUSES);
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
 
@@ -33,6 +34,30 @@ export default function DummyVendorStatusPage() {
   const fetchData = async () => {
     try {
       setLoading(true);
+      let masterStatuses = null;
+      try {
+        const stRes = await axios.get(`${API_BASE_URL}/api/masters`, { params: { type: "status" } });
+        const list = Array.isArray(stRes.data) ? stRes.data : [];
+        masterStatuses = list
+          .map((m) => ({
+            name: m && m.name != null ? String(m.name).trim() : "",
+            sequence: typeof m?.sequence === "number" ? m.sequence : 0,
+          }))
+          .filter((m) => m.name);
+        masterStatuses.sort((a, b) => {
+          if ((a.sequence || 0) !== (b.sequence || 0)) return (a.sequence || 0) - (b.sequence || 0);
+          return a.name.localeCompare(b.name);
+        });
+      } catch {
+        masterStatuses = null;
+      }
+
+      if (Array.isArray(masterStatuses) && masterStatuses.length) {
+        setStatuses(masterStatuses.map((s) => s.name));
+      } else {
+        setStatuses(FALLBACK_STATUSES);
+      }
+
       // Always try to fetch the category from dummy first, then fallback to real
       let catRes;
       try {
@@ -79,7 +104,7 @@ export default function DummyVendorStatusPage() {
         <div>Loading...</div>
       ) : (
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))", gap: 16 }}>
-          {STATUSES.map((st) => (
+          {statuses.map((st) => (
             <div
               key={st}
               onClick={() => navigate(`/dummy-vendors/status/${categoryId}/${encodeURIComponent(st)}`)}

@@ -6,7 +6,7 @@ import DummyBusinessHoursModal from "../components/DummyBusinessHoursModal";
 import DummyBusinessLocationModal from "../components/DummyBusinessLocationModal";
 import DummyLocationPickerModal from "../components/DummyLocationPickerModal";
 
-const STATUSES = [
+const FALLBACK_STATUSES = [
   "Accepted",
   "Pending",
   "Rejected",
@@ -24,6 +24,7 @@ export default function DummyVendorStatusListPage() {
   const isHosted = /go-kar\.net/i.test(String(API_BASE_URL || ""));
   // Always use API_BASE_URL for API calls to avoid proxy mismatches
   const API_PREFIX = (API_BASE_URL && String(API_BASE_URL).trim()) || '';
+  const [statuses, setStatuses] = useState(FALLBACK_STATUSES);
   const [activeVendor, setActiveVendor] = useState(null);
   const [selectedVendorId, setSelectedVendorId] = useState(null);
   const [showPicker, setShowPicker] = useState(false);
@@ -44,6 +45,34 @@ export default function DummyVendorStatusListPage() {
   const [socialHandleIcons, setSocialHandleIcons] = useState({}); // normalized name -> iconUrl
   const [vendorSocialLinks, setVendorSocialLinks] = useState({}); // raw { [handleName]: url }
   const [socialLinksSaving, setSocialLinksSaving] = useState(false);
+
+  const isRegisteredStatus = String(status || "").trim().toLowerCase() === "registered";
+
+  useEffect(() => {
+    const fetchMasterStatuses = async () => {
+      try {
+        const stRes = await axios.get(`${API_PREFIX}/api/masters`, { params: { type: "status" } });
+        const list = Array.isArray(stRes.data) ? stRes.data : [];
+        const masterStatuses = list
+          .map((m) => ({
+            name: m && m.name != null ? String(m.name).trim() : "",
+            sequence: typeof m?.sequence === "number" ? m.sequence : 0,
+          }))
+          .filter((m) => m.name)
+          .sort((a, b) => {
+            if ((a.sequence || 0) !== (b.sequence || 0)) return (a.sequence || 0) - (b.sequence || 0);
+            return a.name.localeCompare(b.name);
+          })
+          .map((s) => s.name);
+
+        setStatuses(masterStatuses.length ? masterStatuses : FALLBACK_STATUSES);
+      } catch {
+        setStatuses(FALLBACK_STATUSES);
+      }
+    };
+
+    fetchMasterStatuses();
+  }, [API_PREFIX]);
 
   const applyLocalLocation = (vendorId, location) => {
     setVendors((list) =>
@@ -352,9 +381,23 @@ export default function DummyVendorStatusListPage() {
           onClick={() => {
             const v = vendors.find(x => x._id === selectedVendorId);
             if (!v) return alert('Please select a vendor first');
+            const vStatus = String(v.status || "").trim().toLowerCase();
+            if (isRegisteredStatus || vStatus === "registered") {
+              alert('View categories not available');
+              return;
+            }
             navigate(`/dummy-vendors/${v._id}/categories/${categoryId}`);
           }}
-          style={{ padding: '6px 12px', borderRadius: 6, background: '#0ea5e9', color: '#fff', border: 'none' }}
+          aria-disabled={isRegisteredStatus}
+          style={{
+            padding: '6px 12px',
+            borderRadius: 6,
+            background: '#0ea5e9',
+            color: '#fff',
+            border: 'none',
+            opacity: isRegisteredStatus ? 0.6 : 1,
+            cursor: isRegisteredStatus ? 'not-allowed' : 'pointer',
+          }}
         >View Categories</button>
         <button
           onClick={() => {
@@ -531,10 +574,10 @@ export default function DummyVendorStatusListPage() {
             <h3 style={{ marginTop: 0, marginBottom: 8 }}>Change Vendor Status</h3>
             <div style={{ fontSize: 13, color: '#4b5563', marginBottom: 12 }}>
               You can move this vendor to any status. Counts below match the
-              Dummy Vendor Status page.
+              Vendor Status page.
             </div>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr', rowGap: 8, marginBottom: 12 }}>
-              {STATUSES.map((st) => (
+              {statuses.map((st) => (
                 <label
                   key={st}
                   style={{

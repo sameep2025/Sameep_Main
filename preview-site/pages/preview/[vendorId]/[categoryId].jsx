@@ -118,6 +118,8 @@ export default function PreviewPage() {
   // Vehicle count popup state for inventory model categories
   const [showVehicleCountPopup, setShowVehicleCountPopup] = useState(false);
   const [setupVehicleCounts, setSetupVehicleCounts] = useState({}); // { [serviceId]: count }
+
+  const pricesBackfillDoneRef = useRef({});
   // Setup inventory selection popup state (after vehicle count)
   const [showSetupInventoryPopup, setShowSetupInventoryPopup] = useState(false);
   const [setupInventoryScopes, setSetupInventoryScopes] = useState([]); // [{ serviceId, serviceName, family, label, maxCount }]
@@ -2105,25 +2107,69 @@ export default function PreviewPage() {
 
   const loadDummyInventorySelections = useCallback(async (vid, cid) => {
     try {
-      const res = await fetch(`${API_BASE_URL}/api/dummy-vendors/${vid}`, { cache: "no-store" });
+      const res = await fetch(
+        `${API_BASE_URL}/api/dummy-vendors/${vid}/categories/${cid}/inventory`,
+        { cache: "no-store" }
+      );
       if (!res.ok) return [];
-      const json = await res.json().catch(() => ({}));
-      const map = json && typeof json.inventorySelections === "object" ? json.inventorySelections : {};
-      const list = Array.isArray(map?.[cid]) ? map[cid] : [];
-      return list;
+      const data = await res.json().catch(() => ({}));
+      const items = Array.isArray(data?.items) ? data.items : [];
+      return items;
     } catch {
       return [];
     }
   }, []);
 
   const saveDummyInventorySelections = useCallback(async (vid, cid, items) => {
-    const payload = { inventorySelections: { [cid]: items } };
-    await fetch(`${API_BASE_URL}/api/dummy-vendors/${vid}`, {
+    const payload = { items };
+    await fetch(`${API_BASE_URL}/api/dummy-categories/${cid}/vendors/${vid}/inventory-selections`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
     });
     return true;
+  }, []);
+
+  const buildDefaultPricesByRowForInventoryItem = useCallback(
+    (item, baseRows) => {
+      try {
+        const rows = Array.isArray(baseRows) ? baseRows : [];
+        const defaults = {};
+        rows.forEach((r) => {
+          const ids = Array.isArray(r?.levelIds) ? r.levelIds : [];
+          const rowKey = ids.length ? ids.map(String).join("|") : "";
+          if (!rowKey) return;
+          const p = r?.price;
+          if (p === undefined || p === null || p === "") return;
+          if (p === "-") return;
+          defaults[rowKey] = p;
+        });
+        return defaults;
+      } catch {
+        return {};
+      }
+    },
+    []
+  );
+
+  const mergeMissingPricesByRow = useCallback((existingPricesByRow, defaults) => {
+    try {
+      const base =
+        existingPricesByRow && typeof existingPricesByRow === "object"
+          ? { ...existingPricesByRow }
+          : {};
+      const def = defaults && typeof defaults === "object" ? defaults : {};
+      let changed = false;
+      Object.keys(def).forEach((k) => {
+        if (base[k] === undefined || base[k] === null || base[k] === "") {
+          base[k] = def[k];
+          changed = true;
+        }
+      });
+      return { merged: base, changed };
+    } catch {
+      return { merged: existingPricesByRow, changed: false };
+    }
   }, []);
 
   const ensureLinkedSubcategoryForScope = useCallback(
@@ -2617,6 +2663,99 @@ export default function PreviewPage() {
       }
     })();
   }, [vendorId, categoryId, loadDummyInventorySelections]);
+
+  // Keep vendor.inventorySelections[categoryId] in sync with invItems in dummy mode.
+  // Many parts of the preview UI read from vendor.inventorySelections, not invItems directly.
+  useEffect(() => {
+    try {
+      if (!isDummyMode) return;
+      if (!categoryId) return;
+      if (!vendor || typeof vendor !== 'object') return;
+      const catKey = String(categoryId);
+      const current = Array.isArray(vendor?.inventorySelections?.[catKey])
+        ? vendor.inventorySelections[catKey]
+        : [];
+      const next = Array.isArray(invItems) ? invItems : [];
+
+      const keyOf = (it) => String(it?._id || it?.at || '');
+      const curKeys = current.map(keyOf);
+      const nextKeys = next.map(keyOf);
+      const same =
+        curKeys.length === nextKeys.length &&
+        curKeys.every((k, i) => k && k === nextKeys[i]);
+      if (same) return;
+
+      setVendor((prev) => {
+        try {
+          const base = prev && typeof prev === 'object' ? prev : {};
+          const inv = base.inventorySelections && typeof base.inventorySelections === 'object'
+            ? base.inventorySelections
+            : {};
+          return { ...base, inventorySelections: { ...inv, [catKey]: next } };
+        } catch {
+          return prev;
+        }
+      });
+    } catch {}
+  }, [isDummyMode, vendor, invItems, categoryId]);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        if (!vendorId || !categoryId) return;
+        if (!categoryTree) return;
+
+        const guardKey = `${vendorId}|${categoryId}`;
+        if (pricesBackfillDoneRef.current[guardKey]) return;
+
+        const flattenTree = (node, rows = [], parentLevels = [], parentIds = []) => {
+          try {
+            if (!node) return rows;
+            const levels = [...parentLevels, node.name ?? "Unnamed"];
+            const ids = [...parentIds, String(node._id ?? node.id ?? "")].filter(Boolean);
+            const kids = Array.isArray(node.children) ? node.children : [];
+            if (kids.length === 0) {
+              rows.push({
+                id: node._id ?? node.id,
+                levels,
+                levelIds: ids,
+                price: (typeof node.vendorPrice === "number") ? node.vendorPrice : (node.price ?? "-"),
+                pricingStatus: node.pricingStatus,
+                terms: node.terms,
+                node,
+              });
+            } else {
+              kids.forEach((child) => flattenTree(child, rows, levels, ids));
+            }
+            return rows;
+          } catch {
+            return rows;
+          }
+        };
+
+        const baseRows = flattenTree(categoryTree, []);
+
+        let anyChanged = false;
+        const nextItems = (Array.isArray(invItems) ? invItems : []).map((it) => {
+          const defaults = buildDefaultPricesByRowForInventoryItem(it, baseRows);
+          const { merged, changed } = mergeMissingPricesByRow(it?.pricesByRow, defaults);
+          if (changed) {
+            anyChanged = true;
+            return { ...it, pricesByRow: merged };
+          }
+          return it;
+        });
+
+        pricesBackfillDoneRef.current[guardKey] = true;
+
+        if (!anyChanged) return;
+        setInvItems(nextItems);
+        await saveDummyInventorySelections(vendorId, categoryId, nextItems);
+      } catch {
+        // ignore
+      }
+    })();
+  }, [vendorId, categoryId, categoryTree, invItems, buildDefaultPricesByRowForInventoryItem, mergeMissingPricesByRow, saveDummyInventorySelections]);
 
   useEffect(() => {
     try {
@@ -3116,15 +3255,17 @@ console.log("✅ Total dummy categories count:", list.length);
         try { console.log("[PREVIEW] Branch selected: forceDummy", { vendorId, categoryId, mode }); } catch {}
         // Dummy vendor flow (forced by query)
         try {
-          const dvRes = await fetch(`${API_BASE_URL}/api/dummy-vendors/${vendorId}/categories`, { cache: 'no-store' });
-          const dv = await dvRes.json();
-          // Fetch full dummy vendor document to hydrate inventorySelections/rowImages
-          let dvDoc = {};
+          const dvRes = await fetch(
+            `${API_BASE_URL}/api/dummy-vendors/${vendorId}/categories/${categoryId}/inventory`,
+            { cache: 'no-store' }
+          );
+          const dv = await dvRes.json().catch(() => ({}));
+
+          const invItemsForCategory = Array.isArray(dv?.items) ? dv.items : [];
+          let dvVendor = { ...(dv?.vendor || {}) };
           try {
-            const vRes = await fetch(`${API_BASE_URL}/api/dummy-vendors/${vendorId}`, { cache: 'no-store' });
-            dvDoc = await vRes.json().catch(() => ({}));
-          } catch { dvDoc = {}; }
-          let dvVendor = { ...(dv?.vendor || {}), ...(dvDoc || {}) };
+            dvVendor.inventorySelections = { ...(dvVendor.inventorySelections || {}), [String(categoryId)]: invItemsForCategory };
+          } catch {}
           try {
             const pics = Array.isArray(dvVendor?.profilePictures) ? dvVendor.profilePictures : [];
             if (pics.length === 0) {
@@ -3137,6 +3278,7 @@ console.log("✅ Total dummy categories count:", list.length);
             }
           } catch {}
           setVendor(dvVendor);
+          setInvItems(invItemsForCategory);
           let categoriesWithLinked = dv?.categories || null;
           if (categoriesWithLinked) {
             try { categoriesWithLinked = await augmentTreeWithDummyLabels(categoriesWithLinked); } catch {}
@@ -3228,15 +3370,17 @@ console.log("✅ Total dummy categories count:", list.length);
         if (isDummy) {
           // Fallback to dummy
           try {
-            const dvRes = await fetch(`${API_BASE_URL}/api/dummy-vendors/${vendorId}/categories`, { cache: 'no-store' });
-            const dv = await dvRes.json();
-            // Hydrate with full dummy vendor
-            let dvDoc = {};
+            const dvRes = await fetch(
+              `${API_BASE_URL}/api/dummy-vendors/${vendorId}/categories/${categoryId}/inventory`,
+              { cache: 'no-store' }
+            );
+            const dv = await dvRes.json().catch(() => ({}));
+
+            const invItemsForCategory = Array.isArray(dv?.items) ? dv.items : [];
+            let dvVendor = { ...(dv?.vendor || {}) };
             try {
-              const vRes = await fetch(`${API_BASE_URL}/api/dummy-vendors/${vendorId}`, { cache: 'no-store' });
-              dvDoc = await vRes.json().catch(() => ({}));
-            } catch { dvDoc = {}; }
-            let dvVendor = { ...(dv?.vendor || {}), ...(dvDoc || {}) };
+              dvVendor.inventorySelections = { ...(dvVendor.inventorySelections || {}), [String(categoryId)]: invItemsForCategory };
+            } catch {}
             try {
               const pics = Array.isArray(dvVendor?.profilePictures) ? dvVendor.profilePictures : [];
               if (pics.length === 0) {
@@ -3249,6 +3393,7 @@ console.log("✅ Total dummy categories count:", list.length);
               }
             } catch {}
             setVendor(dvVendor);
+            setInvItems(invItemsForCategory);
             let categoriesWithLinked = dv?.categories || null;
             if (categoriesWithLinked) {
               try { categoriesWithLinked = await augmentTreeWithDummyLabels(categoriesWithLinked); } catch {}
@@ -3621,6 +3766,42 @@ console.log("✅ Total dummy categories count:", list.length);
   // ----------------- Helpers -----------------
   const hasChildren = (node) => node?.children?.length > 0;
 
+  const parentById = useMemo(() => {
+    try {
+      const map = new Map();
+      const normalizeId = (val) => {
+        try {
+          if (val == null) return "";
+          if (typeof val === "string" || typeof val === "number") return String(val);
+          if (typeof val === "object") {
+            if (val.$oid) return String(val.$oid);
+            if (val.oid) return String(val.oid);
+            if (val._id) return normalizeId(val._id);
+            if (val.id) return normalizeId(val.id);
+          }
+          return String(val);
+        } catch {
+          return "";
+        }
+      };
+      const walk = (node, parentId) => {
+        try {
+          if (!node) return;
+          const id = normalizeId(node._id ?? node.id);
+          if (id && parentId) map.set(id, parentId);
+          const kids = Array.isArray(node.children) ? node.children : [];
+          kids.forEach((ch) => walk(ch, id));
+        } catch {
+          // ignore
+        }
+      };
+      walk(categoryTree, null);
+      return map;
+    } catch {
+      return new Map();
+    }
+  }, [categoryTree]);
+
   const containsId = (node, id) => {
     if (!node || !id) return false;
     if (node.id === id) return true;
@@ -3674,6 +3855,34 @@ console.log("✅ Total dummy categories count:", list.length);
 
       if (status !== undefined && status !== null) {
         return isActive(status);
+      }
+
+      const findAncestorStatus = (startId) => {
+        try {
+          if (!startId) return undefined;
+          const visited = new Set();
+          let cur = String(startId);
+          while (cur && !visited.has(cur)) {
+            visited.add(cur);
+            const pid = parentById?.get(cur);
+            if (!pid) return undefined;
+            const st = readStatus(pid);
+            if (st !== undefined && st !== null) return st;
+            cur = String(pid);
+          }
+          return undefined;
+        } catch {
+          return undefined;
+        }
+      };
+
+      // Dummy mode: if this node isn't explicitly set, inherit from nearest ancestor with a status.
+      // This ensures selecting a service (L1) makes all nested levels visible in preview.
+      if (isDummyMode) {
+        const inherited = findAncestorStatus(nodeId);
+        if (inherited !== undefined && inherited !== null) {
+          return isActive(inherited);
+        }
       }
 
       const hasActiveDescendant = (n) => {
@@ -3744,7 +3953,8 @@ console.log("✅ Total dummy categories count:", list.length);
             if (isDriving) {
               return isNodePricingActive(ch) || hasActivePricingForNode(ch);
             }
-            return isNodePricingActive(ch);
+            // Non-driving: still include nodes that are inventory-active (row-level Active)
+            return isNodePricingActive(ch) || hasActivePricingForNode(ch);
           } catch {
             return false;
           }
@@ -3988,7 +4198,10 @@ console.log("✅ Total dummy categories count:", list.length);
                   if (isDummyMode) {
                     console.log('[DEBUG inv filtered count]', inv.length);
                   }
-                  const ids = [displayNode?.id, selectedParent?.id, node?.id].map((x) => String(x || ''));
+                  // IMPORTANT: resolve prices against the *currently selected* node id only.
+                  // Using multiple ids (like node.id / parent.id) can accidentally match sibling rows
+                  // and show the wrong price (e.g., Without License price while With License is selected).
+                  const targetNodeId = String((displayNode?.id || selectedChild?.id || selectedParent?.id || node?.id || ''));
                   const rootNameLocal = String(categoryTree?.name || '').toLowerCase();
                   const isDrivingLocal = rootNameLocal === 'driving school';
 
@@ -3998,16 +4211,14 @@ console.log("✅ Total dummy categories count:", list.length);
                       if (invPrice != null) return;
                       const pbr = (entry && entry.pricesByRow && typeof entry.pricesByRow === 'object') ? entry.pricesByRow : null;
                       if (!pbr) return;
-                      for (const target of ids) {
-                        if (!target) continue;
+                      if (targetNodeId) {
                         for (const [rk, val] of Object.entries(pbr)) {
                           const parts = String(rk).split('|');
-                          if (parts.some((id) => String(id) === target)) {
+                          if (parts.some((id) => String(id) === targetNodeId)) {
                             const num = Number(val);
                             if (!Number.isNaN(num)) { invPrice = num; break; }
                           }
                         }
-                        if (invPrice != null) break;
                       }
                     });
                     const nodePrice =
@@ -4171,7 +4382,9 @@ console.log("✅ Total dummy categories count:", list.length);
                     // Some inventories (especially those without pricing) may not have scopeFamily filled,
                     // but they should still show in preview.
                     if (!famLower) return true;
-                    if (!familiesAllLower.has(famLower)) return false;
+                    // If linkedAttributes has no family index at all, do not exclude entries.
+                    // This makes inventory UI work even when linkedAttributes isn't configured.
+                    if (familiesAllLower.size > 0 && !familiesAllLower.has(famLower)) return false;
                     const fam = String(e?.scopeFamily || '');
                     const label = String(e?.scopeLabel || '');
                     const specificKey = `${fam}:${label}:linkedSubcategory`;
@@ -4181,7 +4394,9 @@ console.log("✅ Total dummy categories count:", list.length);
                     if (Array.isArray(linked[specificKey]) && linked[specificKey].length) mapped = String(linked[specificKey][0] || '');
                     else if (Array.isArray(linked[genericLabelKey]) && linked[genericLabelKey].length) mapped = String(linked[genericLabelKey][0] || '');
                     else if (Array.isArray(linked[familyKey]) && linked[familyKey].length) mapped = String(linked[familyKey][0] || '');
-                    if (!mapped) return false;
+                    // If linkedAttributes doesn't define a mapping for this inventory family/label,
+                    // do NOT hide the inventory entry. We'll fall back to scopeFamily-based rendering.
+                    if (!mapped) return true;
                     return mapped === 'ALL' || targetIdsLinkedAttrs.some((tid) => tid && String(mapped) === String(tid));
                   };
                   
@@ -4211,6 +4426,8 @@ console.log("✅ Total dummy categories count:", list.length);
                     // If scopeFamily is missing, include the entry instead of dropping it.
                     // This prevents active inventories without pricing/family metadata from disappearing.
                     if (!famLower) return true;
+                    // If familiesAllLower is empty (no linkedAttributes configured), allow all families.
+                    if (familiesAllLower.size === 0) return true;
                     return familiesAllLower.has(famLower);
                   });
                   
@@ -4261,15 +4478,18 @@ console.log("✅ Total dummy categories count:", list.length);
                   
                   const linkedFamilyForNode = nodeNameToFamily[nodeName] || null;
                   
-                  // If no family mapping exists, show all entries (allows categories without inventory to render)
-                  const filteredEntries = linkedFamilyForNode 
-                    ? entriesAll.filter((entry) => {
-                        const entryScopeFamily = String(entry?.scopeFamily || '').trim().toLowerCase();
-                        // If the entry has no scopeFamily, keep it (can't reliably map it to a family).
-                        if (!entryScopeFamily) return true;
-                        return entryScopeFamily === linkedFamilyForNode;
-                      })
-                    : entriesAll;
+                  // IMPORTANT: Only show the inventory selector on nodes that are actually inventory-backed.
+                  // Otherwise a single inventory entry (e.g., bikes) can leak into unrelated cards (Packages/Commercial Vehicles).
+                  if (!linkedFamilyForNode) {
+                    return null;
+                  }
+
+                  const filteredEntries = entriesAll.filter((entry) => {
+                    const entryScopeFamily = String(entry?.scopeFamily || '').trim().toLowerCase();
+                    // If the entry has no scopeFamily, keep it (can't reliably map it to a family).
+                    if (!entryScopeFamily) return true;
+                    return entryScopeFamily === linkedFamilyForNode;
+                  });
                   
                   const finalEntries = filteredEntries;
                   
@@ -5662,9 +5882,9 @@ console.log("✅ Total dummy categories count:", list.length);
                         return true;
                       }
                     });
-                    const ids = [displayNode?.id, selectedParent?.id, node?.id]
-                      .map((x) => String(x || ''))
-                      .filter(Boolean);
+                    // IMPORTANT: resolve against the currently selected node id only.
+                    // Using multiple ids can accidentally match sibling inventory rows.
+                    const targetNodeId = String((displayNode?.id || selectedChild?.id || selectedParent?.id || node?.id || ''));
                     const rootName = String(categoryTree?.name || '').toLowerCase();
                     const isDriving = rootName === 'driving school';
 
@@ -5674,16 +5894,15 @@ console.log("✅ Total dummy categories count:", list.length);
                         if (invPrice != null) return;
                         const pbr = (entry && entry.pricesByRow && typeof entry.pricesByRow === 'object') ? entry.pricesByRow : null;
                         if (!pbr) return;
-                        ids.forEach((target) => {
-                          if (!target || invPrice != null) return;
+                        if (targetNodeId) {
                           for (const [rk, val] of Object.entries(pbr)) {
                             const parts = String(rk).split('|');
-                            if (parts.some((id) => String(id) === target)) {
+                            if (parts.some((id) => String(id) === targetNodeId)) {
                               const n = Number(val);
                               if (!Number.isNaN(n)) { invPrice = n; break; }
                             }
                           }
-                        });
+                        }
                       });
                       const nodePrice =
                         (displayNode?.vendorPrice ?? displayNode?.price) ??
@@ -5894,9 +6113,9 @@ console.log("✅ Total dummy categories count:", list.length);
                     return true;
                   }
                 });
-                const ids = [displayNode?.id, selectedParent?.id, node?.id]
-                  .map((x) => String(x || ''))
-                  .filter(Boolean);
+                // IMPORTANT: resolve against the currently selected node id only.
+                // Using multiple ids can accidentally match sibling rows and show Enroll Now incorrectly.
+                const targetNodeId = String((displayNode?.id || selectedChild?.id || selectedParent?.id || node?.id || ''));
                 const rootName = String(categoryTree?.name || '').toLowerCase();
                 const isDriving = rootName === 'driving school';
 
@@ -5906,16 +6125,15 @@ console.log("✅ Total dummy categories count:", list.length);
                     if (invPrice != null) return;
                     const pbr = (entry && entry.pricesByRow && typeof entry.pricesByRow === 'object') ? entry.pricesByRow : null;
                     if (!pbr) return;
-                    ids.forEach((target) => {
-                      if (!target || invPrice != null) return;
+                    if (targetNodeId) {
                       for (const [rk, val] of Object.entries(pbr)) {
                         const parts = String(rk).split('|');
-                        if (parts.some((id) => String(id) === target)) {
+                        if (parts.some((id) => String(id) === targetNodeId)) {
                           const num = Number(val);
                           if (!Number.isNaN(num)) { invPrice = num; break; }
                         }
                       }
-                    });
+                    }
                   });
                   const nodePrice =
                     (displayNode?.vendorPrice ?? displayNode?.price) ??
@@ -11607,7 +11825,7 @@ console.log("✅ Total dummy categories count:", list.length);
                                                       it._id || it.at
                                                     );
                                                     const res = await fetch(
-                                                      `${API_BASE_URL}/api/dummy-vendors/${vendorId}/inventory/${categoryId}/${keyId}/images/${i}`,
+                                                      `${API_BASE_URL}/api/dummy-categories/${categoryId}/vendors/${vendorId}/inventory/${keyId}/images/${i}`,
                                                       {
                                                         method: "DELETE",
                                                       }
@@ -11704,7 +11922,7 @@ console.log("✅ Total dummy categories count:", list.length);
                                                 it._id || it.at
                                               );
                                               const res = await fetch(
-                                                `${API_BASE_URL}/api/dummy-vendors/${vendorId}/inventory/${categoryId}/${keyId}/images`,
+                                                `${API_BASE_URL}/api/dummy-categories/${categoryId}/vendors/${vendorId}/inventory/${keyId}/images`,
                                                 {
                                                   method: "POST",
                                                   body: form,
@@ -11885,6 +12103,42 @@ console.log("✅ Total dummy categories count:", list.length);
                           scopeFamily: scope.family,
                           scopeLabel: scope.label,
                         };
+
+                        if (!editingItemKey) {
+                          try {
+                            const flattenTree = (node, rows = [], parentLevels = [], parentIds = []) => {
+                              try {
+                                if (!node) return rows;
+                                const levels = [...parentLevels, node.name ?? "Unnamed"];
+                                const ids = [...parentIds, String(node._id ?? node.id ?? "")].filter(Boolean);
+                                const kids = Array.isArray(node.children) ? node.children : [];
+                                if (kids.length === 0) {
+                                  rows.push({
+                                    id: node._id ?? node.id,
+                                    levels,
+                                    levelIds: ids,
+                                    price: (typeof node.vendorPrice === "number") ? node.vendorPrice : (node.price ?? "-"),
+                                    pricingStatus: node.pricingStatus,
+                                    terms: node.terms,
+                                    node,
+                                  });
+                                } else {
+                                  kids.forEach((child) => flattenTree(child, rows, levels, ids));
+                                }
+                                return rows;
+                              } catch {
+                                return rows;
+                              }
+                            };
+                            const baseRows = flattenTree(categoryTree, []);
+                            const defaults = buildDefaultPricesByRowForInventoryItem(snapshot, baseRows);
+                            if (defaults && typeof defaults === "object" && Object.keys(defaults).length) {
+                              snapshot.pricesByRow = defaults;
+                            }
+                          } catch {
+                            // ignore
+                          }
+                        }
                         let nextItems;
                         if (editingItemKey) {
                           nextItems = (Array.isArray(invItems)
@@ -11892,7 +12146,36 @@ console.log("✅ Total dummy categories count:", list.length);
                             : []
                           ).map((p) =>
                             (p._id || p.at) === editingItemKey
-                              ? { ...snapshot, _id: p._id }
+                              ? (() => {
+                                  const flattenTree = (node, rows = [], parentLevels = [], parentIds = []) => {
+                                    try {
+                                      if (!node) return rows;
+                                      const levels = [...parentLevels, node.name ?? "Unnamed"];
+                                      const ids = [...parentIds, String(node._id ?? node.id ?? "")].filter(Boolean);
+                                      const kids = Array.isArray(node.children) ? node.children : [];
+                                      if (kids.length === 0) {
+                                        rows.push({
+                                          id: node._id ?? node.id,
+                                          levels,
+                                          levelIds: ids,
+                                          price: (typeof node.vendorPrice === "number") ? node.vendorPrice : (node.price ?? "-"),
+                                          pricingStatus: node.pricingStatus,
+                                          terms: node.terms,
+                                          node,
+                                        });
+                                      } else {
+                                        kids.forEach((child) => flattenTree(child, rows, levels, ids));
+                                      }
+                                      return rows;
+                                    } catch {
+                                      return rows;
+                                    }
+                                  };
+                                  const baseRows = flattenTree(categoryTree, []);
+                                  const defaults = buildDefaultPricesByRowForInventoryItem(snapshot, baseRows);
+                                  const { merged } = mergeMissingPricesByRow(p?.pricesByRow, defaults);
+                                  return { ...snapshot, _id: p._id, pricesByRow: merged };
+                                })()
                               : p
                           );
                         } else {

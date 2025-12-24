@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useParams } from "react-router-dom";
 import axios from "axios";
 import API_BASE_URL, { PREVIEW_BASE_URL, NIKS_PREVIEW_BASE_URL } from "../config";
@@ -186,6 +186,22 @@ export default function DummyVendorCategoriesDetailPage() {
   const [termsSelectionsByNode, setTermsSelectionsByNode] = useState({}); // { [categoryId]: number[] }
   const [comboTermsSelectionsByText, setComboTermsSelectionsByText] = useState({}); // { [normalizedTermsText]: number[] }
 
+  const pricesBackfillDoneRef = useRef({});
+
+  useEffect(() => {
+    try {
+      setVendor(null);
+      setInvItems([]);
+      setActiveInvScope(null);
+      setShowLinkedModal(false);
+      setDraftSelections({});
+      setRowPriceEdit(null);
+      setEditingItemKey(null);
+    } catch {
+      // ignore
+    }
+  }, [vendorId, categoryId]);
+
   const fetchTree = async () => {
     try {
       setLoading(true);
@@ -225,12 +241,55 @@ export default function DummyVendorCategoriesDetailPage() {
       }
 
       // Normal path: load vendor's dummy category tree
-      const url = `${API_BASE_URL}/api/dummy-vendors/${vendorId}/categories`;
-      const res = await axios.get(url);
-      let categories = res.data.categories;
-      if (!categories) setTree([]);
-      else if (Array.isArray(categories)) setTree(categories);
-      else setTree([{ ...categories, children: categories.children || [] }]);
+      if (categoryId) {
+        const url = `${API_BASE_URL}/api/dummy-vendors/${vendorId}/categories/${categoryId}/inventory`;
+        const res = await axios.get(url);
+        const data = res.data || {};
+        const categories = data.categories;
+        const v = data.vendor || {};
+        const c = data.category || {};
+        const items = Array.isArray(data.items) ? data.items : [];
+
+        if (!categories) setTree([]);
+        else if (Array.isArray(categories)) setTree(categories);
+        else setTree([{ ...categories, children: categories.children || [] }]);
+
+        try {
+          // try to hydrate location details if endpoint exists; ignore failures
+          const lr = await axios.get(`${API_BASE_URL}/api/dummy-vendors/${vendorId}/location`);
+          v.location = lr.data?.location || v.location || {};
+          v.location.nearbyLocations = v.location.nearbyLocations || [];
+        } catch {}
+
+        setVendor(v);
+        setInvItems(items);
+        try {
+          setTermsSelectionsByNode(v?.termsSelectionsByNode && typeof v.termsSelectionsByNode === 'object' ? v.termsSelectionsByNode : {});
+          setComboTermsSelectionsByText(v?.comboTermsSelectionsByText && typeof v.comboTermsSelectionsByText === 'object' ? v.comboTermsSelectionsByText : {});
+        } catch {}
+
+        setInventoryLabelName(c.inventoryLabelName || "");
+        setLinkedAttributes(c.linkedAttributes || {});
+        const rawModels = Array.isArray(c.categoryModel)
+          ? c.categoryModel
+          : c.categoryModel
+          ? [c.categoryModel]
+          : [];
+        const hasInv = rawModels
+          .map((m) => (m == null ? "" : String(m)))
+          .map((s) => s.trim().toLowerCase())
+          .includes("inventory");
+        setIsInventoryModelCategory(hasInv);
+        setAttributesHeading(typeof c.attributesHeading === "string" ? c.attributesHeading : "");
+        setEnquiryStatusConfig(Array.isArray(c.enquiryStatusConfig) ? c.enquiryStatusConfig : []);
+      } else {
+        const url = `${API_BASE_URL}/api/dummy-vendors/${vendorId}/categories`;
+        const res = await axios.get(url);
+        let categories = res.data.categories;
+        if (!categories) setTree([]);
+        else if (Array.isArray(categories)) setTree(categories);
+        else setTree([{ ...categories, children: categories.children || [] }]);
+      }
     } catch (err) {
       // Fallback to minimal view using categoryId if available
       try {
@@ -317,69 +376,6 @@ export default function DummyVendorCategoriesDetailPage() {
     })();
   }, [categoryId]);
 
-  // Fetch dummy vendor for preview params (nearbyLocations, etc.)
-  useEffect(() => {
-    (async () => {
-      if (!vendorId) { setVendor(null); return; }
-      try {
-        const res = await axios.get(`${API_BASE_URL}/api/dummy-vendors/${vendorId}`);
-        const v = res.data || {};
-        try {
-          // try to hydrate location details if endpoint exists; ignore failures
-          const lr = await axios.get(`${API_BASE_URL}/api/dummy-vendors/${vendorId}/location`);
-          v.location = lr.data?.location || v.location || {};
-          v.location.nearbyLocations = v.location.nearbyLocations || [];
-        } catch {}
-        setVendor(v);
-        try {
-          setTermsSelectionsByNode(v?.termsSelectionsByNode && typeof v.termsSelectionsByNode === 'object' ? v.termsSelectionsByNode : {});
-          setComboTermsSelectionsByText(v?.comboTermsSelectionsByText && typeof v.comboTermsSelectionsByText === 'object' ? v.comboTermsSelectionsByText : {});
-        } catch {}
-      } catch {
-        setVendor(null);
-      }
-    })();
-  }, [vendorId]);
-
-  // Fetch dummy category meta for showing inventory label buttons and attributes heading
-  useEffect(() => {
-    (async () => {
-      try {
-        if (!categoryId) {
-          setInventoryLabelName("");
-          setLinkedAttributes({});
-          setIsInventoryModelCategory(false);
-          setAttributesHeading("");
-          return;
-        }
-        const res = await axios.get(`${API_BASE_URL}/api/dummy-categories/${categoryId}`);
-        const c = res.data || {};
-        setInventoryLabelName(c.inventoryLabelName || "");
-        setLinkedAttributes(c.linkedAttributes || {});
-        const rawModels = Array.isArray(c.categoryModel)
-          ? c.categoryModel
-          : c.categoryModel
-          ? [c.categoryModel]
-          : [];
-        const hasInv = rawModels
-          .map((m) => (m == null ? "" : String(m)))
-          .map((s) => s.trim().toLowerCase())
-          .includes("inventory");
-        setIsInventoryModelCategory(hasInv);
-        setAttributesHeading(
-          typeof c.attributesHeading === "string" ? c.attributesHeading : ""
-        );
-        setEnquiryStatusConfig(Array.isArray(c.enquiryStatusConfig) ? c.enquiryStatusConfig : []);
-      } catch {
-        setInventoryLabelName("");
-        setLinkedAttributes({});
-        setIsInventoryModelCategory(false);
-        setAttributesHeading("");
-        setEnquiryStatusConfig([]);
-      }
-    })();
-  }, [categoryId]);
-
   // Fetch masters and vendor selections for dummy vendor
   useEffect(() => {
     (async () => {
@@ -390,24 +386,11 @@ export default function DummyVendorCategoriesDetailPage() {
     })();
   }, []);
 
-  useEffect(() => {
-    (async () => {
-      try {
-        if (!vendorId) return;
-        const topCatId = (vendor && (vendor.categoryId || vendor.category?._id)) || categoryId;
-        if (!topCatId) return;
-        const items = await loadDummyInventorySelections(vendorId, topCatId);
-        setInvItems(items);
-      } catch { setInvItems([]); }
-    })();
-  }, [vendorId, categoryId, vendor]);
-
   // Helper: try multiple endpoints to load selections
   const loadDummyInventorySelections = async (vid, cid) => {
     try {
-      const res = await axios.get(`${API_BASE_URL}/api/dummy-vendors/${vid}`);
-      const map = (res.data && typeof res.data.inventorySelections === 'object') ? res.data.inventorySelections : {};
-      const items = Array.isArray(map?.[cid]) ? map[cid] : [];
+      const res = await axios.get(`${API_BASE_URL}/api/dummy-categories/${cid}/vendors/${vid}/inventory-selections`);
+      const items = Array.isArray(res.data?.items) ? res.data.items : [];
       return items;
     } catch {
       return [];
@@ -416,8 +399,8 @@ export default function DummyVendorCategoriesDetailPage() {
 
   // Helper: try multiple endpoints to save selections
   const saveDummyInventorySelections = async (vid, cid, items) => {
-    const url = `${API_BASE_URL}/api/dummy-vendors/${vid}`;
-    const payload = { inventorySelections: { [cid]: items } };
+    const url = `${API_BASE_URL}/api/dummy-categories/${cid}/vendors/${vid}/inventory-selections`;
+    const payload = { items };
     await axios.put(url, payload, {
       headers: {
         "Content-Type": "application/json",
@@ -680,6 +663,57 @@ export default function DummyVendorCategoriesDetailPage() {
     return out;
   }, [rows, rowMatches]);
 
+  const buildDefaultPricesByRowForInventoryItem = (item) => {
+    try {
+      if (!item || !item.scopeFamily || !item.scopeLabel) return {};
+      const fam = String(item.scopeFamily);
+      const label = String(item.scopeLabel);
+      const keySpecific = `${fam}:${label}:linkedSubcategory`;
+      const keyGeneric = `${fam}:inventoryLabels:linkedSubcategory`;
+      const la = linkedAttributes || {};
+      const linked = (() => {
+        if (Array.isArray(la[keySpecific]) && la[keySpecific].length) return la[keySpecific];
+        if (Array.isArray(la[keyGeneric]) && la[keyGeneric].length) return la[keyGeneric];
+        return ["ALL"]; // default behaviour matches ensureLinkedSubcategoryForScope
+      })();
+      const val = Array.isArray(linked) && linked.length ? String(linked[0]) : "ALL";
+      const out = {};
+      (Array.isArray(rows) ? rows : []).forEach((r) => {
+        const lvlIds = Array.isArray(r.levelIds) ? r.levelIds.map((x) => String(x)) : [];
+        const firstIdx = (lvlIds[0] === 'root') ? 2 : 1;
+        const firstSubcatId = lvlIds.length > firstIdx ? String(lvlIds[firstIdx]) : null;
+        const matchesRow = (val === 'ALL') ? true : (firstSubcatId ? String(firstSubcatId) === val : false);
+        if (!matchesRow) return;
+        const rowKey = lvlIds.length ? lvlIds.join('|') : String(r.id);
+        const raw = r && r.price != null ? r.price : null;
+        const num = (raw === '' || raw === '-' || raw == null) ? null : Number(raw);
+        if (num == null || Number.isNaN(num)) return;
+        out[rowKey] = num;
+      });
+      return out;
+    } catch {
+      return {};
+    }
+  };
+
+  const mergeMissingPricesByRow = (existingPricesByRow, defaults) => {
+    try {
+      const cur = (existingPricesByRow && typeof existingPricesByRow === 'object') ? { ...existingPricesByRow } : {};
+      const def = (defaults && typeof defaults === 'object') ? defaults : {};
+      let changed = false;
+      Object.entries(def).forEach(([k, v]) => {
+        // Only fill when key is truly missing; do NOT override explicit null/number.
+        if (cur[k] === undefined) {
+          cur[k] = v;
+          changed = true;
+        }
+      });
+      return { merged: cur, changed };
+    } catch {
+      return { merged: existingPricesByRow, changed: false };
+    }
+  };
+
   const packageRows = useMemo(() => {
     try {
       const rows = [];
@@ -764,7 +798,43 @@ export default function DummyVendorCategoriesDetailPage() {
     }
   };
 
-  const previewCategoryId = (vendor && (vendor.categoryId || vendor.category?._id)) || categoryId || (rows[0]?.categoryId);
+  const previewCategoryId = categoryId || (vendor && (vendor.categoryId || vendor.category?._id)) || (rows[0]?.categoryId);
+
+  // Backfill missing pricesByRow defaults for existing inventory items (runs once per vendor+category)
+  useEffect(() => {
+    (async () => {
+      try {
+        if (!vendorId || vendorId === 'local') return;
+        if (!previewCategoryId) return;
+        if (!Array.isArray(invItems) || invItems.length === 0) return;
+        if (!Array.isArray(rows) || rows.length === 0) return;
+        const refKey = `${String(vendorId)}|${String(previewCategoryId)}`;
+        if (pricesBackfillDoneRef.current[refKey]) return;
+
+        let anyChanged = false;
+        const next = invItems.map((it) => {
+          const defaults = buildDefaultPricesByRowForInventoryItem(it);
+          const { merged, changed } = mergeMissingPricesByRow(it?.pricesByRow, defaults);
+          if (changed) {
+            anyChanged = true;
+            return { ...it, pricesByRow: merged };
+          }
+          return it;
+        });
+
+        if (!anyChanged) {
+          pricesBackfillDoneRef.current[refKey] = true;
+          return;
+        }
+
+        setInvItems(next);
+        await saveDummyInventorySelections(vendorId, previewCategoryId, next);
+        pricesBackfillDoneRef.current[refKey] = true;
+      } catch {
+        // ignore
+      }
+    })();
+  }, [vendorId, previewCategoryId, invItems, rows, linkedAttributes]);
 
   const loadLogs = async ({ entityType, entityId, label, rowKey }) => {
     try {
@@ -787,7 +857,7 @@ export default function DummyVendorCategoriesDetailPage() {
   return (
     <div>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
-        <h1 style={{ margin: 0 }}>Dummy Vendor Categories</h1>
+        <h1 style={{ margin: 0 }}> Vendor Categories</h1>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
           {(() => {
             try {
@@ -1183,7 +1253,10 @@ export default function DummyVendorCategoriesDetailPage() {
                       try {
                         const rowKey = Array.isArray(row.levelIds) && row.levelIds.length ? row.levelIds.map(String).join('|') : String(row.id);
                         const pbr = match && match.pricesByRow && typeof match.pricesByRow === 'object' ? match.pricesByRow : null;
-                        const rowPrice = pbr && (pbr[rowKey] !== undefined && pbr[rowKey] !== null) ? pbr[rowKey] : (match.price ?? null);
+                        const basePrice = (row && row.price !== undefined && row.price !== null && row.price !== '') ? row.price : null;
+                        const rowPrice = pbr && (pbr[rowKey] !== undefined && pbr[rowKey] !== null)
+                          ? pbr[rowKey]
+                          : (match.price ?? basePrice);
                         return <span>{rowPrice === undefined || rowPrice === null || rowPrice === '-' ? '-' : rowPrice}</span>;
                       } catch { return <span>-</span>; }
                     })()
@@ -1346,7 +1419,8 @@ export default function DummyVendorCategoriesDetailPage() {
                       onClick={() => {
                         const rowKey = Array.isArray(row.levelIds) && row.levelIds.length ? row.levelIds.map(String).join('|') : String(row.id);
                         const pbr = match && match.pricesByRow && typeof match.pricesByRow === 'object' ? match.pricesByRow : null;
-                        const rowPrice = pbr && (pbr[rowKey] !== undefined) ? pbr[rowKey] : (match.price ?? '');
+                        const basePrice = (row && row.price !== undefined && row.price !== null && row.price !== '-') ? row.price : '';
+                        const rowPrice = pbr && (pbr[rowKey] !== undefined) ? pbr[rowKey] : (match.price ?? basePrice);
                         setRowPriceEdit({ key: match._id || match.at, rowKey, price: rowPrice, labels: { category: row.levels.slice(-1)[0], attrs: match.selections || {} } })
                       }}
                       style={{ padding: '4px 8px', borderRadius: 4, background: '#0ea5e9', color: '#fff', border: 'none' }}
@@ -1586,7 +1660,7 @@ export default function DummyVendorCategoriesDetailPage() {
                                                   const file = (e.target.files || [])[0]; if (!file) return;
                                                   const form = new FormData(); form.append('image', file);
                                                   const key = String(it._id || it.at);
-                                                  const res = await axios.put(`${API_BASE_URL}/api/dummy-vendors/${vendorId}/inventory/${previewCategoryId}/${key}/images/${i}`, form, { headers: { 'Content-Type': 'multipart/form-data' } });
+                                                  const res = await axios.put(`${API_BASE_URL}/api/dummy-categories/${previewCategoryId}/vendors/${vendorId}/inventory/${key}/images/${i}`, form, { headers: { 'Content-Type': 'multipart/form-data' } });
                                                   const imgs = res.data?.images || [];
                                                   setInvItems((prev) => prev.map((p) => ((String(p._id || p.at) === key) ? { ...p, images: imgs } : p)));
                                                 } catch {}
@@ -1596,7 +1670,7 @@ export default function DummyVendorCategoriesDetailPage() {
                                             <button title="Delete" onClick={async () => {
                                               try {
                                                 const key = String(it._id || it.at);
-                                                const res = await axios.delete(`${API_BASE_URL}/api/dummy-vendors/${vendorId}/inventory/${previewCategoryId}/${key}/images/${i}`);
+                                                const res = await axios.delete(`${API_BASE_URL}/api/dummy-categories/${previewCategoryId}/vendors/${vendorId}/inventory/${key}/images/${i}`);
                                                 const imgs = res.data?.images || [];
                                                 setInvItems((prev) => prev.map((p) => ((String(p._id || p.at) === key) ? { ...p, images: imgs } : p)));
                                               } catch {}
@@ -1617,7 +1691,7 @@ export default function DummyVendorCategoriesDetailPage() {
                                         const form = new FormData();
                                         files.forEach((f) => form.append('images', f));
                                         const key = String(it._id || it.at);
-                                        const res = await axios.post(`${API_BASE_URL}/api/dummy-vendors/${vendorId}/inventory/${previewCategoryId}/${key}/images`, form, { headers: { 'Content-Type': 'multipart/form-data' } });
+                                        const res = await axios.post(`${API_BASE_URL}/api/dummy-categories/${previewCategoryId}/vendors/${vendorId}/inventory/${key}/images`, form, { headers: { 'Content-Type': 'multipart/form-data' } });
                                         const imgs = res.data?.images || [];
                                         setInvItems((prev) => prev.map((p) => ((String(p._id || p.at) === key) ? { ...p, images: imgs } : p)));
                                       } catch {}
@@ -1709,9 +1783,20 @@ export default function DummyVendorCategoriesDetailPage() {
                     scopeFamily: scope.family,
                     scopeLabel: scope.label,
                   };
+                  if (!editingItemKey) {
+                    const defaults = buildDefaultPricesByRowForInventoryItem(snapshot);
+                    if (defaults && typeof defaults === 'object' && Object.keys(defaults).length) {
+                      snapshot.pricesByRow = defaults;
+                    }
+                  }
                   let nextItems;
                   if (editingItemKey) {
-                    nextItems = (Array.isArray(invItems) ? invItems : []).map((p) => ((p._id || p.at) === editingItemKey ? { ...snapshot, _id: p._id } : p));
+                    nextItems = (Array.isArray(invItems) ? invItems : []).map((p) => {
+                      if ((p._id || p.at) !== editingItemKey) return p;
+                      const defaults = buildDefaultPricesByRowForInventoryItem(snapshot);
+                      const { merged } = mergeMissingPricesByRow(p?.pricesByRow, defaults);
+                      return { ...snapshot, _id: p._id, pricesByRow: merged };
+                    });
                   } else {
                     nextItems = [...(Array.isArray(invItems) ? invItems : []), snapshot];
                   }
@@ -1740,6 +1825,10 @@ export default function DummyVendorCategoriesDetailPage() {
                     scopeLabel: label,
                     selections: { [fam]: sel },
                   };
+                  const defaults = buildDefaultPricesByRowForInventoryItem(item);
+                  if (defaults && typeof defaults === 'object' && Object.keys(defaults).length) {
+                    item.pricesByRow = defaults;
+                  }
                   const next = [...(Array.isArray(invItems) ? invItems : []), item];
                   setInvItems(next);
                   await saveDummyInventorySelections(vendorId, previewCategoryId, next);

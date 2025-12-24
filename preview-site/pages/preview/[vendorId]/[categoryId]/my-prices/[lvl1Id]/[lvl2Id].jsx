@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/router";
 import API_BASE_URL from "../../../../../../config";
 
@@ -67,6 +67,62 @@ export default function MyIndividualServicesDetailPage() {
   const [vendor, setVendor] = useState(null);
   const [rowPriceEdit, setRowPriceEdit] = useState(null); // { entryId, rowKey, price, labels }
   const [sessionExpired, setSessionExpired] = useState(false);
+
+  const pricesBackfillDoneRef = useRef({});
+
+  const saveDummyInventorySelections = async (vid, cid, items) => {
+    const payload = { items };
+    await fetch(`${API_BASE_URL}/api/dummy-categories/${cid}/vendors/${vid}/inventory-selections`, {
+      method: "PUT",
+      headers: {
+        "Content-Type": "application/json",
+        "x-actor-role": "vendor",
+        "x-vendor-id": vid,
+        "x-root-category-id": cid,
+      },
+      body: JSON.stringify(payload),
+    });
+    return true;
+  };
+
+  const buildDefaultPricesByRowForInventoryItem = (baseRows) => {
+    try {
+      const rows = Array.isArray(baseRows) ? baseRows : [];
+      const defaults = {};
+      rows.forEach((r) => {
+        const ids = Array.isArray(r?.levelIds) ? r.levelIds : [];
+        const rowKey = ids.length ? ids.map(String).join("|") : "";
+        if (!rowKey) return;
+        const p = r?.price;
+        if (p === undefined || p === null || p === "") return;
+        if (p === "-") return;
+        defaults[rowKey] = p;
+      });
+      return defaults;
+    } catch {
+      return {};
+    }
+  };
+
+  const mergeMissingPricesByRow = (existingPricesByRow, defaults) => {
+    try {
+      const base =
+        existingPricesByRow && typeof existingPricesByRow === "object"
+          ? { ...existingPricesByRow }
+          : {};
+      const def = defaults && typeof defaults === "object" ? defaults : {};
+      let changed = false;
+      Object.keys(def).forEach((k) => {
+        if (base[k] === undefined || base[k] === null || base[k] === "") {
+          base[k] = def[k];
+          changed = true;
+        }
+      });
+      return { merged: base, changed };
+    } catch {
+      return { merged: existingPricesByRow, changed: false };
+    }
+  };
 
   useEffect(() => {
     if (!vendorId) return;
@@ -147,17 +203,54 @@ export default function MyIndividualServicesDetailPage() {
         if (!res.ok) throw new Error("Failed to load vendor inventory");
         const json = await res.json().catch(() => ({}));
         setVendor(json && typeof json === "object" ? json : null);
-        const map =
-          json && typeof json.inventorySelections === "object"
-            ? json.inventorySelections
-            : {};
-        const items = Array.isArray(map?.[categoryId]) ? map[categoryId] : [];
+
+        const invRes = await fetch(
+          `${API_BASE_URL}/api/dummy-categories/${categoryId}/vendors/${vendorId}/inventory-selections`,
+          { cache: "no-store" }
+        );
+        if (!invRes.ok) {
+          setInvItems([]);
+          return;
+        }
+        const invJson = await invRes.json().catch(() => ({}));
+        const items = Array.isArray(invJson?.items) ? invJson.items : [];
         setInvItems(items);
       } catch {
         setInvItems([]);
       }
     })();
   }, [vendorId, categoryId]);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        if (!vendorId || !categoryId) return;
+        if (!rows || rows.length === 0) return;
+
+        const guardKey = `${vendorId}|${categoryId}`;
+        if (pricesBackfillDoneRef.current[guardKey]) return;
+
+        const defaults = buildDefaultPricesByRowForInventoryItem(rows);
+        let anyChanged = false;
+        const nextItems = (Array.isArray(invItems) ? invItems : []).map((it) => {
+          const { merged, changed } = mergeMissingPricesByRow(it?.pricesByRow, defaults);
+          if (changed) {
+            anyChanged = true;
+            return { ...it, pricesByRow: merged };
+          }
+          return it;
+        });
+
+        pricesBackfillDoneRef.current[guardKey] = true;
+
+        if (!anyChanged) return;
+        setInvItems(nextItems);
+        await saveDummyInventorySelections(vendorId, categoryId, nextItems);
+      } catch {
+        // ignore
+      }
+    })();
+  }, [vendorId, categoryId, rows, invItems]);
 
   const rowMatches = useMemo(() => {
     try {
@@ -448,6 +541,7 @@ export default function MyIndividualServicesDetailPage() {
             : {};
         const nextNodeMap = { ...existingNodeMap, [nodeId]: safe };
 
+        await saveDummyInventorySelections(vendorId, categoryId, items);
         await fetch(`${API_BASE_URL}/api/dummy-vendors/${vendorId}`, {
           method: "PUT",
           headers: {
@@ -456,10 +550,7 @@ export default function MyIndividualServicesDetailPage() {
             "x-vendor-id": vendorId,
             "x-root-category-id": categoryId,
           },
-          body: JSON.stringify({
-            inventorySelections: { [categoryId]: items },
-            nodePricingStatus: nextNodeMap,
-          }),
+          body: JSON.stringify({ nodePricingStatus: nextNodeMap }),
         });
         setInvItems(items);
         setVendor((prev) => ({ ...(prev || {}), nodePricingStatus: nextNodeMap }));
@@ -519,16 +610,7 @@ export default function MyIndividualServicesDetailPage() {
             return { ...it, pricesByRow: currentMap };
           })
         : [];
-      await fetch(`${API_BASE_URL}/api/dummy-vendors/${vendorId}`, {
-        method: "PUT",
-        headers: {
-          "Content-Type": "application/json",
-          "x-actor-role": "vendor",
-          "x-vendor-id": vendorId,
-          "x-root-category-id": categoryId,
-        },
-        body: JSON.stringify({ inventorySelections: { [categoryId]: items } }),
-      });
+      await saveDummyInventorySelections(vendorId, categoryId, items);
       setInvItems(items);
       setRowPriceEdit(null);
     } catch (e) {

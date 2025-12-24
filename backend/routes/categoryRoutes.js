@@ -1,6 +1,7 @@
 const express = require("express");
 const multer = require("multer");
 const Category = require("../models/Category");
+const Vendor = require("../models/Vendor");
 const { uploadBufferToS3, uploadBufferToS3WithLabel, deleteS3ObjectByUrl } = require("../utils/s3Upload");
 const { v4: uuidv4 } = require("uuid");
 const router = express.Router();
@@ -10,7 +11,6 @@ const uploadFields = upload.fields([
   { name: "image", maxCount: 1 },
   { name: "icon", maxCount: 1 },
 ]);
-
 
 // Helper: log duration
 function logApi(req, res, label) {
@@ -31,7 +31,55 @@ const updateFreeTextRecursive = async (categoryId, enabled) => {
   }
 };
 
-/* ---------------- CREATE CATEGORY ---------------- */
+async function getCategoryPathSegments(categoryId) {
+  if (!categoryId) return [];
+  try {
+    let cur = await Category.findById(categoryId, "name parent").lean();
+    const stack = [];
+    while (cur) {
+      stack.unshift(cur.name);
+      if (!cur.parent) break;
+      cur = await Category.findById(cur.parent, "name parent").lean();
+    }
+    return stack;
+  } catch {
+    return [];
+  }
+}
+
+async function getTopCategoryNameById(categoryId) {
+  try {
+    const cat = await Category.findById(categoryId, "name").lean();
+    return cat?.name || null;
+  } catch {
+    return null;
+  }
+}
+
+function getVendorDisplayName(vendor) {
+  return vendor?.name || vendor?.contactName || vendor?.businessName || "Vendor";
+}
+
+async function buildVendorPrefixedSegments(vendor, categoryIdOrSegments, kind) {
+  const vendorName = getVendorDisplayName(vendor);
+  let topCategoryName = null;
+  if (vendor?.categoryId) {
+    topCategoryName = await getTopCategoryNameById(vendor.categoryId);
+  }
+  if (!topCategoryName && typeof categoryIdOrSegments === "string") {
+    topCategoryName = await getTopCategoryNameById(categoryIdOrSegments);
+  }
+  const prefix = topCategoryName ? `${vendorName} - ${topCategoryName}` : vendorName;
+  let segs = Array.isArray(categoryIdOrSegments) ? categoryIdOrSegments : [];
+  if (!Array.isArray(categoryIdOrSegments) && typeof categoryIdOrSegments !== "string") {
+    segs = [];
+  }
+  if (kind === "profile pictures") {
+    return [prefix, "profile pictures"];
+  }
+  return [prefix, "images", ...segs];
+}
+
 /* ---------------- CREATE CATEGORY ---------------- */
 router.post("/", upload.single("image"), async (req, res) => {
   logApi(req, res, "create-category");
@@ -46,18 +94,18 @@ router.post("/", upload.single("image"), async (req, res) => {
       freeText,
       seoKeywords,
       categoryType,
-      addToCart
+      addToCart,
     } = req.body;
 
     if (!name || !name.trim()) {
       return res.status(400).json({ message: "Name is required" });
     }
 
-    // ✅ Handle parent correctly (supports parentId or parent)
+    // Handle parent correctly (supports parentId or parent)
     const parentRaw = (typeof parentId !== 'undefined' ? parentId : req.body.parent);
     const parent = parentRaw && parentRaw !== "" && parentRaw !== "null" ? parentRaw : null;
 
-    // ✅ Prevent duplicate under same parent
+    // Handle duplicate under same parent
     const exists = await Category.findOne({ name, parent });
     if (exists) {
       return res.status(400).json({ message: "Category already exists under this parent" });
@@ -81,6 +129,7 @@ router.post("/", upload.single("image"), async (req, res) => {
       postRequestsDeals: req.body.postRequestsDeals === "true",
       inventoryLabelName: req.body.inventoryLabelName || "",
     };
+
     // Upload image to S3 if provided
     if (req.file && req.file.buffer && req.file.mimetype) {
       try {
@@ -376,7 +425,9 @@ router.put("/:id", uploadFields, async (req, res) => {
           walker = await Category.findById(walker.parent, "name parent").lean();
         }
         segs.push(...stack);
-        const { url } = await uploadBufferToS3WithLabel(imageFile.buffer, imageFile.mimetype, "category", uuidv4(), { segments: segs });
+        const { url } = await uploadBufferToS3WithLabel(imageFile.buffer, imageFile.mimetype, "category", uuidv4(), {
+          segments: segs,
+        });
         category.imageUrl = url;
       } catch (e) {
         return res.status(500).json({ message: "Failed to upload image to S3", error: e.message });
@@ -394,7 +445,9 @@ router.put("/:id", uploadFields, async (req, res) => {
           walker = await Category.findById(walker.parent, "name parent").lean();
         }
         segs.push(...stack);
-        const { url } = await uploadBufferToS3WithLabel(iconFile.buffer, iconFile.mimetype, "category", uuidv4(), { segments: segs });
+        const { url } = await uploadBufferToS3WithLabel(iconFile.buffer, iconFile.mimetype, "category", uuidv4(), {
+          segments: segs,
+        });
         category.iconUrl = url;
       } catch (e) {
         return res.status(500).json({ message: "Failed to upload icon to S3", error: e.message });
@@ -433,11 +486,10 @@ router.put("/:id", uploadFields, async (req, res) => {
     await category.save();
     res.json(category);
   } catch (err) {
-    console.error("🔥 PUT /api/categories/:id error:", err.message);
+    console.error("PUT /api/categories/:id error:", err.message);
     res.status(500).json({ message: err.message || "Server error" });
   }
 });
-
 
 /* ---------------- DELETE CATEGORY ---------------- */
 router.delete("/:id", async (req, res) => {
@@ -468,9 +520,7 @@ router.get("/:id", async (req, res) => {
   }
 });
 
-
-
-// GET all color schemes from parent categories only
+/* ---------------- GET all color schemes from parent categories only ---------------- */
 router.get("/colors/parents", async (req, res) => {
   logApi(req, res, "get-parent-colors");
   try {
@@ -486,5 +536,216 @@ router.get("/colors/parents", async (req, res) => {
   }
 });
 
+router.get("/:categoryId/vendors/:vendorId/inventory-selections", async (req, res) => {
+  logApi(req, res, "get-inventory-selections");
+  try {
+    const { vendorId, categoryId } = req.params;
+    const vendor = await Vendor.findById(vendorId);
+    if (!vendor) return res.status(404).json({ message: "Vendor not found" });
+    const list = Array.isArray(vendor.inventorySelections?.[String(categoryId)])
+      ? vendor.inventorySelections[String(categoryId)]
+      : [];
+    res.json({ success: true, items: list });
+  } catch (err) {
+    console.error("GET /categories/:categoryId/vendors/:vendorId/inventory-selections error:", err);
+    res.status(500).json({ message: "Server error", error: err.message });
+  }
+});
+
+router.put("/:categoryId/vendors/:vendorId/inventory-selections", async (req, res) => {
+  logApi(req, res, "put-inventory-selections");
+  try {
+    const { vendorId, categoryId } = req.params;
+    const { items } = req.body;
+    if (!vendorId || !categoryId || !Array.isArray(items)) {
+      return res.status(400).json({ message: "vendorId, categoryId and items[] are required" });
+    }
+    const vendor = await Vendor.findById(vendorId);
+    if (!vendor) return res.status(404).json({ message: "Vendor not found" });
+
+    if (!vendor.inventorySelections || typeof vendor.inventorySelections !== "object") vendor.inventorySelections = {};
+    const existingList = Array.isArray(vendor.inventorySelections[String(categoryId)]) ? vendor.inventorySelections[String(categoryId)] : [];
+    const findExisting = (candidate) => {
+      try {
+        const key = String(candidate?._id || candidate?.at || "");
+        if (!key) return null;
+        return existingList.find((e) => String(e?._id || e?.at) === key) || null;
+      } catch {
+        return null;
+      }
+    };
+    vendor.inventorySelections[String(categoryId)] = items.map((it, idx) => {
+      const baseAt = Number(it.at) || Date.now();
+      const safeAt = baseAt + idx;
+      const pbrIn = it.pricesByRow && typeof it.pricesByRow === "object" ? it.pricesByRow : null;
+      const pricesByRow = pbrIn
+        ? Object.fromEntries(
+            Object.entries(pbrIn).map(([k, v]) => [String(k), v === null || v === "" || v === undefined ? null : Number(v)])
+          )
+        : undefined;
+      const prev = findExisting(it);
+      const preservedImages = Array.isArray(prev?.images) ? prev.images : [];
+      const providedImages = Array.isArray(it.images) ? it.images.slice(0, 5) : null;
+      return {
+        at: safeAt,
+        categoryId: String(categoryId),
+        selections: it.selections && typeof it.selections === "object" ? it.selections : {},
+        scopeFamily: typeof it.scopeFamily === "string" ? it.scopeFamily : it.scopeFamily == null ? null : String(it.scopeFamily),
+        scopeLabel: typeof it.scopeLabel === "string" ? it.scopeLabel : it.scopeLabel == null ? null : String(it.scopeLabel),
+        price: it.price === null || it.price === undefined || it.price === "" ? null : Number(it.price),
+        ...(pricesByRow ? { pricesByRow } : {}),
+        ...(providedImages ? { images: providedImages } : preservedImages.length ? { images: preservedImages } : {}),
+        pricingStatusByRow:
+          it.pricingStatusByRow && typeof it.pricingStatusByRow === "object" ? it.pricingStatusByRow : prev?.pricingStatusByRow,
+      };
+    });
+    vendor.markModified("inventorySelections");
+    await vendor.save();
+    res.json({ success: true, inventorySelections: vendor.inventorySelections[String(categoryId)] });
+  } catch (err) {
+    console.error("PUT /categories/:categoryId/vendors/:vendorId/inventory-selections error:", err);
+    res.status(500).json({ message: "Server error", error: err.message });
+  }
+});
+
+router.post(
+  "/:categoryId/vendors/:vendorId/inventory/:entryKey/images",
+  upload.array("images", 5),
+  async (req, res) => {
+    logApi(req, res, "post-inventory-images");
+    try {
+      const { vendorId, categoryId, entryKey } = req.params;
+      const vendor = await Vendor.findById(vendorId);
+      if (!vendor) return res.status(404).json({ message: "Vendor not found" });
+      const list = Array.isArray(vendor.inventorySelections?.[categoryId]) ? vendor.inventorySelections[categoryId] : [];
+      const idx = list.findIndex((it) => String(it._id || it.at) === String(entryKey));
+      if (idx < 0) return res.status(404).json({ message: "Inventory entry not found" });
+      const files = Array.isArray(req.files) ? req.files : [];
+      const urls = [];
+      for (const f of files) {
+        if (f && f.buffer && f.mimetype) {
+          try {
+            const segs = await getCategoryPathSegments(categoryId);
+            const extra = [];
+            for (let i = 1; i <= 5; i++) {
+              if (req.body?.[`level${i}`]) extra.push(String(req.body[`level${i}`]));
+            }
+            let merged = segs;
+            if (extra.length) merged = [...segs, ...extra];
+            const finalSegs = await buildVendorPrefixedSegments(vendor, segs, "images");
+            const { url } = await uploadBufferToS3WithLabel(f.buffer, f.mimetype, "vendor", uuidv4(), {
+              segments: extra.length ? [...finalSegs.slice(0, 2), ...merged] : finalSegs,
+            });
+            urls.push(url);
+          } catch (e) {
+            return res.status(500).json({ message: "Failed to upload image to S3", error: e.message });
+          }
+        }
+      }
+      const current = Array.isArray(list[idx].images) ? list[idx].images : [];
+      list[idx].images = [...current, ...urls].slice(0, 5);
+      vendor.markModified("inventorySelections");
+      await vendor.save();
+      res.json({ success: true, images: list[idx].images });
+    } catch (err) {
+      console.error("Append inventory images (categories route) error:", err);
+      res.status(500).json({ message: "Server error", error: err.message });
+    }
+  }
+);
+
+router.put(
+  "/:categoryId/vendors/:vendorId/inventory/:entryKey/images/:index",
+  upload.single("image"),
+  async (req, res) => {
+    logApi(req, res, "put-inventory-image");
+    try {
+      const { vendorId, categoryId, entryKey, index } = req.params;
+      const idxNum = Number(index);
+      const vendor = await Vendor.findById(vendorId);
+      if (!vendor) return res.status(404).json({ message: "Vendor not found" });
+      const list = Array.isArray(vendor.inventorySelections?.[categoryId]) ? vendor.inventorySelections[categoryId] : [];
+      const i = list.findIndex((it) => String(it._id || it.at) === String(entryKey));
+      if (i < 0) return res.status(404).json({ message: "Inventory entry not found" });
+      if (!req.file) return res.status(400).json({ message: "image file required" });
+      const arr = Array.isArray(list[i].images) ? list[i].images : [];
+      if (idxNum < 0 || idxNum >= arr.length) return res.status(400).json({ message: "Invalid index" });
+      try {
+        const oldUrl = arr[idxNum];
+        const segs = await getCategoryPathSegments(categoryId);
+        const extra = [];
+        for (let j = 1; j <= 5; j++) {
+          if (req.body?.[`level${j}`]) extra.push(String(req.body[`level${j}`]));
+        }
+        let merged = segs;
+        if (extra.length) merged = [...segs, ...extra];
+        const finalSegs = await buildVendorPrefixedSegments(vendor, segs, "images");
+        const { url } = await uploadBufferToS3WithLabel(req.file.buffer, req.file.mimetype, "vendor", uuidv4(), {
+          segments: extra.length ? [...finalSegs.slice(0, 2), ...merged] : finalSegs,
+        });
+        arr[idxNum] = url;
+        if (oldUrl) {
+          try {
+            await deleteS3ObjectByUrl(oldUrl);
+          } catch {}
+        }
+      } catch (e) {
+        return res.status(500).json({ message: "Failed to upload image to S3", error: e.message });
+      }
+      list[i].images = arr;
+      vendor.markModified("inventorySelections");
+      await vendor.save();
+      res.json({ success: true, images: list[i].images });
+    } catch (err) {
+      console.error("Replace inventory image (categories route) error:", err);
+      res.status(500).json({ message: "Server error", error: err.message });
+    }
+  }
+);
+
+router.delete("/:categoryId/vendors/:vendorId/inventory/:entryKey/images/:index", async (req, res) => {
+  logApi(req, res, "delete-inventory-image");
+  try {
+    const { vendorId, categoryId, entryKey, index } = req.params;
+    const idxNum = Number(index);
+    const vendor = await Vendor.findById(vendorId);
+    if (!vendor) return res.status(404).json({ message: "Vendor not found" });
+    const list = Array.isArray(vendor.inventorySelections?.[categoryId]) ? vendor.inventorySelections[categoryId] : [];
+    const i = list.findIndex((it) => String(it._id || it.at) === String(entryKey));
+    if (i < 0) return res.status(404).json({ message: "Inventory entry not found" });
+    const arr = Array.isArray(list[i].images) ? list[i].images : [];
+    if (idxNum < 0 || idxNum >= arr.length) return res.status(400).json({ message: "Invalid index" });
+    const removed = arr.splice(idxNum, 1)[0];
+    if (removed) {
+      try {
+        await deleteS3ObjectByUrl(removed);
+      } catch {}
+    }
+    list[i].images = arr;
+    vendor.markModified("inventorySelections");
+    await vendor.save();
+    res.json({ success: true, images: list[i].images });
+  } catch (err) {
+    console.error("Delete inventory image (categories route) error:", err);
+    res.status(500).json({ message: "Server error", error: err.message });
+  }
+});
+
+router.get("/:categoryId/vendors/:vendorId/inventory/:entryKey/images", async (req, res) => {
+  logApi(req, res, "get-inventory-images");
+  try {
+    const { vendorId, categoryId, entryKey } = req.params;
+    const vendor = await Vendor.findById(vendorId);
+    if (!vendor) return res.status(404).json({ message: "Vendor not found" });
+    const list = Array.isArray(vendor.inventorySelections?.[categoryId]) ? vendor.inventorySelections[categoryId] : [];
+    const idx = list.findIndex((it) => String(it._id || it.at) === String(entryKey));
+    if (idx < 0) return res.status(404).json({ message: "Inventory entry not found" });
+    const arr = Array.isArray(list[idx].images) ? list[idx].images : [];
+    res.json({ success: true, images: arr });
+  } catch (err) {
+    console.error("Get inventory images (categories route) error:", err);
+    res.status(500).json({ message: "Server error", error: err.message });
+  }
+});
 
 module.exports = router;

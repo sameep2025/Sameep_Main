@@ -747,7 +747,7 @@ router.get("/byCategory/:categoryId", async (req, res) => {
 });
 
 // Build dummy category tree for a vendor starting at their top-level DummyCategory
-async function buildDummyTreeForVendor(rootCategoryId) {
+async function buildDummyTreeForVendor(rootCategoryId, nodePricingStatus) {
   // Load all subcategories for this top-level category
   const allSubs = await DummySubcategory.find({ category: rootCategoryId })
     .sort({ sequence: 1, createdAt: -1 })
@@ -760,13 +760,26 @@ async function buildDummyTreeForVendor(rootCategoryId) {
     byParent.get(key).push(s);
   });
 
+  const getNodeStatus = (idStr, fallback) => {
+    try {
+      if (!idStr) return fallback;
+      const map = (nodePricingStatus && typeof nodePricingStatus === "object") ? nodePricingStatus : null;
+      if (!map) return fallback;
+      const v = map[idStr];
+      if (v === "Active" || v === "Inactive") return v;
+      return fallback;
+    } catch {
+      return fallback;
+    }
+  };
+
   const attach = (nodeId) => {
     const children = (byParent.get(String(nodeId)) || []).map((c) => ({
       id: c._id,
       _id: c._id,
       name: c.name,
       price: c.price,
-      pricingStatus: c.pricingStatus,
+      pricingStatus: getNodeStatus(String(c._id), c.pricingStatus),
       imageUrl: c.imageUrl || null,
       terms: c.terms || "",
       children: attach(c._id),
@@ -782,7 +795,7 @@ async function buildDummyTreeForVendor(rootCategoryId) {
     _id: c._id,
     name: c.name,
     price: c.price,
-    pricingStatus: c.pricingStatus,
+    pricingStatus: getNodeStatus(String(c._id), c.pricingStatus),
     imageUrl: c.imageUrl || null,
     terms: c.terms || "",
     children: attach(c._id),
@@ -793,7 +806,7 @@ async function buildDummyTreeForVendor(rootCategoryId) {
     _id: rootCat._id,
     name: rootCat.name,
     price: rootCat.price,
-    pricingStatus: rootCat.pricingStatus,
+    pricingStatus: getNodeStatus(String(rootCat._id), rootCat.pricingStatus),
     imageUrl: rootCat.imageUrl || null,
     terms: rootCat.terms || "",
     children: topLevelChildren,
@@ -812,7 +825,7 @@ router.get("/:vendorId/categories", async (req, res) => {
     const vendor = await DummyVendor.findById(vendorId).lean();
     if (!vendor) return res.status(404).json({ message: "Vendor not found" });
 
-    const tree = await buildDummyTreeForVendor(vendor.categoryId);
+    const tree = await buildDummyTreeForVendor(vendor.categoryId, vendor.nodePricingStatus);
 
     res.json({
       vendor: {
@@ -826,6 +839,177 @@ router.get("/:vendorId/categories", async (req, res) => {
     });
   } catch (err) {
     console.error("GET /dummy-vendors/:vendorId/categories error:", err);
+    res.status(500).json({ message: "Server error" });
+  }
+});
+
+// GET vendor's dummy category tree + inventory for a specific category
+// GET /api/dummy-vendors/:vendorId/categories/:categoryId/inventory
+router.get("/:vendorId/categories/:categoryId/inventory", async (req, res) => {
+  try {
+    const { vendorId, categoryId } = req.params;
+    if (!mongoose.Types.ObjectId.isValid(vendorId)) {
+      return res.status(400).json({ message: "Invalid vendorId" });
+    }
+    if (!mongoose.Types.ObjectId.isValid(categoryId)) {
+      return res.status(400).json({ message: "Invalid categoryId" });
+    }
+
+    const vendorDoc = await DummyVendor.findById(vendorId);
+    if (!vendorDoc) return res.status(404).json({ message: "Vendor not found" });
+
+    const category = await DummyCategory.findById(categoryId).lean();
+    if (!category) return res.status(404).json({ message: "Category not found" });
+
+    const tree = await buildDummyTreeForVendor(vendorDoc.categoryId, vendorDoc.nodePricingStatus);
+    const items = Array.isArray(vendorDoc.inventorySelections?.[String(categoryId)])
+      ? vendorDoc.inventorySelections[String(categoryId)]
+      : [];
+
+    const vendor = vendorDoc.toObject ? vendorDoc.toObject() : vendorDoc;
+    try {
+      if (vendor && typeof vendor === "object") delete vendor.inventorySelections;
+    } catch {}
+
+    res.json({
+      success: true,
+      vendor,
+      categories: tree,
+      category,
+      items,
+    });
+  } catch (err) {
+    console.error("GET /dummy-vendors/:vendorId/categories/:categoryId/inventory error:", err);
+    res.status(500).json({ message: "Server error" });
+  }
+});
+
+// GET vendor's dummy category tree + inventory for a specific category (active-only)
+// GET /api/dummy-vendors/:vendorId/categories/:categoryId/inventory/active
+router.get("/:vendorId/categories/:categoryId/inventory/active", async (req, res) => {
+  try {
+    const { vendorId, categoryId } = req.params;
+    if (!mongoose.Types.ObjectId.isValid(vendorId)) {
+      return res.status(400).json({ message: "Invalid vendorId" });
+    }
+    if (!mongoose.Types.ObjectId.isValid(categoryId)) {
+      return res.status(400).json({ message: "Invalid categoryId" });
+    }
+
+    const vendorDoc = await DummyVendor.findById(vendorId);
+    if (!vendorDoc) return res.status(404).json({ message: "Vendor not found" });
+
+    const category = await DummyCategory.findById(categoryId).lean();
+    if (!category) return res.status(404).json({ message: "Category not found" });
+
+    const tree = await buildDummyTreeForVendor(vendorDoc.categoryId, vendorDoc.nodePricingStatus);
+    const rawItems = Array.isArray(vendorDoc.inventorySelections?.[String(categoryId)])
+      ? vendorDoc.inventorySelections[String(categoryId)]
+      : [];
+
+    const isActiveStatus = (v) => {
+      try {
+        const s = String(v == null ? "" : v).trim().toLowerCase();
+        if (!s) return true;
+        return s === "active";
+      } catch {
+        return true;
+      }
+    };
+
+    const filterInventoryActive = (items) => {
+      try {
+        const out = [];
+        (Array.isArray(items) ? items : []).forEach((it) => {
+          const statusMap = (it?.pricingStatusByRow && typeof it.pricingStatusByRow === "object")
+            ? it.pricingStatusByRow
+            : {};
+          const pricesByRow = (it?.pricesByRow && typeof it.pricesByRow === "object")
+            ? it.pricesByRow
+            : {};
+
+          const keys = new Set([
+            ...Object.keys(statusMap),
+            ...Object.keys(pricesByRow),
+          ]);
+
+          const nextStatusMap = {};
+          const nextPricesByRow = {};
+          keys.forEach((k) => {
+            const s = String(statusMap?.[k] || "").trim().toLowerCase();
+            if (s && s !== "active") return;
+            if (statusMap && Object.prototype.hasOwnProperty.call(statusMap, k)) nextStatusMap[k] = statusMap[k];
+            if (pricesByRow && Object.prototype.hasOwnProperty.call(pricesByRow, k)) nextPricesByRow[k] = pricesByRow[k];
+          });
+
+          if (Object.keys(nextStatusMap).length === 0) return;
+          out.push({ ...it, pricingStatusByRow: nextStatusMap, pricesByRow: nextPricesByRow });
+        });
+        return out;
+      } catch {
+        return [];
+      }
+    };
+
+    const items = filterInventoryActive(rawItems);
+
+    // Categories may be stored as Inactive even when inventory rows are active.
+    // Derive a set of categoryIds referenced by active rowKeys and keep those nodes.
+    const activeCategoryIds = new Set();
+    try {
+      (Array.isArray(items) ? items : []).forEach((it) => {
+        const statusMap = (it?.pricingStatusByRow && typeof it.pricingStatusByRow === "object")
+          ? it.pricingStatusByRow
+          : {};
+        Object.entries(statusMap).forEach(([rk, v]) => {
+          const s = String(v || "").trim().toLowerCase();
+          if (s && s !== "active") return;
+          String(rk || "")
+            .split("|")
+            .map((x) => String(x || "").trim())
+            .filter(Boolean)
+            .forEach((id) => activeCategoryIds.add(id));
+        });
+      });
+    } catch {}
+
+    const filterTreeActive = (node) => {
+      try {
+        if (!node || typeof node !== "object") return null;
+        const children = Array.isArray(node.children) ? node.children : [];
+        const filteredChildren = children
+          .map((c) => filterTreeActive(c))
+          .filter(Boolean);
+        const selfActive = isActiveStatus(node.pricingStatus);
+        const idStr = String(node._id ?? node.id ?? "");
+        const referencedByInventory = idStr && activeCategoryIds.has(idStr);
+        const keep = selfActive || referencedByInventory || filteredChildren.length > 0;
+        if (!keep) return null;
+        return { ...node, children: filteredChildren };
+      } catch {
+        return null;
+      }
+    };
+
+    const filteredTreeWithInv = filterTreeActive(tree);
+
+    const vendor = vendorDoc.toObject ? vendorDoc.toObject() : vendorDoc;
+    try {
+      if (vendor && typeof vendor === "object") delete vendor.inventorySelections;
+    } catch {}
+
+    res.json({
+      success: true,
+      vendor,
+      categories: filteredTreeWithInv,
+      category,
+      items,
+    });
+  } catch (err) {
+    console.error(
+      "GET /dummy-vendors/:vendorId/categories/:categoryId/inventory/active error:",
+      err
+    );
     res.status(500).json({ message: "Server error" });
   }
 });

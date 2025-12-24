@@ -72,7 +72,7 @@ export default function DummyVendorPage() {
 
   return (
     <div>
-      <h1>Dummy Vendors</h1>
+      <h1> Vendors</h1>
       {loading ? (
         <div>Loading...</div>
       ) : error ? (

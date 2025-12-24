@@ -28,17 +28,24 @@ function StatusCard({ status, onEdit, onDelete }) {
 // Modal Component
 function StatusModal({ show, onClose, onSave, initialData }) {
   const [name, setName] = useState("");
+  const [sequence, setSequence] = useState("0");
 
   useEffect(() => {
     // If editing, show the status name, else blank
     setName(initialData?.name || "");
+    setSequence(String(typeof initialData?.sequence === "number" ? initialData.sequence : 0));
   }, [initialData]);
 
   if (!show) return null;
 
   const submit = (e) => {
     e.preventDefault();
-    onSave({ ...initialData, name });
+    const seqNum = Number.parseInt(String(sequence || "0"), 10);
+    onSave({
+      ...initialData,
+      name,
+      sequence: Number.isFinite(seqNum) ? seqNum : 0,
+    });
   };
 
   return (
@@ -75,6 +82,23 @@ function StatusModal({ show, onClose, onSave, initialData }) {
               fontSize: 14
             }}
           />
+
+          <label style={{ fontWeight: "bold" }}>Sequence Number</label>
+          <input
+            type="number"
+            value={sequence}
+            onChange={(e) => setSequence(e.target.value)}
+            step={1}
+            placeholder="0"
+            style={{
+              padding: "8px 12px",
+              borderRadius: 6,
+              border: "1px solid #ccc",
+              outline: "none",
+              fontSize: 14
+            }}
+          />
+
           <div style={{ display: "flex", justifyContent: "flex-end", gap: 10 }}>
             <button
               type="button"
@@ -119,7 +143,16 @@ export default function StatusPage() {
   const fetchStatuses = async () => {
     try {
       const res = await axios.get(`${API_BASE_URL}/api/masters`, { params: { type: "status" } });
-      setStatuses(res.data);
+      const list = Array.isArray(res.data) ? res.data : [];
+      list.sort((a, b) => {
+        const sa = typeof a?.sequence === "number" ? a.sequence : 0;
+        const sb = typeof b?.sequence === "number" ? b.sequence : 0;
+        if (sa !== sb) return sa - sb;
+        const na = a?.name != null ? String(a.name) : "";
+        const nb = b?.name != null ? String(b.name) : "";
+        return na.localeCompare(nb);
+      });
+      setStatuses(list);
     } catch (err) {
       console.error(err);
       alert("Failed to fetch statuses");
@@ -133,9 +166,9 @@ export default function StatusPage() {
   const handleSave = async (data) => {
     try {
       if (data._id) {
-        await axios.put(`${API_BASE_URL}/api/masters/${data._id}`, { name: data.name, sequence: 0 });
+        await axios.put(`${API_BASE_URL}/api/masters/${data._id}`, { name: data.name, sequence: data.sequence });
       } else {
-        await axios.post(`${API_BASE_URL}/api/masters`, { name: data.name, type: "status", sequence: 0 });
+        await axios.post(`${API_BASE_URL}/api/masters`, { name: data.name, type: "status", sequence: data.sequence });
       }
       fetchStatuses();
       setShowModal(false);
