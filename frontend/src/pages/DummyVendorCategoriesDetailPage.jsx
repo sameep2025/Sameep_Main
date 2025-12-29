@@ -191,6 +191,55 @@ export default function DummyVendorCategoriesDetailPage() {
 
   const pricesBackfillDoneRef = useRef({});
 
+  // Map of nodeId -> boolean active from vendor.nodePricingStatus (Registered/Active casing agnostic)
+  const nodeActiveMap = useMemo(() => {
+    try {
+      const out = {};
+      const src = vendor && typeof vendor === 'object' ? vendor.nodePricingStatus : null;
+      if (src && typeof src === 'object') {
+        Object.entries(src).forEach(([k, v]) => {
+          const val = String(v || '').toLowerCase();
+          out[String(k)] = val === 'active';
+        });
+      }
+      return out;
+    } catch { return {}; }
+  }, [vendor]);
+
+  // Build a lookup from category path labels to leaf node id from the loaded tree (Old view source)
+  const leafIdByPath = useMemo(() => {
+    try {
+      const map = new Map();
+      const rws = tree.flatMap((root) => flattenTree(root));
+      rws.forEach((r) => {
+        const key = Array.isArray(r.levels) ? r.levels.join(' / ') : '';
+        if (key) map.set(key, String(r.categoryId || r.id));
+      });
+      return map;
+    } catch { return new Map(); }
+  }, [tree]);
+
+  // Resolve a flow row to the best matching node id present in nodePricingStatus
+  const resolveFlowNodeId = (flow) => {
+    try {
+      const candidates = [];
+      const sid = flow && (flow._serviceId || flow._id || flow.serviceId || flow.categoryId || flow._categoryId);
+      if (sid != null) candidates.push(String(sid));
+      // Try categoryPath -> leaf id match via tree
+      const path = Array.isArray(flow?.categoryPath) ? flow.categoryPath.filter(Boolean).join(' / ') : '';
+      if (path) {
+        const matched = leafIdByPath.get(path);
+        if (matched) candidates.push(String(matched));
+      }
+      // Return the first candidate that exists in nodeActiveMap
+      for (const c of candidates) {
+        if (Object.prototype.hasOwnProperty.call(nodeActiveMap, c)) return c;
+      }
+      // Fallback to first candidate if any
+      return candidates[0] ? String(candidates[0]) : '';
+    } catch { return ''; }
+  };
+
   useEffect(() => {
     try {
       setVendor(null);
@@ -405,6 +454,29 @@ export default function DummyVendorCategoriesDetailPage() {
       const res = await axios.patch(`${API_BASE_URL}/api/vendor-flow/vendor/${vendorId}/services/${serviceId}/status`, { status: newStatus });
       const rows = Array.isArray(res.data?.services) ? res.data.services : [];
       setVendorFlows(rows);
+
+      // Also mirror this change into dummy vendor's nodePricingStatus so Old and New views stay consistent
+      try {
+        const normalized = String(newStatus || '').toUpperCase() === 'ACTIVE' ? 'Active' : 'Inactive';
+        const currentMap = (vendor && typeof vendor.nodePricingStatus === 'object') ? vendor.nodePricingStatus : {};
+        const nextMap = { ...(currentMap || {}), [String(serviceId)]: normalized };
+        await axios.put(
+          `${API_BASE_URL}/api/dummy-vendors/${vendorId}`,
+          { nodePricingStatus: nextMap },
+          {
+            headers: {
+              'Content-Type': 'application/json',
+              'x-actor-role': 'admin',
+              'x-vendor-id': vendorId,
+              'x-root-category-id': categoryId,
+            },
+          }
+        );
+        setVendor((prev) => ({ ...(prev || {}), nodePricingStatus: nextMap }));
+      } catch (e2) {
+        // Non-fatal: keep UI responsive even if mirror update fails
+        console.warn('Failed to mirror status to nodePricingStatus', e2);
+      }
     } catch (e) {
       alert(e?.response?.data?.message || 'Failed to update status');
     }
@@ -1671,7 +1743,16 @@ export default function DummyVendorCategoriesDetailPage() {
       </td>
       <td style={{ border: "1px solid #ccc", padding: "8px" }}>
         <select
-          value={flow.status || 'INACTIVE'}
+          value={
+            (() => {
+              const sid = String(flow._serviceId || flow._id || '');
+              if (sid && Object.prototype.hasOwnProperty.call(nodeActiveMap, sid)) {
+                return nodeActiveMap[sid] ? 'ACTIVE' : 'INACTIVE';
+              }
+              const raw = flow.status ? String(flow.status).toUpperCase() : '';
+              return raw === 'ACTIVE' ? 'ACTIVE' : 'INACTIVE';
+            })()
+          }
           style={{ padding: '4px', borderRadius: '4px', border: '1px solid #d1d5db', fontSize: '13px' }}
           onChange={(e) => {
             const serviceId = flow._serviceId || flow._id;

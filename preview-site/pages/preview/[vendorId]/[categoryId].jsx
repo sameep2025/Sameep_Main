@@ -9989,7 +9989,7 @@ console.log("✅ Total dummy categories count:", list.length);
                           }
                         }
 
-                        // Non-inventory model or no services with inventory config - proceed directly
+                        // Non-inventory model or no services with inventory config - do NOT open preview directly
                         // Build nodePricingStatus map: selected = Active, unselected = Inactive
                         const nodePricingStatus = {};
                         setupSubcategories.forEach((subcat) => {
@@ -10008,7 +10008,19 @@ console.log("✅ Total dummy categories count:", list.length);
                         } catch (e) {
                           console.error("Failed to save nodePricingStatus", e);
                         }
-                        // Set vendor identity in localStorage so the new tab logs in as vendor
+                        // Update vendor status to "Profile Setup" and show confirmations, mirroring inventory flow
+                        try {
+                          await fetch(`${API_BASE_URL}/api/dummy-vendors/${dvId}`, {
+                            method: "PUT",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({ status: "Profile Setup" }),
+                          });
+                          console.log("Status updated to Profile Setup");
+                        } catch (e) {
+                          console.error("Failed to update status to Profile Setup", e);
+                        }
+
+                        // Set vendor identity in localStorage so the preview tab logs in as vendor
                         const identityKey = `previewIdentity:${dvId}:${catId}`;
                         const vendorIdentity = {
                           role: "vendor",
@@ -10018,22 +10030,11 @@ console.log("✅ Total dummy categories count:", list.length);
                         try {
                           window.localStorage.setItem(identityKey, JSON.stringify(vendorIdentity));
                         } catch {}
-                        // Build URL same as DummyVendorCategoriesDetailPage Preview button
-                        const homeLocs = Array.isArray(setupSelectedPlace?.nearbyLocations)
-                          ? setupSelectedPlace.nearbyLocations.filter(Boolean)
-                          : [];
-                        const params = new URLSearchParams();
-                        params.set("mode", "dummy");
-                        if (setupCreationTimerKey) {
-                          params.set("setupTimerKey", String(setupCreationTimerKey));
-                        }
-                        if (homeLocs.length) {
-                          params.set("homeLocs", JSON.stringify(homeLocs));
-                        }
-                        params.set("t", String(Date.now()));
-                        const url = `/preview/${dvId}/${catId}?${params.toString()}`;
+
+                        // Close subcategory popup and show profile setup confirmation
                         setShowSubcategoryPopup(false);
-                        window.open(url, "_blank");
+                        setSetupProfileStatus("profile_setup");
+                        setShowProfileSetupConfirm(true);
                       } catch (e) {
                         setSetupGeneratePreviewError("Failed to generate preview");
                         setShowSubcategoryPopup(false);
@@ -10268,31 +10269,36 @@ console.log("✅ Total dummy categories count:", list.length);
                             await fetchSetupModelsForFamily(scopes[0].family);
                           } catch {}
                         } else {
-                          // No inventory scopes, go directly to preview
-                          const identityKey = `previewIdentity:${dvId}:${catId}`;
-                          const vendorIdentity = {
-                            role: "vendor",
-                            displayName: setupSelectedPlace?.name || setupBusinessName || "Vendor",
-                            loggedIn: true,
-                          };
+                          // No inventory scopes, update status to "Profile Setup" and show confirmation
                           try {
-                            window.localStorage.setItem(identityKey, JSON.stringify(vendorIdentity));
-                          } catch {}
-                          const homeLocs = Array.isArray(setupSelectedPlace?.nearbyLocations)
-                            ? setupSelectedPlace.nearbyLocations.filter(Boolean)
-                            : [];
-                          const params = new URLSearchParams();
-                          params.set("mode", "dummy");
-                          if (setupCreationTimerKey) {
-                            params.set("setupTimerKey", String(setupCreationTimerKey));
+                            // Update vendor status to "Profile Setup"
+                            await fetch(`${API_BASE_URL}/api/dummy-vendors/${dvId}`, {
+                              method: "PUT",
+                              headers: { "Content-Type": "application/json" },
+                              body: JSON.stringify({ status: "Profile Setup" }),
+                            });
+                            console.log("Status updated to Profile Setup");
+
+                            // Set vendor identity
+                            const identityKey = `previewIdentity:${dvId}:${catId}`;
+                            const vendorIdentity = {
+                              role: "vendor",
+                              displayName: setupSelectedPlace?.name || setupBusinessName || "Vendor",
+                              loggedIn: true,
+                            };
+                            try {
+                              window.localStorage.setItem(identityKey, JSON.stringify(vendorIdentity));
+                            } catch {}
+
+                            // Show profile setup confirmation
+                            setShowVehicleCountPopup(false);
+                            setSetupProfileStatus("profile_setup");
+                            setShowProfileSetupConfirm(true);
+                          } catch (e) {
+                            console.error("Failed to update status to Profile Setup", e);
+                            setSetupGeneratePreviewError("Failed to update profile status");
+                            setShowVehicleCountPopup(false);
                           }
-                          if (homeLocs.length) {
-                            params.set("homeLocs", JSON.stringify(homeLocs));
-                          }
-                          params.set("t", String(Date.now()));
-                          const url = `/preview/${dvId}/${catId}?${params.toString()}`;
-                          setShowVehicleCountPopup(false);
-                          window.open(url, "_blank");
                         }
                       } catch (e) {
                         setSetupGeneratePreviewError("Failed to generate preview");
