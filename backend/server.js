@@ -26,6 +26,7 @@ const enquiryRoutes = require('./routes/enquiryRoutes');
 const authRoutes = require('./routes/authRoutes');
 const googlePlacesRoutes = require('./routes/googlePlacesRoutes');
 const setupProgressRoutes = require('./routes/setupProgressRoutes');
+const vendorFlowRoutes = require('./routes/vendorFlowRoutes');
 
 const app = express();
 
@@ -162,6 +163,7 @@ app.use('/api/app-config', appConfigRoutes);
 app.use('/api/audit-logs', auditLogRoutes);
 app.use('/api/google/places', googlePlacesRoutes);
 app.use('/api/setup-progress', setupProgressRoutes);
+app.use('/api/vendor-flow', vendorFlowRoutes);
 app.use('/', authRoutes);
 
 // Debug: DB connection info

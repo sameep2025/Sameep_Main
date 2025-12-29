@@ -185,6 +185,9 @@ export default function DummyVendorCategoriesDetailPage() {
   const [selectedStatusFilter, setSelectedStatusFilter] = useState("All"); // dropdown filter for admin view
   const [termsSelectionsByNode, setTermsSelectionsByNode] = useState({}); // { [categoryId]: number[] }
   const [comboTermsSelectionsByText, setComboTermsSelectionsByText] = useState({}); // { [normalizedTermsText]: number[] }
+  const [activeView, setActiveView] = useState('old'); // 'old' or 'new'
+  const [vendorFlows, setVendorFlows] = useState([]); // VendorFlow data for new view
+  const [editingNewFlow, setEditingNewFlow] = useState(null); // { id, price }
 
   const pricesBackfillDoneRef = useRef({});
 
@@ -318,7 +321,7 @@ export default function DummyVendorCategoriesDetailPage() {
       setEnquiriesError("");
       const params = new URLSearchParams();
       params.set("vendorId", String(vendorId));
-      if (previewCategoryId) params.set("categoryId", String(previewCategoryId));
+      if (categoryId) params.set("categoryId", String(categoryId));
       const res = await axios.get(`${API_BASE_URL}/api/enquiries?${params.toString()}`);
       const list = Array.isArray(res.data) ? res.data : [];
       setEnquiries(list);
@@ -330,6 +333,96 @@ export default function DummyVendorCategoriesDetailPage() {
       setShowEnquiriesModal(true);
     } finally {
       setEnquiriesLoading(false);
+    }
+  };
+
+  const fetchVendorFlows = async () => {
+    try {
+      setLoading(true);
+      setError("");
+      const response = await axios.get(`${API_BASE_URL}/api/vendor-flow/vendor/${vendorId}`);
+      const flows = Array.isArray(response.data) ? response.data : [];
+      
+      // If no flows exist, try to sync from old data
+      if (flows.length === 0) {
+        try {
+          // Try POST first
+          const syncResponse = await axios.post(`${API_BASE_URL}/api/vendor-flow/vendor/${vendorId}/sync${categoryId ? `?categoryId=${categoryId}` : ''}`);
+          setVendorFlows(Array.isArray(syncResponse.data.services) ? syncResponse.data.services : []);
+          alert(syncResponse.data.message || 'Data synced successfully!');
+        } catch (syncErr) {
+          // If POST 404 (some proxies strip method), retry with GET fallback
+          const status = syncErr?.response?.status;
+          if (status === 404) {
+            try {
+              const syncGet = await axios.get(`${API_BASE_URL}/api/vendor-flow/vendor/${vendorId}/sync${categoryId ? `?categoryId=${categoryId}` : ''}`);
+              setVendorFlows(Array.isArray(syncGet.data.services) ? syncGet.data.services : []);
+              alert(syncGet.data.message || 'Data synced successfully!');
+            } catch (syncGetErr) {
+              setVendorFlows([]);
+              setError(syncGetErr?.response?.data?.message || 'Failed to sync vendor flows');
+            }
+          } else {
+            setVendorFlows([]);
+            setError(syncErr?.response?.data?.message || "Failed to sync vendor flows");
+          }
+        }
+      } else {
+        setVendorFlows(flows);
+      }
+    } catch (err) {
+      setError(err?.response?.data?.message || "Failed to load vendor flows");
+      setVendorFlows([]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const startEditNewFlow = (flow) => {
+    const id = flow._serviceId || flow._id;
+    const price = (flow.price === undefined || flow.price === null || flow.price === '-') ? '' : String(flow.price);
+    setEditingNewFlow({ id, price });
+  };
+
+  const cancelEditNewFlow = () => setEditingNewFlow(null);
+
+  const saveEditNewFlow = async () => {
+    try {
+      if (!editingNewFlow) return;
+      const id = editingNewFlow.id;
+      const priceNum = editingNewFlow.price === '' ? 0 : Number(editingNewFlow.price);
+      const res = await axios.patch(`${API_BASE_URL}/api/vendor-flow/vendor/${vendorId}/services/${id}/price`, { price: priceNum });
+      const rows = Array.isArray(res.data?.services) ? res.data.services : [];
+      setVendorFlows(rows);
+      setEditingNewFlow(null);
+    } catch (e) {
+      alert(e?.response?.data?.message || 'Failed to update price');
+    }
+  };
+
+  const updateServiceStatus = async (serviceId, newStatus) => {
+    try {
+      const res = await axios.patch(`${API_BASE_URL}/api/vendor-flow/vendor/${vendorId}/services/${serviceId}/status`, { status: newStatus });
+      const rows = Array.isArray(res.data?.services) ? res.data.services : [];
+      setVendorFlows(rows);
+    } catch (e) {
+      alert(e?.response?.data?.message || 'Failed to update status');
+    }
+  };
+
+  const fetchServiceLogs = async (serviceId) => {
+    try {
+      const res = await axios.get(`${API_BASE_URL}/api/vendor-flow/vendor/${vendorId}/services/${serviceId}/logs`);
+      const logs = Array.isArray(res.data?.logs) ? res.data.logs : [];
+      const label = Array.isArray(res.data?.categoryPath) ? res.data.categoryPath.join(' / ') : 'Service';
+      loadLogs({
+        entityType: 'vendor_service',
+        entityId: String(serviceId),
+        label,
+        logs,
+      });
+    } catch (e) {
+      alert(e?.response?.data?.message || 'Failed to load logs');
     }
   };
 
@@ -1118,13 +1211,50 @@ export default function DummyVendorCategoriesDetailPage() {
         </div>
       ) : null}
        <div style={{ marginTop: 30 }}>
-        <h2 style={{ marginBottom: 8 }}>Categories</h2>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+          <h2 style={{ margin: 0 }}>Categories</h2>
+          <div style={{ display: "flex", gap: "8px" }}>
+            <button 
+              style={{ 
+                padding: "6px 12px", 
+                backgroundColor: activeView === 'old' ? "#2563eb" : "#3b82f6", 
+                color: "white", 
+                border: "none", 
+                borderRadius: "4px", 
+                cursor: "pointer" 
+              }}
+              onClick={() => {
+                setActiveView('old');
+                fetchTree();
+              }}
+            >
+              Old
+            </button>
+            <button 
+              style={{ 
+                padding: "6px 12px", 
+                backgroundColor: activeView === 'new' ? "#059669" : "#10b981", 
+                color: "white", 
+                border: "none", 
+                borderRadius: "4px", 
+                cursor: "pointer" 
+              }}
+              onClick={() => {
+                setActiveView('new');
+                fetchVendorFlows();
+              }}
+            >
+              New
+            </button>
+          </div>
+        </div>
       {loading ? (
         <div>Loading...</div>
       ) : error ? (
         <div style={{ color: "#991b1b", background: "#fee2e2", border: "1px solid #fecaca", padding: 10, borderRadius: 8 }}>{error}</div>
-      ) : rows.length === 0 ? (
-        <div>No categories found</div>
+      ) : activeView === 'old' ? (
+        rows.length === 0 ? (
+          <div>No categories found</div>
         ) : (
         <table style={{ borderCollapse: "collapse", width: "100%" }}>
           <thead>
@@ -1474,6 +1604,121 @@ export default function DummyVendorCategoriesDetailPage() {
             ))}
           </tbody>
         </table>
+        )
+      ) : (
+        // New VendorFlow View
+        vendorFlows.length === 0 ? (
+          <div>No vendor flows found</div>
+        ) : (
+        <table style={{ borderCollapse: "collapse", width: "100%" }}>
+          <thead>
+            <tr>
+              <th style={{ border: "1px solid #ccc", padding: "8px" }}>Category</th>
+              <th style={{ border: "1px solid #ccc", padding: "8px" }}>Level 2</th>
+              <th style={{ border: "1px solid #ccc", padding: "8px" }}>Level 3</th>
+              <th style={{ border: "1px solid #ccc", padding: "8px" }}>Attributes</th>
+              <th style={{ border: "1px solid #ccc", padding: "8px" }}>Price</th>
+              <th style={{ border: "1px solid #ccc", padding: "8px" }}>Terms</th>
+              <th style={{ border: "1px solid #ccc", padding: "8px" }}>Pricing Status</th>
+              <th style={{ border: "1px solid #ccc", padding: "8px" }}>Action</th>
+              <th style={{ border: "1px solid #ccc", padding: "8px" }}>Logs</th>
+            </tr>
+          </thead>
+          <tbody>
+  {vendorFlows.map((flow) => (
+    <tr key={flow._serviceId || flow._id}>
+      <td style={{ border: "1px solid #ccc", padding: "8px" }}>
+        {(Array.isArray(flow.categoryPath) && flow.categoryPath[0]) || '-'}
+      </td>
+      <td style={{ border: "1px solid #ccc", padding: "8px" }}>
+        {(Array.isArray(flow.categoryPath) && flow.categoryPath[1]) || '-'}
+      </td>
+      <td style={{ border: "1px solid #ccc", padding: "8px" }}>
+        {(Array.isArray(flow.categoryPath) && flow.categoryPath[2]) || '-'}
+      </td>
+      <td style={{ border: "1px solid #ccc", padding: "8px" }}>
+        {flow.attributes && typeof flow.attributes === 'object'
+          ? Object.entries(flow.attributes).map(([key, value]) => (
+              <div key={key} style={{ fontSize: '12px' }}>
+                <strong>{key}:</strong> {value}
+              </div>
+            ))
+          : '-'
+        }
+      </td>
+      <td style={{ border: "1px solid #ccc", padding: "8px" }}>
+        {editingNewFlow && (editingNewFlow.id === (flow._serviceId || flow._id)) ? (
+          <input
+            type="number"
+            value={editingNewFlow.price}
+            onChange={(e) => setEditingNewFlow((prev) => ({ ...(prev || {}), price: e.target.value }))}
+            style={{ width: 120, padding: 6 }}
+            placeholder="Price"
+          />
+        ) : (
+          <span>{(flow.price === undefined || flow.price === null || flow.price === '-') ? '-' : flow.price}</span>
+        )}
+      </td>
+      <td style={{ border: "1px solid #ccc", padding: "8px" }}>
+        {Array.isArray(flow.terms) && flow.terms.length > 0
+          ? flow.terms.map((term, idx) => (
+              <div key={idx} style={{ fontSize: '12px', marginBottom: '2px' }}>
+                {String(term)}
+              </div>
+            ))
+          : '-'
+        }
+      </td>
+      <td style={{ border: "1px solid #ccc", padding: "8px" }}>
+        <select
+          value={flow.status || 'INACTIVE'}
+          style={{ padding: '4px', borderRadius: '4px', border: '1px solid #d1d5db', fontSize: '13px' }}
+          onChange={(e) => {
+            const serviceId = flow._serviceId || flow._id;
+            updateServiceStatus(serviceId, e.target.value);
+          }}
+        >
+          <option value="INACTIVE">INACTIVE</option>
+          <option value="ACTIVE">ACTIVE</option>
+        </select>
+      </td>
+      <td style={{ border: "1px solid #ccc", padding: "8px" }}>
+        {editingNewFlow && (editingNewFlow.id === (flow._serviceId || flow._id)) ? (
+          <div style={{ display: 'flex', gap: 6 }}>
+            <button
+              onClick={saveEditNewFlow}
+              style={{ padding: '4px 8px', borderRadius: 4, background: '#16a34a', color: '#fff', border: 'none', fontSize: 12 }}
+            >Save</button>
+            <button
+              onClick={cancelEditNewFlow}
+              style={{ padding: '4px 8px', borderRadius: 4, background: '#e5e7eb', border: '1px solid #d1d5db', fontSize: 12 }}
+            >Cancel</button>
+          </div>
+        ) : (
+          <button
+            style={{ padding: '4px 8px', borderRadius: '4px', background: '#3b82f6', color: '#fff', border: 'none', fontSize: '12px' }}
+            onClick={() => startEditNewFlow(flow)}
+          >
+            Edit
+          </button>
+        )}
+      </td>
+      <td style={{ border: "1px solid #ccc", padding: "8px" }}>
+        <button
+          style={{ padding: '4px 8px', borderRadius: '4px', background: '#f97316', color: '#fff', border: 'none', fontSize: '12px' }}
+          onClick={() => {
+            const serviceId = flow._serviceId || flow._id;
+            fetchServiceLogs(serviceId);
+          }}
+        >
+          See Logs
+        </button>
+      </td>
+    </tr>
+  ))}
+</tbody>
+        </table>
+        )
       )}
       </div>
 
