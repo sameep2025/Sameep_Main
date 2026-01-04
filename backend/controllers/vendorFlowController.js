@@ -397,7 +397,7 @@ exports.syncVendorFlows = async (req, res) => {
       else collectLeaves([vendorCategories]);
     }
 
-    // Prepare attributes by querying inventory selections per leaf category (cached)
+    // Prepare attributes by querying inventory selections per leaf category (cached and parallelized)
     const flowsToCreate = [];
     const axios = require('axios');
     const base = `${req.protocol}://${req.get('host')}`;
@@ -460,17 +460,17 @@ exports.syncVendorFlows = async (req, res) => {
       }
     };
 
-    for (const item of leaves) {
+    // Process leaves in parallel for better performance
+    const leafPromises = leaves.map(async (item) => {
       const { levels, ids, cat } = item;
       const leafCid = ids[ids.length - 1];
       const attributes = await getAttributesForLeaf(leafCid);
-      const flowData = {
+      
+      // Store ALL levels, not just 3
+      return {
         vendorId,
-        category: {
-          level1: { id: ids[0], name: levels[0] },
-          level2: ids[1] ? { id: ids[1], name: levels[1] } : undefined,
-          level3: ids[2] ? { id: ids[2], name: levels[2] } : undefined
-        },
+        categoryPath: levels, // Store the complete path
+        categoryIds: ids,     // Store all category IDs
         attributes,
         price: cat.price || 0,
         terms: cat.terms && cat.terms.length > 0 ? String(cat.terms).split(',').map(t => ({
@@ -486,8 +486,11 @@ exports.syncVendorFlows = async (req, res) => {
           timestamp: new Date()
         }]
       };
-      flowsToCreate.push(flowData);
-    }
+    });
+
+    // Wait for all parallel requests to complete
+    const flowsToCreateArray = await Promise.all(leafPromises);
+    flowsToCreate.push(...flowsToCreateArray);
 
     // Save new services
     if (flowsToCreate.length === 0) {
@@ -499,16 +502,8 @@ exports.syncVendorFlows = async (req, res) => {
 
     // Project new services array per the flattened design
     const services = flowsToCreate.map((f) => ({
-      categoryPath: [
-        f.category?.level1?.name,
-        f.category?.level2?.name,
-        f.category?.level3?.name,
-      ].filter(Boolean),
-      categoryIds: [
-        f.category?.level1?.id,
-        f.category?.level2?.id,
-        f.category?.level3?.id,
-      ].filter(Boolean),
+      categoryPath: f.categoryPath || [], // Use the complete path with all levels
+      categoryIds: f.categoryIds || [],   // Use all category IDs
       price: Number(f.price || 0),
       terms: Array.isArray(f.terms) ? f.terms.map(t => (typeof t === 'string' ? t : t?.text || '')) .filter(Boolean) : [],
       status: (f.pricingStatus === 'Active' || f.pricingStatus === 'ACTIVE') ? 'ACTIVE' : 'INACTIVE',

@@ -70,17 +70,24 @@ export default function MyIndividualServicesDetailPage() {
 
   const pricesBackfillDoneRef = useRef({});
 
-  const saveDummyInventorySelections = async (vid, cid, items) => {
-    const payload = { items };
-    await fetch(`${API_BASE_URL}/api/dummy-categories/${cid}/vendors/${vid}/inventory-selections`, {
-      method: "PUT",
+  const saveVendorFlowServicePrice = async (serviceId, price) => {
+    await fetch(`${API_BASE_URL}/api/vendor-flow/vendor/${vendorId}/services/${serviceId}/price`, {
+      method: "PATCH",
       headers: {
         "Content-Type": "application/json",
-        "x-actor-role": "vendor",
-        "x-vendor-id": vid,
-        "x-root-category-id": cid,
       },
-      body: JSON.stringify(payload),
+      body: JSON.stringify({ price }),
+    });
+    return true;
+  };
+
+  const saveVendorFlowServiceStatus = async (serviceId, status) => {
+    await fetch(`${API_BASE_URL}/api/vendor-flow/vendor/${vendorId}/services/${serviceId}/status`, {
+      method: "PATCH",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ status }),
     });
     return true;
   };
@@ -138,17 +145,39 @@ export default function MyIndividualServicesDetailPage() {
       try {
         setLoading(true);
         setError("");
-        const url = `${API_BASE_URL}/api/dummy-vendors/${vendorId}/categories`;
+        
+        // Use vendor-flow API to get services
+        const url = `${API_BASE_URL}/api/vendor-flow/vendor/${vendorId}${categoryId ? `?categoryId=${categoryId}` : ''}`;
         const res = await fetch(url);
-        if (!res.ok) throw new Error("Failed to load categories");
+        if (!res.ok) throw new Error("Failed to load services");
         const json = await res.json().catch(() => ({}));
-        let categories = json?.categories;
-        if (!categories) setTree([]);
-        else if (Array.isArray(categories)) setTree(categories);
-        else setTree([{ ...categories, children: categories.children || [] }]);
+        
+        // Extract services from vendor flow response
+        const services = Array.isArray(json?.services) ? json.services : [];
+        
+        // Filter services that match the selected lvl1 and lvl2 categories
+        const filteredServices = services.filter(service => {
+          const categoryPath = Array.isArray(service?.categoryPath) ? service.categoryPath : [];
+          return categoryPath.length >= 2 && 
+                 categoryPath[0] === lvl1Id && 
+                 categoryPath[1] === lvl2Id;
+        });
+        
+        // Convert services to tree structure for compatibility
+        const treeData = filteredServices.map(service => ({
+          _id: service._serviceId || service._id || service.categoryId,
+          name: service.serviceName || service.name || 'Service',
+          price: service.price || 0,
+          vendorPrice: service.price || 0,
+          pricingStatus: service.status || 'Active',
+          imageUrl: service.imageUrl || service.iconUrl || null,
+          children: []
+        }));
+        
+        setTree(treeData);
       } catch (e) {
         console.error("MyIndividualServicesDetailPage fetchTree error", e);
-        setError(e?.message || "Failed to load categories");
+        setError(e?.message || "Failed to load services");
         setTree([]);
       } finally {
         setLoading(false);
@@ -471,17 +500,10 @@ export default function MyIndividualServicesDetailPage() {
     }
     try {
       setSaving(true);
-      const body = { price: val };
-      await fetch(`${API_BASE_URL}/api/dummy-categories/${editingId}`, {
-        method: "PUT",
-        headers: {
-          "Content-Type": "application/json",
-          "x-actor-role": "vendor",
-          "x-vendor-id": vendorId,
-          "x-root-category-id": categoryId,
-        },
-        body: JSON.stringify(body),
-      });
+      
+      // Use vendor-flow API to update service price
+      await saveVendorFlowServicePrice(editingId, val);
+      
       setTree((prev) => {
         const clone = JSON.parse(JSON.stringify(prev || []));
         const visit = (node) => {
@@ -489,9 +511,11 @@ export default function MyIndividualServicesDetailPage() {
           const id = node._id || node.id;
           if (String(id) === String(editingId)) {
             node.price = val;
+            node.vendorPrice = val;
           }
-          const kids = Array.isArray(node.children) ? node.children : [];
-          kids.forEach(visit);
+          if (Array.isArray(node.children)) {
+            node.children.forEach(visit);
+          }
         };
         clone.forEach(visit);
         return clone;
@@ -500,9 +524,28 @@ export default function MyIndividualServicesDetailPage() {
       setEditingPrice("");
     } catch (e) {
       console.error("Failed to save price", e);
-      alert("Failed to save price");
+      alert(e?.message || "Failed to save price");
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleToggleStatus = async (rowKey) => {
+    try {
+      const current = statusByRow[rowKey] || "Active";
+      const next = current === "Active" ? "Inactive" : "Active";
+      
+      // Find the service ID from the tree
+      const serviceId = rowKey.split('|').pop();
+      if (!serviceId) return;
+      
+      // Use vendor-flow API to update service status
+      await saveVendorFlowServiceStatus(serviceId, next);
+      
+      setStatusByRow((prev) => ({ ...prev, [rowKey]: next }));
+    } catch (e) {
+      console.error("Failed to toggle status", e);
+      alert(e?.message || "Failed to update status");
     }
   };
 
