@@ -76,78 +76,24 @@ export default function Level2SelectorPage() {
       try {
         setLoading(true);
         setError("");
-        
-        // Use vendor-flow API exactly like the admin page
-        const url = `${API_BASE_URL}/api/vendor-flow/vendor/${vendorId}${categoryId ? `?categoryId=${categoryId}` : ''}`;
+        const url = `${API_BASE_URL}/api/dummy-vendors/${vendorId}/categories`;
         const res = await fetch(url);
-        if (!res.ok) throw new Error("Failed to load services");
+        if (!res.ok) throw new Error("Failed to load categories");
         const json = await res.json().catch(() => ({}));
-        
-        // Extract services from vendor flow response (same as admin page)
-        const services = Array.isArray(json?.services) ? json.services : [];
-        
-        // Filter services that belong to the selected lvl1 category
-        const lvl1Services = services.filter(service => {
-          const categoryPath = Array.isArray(service?.categoryPath) ? service.categoryPath : [];
-          return categoryPath.length > 0 && categoryPath[0] === lvl1Id;
-        });
-        
-        // Group services by their second-level category
-        const lvl2Map = new Map();
-        lvl1Services.forEach(service => {
-          const categoryPath = Array.isArray(service?.categoryPath) ? service.categoryPath : [];
-          if (categoryPath.length > 1) {
-            const lvl2Name = categoryPath[1];
-            if (!lvl2Map.has(lvl2Name)) {
-              lvl2Map.set(lvl2Name, {
-                _id: service._serviceId || service._id || service.categoryId,
-                name: lvl2Name,
-                children: [],
-                pricingStatus: service.status || 'Active'
-              });
-            }
-          } else if (categoryPath.length === 1) {
-            // Direct service under lvl1, create a placeholder
-            const serviceName = service.serviceName || service.name || 'Service';
-            if (!lvl2Map.has(serviceName)) {
-              lvl2Map.set(serviceName, {
-                _id: service._serviceId || service._id || service.categoryId,
-                name: serviceName,
-                children: [],
-                pricingStatus: service.status || 'Active'
-              });
-            }
-          }
-        });
-        
-        setTree(Array.from(lvl2Map.values()));
+        let categories = json?.categories;
+        if (!categories) setTree([]);
+        else if (Array.isArray(categories)) setTree(categories);
+        else setTree([{ ...categories, children: categories.children || [] }]);
       } catch (e) {
         console.error("Level2SelectorPage fetchTree error", e);
-        
-        // Fallback to dummy-categories API if vendor-flow fails
-        try {
-          const fallbackUrl = `${API_BASE_URL}/api/dummy-vendors/${vendorId}/categories`;
-          const fallbackRes = await fetch(fallbackUrl);
-          if (fallbackRes.ok) {
-            const fallbackJson = await fallbackRes.json().catch(() => ({}));
-            let categories = fallbackJson?.categories;
-            if (!categories) setTree([]);
-            else if (Array.isArray(categories)) setTree(categories);
-            else setTree([{ ...categories, children: categories.children || [] }]);
-            return;
-          }
-        } catch (fallbackError) {
-          console.error("Fallback also failed:", fallbackError);
-        }
-        
-        setError(e?.message || "Failed to load services");
+        setError(e?.message || "Failed to load categories");
         setTree([]);
       } finally {
         setLoading(false);
       }
     };
     fetchTree();
-  }, [vendorId, categoryId, lvl1Id]);
+  }, [vendorId]);
 
   useEffect(() => {
     if (!vendorId || !categoryId) return;

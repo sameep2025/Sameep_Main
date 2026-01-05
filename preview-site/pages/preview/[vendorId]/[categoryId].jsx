@@ -958,51 +958,15 @@ export default function PreviewPage() {
       }
       setSetupSubcategoriesLoading(true);
       try {
-        // Use vendor-flow API to get services and extract subcategories
-        console.log("🔍 DEBUG: Fetching vendor-flow services for:", dvId, categoryId);
-        const res = await fetch(`${API_BASE_URL}/api/vendor-flow/vendor/${dvId}${categoryId ? `?categoryId=${categoryId}` : ''}`);
-        console.log("🔍 DEBUG: Vendor-flow API response status:", res.status);
-        
+        const res = await fetch(`${API_BASE_URL}/api/dummy-categories?parentId=${catId}`);
         if (res.ok) {
-          const json = await res.json();
-          console.log("🔍 DEBUG: Vendor-flow response data:", json);
-          const services = Array.isArray(json?.services) ? json.services : [];
-          console.log("🔍 DEBUG: Number of services found:", services.length);
-          
-          // Extract unique subcategories from services based on categoryPath
-          const subcategoryMap = new Map();
-          services.forEach((service, index) => {
-            console.log(`🔍 DEBUG: Service ${index}:`, service);
-            const categoryPath = Array.isArray(service?.categoryPath) ? service.categoryPath : [];
-            console.log(`🔍 DEBUG: Category path for service ${index}:`, categoryPath);
-            
-            // Try different ways to extract subcategories
-            if (categoryPath.length > 1) {
-              const subcategoryName = categoryPath[1];
-              console.log(`🔍 DEBUG: Found subcategory:`, subcategoryName);
-              if (!subcategoryMap.has(subcategoryName)) {
-                subcategoryMap.set(subcategoryName, {
-                  _id: service._serviceId || service._id || service.categoryId || `sub_${index}`,
-                  name: subcategoryName,
-                  status: service.status || 'Active'
-                });
-              }
-            } else if (categoryPath.length === 1) {
-              // If only one level, use the service name itself as subcategory
-              const serviceName = service.serviceName || service.name || `Service ${index}`;
-              console.log(`🔍 DEBUG: Using service as subcategory:`, serviceName);
-              if (!subcategoryMap.has(serviceName)) {
-                subcategoryMap.set(serviceName, {
-                  _id: service._serviceId || service._id || service.categoryId || `sub_${index}`,
-                  name: serviceName,
-                  status: service.status || 'Active'
-                });
-              }
-            }
+          const children = await res.json();
+          const childrenArr = Array.isArray(children) ? children : [];
+          // Include all subcategories - allow packages and other categories to show
+          const filteredChildren = childrenArr.filter((c) => {
+            const name = String(c.name || "").toLowerCase().trim();
+            return true; // Show all categories including packages
           });
-          
-          const filteredChildren = Array.from(subcategoryMap.values());
-          console.log("🔍 DEBUG: Final subcategories:", filteredChildren);
           setSetupSubcategories(filteredChildren);
           if (!preserveSelection) {
             const defaultSelected = {};
@@ -1028,36 +992,10 @@ export default function PreviewPage() {
             });
           }
         } else {
-          console.error("Failed to load vendor-flow services, trying fallback...");
-          // Fallback to old dummy-categories API
-          try {
-            const fallbackRes = await fetch(`${API_BASE_URL}/api/dummy-categories?parentId=${catId}`);
-            if (fallbackRes.ok) {
-              const children = await fallbackRes.json();
-              const childrenArr = Array.isArray(children) ? children : [];
-              console.log("🔍 DEBUG: Fallback - dummy-categories found:", childrenArr);
-              setSetupSubcategories(childrenArr);
-              if (!preserveSelection) {
-                const defaultSelected = {};
-                childrenArr.forEach((c) => {
-                  const id = c._id || c.id;
-                  if (id) defaultSelected[id] = true;
-                });
-                setSetupSelectedSubcategories(defaultSelected);
-              }
-            } else {
-              console.error("Fallback also failed");
-              setSetupSubcategories([]);
-              setSetupSelectedSubcategories({});
-            }
-          } catch (fallbackError) {
-            console.error("Fallback error:", fallbackError);
-            setSetupSubcategories([]);
-            setSetupSelectedSubcategories({});
-          }
+          setSetupSubcategories([]);
+          setSetupSelectedSubcategories({});
         }
-      } catch (error) {
-        console.error("Error loading vendor-flow services:", error);
+      } catch {
         setSetupSubcategories([]);
         setSetupSelectedSubcategories({});
       } finally {
@@ -8299,8 +8237,6 @@ console.log("✅ Total dummy categories count:", list.length);
             webMenu={webMenu}
             servicesNavLabel={servicesNavLabel}
             socialHandles={socialHandles}
-            vendorId={vendorId}
-            categoryId={categoryId}
           />
           <HomeSection
             businessName={vendor?.businessName || "Loading..."}

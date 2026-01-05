@@ -240,45 +240,6 @@ export default function DummyVendorCategoriesDetailPage() {
     } catch { return ''; }
   };
 
-  const parentById = useMemo(() => {
-    try {
-      const map = new Map();
-      const walk = (node, parentId = null) => {
-        if (!node) return;
-        const id = node._id ?? node.id;
-        if (id != null && parentId != null) {
-          map.set(String(id), String(parentId));
-        }
-        const kids = Array.isArray(node.children) ? node.children : [];
-        kids.forEach((ch) => walk(ch, id != null ? id : parentId));
-      };
-      (Array.isArray(tree) ? tree : []).forEach((root) => walk(root, null));
-      return map;
-    } catch { return new Map(); }
-  }, [tree]);
-
-  const isNodeActiveInherited = (nodeId) => {
-    try {
-      if (!nodeId) return false;
-      const id = String(nodeId);
-      if (Object.prototype.hasOwnProperty.call(nodeActiveMap, id)) {
-        return Boolean(nodeActiveMap[id]);
-      }
-      const visited = new Set();
-      let cur = id;
-      while (cur && !visited.has(cur)) {
-        visited.add(cur);
-        const pid = parentById.get(cur);
-        if (!pid) break;
-        if (Object.prototype.hasOwnProperty.call(nodeActiveMap, String(pid))) {
-          return Boolean(nodeActiveMap[String(pid)]);
-        }
-        cur = String(pid);
-      }
-      return false;
-    } catch { return false; }
-  };
-
   useEffect(() => {
     try {
       setVendor(null);
@@ -428,84 +389,38 @@ export default function DummyVendorCategoriesDetailPage() {
     try {
       setLoading(true);
       setError("");
+      const response = await axios.get(`${API_BASE_URL}/api/vendor-flow/vendor/${vendorId}`);
+      const flows = Array.isArray(response.data) ? response.data : [];
       
-      // First try to fetch existing flows (much faster than sync)
-      try {
-        const response = await axios.get(`${API_BASE_URL}/api/vendor-flow/vendor/${vendorId}`);
-        const data = response.data;
-        // Backend may return either an array of services or an object with services
-        const flows = Array.isArray(data)
-          ? data
-          : (Array.isArray(data?.services) ? data.services : []);
-        if (Array.isArray(flows) && flows.length > 0) {
-          setVendorFlows(flows);
-          return; // Success - no sync needed
-        }
-      } catch (fetchErr) {
-        console.log('No existing vendor flows found, will attempt sync');
-      }
-      
-      // Only sync if no existing data found
-      try {
-        // Try POST first
-        const syncResponse = await axios.post(`${API_BASE_URL}/api/vendor-flow/vendor/${vendorId}/sync${categoryId ? `?categoryId=${categoryId}` : ''}${categoryId ? '&' : '?'}force=true`);
-        setVendorFlows(Array.isArray(syncResponse.data.services) ? syncResponse.data.services : []);
-        alert(syncResponse.data.message || 'Data synced successfully!');
-      } catch (syncErr) {
-        // If POST 404 (some proxies strip method), retry with GET fallback
-        const status = syncErr?.response?.status;
-        if (status === 404) {
-          try {
-            const syncGet = await axios.get(`${API_BASE_URL}/api/vendor-flow/vendor/${vendorId}/sync${categoryId ? `?categoryId=${categoryId}` : ''}${categoryId ? '&' : '?'}force=true`);
-            setVendorFlows(Array.isArray(syncGet.data.services) ? syncGet.data.services : []);
-            alert(syncGet.data.message || 'Data synced successfully!');
-          } catch (syncGetErr) {
+      // If no flows exist, try to sync from old data
+      if (flows.length === 0) {
+        try {
+          // Try POST first
+          const syncResponse = await axios.post(`${API_BASE_URL}/api/vendor-flow/vendor/${vendorId}/sync${categoryId ? `?categoryId=${categoryId}` : ''}`);
+          setVendorFlows(Array.isArray(syncResponse.data.services) ? syncResponse.data.services : []);
+          alert(syncResponse.data.message || 'Data synced successfully!');
+        } catch (syncErr) {
+          // If POST 404 (some proxies strip method), retry with GET fallback
+          const status = syncErr?.response?.status;
+          if (status === 404) {
+            try {
+              const syncGet = await axios.get(`${API_BASE_URL}/api/vendor-flow/vendor/${vendorId}/sync${categoryId ? `?categoryId=${categoryId}` : ''}`);
+              setVendorFlows(Array.isArray(syncGet.data.services) ? syncGet.data.services : []);
+              alert(syncGet.data.message || 'Data synced successfully!');
+            } catch (syncGetErr) {
+              setVendorFlows([]);
+              setError(syncGetErr?.response?.data?.message || 'Failed to sync vendor flows');
+            }
+          } else {
             setVendorFlows([]);
-            setError('Failed to sync vendor flows');
+            setError(syncErr?.response?.data?.message || "Failed to sync vendor flows");
           }
-        } else {
-          setVendorFlows([]);
-          setError(syncErr?.response?.data?.message || "Failed to sync vendor flows");
         }
+      } else {
+        setVendorFlows(flows);
       }
     } catch (err) {
       setError(err?.response?.data?.message || "Failed to load vendor flows");
-      setVendorFlows([]);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const forceSyncVendorFlows = async () => {
-    try {
-      setLoading(true);
-      setError("");
-      
-      // Force sync with force=true
-      try {
-        // Try POST first
-        const syncResponse = await axios.post(`${API_BASE_URL}/api/vendor-flow/vendor/${vendorId}/sync${categoryId ? `?categoryId=${categoryId}` : ''}${categoryId ? '&' : '?'}force=true`);
-        setVendorFlows(Array.isArray(syncResponse.data.services) ? syncResponse.data.services : []);
-        alert(syncResponse.data.message || 'Data synced successfully!');
-      } catch (syncErr) {
-        // If POST 404 (some proxies strip method), retry with GET fallback
-        const status = syncErr?.response?.status;
-        if (status === 404) {
-          try {
-            const syncGet = await axios.get(`${API_BASE_URL}/api/vendor-flow/vendor/${vendorId}/sync${categoryId ? `?categoryId=${categoryId}` : ''}${categoryId ? '&' : '?'}force=true`);
-            setVendorFlows(Array.isArray(syncGet.data.services) ? syncGet.data.services : []);
-            alert(syncGet.data.message || 'Data synced successfully!');
-          } catch (syncGetErr) {
-            setVendorFlows([]);
-            setError('Failed to sync vendor flows');
-          }
-        } else {
-          setVendorFlows([]);
-          setError(syncErr?.response?.data?.message || "Failed to sync vendor flows");
-        }
-      }
-    } catch (err) {
-      setError(err?.response?.data?.message || "Failed to sync vendor flows");
       setVendorFlows([]);
     } finally {
       setLoading(false);
@@ -873,24 +788,9 @@ export default function DummyVendorCategoriesDetailPage() {
   };
 
   // rows from tree
-const rows = useMemo(() => tree.flatMap((root) => flattenTree(root)), [tree]);
-const maxLevels = rows.reduce((max, row) => Math.max(max, row.levels.length), 0);
-const levelHeaders = Array.from({ length: maxLevels }, (_, idx) => (idx === 0 ? "Category" : `Level ${idx + 1}`));
-
-// For new table: compute max depth from vendorFlows to match old table's dynamic columns
-  const maxFlowLevels = useMemo(() => {
-    try {
-      const maxLen = vendorFlows.reduce((max, flow) => {
-        const len = Array.isArray(flow.categoryPath) ? flow.categoryPath.length : 0;
-        return Math.max(max, len);
-      }, 0);
-      return maxLen;
-    } catch (error) {
-      console.error('Error calculating maxFlowLevels:', error);
-      return 3;
-    }
-  }, [vendorFlows]);
-  const flowLevelHeaders = Array.from({ length: maxFlowLevels }, (_, idx) => (idx === 0 ? "Category" : `Level ${idx + 1}`));
+  const rows = useMemo(() => tree.flatMap((root) => flattenTree(root)), [tree]);
+  const maxLevels = rows.reduce((max, row) => Math.max(max, row.levels.length), 0);
+  const levelHeaders = Array.from({ length: maxLevels }, (_, idx) => (idx === 0 ? "Category" : `Level ${idx + 1}`));
 
   // Map row.id -> items matching scope (ALL or linked subcategory)
   const rowMatches = useMemo(() => {
@@ -1053,27 +953,8 @@ const levelHeaders = Array.from({ length: maxLevels }, (_, idx) => (idx === 0 ? 
           },
         }
       );
-      
-      // Update local tree state immediately to reflect the saved price
-      setTree((prevTree) => {
-        const updateNodePrice = (nodes) => {
-          return nodes.map((node) => {
-            if (node._id === editingId || node.id === editingId) {
-              return { ...node, price: val };
-            }
-            if (node.children && node.children.length > 0) {
-              return { ...node, children: updateNodePrice(node.children) };
-            }
-            return node;
-          });
-        };
-        return updateNodePrice(prevTree);
-      });
-      
       setEditingId(null);
       setEditingPrice("");
-      
-      // Refresh tree data to ensure consistency
       await fetchTree();
     } catch (e) {
       alert(e?.response?.data?.message || "Failed to save price");
@@ -1437,24 +1318,6 @@ const levelHeaders = Array.from({ length: maxLevels }, (_, idx) => (idx === 0 ? 
             >
               New
             </button>
-            {activeView === 'new' && (
-              <button 
-                style={{ 
-                  padding: "6px 12px", 
-                  backgroundColor: "#f59e0b", 
-                  color: "white", 
-                  border: "none", 
-                  borderRadius: "4px", 
-                  cursor: "pointer",
-                  fontSize: "12px"
-                }}
-              onClick={forceSyncVendorFlows}
-              disabled={loading}
-              title="Force refresh data from backend (may take a few minutes)"
-            >
-              {loading ? 'Syncing...' : 'Refresh Data'}
-            </button>
-            )}
           </div>
         </div>
       {loading ? (
@@ -1822,9 +1685,9 @@ const levelHeaders = Array.from({ length: maxLevels }, (_, idx) => (idx === 0 ? 
         <table style={{ borderCollapse: "collapse", width: "100%" }}>
           <thead>
             <tr>
-              {flowLevelHeaders.map((hdr, i) => (
-                <th key={i} style={{ border: "1px solid #ccc", padding: "8px" }}>{hdr}</th>
-              ))}
+              <th style={{ border: "1px solid #ccc", padding: "8px" }}>Category</th>
+              <th style={{ border: "1px solid #ccc", padding: "8px" }}>Level 2</th>
+              <th style={{ border: "1px solid #ccc", padding: "8px" }}>Level 3</th>
               <th style={{ border: "1px solid #ccc", padding: "8px" }}>Attributes</th>
               <th style={{ border: "1px solid #ccc", padding: "8px" }}>Price</th>
               <th style={{ border: "1px solid #ccc", padding: "8px" }}>Terms</th>
@@ -1834,15 +1697,17 @@ const levelHeaders = Array.from({ length: maxLevels }, (_, idx) => (idx === 0 ? 
             </tr>
           </thead>
           <tbody>
-  {vendorFlows.map((flow) => {
-    const path = Array.isArray(flow.categoryPath) ? flow.categoryPath : [];
-    return (
-      <tr key={flow._serviceId || flow._id}>
-        {flowLevelHeaders.map((_, i) => (
-          <td key={i} style={{ border: "1px solid #ccc", padding: "8px" }}>
-            {(i < path.length) ? path[i] : '-'}
-          </td>
-        ))}
+  {vendorFlows.map((flow) => (
+    <tr key={flow._serviceId || flow._id}>
+      <td style={{ border: "1px solid #ccc", padding: "8px" }}>
+        {(Array.isArray(flow.categoryPath) && flow.categoryPath[0]) || '-'}
+      </td>
+      <td style={{ border: "1px solid #ccc", padding: "8px" }}>
+        {(Array.isArray(flow.categoryPath) && flow.categoryPath[1]) || '-'}
+      </td>
+      <td style={{ border: "1px solid #ccc", padding: "8px" }}>
+        {(Array.isArray(flow.categoryPath) && flow.categoryPath[2]) || '-'}
+      </td>
       <td style={{ border: "1px solid #ccc", padding: "8px" }}>
         {flow.attributes && typeof flow.attributes === 'object'
           ? Object.entries(flow.attributes).map(([key, value]) => (
@@ -1881,33 +1746,8 @@ const levelHeaders = Array.from({ length: maxLevels }, (_, idx) => (idx === 0 ? 
           value={
             (() => {
               const sid = String(flow._serviceId || flow._id || '');
-              const leafFromIds = (() => {
-                try {
-                  const arr = Array.isArray(flow.categoryIds) ? flow.categoryIds : [];
-                  const last = arr.length ? arr[arr.length - 1] : null;
-                  if (!last) return '';
-                  if (typeof last === 'string' || typeof last === 'number') return String(last);
-                  if (last && typeof last === 'object') {
-                    if (last.$oid) return String(last.$oid);
-                    if (last.oid) return String(last.oid);
-                    if (last._id) return String(last._id);
-                    if (last.id) return String(last.id);
-                  }
-                  return String(last || '');
-                } catch { return ''; }
-              })();
-              const leafFromPath = (() => {
-                try {
-                  const key = Array.isArray(flow.categoryPath) ? flow.categoryPath.filter(Boolean).join(' / ') : '';
-                  if (!key) return '';
-                  const id = leafIdByPath.get(key);
-                  return id ? String(id) : '';
-                } catch { return ''; }
-              })();
-              const resolved = resolveFlowNodeId(flow) || '';
-              const preferred = leafFromIds || leafFromPath || resolved || sid;
-              if (preferred) {
-                return isNodeActiveInherited(preferred) ? 'ACTIVE' : 'INACTIVE';
+              if (sid && Object.prototype.hasOwnProperty.call(nodeActiveMap, sid)) {
+                return nodeActiveMap[sid] ? 'ACTIVE' : 'INACTIVE';
               }
               const raw = flow.status ? String(flow.status).toUpperCase() : '';
               return raw === 'ACTIVE' ? 'ACTIVE' : 'INACTIVE';
@@ -1956,8 +1796,7 @@ const levelHeaders = Array.from({ length: maxLevels }, (_, idx) => (idx === 0 ? 
         </button>
       </td>
     </tr>
-    );
-  })}
+  ))}
 </tbody>
         </table>
         )

@@ -34,8 +34,6 @@ export default function TopNavBar({
   webMenu = null,
   servicesNavLabel = "Our Services",
   socialHandles = [],
-  vendorId,
-  categoryId,
 }) {
   const [mobile, setMobile] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -43,64 +41,6 @@ export default function TopNavBar({
   const [servicesOpen, setServicesOpen] = useState(false);
   const [guestLogoutHover, setGuestLogoutHover] = useState(false);
   const [vendorLogoutHover, setVendorLogoutHover] = useState(false);
-  const [vendorFlows, setVendorFlows] = useState([]);
-  const [vendorFlowsLoading, setVendorFlowsLoading] = useState(false);
-
-  // Fetch vendor flows using the same API as DummyVendorCategoriesDetailPage
-  useEffect(() => {
-    const fetchVendorFlows = async () => {
-      console.log('fetchVendorFlows called with vendorId:', vendorId, 'categoryId:', categoryId);
-      
-      if (!vendorId) {
-        console.log('No vendorId provided, skipping fetch');
-        return;
-      }
-      try {
-        setVendorFlowsLoading(true);
-        
-        // Always try to sync with force=true to get the latest data with all levels
-        try {
-          // Try POST first
-          const syncResponse = await fetch(`${API_BASE_URL}/api/vendor-flow/vendor/${vendorId}/sync${categoryId ? `?categoryId=${categoryId}` : ''}${categoryId ? '&' : '?'}force=true`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' }
-          });
-          const syncData = await syncResponse.json();
-          console.log('Vendor flows API response:', syncData);
-          setVendorFlows(Array.isArray(syncData.services) ? syncData.services : []);
-        } catch (syncErr) {
-          // If POST 404 (some proxies strip method), retry with GET fallback
-          try {
-            const syncGet = await fetch(`${API_BASE_URL}/api/vendor-flow/vendor/${vendorId}/sync${categoryId ? `?categoryId=${categoryId}` : ''}${categoryId ? '&' : '?'}force=true`);
-            const syncGetData = await syncGet.json();
-            setVendorFlows(Array.isArray(syncGetData.services) ? syncGetData.services : []);
-          } catch (syncGetErr) {
-            // If sync fails, try to fetch existing flows
-            try {
-              const response = await fetch(`${API_BASE_URL}/api/vendor-flow/vendor/${vendorId}`);
-              const vendorFlowDoc = await response.json();
-              
-              // Extract services array from the vendor flow document
-              let flows = [];
-              if (vendorFlowDoc && vendorFlowDoc.services && Array.isArray(vendorFlowDoc.services)) {
-                flows = vendorFlowDoc.services;
-              }
-              
-              setVendorFlows(flows);
-            } catch (fetchErr) {
-              setVendorFlows([]);
-            }
-          }
-        }
-      } catch (err) {
-        setVendorFlows([]);
-      } finally {
-        setVendorFlowsLoading(false);
-      }
-    };
-
-    fetchVendorFlows();
-  }, [vendorId, categoryId]);
 
   const isVendor = identityLoggedIn && identityRole === "vendor";
   const avatarLetter = (() => {
@@ -133,9 +73,6 @@ export default function TopNavBar({
 
   const activeServicesForMyPrices = useMemo(() => {
     try {
-      // Use vendor flows data instead of categoryTree
-      if (vendorFlowsLoading) return effectiveServices;
-      
       const nodeMap = (vendor && vendor.nodePricingStatus && typeof vendor.nodePricingStatus === "object")
         ? vendor.nodePricingStatus
         : {};
@@ -147,93 +84,52 @@ export default function TopNavBar({
       const out = [];
       if (hasPackages) out.push("Packages");
 
-      // If vendor flows is empty, fall back to original categoryTree logic
-      if (vendorFlows.length === 0 && categoryTree) {
-        console.log('Vendor flows empty for active services, falling back to categoryTree logic');
-        const children = Array.isArray(categoryTree?.children) ? categoryTree.children : [];
-        const isActiveInSubtree = (node) => {
-          try {
-            const ids = [];
-            const visit = (cur) => {
-              if (!cur) return;
-              const id = String(cur?._id || cur?.id || "");
-              if (id) ids.push(id);
-              const kids = Array.isArray(cur?.children) ? cur.children : [];
-              kids.forEach(visit);
-            };
-            visit(node);
-            return ids.some((id) => String(nodeMap[id] || "").trim().toLowerCase() === "active");
-          } catch {
-            return false;
-          }
-        };
+      const children = Array.isArray(categoryTree?.children) ? categoryTree.children : [];
+      const isActiveInSubtree = (node) => {
+        try {
+          const ids = [];
+          const visit = (cur) => {
+            if (!cur) return;
+            const id = String(cur?._id || cur?.id || "");
+            if (id) ids.push(id);
+            const kids = Array.isArray(cur?.children) ? cur.children : [];
+            kids.forEach(visit);
+          };
+          visit(node);
+          return ids.some((id) => String(nodeMap[id] || "").trim().toLowerCase() === "active");
+        } catch {
+          return false;
+        }
+      };
 
-        children.forEach((n) => {
-          if (!isActiveInSubtree(n)) return;
-          const name = (n && typeof n.name === "string" ? n.name.trim() : "") || "";
-          if (name) out.push(name);
-        });
-      } else {
-        // Extract service names from vendor flows and check active status
-        vendorFlows.forEach((flow) => {
-          const serviceName = flow?.serviceName || flow?.name || '';
-          const serviceId = flow?._serviceId || flow?._id || flow?.serviceId || flow?.categoryId;
-          
-          if (!serviceName) return;
-          
-          // Check if this service is active based on nodePricingStatus
-          const isActive = serviceId && String(nodeMap[serviceId] || "").trim().toLowerCase() === "active";
-          
-          // If no nodePricingStatus configured for this service, treat as active
-          if (!serviceId || !nodeMap[serviceId] || isActive) {
-            out.push(serviceName.trim());
-          }
-        });
-      }
+      children.forEach((n) => {
+        if (!isActiveInSubtree(n)) return;
+        const name = (n && typeof n.name === "string" ? n.name.trim() : "") || "";
+        if (name) out.push(name);
+      });
 
       return out;
     } catch {
       return effectiveServices;
     }
-  }, [vendor, vendorFlows, vendorFlowsLoading, hasPackages, effectiveServices, categoryTree]);
+  }, [vendor, categoryTree, hasPackages, effectiveServices]);
 
   const firstLevelSubcategoryLabels = useMemo(() => {
     try {
-      // Use vendor flows data instead of categoryTree
-      if (vendorFlowsLoading) return [];
-      
+      const children = Array.isArray(categoryTree?.children)
+        ? categoryTree.children
+        : [];
       const out = [];
       const seen = new Set();
-      
-      console.log('Processing vendor flows:', vendorFlows);
-      
-      // If vendor flows is empty, fall back to original categoryTree logic
-      if (vendorFlows.length === 0 && categoryTree) {
-        console.log('Vendor flows empty, falling back to categoryTree logic');
-        const children = Array.isArray(categoryTree?.children) ? categoryTree.children : [];
-        children.forEach((n) => {
-          const name = (n && typeof n.name === "string" ? n.name.trim() : "") || "";
-          const key = name.toLowerCase();
-          if (name && !seen.has(key)) {
-            seen.add(key);
-            out.push(name);
-          }
-        });
-      } else {
-        // Use vendor flows
-        vendorFlows.forEach((flow) => {
-          const serviceName = flow?.serviceName || flow?.name || '';
-          const name = String(serviceName).trim();
-          const key = name.toLowerCase();
-          
-          console.log('Processing flow:', { serviceName, name, key });
-          
-          if (name && !seen.has(key)) {
-            seen.add(key);
-            out.push(name);
-          }
-        });
-      }
+      children.forEach((n) => {
+        const name =
+          (n && typeof n.name === "string" ? n.name.trim() : "") || "";
+        const key = name.toLowerCase();
+        if (name && !seen.has(key)) {
+          seen.add(key);
+          out.push(name);
+        }
+      });
 
       if (hasPackages) {
         const pkgKey = "packages";
@@ -242,12 +138,11 @@ export default function TopNavBar({
         }
       }
 
-      console.log('Final firstLevelSubcategoryLabels:', out);
       return out;
     } catch {
       return [];
     }
-  }, [vendorFlows, vendorFlowsLoading, hasPackages, categoryTree]);
+  }, [categoryTree, hasPackages]);
 
   const scrollToSection = (id) => {
     try {

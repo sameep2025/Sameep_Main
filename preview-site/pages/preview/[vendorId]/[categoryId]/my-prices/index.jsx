@@ -52,87 +52,21 @@ export default function MyPricesEntryPage() {
       try {
         setLoading(true);
         setError("");
-        
-        // Use vendor-flow API to get services
-        const url = `${API_BASE_URL}/api/vendor-flow/vendor/${vendorId}${categoryId ? `?categoryId=${categoryId}` : ''}`;
+        const url = `${API_BASE_URL}/api/dummy-vendors/${vendorId}/categories`;
         const res = await fetch(url);
-        
-        if (!res.ok) {
-          console.log("Vendor-flow API failed, trying fallback...");
-          throw new Error("Vendor-flow API failed");
-        }
-        
+        if (!res.ok) throw new Error("Failed to load categories");
         const json = await res.json().catch(() => ({}));
-        // VendorFlow GET returns an array; support both shapes (array or {services})
-        const services = Array.isArray(json) ? json : (Array.isArray(json?.services) ? json.services : []);
-        
-        if (services.length === 0) {
-          console.log("No services found, trying fallback...");
-          throw new Error("No services found");
+        const root = Array.isArray(json?.categories) ? json.categories[0] : json?.categories || null;
+        if (!root) {
+          setLvl1Nodes([]);
+          return;
         }
-        
-        // Build unique Level-1 labels from services.categoryPath[0]
-        const categories = [];
-        const seen = new Set();
-        (services || []).forEach((service) => {
-          const cp = Array.isArray(service?.categoryPath) ? service.categoryPath : [];
-          const lvl1 = cp.length ? String(cp[0]).trim() : '';
-          if (!lvl1) return;
-          const key = lvl1.toLowerCase();
-          if (seen.has(key)) return;
-          seen.add(key);
-          categories.push({ _id: key, name: lvl1, children: [] });
-        });
-        
-        console.log("Created categories:", categories);
-        setLvl1Nodes(categories);
-        
+        const kids = Array.isArray(root.children) ? root.children : [];
+        setLvl1Nodes(kids);
       } catch (e) {
-        console.error("Primary approach failed, using fallback:", e);
-        
-        // Fallback to dummy-categories API
-        try {
-          console.log("Trying fallback to dummy-categories API...");
-          const fallbackUrl = `${API_BASE_URL}/api/dummy-vendors/${vendorId}/categories/${categoryId}`;
-          const fallbackRes = await fetch(fallbackUrl);
-          if (fallbackRes.ok) {
-            const fallbackJson = await fallbackRes.json().catch(() => ({}));
-            console.log("Fallback API response:", fallbackJson);
-            
-            // Try to get categories from different possible structures
-            let categories = [];
-            
-            // Check if categories is directly an array
-            if (Array.isArray(fallbackJson?.categories)) {
-              categories = fallbackJson.categories;
-            }
-            // Check if categories is an object with a children array
-            else if (fallbackJson?.categories?.children && Array.isArray(fallbackJson.categories.children)) {
-              categories = fallbackJson.categories.children;
-            }
-            // Check if there's a direct categories array at root
-            else if (Array.isArray(fallbackJson)) {
-              categories = fallbackJson;
-            }
-            
-            console.log("Extracted categories:", categories);
-            
-            if (categories.length > 0) {
-              setLvl1Nodes(categories);
-              return;
-            }
-          }
-        } catch (fallbackError) {
-          console.error("Fallback also failed:", fallbackError);
-        }
-        
-        // Last resort - create dummy categories
-        setLvl1Nodes([
-          { _id: 'dummy1', name: 'Services', children: [] },
-          { _id: 'dummy2', name: 'Products', children: [] }
-        ]);
-        
-        setError("Using fallback categories");
+        console.error("MyPricesEntryPage fetchTree error", e);
+        setError(e?.message || "Failed to load categories");
+        setLvl1Nodes([]);
       } finally {
         setLoading(false);
       }
@@ -159,9 +93,9 @@ export default function MyPricesEntryPage() {
   const handleOpenLvl1 = (node) => {
     try {
       if (!vendorId || !categoryId || !node) return;
-      const label = node.name || node._id || node.id;
-      if (!label) return;
-      router.push(`/preview/${vendorId}/${categoryId}/my-prices/${encodeURIComponent(String(label))}`);
+      const id = node._id || node.id;
+      if (!id) return;
+      router.push(`/preview/${vendorId}/${categoryId}/my-prices/${id}`);
     } catch {}
   };
 
