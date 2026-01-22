@@ -1,0 +1,72 @@
+import React from "react";
+import { useNavigate } from "react-router-dom";
+import API_BASE_URL from "../config";
+
+function DummyCategoryCard({ category, onEdit, onDelete }) {
+  const navigate = useNavigate();
+
+  const handleOpen = () => {
+    navigate(`/dummy-categories/${category._id}`);
+  };
+
+  const termsList = category.terms
+    ? category.terms.split(",").map((term, index) => <li key={index}>{term.trim()}</li>)
+    : null;
+
+  const resolvedImageUrl = (() => {
+  const src = category?.imageUrl || category?.iconUrl || "";
+  if (!src) return "";
+
+  // If already a full URL → encode spaces & return
+  if (src.startsWith("http://") || src.startsWith("https://")) {
+    return encodeURI(src).replace(/\+/g, "%2B");
+
+  }
+
+  // If relative path → build full path + encode
+  return encodeURI(`${API_BASE_URL}${src}`);
+})();
+
+
+  return (
+    <div className="card" style={{ borderRadius: "8px", background: "#fff", color: "#333", padding: "10px", width: "220px", boxShadow: "0 4px 8px rgba(0,0,0,0.1)" }}>
+      {resolvedImageUrl && (
+        <img
+          src={resolvedImageUrl}
+          alt={category.name}
+          style={{ width: "100%", height: "140px", objectFit: "cover", borderRadius: "6px" }}
+        />
+      )}
+
+      <h3 style={{ marginTop: "10px", color: "#00AEEF" }}>{category.name}</h3>
+
+      {category.price && (
+        <p style={{ color: "#555", margin: "4px 0" }}>Price: ₹{category.price}</p>
+      )}
+
+
+
+      {termsList && (
+        <div style={{ color: "#555", margin: "4px 0" }}>
+          <ul style={{ paddingLeft: "20px", margin: "4px 0" }}>{termsList}</ul>
+        </div>
+      )}
+
+      <div style={{ display: "flex", justifyContent: "space-between", marginTop: "8px" }}>
+        <button onClick={handleOpen} title="Open Subcategories" style={{ cursor: "pointer", background: "none", border: "1px solid #000", borderRadius: "4px", padding: "4px 8px", color: "#000", fontWeight: "bold" }}>
+          ➡
+        </button>
+
+        <button onClick={() => onEdit && onEdit(category)} title="Edit" style={{ cursor: "pointer", background: "none", border: "none", color: "#00AEEF", fontSize: "16px" }}>
+          ✏️
+        </button>
+
+        <button onClick={() => onDelete && onDelete(category)} title="Delete" style={{ cursor: "pointer", background: "none", border: "none", color: "#00AEEF", fontSize: "16px" }}>
+          🗑️
+        </button>
+      </div>
+    </div>
+  );
+}
+
+export default DummyCategoryCard;

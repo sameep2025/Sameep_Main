@@ -1,0 +1,7 @@
+
+{
+  "scripts": {
+    "dev:harish": "cd Harishpreview-site && npm run dev -p 3001"
+  }
+}
+

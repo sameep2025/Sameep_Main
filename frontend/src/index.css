@@ -1,0 +1,13 @@
+body {
+  font-family: 'Poppins', sans-serif;
+  background-color: #fff; /* White background */
+  color: #111;            /* Default text black */
+  margin: 0;
+  padding: 0;
+}
+
+
+code {
+  font-family: source-code-pro, Menlo, Monaco, Consolas, 'Courier New',
+    monospace;
+}
