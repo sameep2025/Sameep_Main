@@ -2,10 +2,16 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useParams } from "react-router-dom";
 import axios from "axios";
 import API_BASE_URL, { PREVIEW_BASE_URL, NIKS_PREVIEW_BASE_URL } from "../config";
-
+import { openPreviewByCategoryId } from "../utils/preview";
 const normTermsKey = (s) => String(s || "").replace(/\s+/g, " ").trim();
 
 const norm = (s) => String(s || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+
+
+
+
+
+
 
 function flattenTree(node, rows = [], parentLevels = [], parentIds = []) {
   if (!node) return rows;
@@ -1083,6 +1089,59 @@ export default function DummyVendorCategoriesDetailPage() {
           >
             NiksPreview
           </button>
+
+          
+
+
+<button
+ style={{ padding: '6px 10px', borderRadius: 12, border: 'none', background: '#35d3df', color: '#fff' }}
+  className="btn primary"
+  onClick={async () => {
+    if (!previewCategoryId || !vendorId) return;
+
+    const SPECIAL_CATEGORY_ID = "69116cd69229b2565c656bcd";
+
+    // 👉 CASE 1: Open 3000 (simple preview)
+    if (previewCategoryId === SPECIAL_CATEGORY_ID) {
+      const PREVIEW_3000 =
+        process.env.REACT_APP_HARISH_PREVIEW_BASE_URL ||
+        "http://localhost:3000";
+
+      window.open(PREVIEW_3000, "_blank", "noopener,noreferrer");
+      return;
+    }
+
+    // 👉 CASE 2: Open 4000 (with params)
+  
+
+  
+
+    const PREVIEW_4000 =
+      process.env.NEXT_PUBLIC_HARISH_PREVIEW_BASE_URL ||
+      "http://localhost:4000";
+
+    const url =
+      `${PREVIEW_4000}/` +
+      `?vendorId=${vendorId}` +
+      `&rootCategoryId=${previewCategoryId}`  
+      // `&vendorName=${encodeURIComponent(vendorName)}`;
+
+    // popup-safe approach
+    const win = window.open("about:blank", "_blank");
+    if (win) {
+      win.location.href = url;
+    }
+  }}
+  disabled={!previewCategoryId}
+>
+  Harish Preview
+</button>
+
+
+
+
+
+
         </div>
       </div>
       <div style={{ height: 4 }} />

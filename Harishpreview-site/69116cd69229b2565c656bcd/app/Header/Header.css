@@ -1,0 +1,131 @@
+.custom-navbar {
+  background: linear-gradient(90deg, #0d0d0d, #3d0066);
+  padding: 12px 20px;
+  box-shadow: 0px 4px 12px rgba(128,0,255,0.2);
+}
+.nav-link:hover {
+  color: #b44cff !important;
+  transform: translateY(-2px);
+}
+
+.login-btn {
+  padding: 6px 14px;
+  border-radius: 6px;
+  background: #b44cff;
+  color: white !important;
+  font-weight: 600;
+  transition: 0.3s ease-in-out;
+}
+
+.login-btn:hover {
+  background: #7d00cc;
+}
+
+.dropdown-menu {
+  background-color: #15001a;
+  border: 1px solid #4a007a;
+  box-shadow: 0px 4px 12px rgba(128,0,255,0.3);
+}
+
+.dropdown-item {
+  color: #e7d9ff !important;
+  transition: 0.3s;
+}
+
+.dropdown-item:hover {
+  background-color: #2a0040;
+}
+
+.navbar-toggler {
+  border-color: #e7d9ff;
+}
+
+.custom-navbar {
+  background: linear-gradient(90deg, #0d0d0d, #3d0066);
+  padding: 22px 30px;
+  box-shadow: 0px 4px 12px rgba(128,0,255,0.2);
+}
+
+.navbar-brand {
+  white-space: normal !important;
+  max-width: 60%;
+  overflow-wrap: break-word;
+  color: #E7D9FF !important;
+  font-size: 26px; 
+  letter-spacing: 0.7px;
+  font-weight: 700;
+}
+
+.nav-link {
+  color: #d9c2ff !important;
+  margin-left: 22px;
+  font-size: 18px;  
+  transition: 0.3s ease;
+}
+
+.navbar-toggler-icon {
+  filter: invert(1);
+  width: 30px;
+  height: 30px; 
+}
+
+
+@media (max-width: 992px) {
+
+  .navbar-brand {
+    font-size: 20px;
+    width: auto !important;
+    text-align: left !important;
+  }
+
+  .navbar-toggler {
+    margin-left: auto !important;
+    margin-right: 0 !important;
+  }
+
+  .navbar-nav .nav-item {
+    margin: 8px 0;
+  }
+
+  .nav-link {
+    font-size: 18px;
+    padding: 10px 0;
+  }
+
+  .dropdown-menu {
+    background-color: #222;
+    width: 100%;
+    border-radius: 0;
+  }
+
+  .dropdown-item {
+    padding: 12px 16px;
+  }
+
+  .login-btn {
+    width: 100%;
+    text-align: center;
+    margin-top: 10px;
+  }
+}
+@media (max-width: 576px) {
+  
+  .navbar-brand {
+    font-size: 18px;
+  }
+
+  .navbar-toggler {
+    margin-left: auto !important;
+  }
+
+  .nav-link {
+    font-size: 16px;
+  }
+
+  .login-btn {
+    font-size: 15px;
+    padding: 8px;
+  }
+}
+
+

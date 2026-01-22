@@ -1,0 +1,176 @@
+/* =========================
+   PAGE GRID – FULL SCREEN
+========================= */
+.ws-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);   /* ⭐ 3 CARDS PER ROW */
+  gap: 32px;
+  padding: 80px 64px;
+  background: #0a0a0d;
+  width: 100vw;
+  box-sizing: border-box;
+}
+
+/* =========================
+   CARD
+========================= */
+.pkg-card {
+  background: linear-gradient(180deg, #1a0b22 0%, #2a0044 100%);
+  border-radius: 22px;
+  padding: 22px;
+
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+
+  box-shadow: 0 10px 28px rgba(140, 60, 220, 0.28);
+  transition: transform 0.25s ease, box-shadow 0.25s ease;
+}
+
+.pkg-card:hover {
+  transform: translateY(-6px);
+  box-shadow: 0 16px 36px rgba(160, 80, 240, 0.45);
+}
+
+/* =========================
+   TITLE
+========================= */
+.pkg-title {
+  font-size: 24px;
+  font-weight: 800;
+  color: #efe7ff;
+  margin-bottom: 12px;
+}
+
+/* =========================
+   IMAGE
+========================= */
+.pkg-image img {
+  width: 100%;
+  height: 190px;
+  border-radius: 16px;
+  object-fit: cover;
+  margin-bottom: 14px;
+}
+
+/* =========================
+   PRICE
+========================= */
+.pkg-price {
+  font-size: 30px;
+  font-weight: 800;
+  color: #25ffb4;
+  margin-bottom: 10px;
+}
+
+/* =========================
+   SUBHEAD
+========================= */
+.pkg-subhead {
+  font-size: 14px;
+  font-weight: 600;
+  color: #cbb8f9;
+  margin-bottom: 10px;
+}
+
+/* =========================
+   CHIPS
+========================= */
+.pkg-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.pkg-chip {
+  padding: 8px 14px;
+  border-radius: 999px;
+  border: 1px solid rgba(180, 76, 255, 0.6);
+  background: transparent;
+  font-size: 14px;
+  font-weight: 600;
+  color: #e8d8ff;
+  cursor: pointer;
+  transition: 0.25s ease;
+}
+
+.pkg-chip:hover {
+  background: rgba(180, 76, 255, 0.2);
+}
+
+.pkg-chip.active {
+  background: linear-gradient(135deg, #9b4dff, #6f00cc);
+  color: #ffffff;
+  border-color: transparent;
+}
+
+/* =========================
+   LIST (NO SCROLL)
+========================= */
+.pkg-list {
+  padding-left: 18px;
+  font-size: 14px;
+  color: #d6c6ff;
+  margin-bottom: 18px;
+}
+
+.pkg-list li {
+  margin-bottom: 6px;
+}
+
+/* =========================
+   BUTTON
+========================= */
+.pkg-btn {
+  margin-top: auto;
+  width: 100%;
+  background: linear-gradient(135deg, #ffb424, #ff9300);
+  border: none;
+  padding: 14px;
+  border-radius: 26px;
+  font-size: 16px;
+  font-weight: 800;
+  color: #2a0036;
+  cursor: pointer;
+  transition: 0.25s ease;
+}
+
+.pkg-btn:hover {
+  background: linear-gradient(135deg, #ffd06a, #ff9f1c);
+}
+
+/* =========================
+   RESPONSIVE
+========================= */
+
+/* Laptop */
+@media (max-width: 1200px) {
+  .ws-grid {
+    grid-template-columns: repeat(2, 1fr);
+    padding: 64px 40px;
+  }
+}
+
+/* Tablet */
+@media (max-width: 768px) {
+  .ws-grid {
+    grid-template-columns: 1fr;
+    padding: 40px 20px;
+  }
+}
+
+/* Mobile */
+@media (max-width: 480px) {
+  .pkg-title {
+    font-size: 22px;
+  }
+
+  .pkg-price {
+    font-size: 26px;
+  }
+
+  .pkg-btn {
+    font-size: 15px;
+  }
+}

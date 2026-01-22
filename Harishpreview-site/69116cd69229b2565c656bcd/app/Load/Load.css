@@ -1,0 +1,40 @@
+.loader-wrapper {
+  position: fixed;
+  inset: 0;
+  background: var(--bg);      /* Cream background */
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  z-index: 999999;
+}
+
+/* Spinner */
+.spinner {
+  width: 70px;
+  height: 70px;
+  border: 5px solid var(--primary);   /* Sage border */
+  border-top-color: var(--accent);    /* Herbal animation */
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+}
+
+.loader-text {
+  margin-top: 20px;
+  font-size: 24px;
+  font-weight: 700;
+  color: var(--dark);
+  letter-spacing: 2px;
+  animation: fadeIn 1.5s ease;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes fadeIn {
+  0% { opacity: 0; }
+  100% { opacity: 1; }
+}

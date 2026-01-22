@@ -1,8 +1,7 @@
+
 {
-  "dependencies": {
-    "@react-google-maps/api": "^2.20.7",
-    "axios": "^1.12.2",
-    "leaflet": "^1.9.4",
-    "react-leaflet": "^5.0.0"
+  "scripts": {
+    "dev:harish": "cd Harishpreview-site && npm run dev -p 3001"
   }
 }
+

@@ -1,0 +1,155 @@
+
+.contact-wrapper {
+  display: flex;
+  justify-content: space-between;
+  padding: 80px 60px;
+  background: #0a0a0d;
+  flex-wrap: wrap;
+  gap: 40px;
+}
+
+
+.contact-left {
+  flex: 1;
+  min-width: 300px;
+}
+
+.contact-title {
+  font-size: 42px;
+  color: #ffffff;
+  font-weight: 800;
+  margin-bottom: 15px;
+}
+
+.contact-desc {
+  font-size: 18px;
+  color: #cbb8f9;
+  line-height: 1.6;
+  margin-bottom: 25px;
+}
+
+.contact-info p {
+  color: #e8d8ff;
+  font-size: 17px;
+  margin-bottom: 10px;
+}
+
+
+.contact-form {
+  flex: 1;
+  min-width: 300px;
+  background: linear-gradient(145deg, #1a0b22, #2e0048);
+  padding: 35px;
+  border-radius: 22px;
+  box-shadow: 0px 10px 25px rgba(180, 76, 255, 0.25);
+}
+
+.form-group {
+  position: relative;
+  margin-bottom: 28px;
+}
+
+.form-group input {
+  width: 100%;
+  padding: 14px 14px;
+  background: #120016;
+  border: 1px solid #7a00cc;
+  border-radius: 10px;
+  color: #e8d8ff;
+  font-size: 16px;
+  outline: none;
+  transition: 0.3s;
+}
+
+.form-group label {
+  position: absolute;
+  left: 15px;
+  top: 14px;
+  color: #cbb8f9;
+  font-size: 16px;
+  pointer-events: none;
+  transition: 0.3s;
+}
+
+.form-group input:focus + label,
+.form-group input:valid + label {
+  top: -10px;
+  left: 12px;
+  font-size: 13px;
+  background: #2e0048;
+  padding: 0 6px;
+  color: #b44cff;
+}
+
+.contact-btn {
+  width: 100%;
+  padding: 14px;
+  background: linear-gradient(135deg, #b44cff, #7a00cc);
+  border: none;
+  color: #fff;
+  font-size: 18px;
+  border-radius: 40px;
+  cursor: pointer;
+  transition: 0.3s ease;
+}
+
+.contact-btn:hover {
+  background: linear-gradient(135deg, #d77bff, #9000ff);
+  box-shadow: 0px 8px 25px rgba(180, 76, 255, 0.4);
+}
+
+@media (max-width: 992px) {
+  .contact-wrapper {
+    padding: 60px 30px;
+    gap: 30px;
+  }
+
+  .contact-title {
+    font-size: 34px;
+  }
+
+  .contact-form {
+    padding: 28px;
+  }
+}
+
+@media (max-width: 768px) {
+  .contact-wrapper {
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+    padding: 50px 20px;
+  }
+
+  .contact-left,
+  .contact-form {
+    width: 100%;
+    max-width: 500px;
+  }
+}
+
+@media (max-width: 480px) {
+  .contact-wrapper {
+    padding: 35px 15px;
+  }
+
+  .contact-title {
+    font-size: 28px;
+  }
+
+  .contact-form {
+    width: 100%;
+    min-width: unset;
+    padding: 20px;
+  }
+
+  .form-group input {
+    font-size: 15px;
+    padding: 12px;
+  }
+
+  .contact-btn {
+    font-size: 16px;
+    padding: 12px;
+  }
+}

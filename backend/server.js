@@ -8,6 +8,15 @@ const qs = require("querystring");
 const axios = require('axios');
 
 const connectDB = require('./config/db');
+
+// 🔹 IMPORTANT: load model ONCE before routes
+require("./models/VendorPriceNode");
+
+
+const vendorPriceNodeRoutes = require(
+  path.resolve(__dirname, "routes", "vendorPriceNodeRoutes")
+);
+
 const categoryRoutes = require('./routes/categoryRoutes');
 const vendorRoutes = require('./routes/vendorRoutes');
 const masterRoutes = require('./routes/masterRoutes');
@@ -165,6 +174,8 @@ app.use('/api/google/places', googlePlacesRoutes);
 app.use('/api/setup-progress', setupProgressRoutes);
 app.use('/api/vendor-flow', vendorFlowRoutes);
 app.use('/', authRoutes);
+// Vendor price nodes
+app.use('/api/vendor-price-nodes', vendorPriceNodeRoutes);
 
 // Debug: DB connection info
 app.get('/api/_debug/db', (req, res) => {
