@@ -80,8 +80,26 @@ function getTemplateStatusTone(status) {
   return "idle";
 }
 
+function isDevMode() {
+  return process.env.NODE_ENV !== "production";
+}
+
+function debugTestSend(message, data) {
+  if (isDevMode()) {
+    console.debug(message, data);
+  }
+}
+
+function normalizePhoneNumber(value) {
+  const cleaned = String(value || "").trim().replace(/[\s()-]/g, "");
+  if (!cleaned) return "";
+  const digits = cleaned.replace(/^\+/, "");
+  if (!/^\d+$/.test(digits)) return cleaned;
+  return cleaned.startsWith("+") ? `+${digits}` : `+${digits}`;
+}
+
 function isValidInternationalPhone(value) {
-  return /^\+[1-9]\d{7,14}$/.test(String(value || "").trim().replace(/[\s()-]/g, ""));
+  return /^\+?[1-9]\d{7,14}$/.test(value);
 }
 
 function getWhatsappConnectBaseUrl() {
@@ -107,8 +125,9 @@ export default function WhatsappBusinessDashboard({ vendorId }) {
   const [templateLibrary, setTemplateLibrary] = useState([]);
   const [selectedTemplate, setSelectedTemplate] = useState(null);
   const [testPanelOpen, setTestPanelOpen] = useState(false);
-  const [testRecipient, setTestRecipient] = useState("");
+  const [recipientPhoneNumber, setRecipientPhoneNumber] = useState("");
   const [testResult, setTestResult] = useState("");
+  const [testSendError, setTestSendError] = useState("");
   const [loading, setLoading] = useState(true);
   const [templateLoading, setTemplateLoading] = useState(false);
   const [actionLoading, setActionLoading] = useState("");
@@ -247,8 +266,9 @@ export default function WhatsappBusinessDashboard({ vendorId }) {
 
       setSelectedTemplate(json.data || null);
       setTestPanelOpen(false);
-      setTestRecipient("");
+      setRecipientPhoneNumber("");
       setTestResult("");
+      setTestSendError("");
       setDashboardMode("preview");
     } catch (err) {
       console.error("WhatsApp template preview fetch failed", err);
@@ -284,6 +304,7 @@ export default function WhatsappBusinessDashboard({ vendorId }) {
       await fetchTemplateLibrary();
       setSelectedTemplate(json.data || null);
       setTestResult("");
+      setTestSendError("");
       setDashboardMode("preview");
     } catch (err) {
       console.error("WhatsApp template action failed", err);
@@ -294,11 +315,30 @@ export default function WhatsappBusinessDashboard({ vendorId }) {
   };
 
   const sendTestMessage = async () => {
-    if (!vendorId || !selectedTemplate?.template?.key || actionLoading) return;
+    const templateKey = selectedTemplate?.template?.key || "";
+    const normalizedRecipient = normalizePhoneNumber(recipientPhoneNumber);
 
-    const recipientPhoneNumber = testRecipient.trim().replace(/[\s()-]/g, "");
-    if (!isValidInternationalPhone(recipientPhoneNumber)) {
-      setError("Enter a valid WhatsApp number in international format, for example +919381520396.");
+    debugTestSend("[WA Test Send UI]", {
+      buttonClicked: true,
+      hasRecipient: Boolean(recipientPhoneNumber),
+      normalizedRecipientPresent: Boolean(normalizedRecipient),
+      templateKey: templateKey || "BILL_STANDARD",
+    });
+
+    if (actionLoading) return;
+
+    if (!vendorId) {
+      setTestSendError("Vendor session was not found. Please log in again.");
+      return;
+    }
+
+    if (!templateKey) {
+      setTestSendError("Template details were not loaded. Please reopen Standard Bill and try again.");
+      return;
+    }
+
+    if (!isValidInternationalPhone(normalizedRecipient)) {
+      setTestSendError("Enter a valid WhatsApp number including country code, for example +919381520396.");
       return;
     }
 
@@ -307,9 +347,15 @@ export default function WhatsappBusinessDashboard({ vendorId }) {
       setError("");
       setMessage("");
       setTestResult("");
+      setTestSendError("");
+
+      debugTestSend("[WA Test Send UI] validation passed, starting request", {
+        templateKey,
+        hasRecipient: true,
+      });
 
       const res = await fetch(
-        `${API_BASE_URL}/api/vendor/whatsapp-business/meta/templates/${encodeURIComponent(selectedTemplate.template.key)}/test-send`,
+        `${API_BASE_URL}/api/vendor/whatsapp-business/meta/templates/${encodeURIComponent(templateKey)}/test-send`,
         {
           method: "POST",
           headers: {
@@ -318,16 +364,19 @@ export default function WhatsappBusinessDashboard({ vendorId }) {
           },
           body: JSON.stringify({
             vendorId,
-            recipientPhoneNumber,
+            recipientPhoneNumber: normalizedRecipient,
           }),
         }
       );
+      debugTestSend("[WA Test Send UI] response", {
+        status: res.status,
+      });
       const json = await parseApiResponse(res, "Unable to send WhatsApp test message");
 
       setTestResult(json.message || "Test message submitted successfully.");
     } catch (err) {
       console.error("WhatsApp test message failed", err);
-      setError(err.message || "Unable to send WhatsApp test message");
+      setTestSendError(err.message || "Unable to send WhatsApp test message");
     } finally {
       setActionLoading("");
     }
@@ -631,6 +680,7 @@ export default function WhatsappBusinessDashboard({ vendorId }) {
                       setError("");
                       setMessage("");
                       setTestResult("");
+                      setTestSendError("");
                     }}
                   >
                     Send Test Message
@@ -654,9 +704,9 @@ export default function WhatsappBusinessDashboard({ vendorId }) {
                     <span>Recipient WhatsApp Number</span>
                     <input
                       type="tel"
-                      value={testRecipient}
-                      placeholder="+919381520396"
-                      onChange={(event) => setTestRecipient(event.target.value)}
+                      value={recipientPhoneNumber}
+                      placeholder="Example: +919381520396"
+                      onChange={(event) => setRecipientPhoneNumber(event.target.value)}
                     />
                     <small>Use one full international number, including country code.</small>
                   </label>
@@ -676,6 +726,9 @@ export default function WhatsappBusinessDashboard({ vendorId }) {
                   {testResult && (
                     <div className="whatsapp-business-alert success">{testResult}</div>
                   )}
+                  {testSendError && (
+                    <div className="whatsapp-business-alert error">{testSendError}</div>
+                  )}
 
                   <div className="whatsapp-business-actions">
                     <button
@@ -692,8 +745,9 @@ export default function WhatsappBusinessDashboard({ vendorId }) {
                       disabled={Boolean(actionLoading)}
                       onClick={() => {
                         setTestPanelOpen(false);
-                        setTestRecipient("");
+                        setRecipientPhoneNumber("");
                         setTestResult("");
+                        setTestSendError("");
                       }}
                     >
                       Cancel
