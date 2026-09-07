@@ -1,9 +1,15 @@
+const crypto = require("crypto");
 const mongoose = require("mongoose");
 const DummyVendor = require("../models/DummyVendor");
 const Vendor = require("../models/Vendor");
 const { getDefaultWhatsappBusinessConfig } = require("../models/whatsappBusinessConfigSchema");
 const { getPublicMetaWhatsAppConfig } = require("../config/metaWhatsAppConfig");
-const { decryptMetaAccessToken, encryptMetaAccessToken } = require("../services/metaTokenStorage");
+const {
+  decryptMetaAccessToken,
+  decryptMetaRegistrationPin,
+  encryptMetaAccessToken,
+  encryptMetaRegistrationPin,
+} = require("../services/metaTokenStorage");
 const { createWhatsappConnectToken } = require("../utils/whatsappConnectToken");
 const {
   getBillStandardSampleData,
@@ -16,8 +22,10 @@ const {
   buildMetaTemplatePayload,
   createTemplate,
   exchangeEmbeddedSignupCode,
+  getPhoneNumberStatus,
   getTemplateStatus,
   findTemplateByName,
+  registerPhoneNumber,
   runMetaConfigurationDiagnostics,
   sendTemplateMessage,
   validateConnection,
@@ -71,6 +79,11 @@ function sanitizeWhatsappBusinessConfig(config) {
     displayPhoneNumber: normalized.displayPhoneNumber || "",
     displayName: normalized.displayName || "",
     templateStatus: normalized.templateStatus || "",
+    phoneRegistrationStatus: normalized.phoneRegistrationStatus || "unknown",
+    phoneRegisteredAt: normalized.phoneRegisteredAt || null,
+    phoneRegistrationLastError: normalized.phoneRegistrationLastError
+      ? "Phone registration needs attention. Please contact YNOT support."
+      : "",
     connectedAt: normalized.connectedAt || null,
     lastError: normalized.lastError
       ? "Connection needs attention. Please contact YNOT support."
@@ -262,6 +275,100 @@ function sendTemplateError(res, error) {
         : error.code === "recipient_phone_invalid"
         ? "Enter a valid WhatsApp number in international format, for example +919381520396."
         : "Unable to update WhatsApp template setup. Please try again.",
+  });
+}
+
+function formatSafeMetaForResponse(metaError) {
+  if (!metaError || typeof metaError !== "object") return null;
+
+  return {
+    status: metaError.status || null,
+    type: metaError.type || "",
+    code: metaError.code || "",
+    subcode: metaError.subcode || "",
+    message: metaError.message || "",
+    userTitle: metaError.errorUserTitle || "",
+    userMessage: metaError.errorUserMessage || "",
+    fbtraceId: metaError.fbtraceId || "",
+    hasErrorData: Boolean(metaError.hasErrorData),
+  };
+}
+
+function mapPhoneRegistrationStatus(phoneStatus, fallback = "unknown") {
+  const status = String(phoneStatus?.code_verification_status || fallback || "")
+    .trim()
+    .toUpperCase();
+  if (status === "VERIFIED") return "registered";
+  if (status === "PENDING" || status === "NOT_VERIFIED" || status === "EXPIRED") return "pending";
+  if (status === "CONNECTED") return "active";
+  if (!status) return "unknown";
+  return fallback === "registered" || fallback === "active" ? fallback : "pending";
+}
+
+function generateSixDigitPin() {
+  return String(crypto.randomInt(0, 1000000)).padStart(6, "0");
+}
+
+function getOrCreateRegistrationPin(config) {
+  const encryptedPin = config.metaRegistration?.pinEncrypted || "";
+  if (encryptedPin) {
+    return {
+      pin: decryptMetaRegistrationPin(encryptedPin),
+      pinEncrypted: encryptedPin,
+    };
+  }
+
+  const pin = generateSixDigitPin();
+  return {
+    pin,
+    pinEncrypted: encryptMetaRegistrationPin(pin),
+  };
+}
+
+function sendTestMessageError(res, error) {
+  const meta = formatSafeMetaForResponse(error.metaError);
+  const status =
+    error.code === "meta_test_send_failed" ||
+    error.code === "meta_token_encryption_missing"
+      ? 500
+      : 400;
+
+  return res.status(status).json({
+    success: false,
+    code: error.code || "meta_test_send_error",
+    message:
+      error.code === "recipient_phone_invalid"
+        ? "Enter a valid WhatsApp number in international format, for example +919381520396."
+      : error.code === "meta_template_not_approved"
+        ? "This WhatsApp template must be approved before sending a test message."
+        : error.code === "meta_token_encryption_missing"
+        ? "WhatsApp test messaging is not configured correctly. Please contact YNOT support."
+        : "Unable to send test WhatsApp message.",
+    ...(meta ? { meta } : {}),
+  });
+}
+
+function sendPhoneRegistrationError(res, error) {
+  const meta = formatSafeMetaForResponse(error.metaError);
+  const status =
+    error.code === "meta_token_encryption_missing" ||
+    error.code === "meta_phone_registration_failed" ||
+    error.code === "meta_phone_status_failed"
+      ? 500
+      : 400;
+
+  return res.status(status).json({
+    success: false,
+    code: error.code || "meta_phone_registration_error",
+    message:
+      error.code === "meta_whatsapp_not_connected"
+        ? "Please connect WhatsApp Business before registering the phone number."
+        : error.code === "meta_whatsapp_connection_incomplete"
+        ? "WhatsApp Business connection details are incomplete."
+        : error.code === "meta_token_encryption_missing"
+        ? "WhatsApp phone registration is not configured correctly. Please contact YNOT support."
+        : "Unable to register WhatsApp number.",
+    ...(meta ? { meta } : {}),
   });
 }
 
@@ -618,6 +725,14 @@ async function checkWhatsappTemplateStatus(req, res) {
 }
 
 async function sendWhatsappTemplateTestMessage(req, res) {
+  let logContext = {
+    vendorId: "",
+    templateKey: req.params.masterTemplateKey || "",
+    templateName: "",
+    phoneNumberIdPresent: false,
+    recipientMasked: "",
+  };
+
   try {
     const template = getMasterTemplate(req.params.masterTemplateKey);
     if (!template) {
@@ -652,14 +767,17 @@ async function sendWhatsappTemplateTestMessage(req, res) {
     });
     const bodyParameters = getTemplateBodyParameterTexts(template.key, sampleData);
     const recipientMasked = maskPhoneNumber(recipientPhoneNumber);
-
-    console.log("[Meta Test Send]", {
+    logContext = {
       vendorId: String(record.vendor._id),
-      phoneNumberIdPresent: Boolean(config.phoneNumberId),
       templateKey: template.key,
       templateName: existing.metaTemplateName,
-      templateStatus: existing.status,
+      phoneNumberIdPresent: Boolean(config.phoneNumberId),
       recipientMasked,
+    };
+
+    console.log("[Meta Test Send]", {
+      ...logContext,
+      templateStatus: existing.status,
     });
 
     const result = await sendTemplateMessage({
@@ -703,7 +821,141 @@ async function sendWhatsappTemplateTestMessage(req, res) {
     });
   } catch (error) {
     console.error("Failed to send WhatsApp test message:", error.code || error.message || error);
-    return sendTemplateError(res, error);
+    if (error.code === "meta_test_send_failed") {
+      const meta = formatSafeMetaForResponse(error.metaError);
+      console.error("[Meta Test Send Error]", {
+        ...logContext,
+        httpStatus: meta?.status || null,
+        metaType: meta?.type || "",
+        metaCode: meta?.code || "",
+        metaSubcode: meta?.subcode || "",
+        metaMessage: meta?.message || "",
+        metaUserTitle: meta?.userTitle || "",
+        metaUserMessage: meta?.userMessage || "",
+        fbtraceId: meta?.fbtraceId || "",
+        hasErrorData: Boolean(meta?.hasErrorData),
+      });
+    }
+    return sendTestMessageError(res, error);
+  }
+}
+
+async function registerWhatsappPhoneNumber(req, res) {
+  let logContext = {
+    vendorId: "",
+    phoneNumberId: "",
+  };
+
+  try {
+    const record = await findVendorRecord(getAuthorizedVendorId(req));
+    if (!record) return sendVendorNotFound(res);
+
+    const config = normalizeWhatsappBusinessConfig(record.vendor.whatsappBusiness);
+    assertConnectedMetaConfig(config);
+
+    if (!config.phoneNumberId) {
+      const error = new Error("Meta phone number ID is required");
+      error.code = "meta_whatsapp_connection_incomplete";
+      throw error;
+    }
+
+    logContext = {
+      vendorId: String(record.vendor._id),
+      phoneNumberId: String(config.phoneNumberId),
+    };
+
+    const accessToken = getDecryptedMetaToken(config);
+    const { pin, pinEncrypted } = getOrCreateRegistrationPin(config);
+    let statusBefore = null;
+
+    try {
+      statusBefore = await getPhoneNumberStatus({
+        phoneNumberId: config.phoneNumberId,
+        accessToken,
+      });
+    } catch (error) {
+      statusBefore = null;
+    }
+
+    const beforeRegistrationStatus = mapPhoneRegistrationStatus(
+      statusBefore,
+      config.phoneRegistrationStatus || "unknown"
+    );
+    let registrationResult = null;
+
+    if (beforeRegistrationStatus !== "registered" && beforeRegistrationStatus !== "active") {
+      registrationResult = await registerPhoneNumber({
+        phoneNumberId: config.phoneNumberId,
+        accessToken,
+        pin,
+      });
+    }
+
+    const statusAfter = await getPhoneNumberStatus({
+      phoneNumberId: config.phoneNumberId,
+      accessToken,
+    });
+    const registrationStatus = mapPhoneRegistrationStatus(
+      statusAfter,
+      registrationResult?.success ? "registered" : beforeRegistrationStatus
+    );
+    const registeredAt =
+      registrationStatus === "registered" || registrationStatus === "active"
+        ? config.phoneRegisteredAt || new Date()
+        : null;
+    const whatsappBusiness = {
+      ...config,
+      enabled: false,
+      phoneRegistrationStatus: registrationStatus,
+      phoneRegisteredAt: registeredAt,
+      phoneRegistrationLastError: "",
+      metaRegistration: {
+        ...(config.metaRegistration || {}),
+        pinEncrypted,
+      },
+    };
+
+    await record.Model.updateOne(
+      { _id: record.vendor._id },
+      { $set: { whatsappBusiness } }
+    );
+
+    console.log("[Meta Phone Registration Success]", {
+      ...logContext,
+      registrationStatus,
+      registeredAt,
+    });
+
+    return res.json({
+      success: true,
+      data: sanitizeWhatsappBusinessConfig(whatsappBusiness),
+      phoneStatus: {
+        displayPhoneNumber: statusAfter?.display_phone_number || "",
+        verifiedName: statusAfter?.verified_name || "",
+        codeVerificationStatus: statusAfter?.code_verification_status || "",
+        qualityRating: statusAfter?.quality_rating || "",
+        platformType: statusAfter?.platform_type || "",
+        throughput: statusAfter?.throughput || null,
+      },
+      message: "WhatsApp number registration request completed.",
+    });
+  } catch (error) {
+    const meta = formatSafeMetaForResponse(error.metaError);
+    console.error("Failed to register WhatsApp phone number:", error.code || error.message || error);
+    if (error.metaError) {
+      console.error("[Meta Phone Registration Error]", {
+        ...logContext,
+        httpStatus: meta?.status || null,
+        metaType: meta?.type || "",
+        metaCode: meta?.code || "",
+        metaSubcode: meta?.subcode || "",
+        metaMessage: meta?.message || "",
+        metaUserTitle: meta?.userTitle || "",
+        metaUserMessage: meta?.userMessage || "",
+        fbtraceId: meta?.fbtraceId || "",
+      });
+    }
+    return sendPhoneRegistrationError(res, error);
   }
 }
 
@@ -925,6 +1177,7 @@ module.exports = {
   getWhatsappTemplatePreview,
   getWhatsappBusinessConfig,
   prepareWhatsappBusinessConnect,
+  registerWhatsappPhoneNumber,
   sendWhatsappTemplateTestMessage,
   submitWhatsappTemplate,
   updateWhatsappBusinessConfig,

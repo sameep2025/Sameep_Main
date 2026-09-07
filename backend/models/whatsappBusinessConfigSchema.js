@@ -19,6 +19,14 @@ const WHATSAPP_BUSINESS_TEMPLATE_STATUSES = [
   "error",
 ];
 
+const WHATSAPP_PHONE_REGISTRATION_STATUSES = [
+  "unknown",
+  "pending",
+  "registered",
+  "active",
+  "error",
+];
+
 const whatsappBusinessTemplateInstanceSchema = new mongoose.Schema(
   {
     masterTemplateKey: { type: String, required: true, trim: true },
@@ -77,6 +85,16 @@ const whatsappBusinessConfigSchema = new mongoose.Schema(
       tokenType: { type: String, default: "" },
       expiresAt: { type: Date, default: null },
     },
+    metaRegistration: {
+      pinEncrypted: { type: String, default: "" },
+    },
+    phoneRegistrationStatus: {
+      type: String,
+      enum: WHATSAPP_PHONE_REGISTRATION_STATUSES,
+      default: "unknown",
+    },
+    phoneRegisteredAt: { type: Date, default: null },
+    phoneRegistrationLastError: { type: String, default: "" },
     lastTestSend: {
       templateKey: { type: String, default: "" },
       recipientMasked: { type: String, default: "" },
@@ -107,6 +125,12 @@ function getDefaultWhatsappBusinessConfig() {
       tokenType: "",
       expiresAt: null,
     },
+    metaRegistration: {
+      pinEncrypted: "",
+    },
+    phoneRegistrationStatus: "unknown",
+    phoneRegisteredAt: null,
+    phoneRegistrationLastError: "",
     lastTestSend: {
       templateKey: "",
       recipientMasked: "",
@@ -119,6 +143,7 @@ function getDefaultWhatsappBusinessConfig() {
 module.exports = {
   WHATSAPP_BUSINESS_CONNECTION_STATUSES,
   WHATSAPP_BUSINESS_TEMPLATE_STATUSES,
+  WHATSAPP_PHONE_REGISTRATION_STATUSES,
   WHATSAPP_BUSINESS_PROVIDERS,
   getDefaultWhatsappBusinessConfig,
   whatsappBusinessTemplateInstanceSchema,

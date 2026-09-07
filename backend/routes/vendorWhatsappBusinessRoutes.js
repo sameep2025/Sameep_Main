@@ -12,6 +12,7 @@ const {
   getWhatsappTemplatePreview,
   getWhatsappBusinessConfig,
   prepareWhatsappBusinessConnect,
+  registerWhatsappPhoneNumber,
   sendWhatsappTemplateTestMessage,
   submitWhatsappTemplate,
   updateWhatsappBusinessConfig,
@@ -101,6 +102,12 @@ router.post(
   "/meta/templates/:masterTemplateKey/test-send",
   requireVendorAccessFromExistingAuth(resolveRequestedVendorId),
   sendWhatsappTemplateTestMessage
+);
+
+router.post(
+  "/meta/register-phone",
+  requireVendorAccessFromExistingAuth(resolveRequestedVendorId),
+  registerWhatsappPhoneNumber
 );
 
 router.post(

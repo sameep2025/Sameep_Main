@@ -35,6 +35,7 @@ function getSafeMetaErrorDetails(error) {
     errorUserTitle: metaError.error_user_title || "",
     errorUserMessage: metaError.error_user_msg || "",
     fbtraceId: metaError.fbtrace_id || "",
+    hasErrorData: Boolean(metaError.error_data),
   };
 }
 
@@ -251,10 +252,6 @@ async function subscribeAppToWaba() {
   throw new Error("subscribeAppToWaba is reserved for the Meta onboarding phase that requires it.");
 }
 
-async function registerPhoneNumber() {
-  throw new Error("registerPhoneNumber is reserved for the Meta onboarding phase that requires it.");
-}
-
 async function sendTemplateMessage(args) {
   return sendMetaTemplateMessage(args);
 }
@@ -340,6 +337,80 @@ async function getTemplateStatus({ wabaId, accessToken, name }) {
   return findTemplateByName({ wabaId, accessToken, name });
 }
 
+async function getPhoneNumberStatus({ phoneNumberId, accessToken }) {
+  const id = String(phoneNumberId || "").trim();
+  if (!id || !accessToken) return null;
+
+  try {
+    const response = await axios.get(graphUrl(id), {
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+      },
+      params: {
+        fields:
+          "id,display_phone_number,verified_name,code_verification_status,quality_rating,platform_type,throughput",
+      },
+    });
+
+    return response.data || null;
+  } catch (error) {
+    const metaError = getSafeMetaErrorDetails(error);
+    console.error("[Meta Phone Status Error]", metaError);
+    const wrapped = new Error("Unable to read WhatsApp phone number status from Meta");
+    wrapped.code = "meta_phone_status_failed";
+    wrapped.metaError = metaError;
+    throw wrapped;
+  }
+}
+
+async function registerMetaPhoneNumber({ phoneNumberId, accessToken, pin }) {
+  const id = String(phoneNumberId || "").trim();
+  const registrationPin = String(pin || "").trim();
+
+  if (!id || !accessToken || !/^\d{6}$/.test(registrationPin)) {
+    const error = new Error("Phone number ID, access token, and a 6-digit PIN are required");
+    error.code = "meta_phone_registration_payload_invalid";
+    throw error;
+  }
+
+  try {
+    const response = await axios.post(
+      graphUrl(`${id}/register`),
+      {
+        messaging_product: "whatsapp",
+        pin: registrationPin,
+      },
+      {
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          "Content-Type": "application/json",
+        },
+      }
+    );
+
+    return response.data || {};
+  } catch (error) {
+    const metaError = getSafeMetaErrorDetails(error);
+    const message = String(metaError.message || "").toLowerCase();
+    if (message.includes("already") && message.includes("register")) {
+      return {
+        success: true,
+        alreadyRegistered: true,
+        metaError,
+      };
+    }
+
+    const wrapped = new Error("Unable to register WhatsApp phone number with Meta");
+    wrapped.code = "meta_phone_registration_failed";
+    wrapped.metaError = metaError;
+    throw wrapped;
+  }
+}
+
+async function registerPhoneNumber(args) {
+  return registerMetaPhoneNumber(args);
+}
+
 async function sendMetaTemplateMessage({
   phoneNumberId,
   accessToken,
@@ -389,10 +460,11 @@ async function sendMetaTemplateMessage({
 
     return response.data || {};
   } catch (error) {
-    console.error("[Meta Test Send Error]", getSafeMetaErrorDetails(error));
+    const metaError = getSafeMetaErrorDetails(error);
+    console.error("[Meta Test Send Error]", metaError);
     const wrapped = new Error("Unable to send WhatsApp test message through Meta");
     wrapped.code = "meta_test_send_failed";
-    wrapped.metaError = getSafeMetaError(error);
+    wrapped.metaError = metaError;
     throw wrapped;
   }
 }
@@ -404,9 +476,11 @@ module.exports = {
   findTemplateByName,
   getAuthorizedBusinesses,
   getPhoneNumbers,
+  getPhoneNumberStatus,
   getTemplateStatus,
   getWhatsAppBusinessAccount,
   registerPhoneNumber,
+  registerMetaPhoneNumber,
   runMetaConfigurationDiagnostics,
   sendMetaTemplateMessage,
   sendTemplateMessage,

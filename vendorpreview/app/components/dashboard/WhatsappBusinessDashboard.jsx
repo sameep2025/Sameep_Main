@@ -69,6 +69,10 @@ function getStatusTone(status) {
   return "idle";
 }
 
+function isPhoneRegistrationReady(status) {
+  return status === "registered" || status === "active";
+}
+
 function getTemplateStatusLabel(status) {
   return TEMPLATE_STATUS_LABELS[status] || formatStatus(status || "not_configured");
 }
@@ -467,6 +471,9 @@ export default function WhatsappBusinessDashboard({ vendorId }) {
   const isConnected = CONNECTED_STATUSES.has(status);
   const statusTone = getStatusTone(status);
   const hasConnectLauncher = getHasWhatsappConnectLauncher();
+  const phoneRegistrationStatus = config?.phoneRegistrationStatus || "unknown";
+  const shouldShowPhoneRegistration =
+    isConnected && !isPhoneRegistrationReady(phoneRegistrationStatus);
   const selectedTemplateStatus =
     selectedTemplate?.vendorTemplate?.status || "not_configured";
   const canSubmitSelectedTemplate = selectedTemplateStatus === "not_configured";
@@ -504,6 +511,11 @@ export default function WhatsappBusinessDashboard({ vendorId }) {
               connect URL to enable the connection flow.
             </div>
           )}
+          {shouldShowPhoneRegistration && (
+            <div className="whatsapp-business-alert warning">
+              WhatsApp number registration is pending.
+            </div>
+          )}
 
           {isConnected && dashboardMode === "overview" ? (
             <div className="whatsapp-business-grid">
@@ -526,6 +538,10 @@ export default function WhatsappBusinessDashboard({ vendorId }) {
                     ? "Not configured yet"
                     : config?.templateStatus || "Not configured yet"}
                 </strong>
+              </div>
+              <div className="whatsapp-business-card">
+                <span>Phone Registration</span>
+                <strong>{formatStatus(phoneRegistrationStatus)}</strong>
               </div>
             </div>
           ) : null}
@@ -780,6 +796,18 @@ export default function WhatsappBusinessDashboard({ vendorId }) {
 	                >
 	                  {templateLoading ? "Loading..." : "Continue Setup"}
 	                </button>
+                {shouldShowPhoneRegistration && (
+                  <button
+                    type="button"
+                    className="whatsapp-business-button secondary"
+                    disabled={Boolean(actionLoading)}
+                    onClick={() => postWhatsappBusinessAction("meta/register-phone")}
+                  >
+                    {actionLoading === "meta/register-phone"
+                      ? "Registering..."
+                      : "Register WhatsApp Number"}
+                  </button>
+                )}
                 <button
                   type="button"
                   className="whatsapp-business-button secondary"

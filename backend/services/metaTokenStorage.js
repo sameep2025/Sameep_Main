@@ -1,6 +1,11 @@
 const crypto = require("crypto");
 const { getMetaWhatsAppConfig } = require("../config/metaWhatsAppConfig");
 
+console.log(
+  "META_TOKEN_ENCRYPTION_KEY loaded:",
+  Boolean(getMetaWhatsAppConfig().tokenEncryptionKey)
+);
+
 function getEncryptionKey() {
   const { tokenEncryptionKey } = getMetaWhatsAppConfig();
   if (!tokenEncryptionKey) return null;
@@ -8,11 +13,11 @@ function getEncryptionKey() {
   return crypto.createHash("sha256").update(tokenEncryptionKey).digest();
 }
 
-function encryptMetaAccessToken(accessToken) {
-  const token = String(accessToken || "");
+function encryptSecretValue(value) {
+  const secret = String(value || "");
   const key = getEncryptionKey();
 
-  if (!token) {
+  if (!secret) {
     return "";
   }
 
@@ -24,7 +29,7 @@ function encryptMetaAccessToken(accessToken) {
 
   const iv = crypto.randomBytes(12);
   const cipher = crypto.createCipheriv("aes-256-gcm", key, iv);
-  const encrypted = Buffer.concat([cipher.update(token, "utf8"), cipher.final()]);
+  const encrypted = Buffer.concat([cipher.update(secret, "utf8"), cipher.final()]);
   const tag = cipher.getAuthTag();
 
   return [
@@ -35,8 +40,8 @@ function encryptMetaAccessToken(accessToken) {
   ].join(":");
 }
 
-function decryptMetaAccessToken(encryptedToken) {
-  const value = String(encryptedToken || "");
+function decryptSecretValue(encryptedValue) {
+  const value = String(encryptedValue || "");
   const key = getEncryptionKey();
 
   if (!value) return "";
@@ -64,7 +69,25 @@ function decryptMetaAccessToken(encryptedToken) {
   ]).toString("utf8");
 }
 
+function encryptMetaAccessToken(accessToken) {
+  return encryptSecretValue(accessToken);
+}
+
+function decryptMetaAccessToken(encryptedToken) {
+  return decryptSecretValue(encryptedToken);
+}
+
+function encryptMetaRegistrationPin(pin) {
+  return encryptSecretValue(pin);
+}
+
+function decryptMetaRegistrationPin(encryptedPin) {
+  return decryptSecretValue(encryptedPin);
+}
+
 module.exports = {
   decryptMetaAccessToken,
+  decryptMetaRegistrationPin,
   encryptMetaAccessToken,
+  encryptMetaRegistrationPin,
 };
