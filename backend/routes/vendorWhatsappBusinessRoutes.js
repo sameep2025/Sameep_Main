@@ -12,6 +12,7 @@ const {
   getWhatsappTemplatePreview,
   getWhatsappBusinessConfig,
   prepareWhatsappBusinessConnect,
+  sendWhatsappTemplateTestMessage,
   submitWhatsappTemplate,
   updateWhatsappBusinessConfig,
 } = require("../controllers/vendorWhatsappBusinessController");
@@ -94,6 +95,12 @@ router.post(
   "/templates/:masterTemplateKey/check-status",
   requireVendorAccessFromExistingAuth(resolveRequestedVendorId),
   checkWhatsappTemplateStatus
+);
+
+router.post(
+  "/meta/templates/:masterTemplateKey/test-send",
+  requireVendorAccessFromExistingAuth(resolveRequestedVendorId),
+  sendWhatsappTemplateTestMessage
 );
 
 router.post(

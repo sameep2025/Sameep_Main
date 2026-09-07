@@ -164,12 +164,39 @@ function getVariableSourceFieldsInOrder(key) {
     .filter(Boolean);
 }
 
+function getTemplateExampleValuesInOrder(key) {
+  const template = getMasterTemplate(key);
+  const body = template?.components?.find((component) => component.type === "BODY") || {};
+  return Array.isArray(body.example?.body_text?.[0]) ? body.example.body_text[0].slice() : [];
+}
+
+function getBillStandardSampleData({ vendorName } = {}) {
+  return {
+    vendorName: String(vendorName || "").trim() || "Reelook Beauty Saloon",
+    billAmount: "1050",
+    earned: "52",
+    redeemed: "0",
+    finalPaid: "1050",
+    balance: "102",
+    billUrl: "https://sameep.app/bill/example",
+  };
+}
+
+function getTemplateBodyParameterTexts(key, data = {}) {
+  return getVariableSourceFieldsInOrder(key).map((sourceField) =>
+    String(data[sourceField] ?? "")
+  );
+}
+
 module.exports = {
   MASTER_TEMPLATES,
   META_TEMPLATE_CATEGORIES,
   TEMPLATE_PURPOSES,
   YNOT_TEMPLATE_VARIABLES,
+  getBillStandardSampleData,
   getMasterTemplate,
+  getTemplateBodyParameterTexts,
+  getTemplateExampleValuesInOrder,
   getTemplateVariablesInOrder,
   getVariableSourceFieldsInOrder,
   listMasterTemplates,

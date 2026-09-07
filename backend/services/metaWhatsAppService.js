@@ -255,8 +255,8 @@ async function registerPhoneNumber() {
   throw new Error("registerPhoneNumber is reserved for the Meta onboarding phase that requires it.");
 }
 
-async function sendTemplateMessage() {
-  throw new Error("sendTemplateMessage is reserved for Phase 4 provider routing.");
+async function sendTemplateMessage(args) {
+  return sendMetaTemplateMessage(args);
 }
 
 function normalizeTemplateName(value) {
@@ -340,6 +340,63 @@ async function getTemplateStatus({ wabaId, accessToken, name }) {
   return findTemplateByName({ wabaId, accessToken, name });
 }
 
+async function sendMetaTemplateMessage({
+  phoneNumberId,
+  accessToken,
+  recipientPhoneNumber,
+  templateName,
+  languageCode = "en",
+  bodyParameters = [],
+}) {
+  const id = String(phoneNumberId || "").trim();
+  const recipient = String(recipientPhoneNumber || "").trim();
+  const name = normalizeTemplateName(templateName);
+
+  if (!id || !accessToken || !recipient || !name) {
+    const error = new Error("Phone number ID, access token, recipient, and template name are required");
+    error.code = "meta_test_send_payload_invalid";
+    throw error;
+  }
+
+  const payload = {
+    messaging_product: "whatsapp",
+    to: recipient.replace(/^\+/, ""),
+    type: "template",
+    template: {
+      name,
+      language: {
+        code: languageCode || "en",
+      },
+      components: [
+        {
+          type: "body",
+          parameters: bodyParameters.map((text) => ({
+            type: "text",
+            text: String(text ?? ""),
+          })),
+        },
+      ],
+    },
+  };
+
+  try {
+    const response = await axios.post(graphUrl(`${id}/messages`), payload, {
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "Content-Type": "application/json",
+      },
+    });
+
+    return response.data || {};
+  } catch (error) {
+    console.error("[Meta Test Send Error]", getSafeMetaErrorDetails(error));
+    const wrapped = new Error("Unable to send WhatsApp test message through Meta");
+    wrapped.code = "meta_test_send_failed";
+    wrapped.metaError = getSafeMetaError(error);
+    throw wrapped;
+  }
+}
+
 module.exports = {
   buildMetaTemplatePayload,
   createTemplate,
@@ -351,6 +408,7 @@ module.exports = {
   getWhatsAppBusinessAccount,
   registerPhoneNumber,
   runMetaConfigurationDiagnostics,
+  sendMetaTemplateMessage,
   sendTemplateMessage,
   subscribeAppToWaba,
   validateConnection,

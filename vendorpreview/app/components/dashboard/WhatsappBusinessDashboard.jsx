@@ -12,6 +12,15 @@ const TEMPLATE_STATUS_LABELS = {
   rejected: "Rejected",
   error: "Error",
 };
+const SAMPLE_FIELD_LABELS = {
+  vendorName: "Business Name",
+  billAmount: "Bill Amount",
+  earned: "Points Earned",
+  redeemed: "Points Redeemed",
+  finalPaid: "Final Paid",
+  balance: "Loyalty Balance",
+  billUrl: "Bill URL",
+};
 
 function getVendorAuthToken(vendorId) {
   if (typeof window === "undefined") return "";
@@ -71,6 +80,10 @@ function getTemplateStatusTone(status) {
   return "idle";
 }
 
+function isValidInternationalPhone(value) {
+  return /^\+[1-9]\d{7,14}$/.test(String(value || "").trim().replace(/[\s()-]/g, ""));
+}
+
 function getWhatsappConnectBaseUrl() {
   const configured = process.env.NEXT_PUBLIC_WHATSAPP_CONNECT_BASE_URL;
   if (configured && configured.trim()) {
@@ -93,6 +106,9 @@ export default function WhatsappBusinessDashboard({ vendorId }) {
   const [dashboardMode, setDashboardMode] = useState("overview");
   const [templateLibrary, setTemplateLibrary] = useState([]);
   const [selectedTemplate, setSelectedTemplate] = useState(null);
+  const [testPanelOpen, setTestPanelOpen] = useState(false);
+  const [testRecipient, setTestRecipient] = useState("");
+  const [testResult, setTestResult] = useState("");
   const [loading, setLoading] = useState(true);
   const [templateLoading, setTemplateLoading] = useState(false);
   const [actionLoading, setActionLoading] = useState("");
@@ -230,6 +246,9 @@ export default function WhatsappBusinessDashboard({ vendorId }) {
       const json = await parseApiResponse(res, "Unable to load WhatsApp template preview");
 
       setSelectedTemplate(json.data || null);
+      setTestPanelOpen(false);
+      setTestRecipient("");
+      setTestResult("");
       setDashboardMode("preview");
     } catch (err) {
       console.error("WhatsApp template preview fetch failed", err);
@@ -264,10 +283,51 @@ export default function WhatsappBusinessDashboard({ vendorId }) {
       setMessage(json.message || "WhatsApp template updated");
       await fetchTemplateLibrary();
       setSelectedTemplate(json.data || null);
+      setTestResult("");
       setDashboardMode("preview");
     } catch (err) {
       console.error("WhatsApp template action failed", err);
       setError(err.message || "Unable to update WhatsApp template");
+    } finally {
+      setActionLoading("");
+    }
+  };
+
+  const sendTestMessage = async () => {
+    if (!vendorId || !selectedTemplate?.template?.key || actionLoading) return;
+
+    const recipientPhoneNumber = testRecipient.trim().replace(/[\s()-]/g, "");
+    if (!isValidInternationalPhone(recipientPhoneNumber)) {
+      setError("Enter a valid WhatsApp number in international format, for example +919381520396.");
+      return;
+    }
+
+    try {
+      setActionLoading("test-send");
+      setError("");
+      setMessage("");
+      setTestResult("");
+
+      const res = await fetch(
+        `${API_BASE_URL}/api/vendor/whatsapp-business/meta/templates/${encodeURIComponent(selectedTemplate.template.key)}/test-send`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            ...getAuthHeaders(vendorId),
+          },
+          body: JSON.stringify({
+            vendorId,
+            recipientPhoneNumber,
+          }),
+        }
+      );
+      const json = await parseApiResponse(res, "Unable to send WhatsApp test message");
+
+      setTestResult(json.message || "Test message submitted successfully.");
+    } catch (err) {
+      console.error("WhatsApp test message failed", err);
+      setError(err.message || "Unable to send WhatsApp test message");
     } finally {
       setActionLoading("");
     }
@@ -362,6 +422,8 @@ export default function WhatsappBusinessDashboard({ vendorId }) {
     selectedTemplate?.vendorTemplate?.status || "not_configured";
   const canSubmitSelectedTemplate = selectedTemplateStatus === "not_configured";
   const canCheckSelectedTemplateStatus = selectedTemplateStatus !== "not_configured";
+  const sampleData = selectedTemplate?.preview?.sampleData || {};
+  const sampleFields = selectedTemplate?.preview?.variables || [];
 
   return (
     <section className="whatsapp-business-panel">
@@ -559,7 +621,86 @@ export default function WhatsappBusinessDashboard({ vendorId }) {
                     {actionLoading === "check-status" ? "Checking..." : "Check Status"}
                   </button>
                 )}
+                {selectedTemplateStatus === "approved" && (
+                  <button
+                    type="button"
+                    className="whatsapp-business-button primary"
+                    disabled={Boolean(actionLoading)}
+                    onClick={() => {
+                      setTestPanelOpen(true);
+                      setError("");
+                      setMessage("");
+                      setTestResult("");
+                    }}
+                  >
+                    Send Test Message
+                  </button>
+                )}
               </div>
+
+              {testPanelOpen && selectedTemplateStatus === "approved" && (
+                <div className="whatsapp-test-panel">
+                  <div className="whatsapp-template-section-header">
+                    <div>
+                      <h3>Send Test Message</h3>
+                      <p>
+                        Send this approved template from the connected WhatsApp number to a test recipient.
+                        Production billing remains disabled.
+                      </p>
+                    </div>
+                  </div>
+
+                  <label className="whatsapp-test-field">
+                    <span>Recipient WhatsApp Number</span>
+                    <input
+                      type="tel"
+                      value={testRecipient}
+                      placeholder="+919381520396"
+                      onChange={(event) => setTestRecipient(event.target.value)}
+                    />
+                    <small>Use one full international number, including country code.</small>
+                  </label>
+
+                  <div className="whatsapp-test-sample">
+                    <h4>Sample Template Values</h4>
+                    <div className="whatsapp-test-sample-grid">
+                      {sampleFields.map((variable) => (
+                        <div key={variable.key}>
+                          <span>{SAMPLE_FIELD_LABELS[variable.sourceField] || variable.displayName}</span>
+                          <strong>{sampleData[variable.sourceField] || ""}</strong>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  {testResult && (
+                    <div className="whatsapp-business-alert success">{testResult}</div>
+                  )}
+
+                  <div className="whatsapp-business-actions">
+                    <button
+                      type="button"
+                      className="whatsapp-business-button primary"
+                      disabled={Boolean(actionLoading)}
+                      onClick={sendTestMessage}
+                    >
+                      {actionLoading === "test-send" ? "Sending..." : "Send Test"}
+                    </button>
+                    <button
+                      type="button"
+                      className="whatsapp-business-button secondary"
+                      disabled={Boolean(actionLoading)}
+                      onClick={() => {
+                        setTestPanelOpen(false);
+                        setTestRecipient("");
+                        setTestResult("");
+                      }}
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           ) : null}
 

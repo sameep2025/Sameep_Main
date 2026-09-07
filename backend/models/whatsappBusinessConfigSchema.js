@@ -77,6 +77,12 @@ const whatsappBusinessConfigSchema = new mongoose.Schema(
       tokenType: { type: String, default: "" },
       expiresAt: { type: Date, default: null },
     },
+    lastTestSend: {
+      templateKey: { type: String, default: "" },
+      recipientMasked: { type: String, default: "" },
+      sentAt: { type: Date, default: null },
+      metaMessageId: { type: String, default: "" },
+    },
   },
   { _id: false }
 );
@@ -100,6 +106,12 @@ function getDefaultWhatsappBusinessConfig() {
       accessTokenEncrypted: "",
       tokenType: "",
       expiresAt: null,
+    },
+    lastTestSend: {
+      templateKey: "",
+      recipientMasked: "",
+      sentAt: null,
+      metaMessageId: "",
     },
   };
 }

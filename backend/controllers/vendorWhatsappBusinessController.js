@@ -6,7 +6,9 @@ const { getPublicMetaWhatsAppConfig } = require("../config/metaWhatsAppConfig");
 const { decryptMetaAccessToken, encryptMetaAccessToken } = require("../services/metaTokenStorage");
 const { createWhatsappConnectToken } = require("../utils/whatsappConnectToken");
 const {
+  getBillStandardSampleData,
   getMasterTemplate,
+  getTemplateBodyParameterTexts,
   getTemplateVariablesInOrder,
   listMasterTemplates,
 } = require("../services/whatsappTemplates/masterTemplateLibrary");
@@ -17,6 +19,7 @@ const {
   getTemplateStatus,
   findTemplateByName,
   runMetaConfigurationDiagnostics,
+  sendTemplateMessage,
   validateConnection,
 } = require("../services/metaWhatsAppService");
 
@@ -173,15 +176,46 @@ function getTemplateName(template) {
     .replace(/[^a-z0-9_]/g, "_")}_v${template.version || 1}`;
 }
 
-function getTemplatePreview(template) {
+function normalizeInternationalPhone(value) {
+  return String(value || "").trim().replace(/[\s()-]/g, "");
+}
+
+function isValidInternationalPhone(value) {
+  return /^\+[1-9]\d{7,14}$/.test(normalizeInternationalPhone(value));
+}
+
+function maskPhoneNumber(value) {
+  const phone = normalizeInternationalPhone(value);
+  if (!phone) return "";
+  const prefix = phone.startsWith("+") ? "+" : "";
+  const digits = phone.replace(/\D/g, "");
+  if (digits.length <= 4) return `${prefix}****`;
+  const countryHint = digits.length > 10 ? digits.slice(0, digits.length - 10) : "";
+  return `${prefix}${countryHint}${"*".repeat(Math.max(digits.length - countryHint.length - 4, 4))}${digits.slice(-4)}`;
+}
+
+function getSampleDataForTemplate(template, config = {}, vendor = {}) {
+  if (template.key === "BILL_STANDARD") {
+    return getBillStandardSampleData({
+      vendorName: config.displayName || vendor.businessName,
+    });
+  }
+
+  return {};
+}
+
+function getTemplatePreview(template, sampleData = null) {
   const body = template.components.find((component) => component.type === "BODY") || {};
-  const sampleValues = body.example?.body_text?.[0] || [];
+  const sampleValues = sampleData
+    ? getTemplateBodyParameterTexts(template.key, sampleData)
+    : body.example?.body_text?.[0] || [];
   const message = sampleValues.reduce(
     (text, value, index) => text.replace(`{{${index + 1}}}`, value),
     body.text || ""
   );
 
   return {
+    sampleData: sampleData || {},
     sampleMessage: message,
     variables: getTemplateVariablesInOrder(template.key),
   };
@@ -209,7 +243,9 @@ function sendTemplateError(res, error) {
   const status =
     error.code === "meta_whatsapp_not_connected" ||
     error.code === "meta_whatsapp_connection_incomplete" ||
-    error.code === "master_template_not_found"
+    error.code === "master_template_not_found" ||
+    error.code === "meta_template_not_approved" ||
+    error.code === "recipient_phone_invalid"
       ? 400
       : 500;
 
@@ -221,6 +257,10 @@ function sendTemplateError(res, error) {
         ? "Please connect WhatsApp Business before setting up templates."
         : error.code === "master_template_not_found"
         ? "The selected WhatsApp template is not available."
+        : error.code === "meta_template_not_approved"
+        ? "This WhatsApp template must be approved before sending a test message."
+        : error.code === "recipient_phone_invalid"
+        ? "Enter a valid WhatsApp number in international format, for example +919381520396."
         : "Unable to update WhatsApp template setup. Please try again.",
   });
 }
@@ -372,7 +412,7 @@ async function getWhatsappTemplateLibrary(req, res) {
     const config = normalizeWhatsappBusinessConfig(record.vendor.whatsappBusiness);
     const templates = listMasterTemplates({ activeOnly: true }).map((template) => ({
       ...template,
-      preview: getTemplatePreview(template),
+      preview: getTemplatePreview(template, getSampleDataForTemplate(template, config, record.vendor)),
       vendorTemplate: sanitizeTemplateInstance(getTemplateInstance(config, template.key)),
     }));
 
@@ -401,12 +441,13 @@ async function getWhatsappTemplatePreview(req, res) {
     if (!record) return sendVendorNotFound(res);
 
     const config = normalizeWhatsappBusinessConfig(record.vendor.whatsappBusiness);
+    const sampleData = getSampleDataForTemplate(template, config, record.vendor);
 
     return res.json({
       success: true,
       data: {
         template,
-        preview: getTemplatePreview(template),
+        preview: getTemplatePreview(template, sampleData),
         vendorTemplate: sanitizeTemplateInstance(getTemplateInstance(config, template.key)),
       },
     });
@@ -487,7 +528,7 @@ async function submitWhatsappTemplate(req, res) {
       success: true,
       data: {
         template,
-        preview: getTemplatePreview(template),
+        preview: getTemplatePreview(template, getSampleDataForTemplate(template, config, record.vendor)),
         vendorTemplate: sanitizeTemplateInstance(templateInstance),
       },
       message: "Standard Bill template submitted to Meta for approval.",
@@ -535,7 +576,7 @@ async function checkWhatsappTemplateStatus(req, res) {
         success: true,
         data: {
           template,
-          preview: getTemplatePreview(template),
+          preview: getTemplatePreview(template, getSampleDataForTemplate(template, config, record.vendor)),
           vendorTemplate: sanitizeTemplateInstance(templateInstance),
         },
         message: "Template has not been submitted to Meta yet.",
@@ -565,13 +606,103 @@ async function checkWhatsappTemplateStatus(req, res) {
       success: true,
       data: {
         template,
-        preview: getTemplatePreview(template),
+        preview: getTemplatePreview(template, getSampleDataForTemplate(template, config, record.vendor)),
         vendorTemplate: sanitizeTemplateInstance(templateInstance),
       },
       message: "Template status refreshed from Meta.",
     });
   } catch (error) {
     console.error("Failed to refresh WhatsApp template status:", error.code || error.message || error);
+    return sendTemplateError(res, error);
+  }
+}
+
+async function sendWhatsappTemplateTestMessage(req, res) {
+  try {
+    const template = getMasterTemplate(req.params.masterTemplateKey);
+    if (!template) {
+      const error = new Error("Template not found");
+      error.code = "master_template_not_found";
+      throw error;
+    }
+
+    const recipientPhoneNumber = normalizeInternationalPhone(req.body?.recipientPhoneNumber);
+    if (!isValidInternationalPhone(recipientPhoneNumber)) {
+      const error = new Error("Recipient phone number must use international format");
+      error.code = "recipient_phone_invalid";
+      throw error;
+    }
+
+    const record = await findVendorRecord(getAuthorizedVendorId(req));
+    if (!record) return sendVendorNotFound(res);
+
+    const config = normalizeWhatsappBusinessConfig(record.vendor.whatsappBusiness);
+    assertConnectedMetaConfig(config);
+
+    const existing = getTemplateInstance(config, template.key);
+    if (!existing || existing.status !== "approved" || !existing.metaTemplateName) {
+      const error = new Error("Approved template instance is required before test send");
+      error.code = "meta_template_not_approved";
+      throw error;
+    }
+
+    const accessToken = getDecryptedMetaToken(config);
+    const sampleData = getBillStandardSampleData({
+      vendorName: config.displayName || record.vendor.businessName,
+    });
+    const bodyParameters = getTemplateBodyParameterTexts(template.key, sampleData);
+    const recipientMasked = maskPhoneNumber(recipientPhoneNumber);
+
+    console.log("[Meta Test Send]", {
+      vendorId: String(record.vendor._id),
+      phoneNumberIdPresent: Boolean(config.phoneNumberId),
+      templateKey: template.key,
+      templateName: existing.metaTemplateName,
+      templateStatus: existing.status,
+      recipientMasked,
+    });
+
+    const result = await sendTemplateMessage({
+      phoneNumberId: config.phoneNumberId,
+      accessToken,
+      recipientPhoneNumber,
+      templateName: existing.metaTemplateName,
+      languageCode: existing.language || template.language,
+      bodyParameters,
+    });
+    const metaMessageId = String(result?.messages?.[0]?.id || "");
+    const lastTestSend = {
+      templateKey: template.key,
+      recipientMasked,
+      sentAt: new Date(),
+      metaMessageId,
+    };
+    const whatsappBusiness = {
+      ...config,
+      enabled: false,
+      lastTestSend,
+    };
+
+    await record.Model.updateOne(
+      { _id: record.vendor._id },
+      { $set: { whatsappBusiness } }
+    );
+
+    console.log("[Meta Test Send Success]", {
+      vendorId: String(record.vendor._id),
+      templateKey: template.key,
+      messageId: metaMessageId,
+      recipientMasked,
+    });
+
+    return res.json({
+      success: true,
+      status: "submitted",
+      messageId: metaMessageId,
+      message: "Test message submitted successfully.",
+    });
+  } catch (error) {
+    console.error("Failed to send WhatsApp test message:", error.code || error.message || error);
     return sendTemplateError(res, error);
   }
 }
@@ -794,6 +925,7 @@ module.exports = {
   getWhatsappTemplatePreview,
   getWhatsappBusinessConfig,
   prepareWhatsappBusinessConnect,
+  sendWhatsappTemplateTestMessage,
   submitWhatsappTemplate,
   updateWhatsappBusinessConfig,
 };
