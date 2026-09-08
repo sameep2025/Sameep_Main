@@ -242,6 +242,93 @@ async function runMetaConfigurationDiagnostics() {
   return result;
 }
 
+function getSanitizedSystemUserMetaError(error) {
+  const metaError = getSafeMetaErrorDetails(error);
+  return {
+    status: metaError.status,
+    type: metaError.type,
+    code: metaError.code,
+    subcode: metaError.subcode,
+    message: metaError.message,
+    fbtraceId: metaError.fbtraceId,
+  };
+}
+
+async function readGraphAssetWithSystemUserToken({ path, fields, accessToken }) {
+  try {
+    const response = await axios.get(graphUrl(path), {
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+      },
+      params: { fields },
+    });
+
+    return {
+      accessible: true,
+      data: response.data || {},
+    };
+  } catch (error) {
+    return {
+      accessible: false,
+      meta: getSanitizedSystemUserMetaError(error),
+    };
+  }
+}
+
+async function runMetaSystemUserAssetDiagnostics() {
+  const config = getMetaWhatsAppConfig();
+  const accessToken = config.systemUserAccessToken;
+
+  if (!accessToken) {
+    return {
+      success: false,
+      code: "meta_system_user_token_missing",
+    };
+  }
+
+  const wabaResult = await readGraphAssetWithSystemUserToken({
+    path: "1074343041678320",
+    fields: "id,name",
+    accessToken,
+  });
+  const phoneResult = await readGraphAssetWithSystemUserToken({
+    path: "1336796569515966",
+    fields:
+      "id,display_phone_number,verified_name,code_verification_status,quality_rating,platform_type,throughput",
+    accessToken,
+  });
+
+  return {
+    success: true,
+    systemUserTokenPresent: true,
+    waba: wabaResult.accessible
+      ? {
+          accessible: true,
+          id: String(wabaResult.data?.id || ""),
+          name: String(wabaResult.data?.name || ""),
+        }
+      : {
+          accessible: false,
+          meta: wabaResult.meta,
+        },
+    phone: phoneResult.accessible
+      ? {
+          accessible: true,
+          id: String(phoneResult.data?.id || ""),
+          displayPhoneNumber: String(phoneResult.data?.display_phone_number || ""),
+          verifiedName: String(phoneResult.data?.verified_name || ""),
+          codeVerificationStatus: String(phoneResult.data?.code_verification_status || ""),
+          qualityRating: String(phoneResult.data?.quality_rating || ""),
+          platformType: String(phoneResult.data?.platform_type || ""),
+          throughput: phoneResult.data?.throughput || null,
+        }
+      : {
+          accessible: false,
+          meta: phoneResult.meta,
+        },
+  };
+}
+
 async function disconnectAuthorization() {
   // Keep external Meta assets intact. Revocation can be wired here later if YNOT
   // receives a token model where revocation is required and safe.
@@ -363,6 +450,21 @@ async function getPhoneNumberStatus({ phoneNumberId, accessToken }) {
   }
 }
 
+async function getPhoneNumberStatusWithSystemUserToken({ phoneNumberId }) {
+  const { systemUserAccessToken } = getMetaWhatsAppConfig();
+
+  if (!systemUserAccessToken) {
+    const error = new Error("Meta system-user access token is not configured");
+    error.code = "meta_system_user_token_missing";
+    throw error;
+  }
+
+  return getPhoneNumberStatus({
+    phoneNumberId,
+    accessToken: systemUserAccessToken,
+  });
+}
+
 async function registerMetaPhoneNumber({ phoneNumberId, accessToken, pin }) {
   const id = String(phoneNumberId || "").trim();
   const registrationPin = String(pin || "").trim();
@@ -409,6 +511,22 @@ async function registerMetaPhoneNumber({ phoneNumberId, accessToken, pin }) {
 
 async function registerPhoneNumber(args) {
   return registerMetaPhoneNumber(args);
+}
+
+async function registerPhoneNumberWithSystemUserToken({ phoneNumberId, pin }) {
+  const { systemUserAccessToken } = getMetaWhatsAppConfig();
+
+  if (!systemUserAccessToken) {
+    const error = new Error("Meta system-user access token is not configured");
+    error.code = "meta_system_user_token_missing";
+    throw error;
+  }
+
+  return registerMetaPhoneNumber({
+    phoneNumberId,
+    accessToken: systemUserAccessToken,
+    pin,
+  });
 }
 
 async function sendMetaTemplateMessage({
@@ -477,11 +595,14 @@ module.exports = {
   getAuthorizedBusinesses,
   getPhoneNumbers,
   getPhoneNumberStatus,
+  getPhoneNumberStatusWithSystemUserToken,
   getTemplateStatus,
   getWhatsAppBusinessAccount,
   registerPhoneNumber,
   registerMetaPhoneNumber,
+  registerPhoneNumberWithSystemUserToken,
   runMetaConfigurationDiagnostics,
+  runMetaSystemUserAssetDiagnostics,
   sendMetaTemplateMessage,
   sendTemplateMessage,
   subscribeAppToWaba,

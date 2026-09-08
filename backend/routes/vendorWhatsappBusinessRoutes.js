@@ -1,4 +1,5 @@
 const express = require("express");
+const { requireAdminAuth } = require("../utils/adminAuthMiddleware");
 const { requireVendorAccessFromExistingAuth } = require("../utils/vendorWriteAuth");
 const { verifyWhatsappConnectToken } = require("../utils/whatsappConnectToken");
 const {
@@ -8,11 +9,13 @@ const {
   createMetaConnectSession,
   getMetaDiagnostics,
   getMetaEmbeddedSignupConfig,
+  getMetaSystemUserAssetDiagnostics,
   getWhatsappTemplateLibrary,
   getWhatsappTemplatePreview,
   getWhatsappBusinessConfig,
   prepareWhatsappBusinessConnect,
   registerWhatsappPhoneNumber,
+  runSystemUserPhoneRegistrationDiagnostic,
   sendWhatsappTemplateTestMessage,
   submitWhatsappTemplate,
   updateWhatsappBusinessConfig,
@@ -72,6 +75,18 @@ router.get(
   requireDevelopmentDiagnostics,
   requireVendorAccessFromExistingAuth(resolveRequestedVendorId),
   getMetaDiagnostics
+);
+
+router.get(
+  "/meta/system-user-asset-diagnostics",
+  requireAdminAuth,
+  getMetaSystemUserAssetDiagnostics
+);
+
+router.post(
+  "/meta/system-user-register-phone-diagnostic",
+  requireAdminAuth,
+  runSystemUserPhoneRegistrationDiagnostic
 );
 
 router.get(

@@ -21,6 +21,9 @@ const WHATSAPP_BUSINESS_TEMPLATE_STATUSES = [
 
 const WHATSAPP_PHONE_REGISTRATION_STATUSES = [
   "unknown",
+  "not_registered",
+  "registration_required",
+  "registration_submitted",
   "pending",
   "registered",
   "active",

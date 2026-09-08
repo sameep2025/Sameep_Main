@@ -12,6 +12,16 @@ const TEMPLATE_STATUS_LABELS = {
   rejected: "Rejected",
   error: "Error",
 };
+const PHONE_REGISTRATION_STATUS_LABELS = {
+  unknown: "Registration Required",
+  not_registered: "Not Registered",
+  registration_required: "Registration Required",
+  registration_submitted: "Registration Submitted",
+  pending: "Registration Required",
+  registered: "Registration Required",
+  active: "Ready",
+  error: "Error",
+};
 const SAMPLE_FIELD_LABELS = {
   vendorName: "Business Name",
   billAmount: "Bill Amount",
@@ -70,7 +80,19 @@ function getStatusTone(status) {
 }
 
 function isPhoneRegistrationReady(status) {
-  return status === "registered" || status === "active";
+  return status === "active";
+}
+
+function canRegisterPhoneNumber(status) {
+  return (
+    !isPhoneRegistrationReady(status) &&
+    status !== "registration_submitted" &&
+    status !== "error"
+  );
+}
+
+function getPhoneRegistrationStatusLabel(status) {
+  return PHONE_REGISTRATION_STATUS_LABELS[status] || formatStatus(status || "registration_required");
 }
 
 function getTemplateStatusLabel(status) {
@@ -474,6 +496,8 @@ export default function WhatsappBusinessDashboard({ vendorId }) {
   const phoneRegistrationStatus = config?.phoneRegistrationStatus || "unknown";
   const shouldShowPhoneRegistration =
     isConnected && !isPhoneRegistrationReady(phoneRegistrationStatus);
+  const shouldShowPhoneRegistrationAction =
+    isConnected && canRegisterPhoneNumber(phoneRegistrationStatus);
   const selectedTemplateStatus =
     selectedTemplate?.vendorTemplate?.status || "not_configured";
   const canSubmitSelectedTemplate = selectedTemplateStatus === "not_configured";
@@ -513,7 +537,7 @@ export default function WhatsappBusinessDashboard({ vendorId }) {
           )}
           {shouldShowPhoneRegistration && (
             <div className="whatsapp-business-alert warning">
-              WhatsApp number registration is pending.
+              WhatsApp number registration is not ready yet.
             </div>
           )}
 
@@ -541,7 +565,7 @@ export default function WhatsappBusinessDashboard({ vendorId }) {
               </div>
               <div className="whatsapp-business-card">
                 <span>Phone Registration</span>
-                <strong>{formatStatus(phoneRegistrationStatus)}</strong>
+                <strong>{getPhoneRegistrationStatusLabel(phoneRegistrationStatus)}</strong>
               </div>
             </div>
           ) : null}
@@ -796,7 +820,7 @@ export default function WhatsappBusinessDashboard({ vendorId }) {
 	                >
 	                  {templateLoading ? "Loading..." : "Continue Setup"}
 	                </button>
-                {shouldShowPhoneRegistration && (
+                {shouldShowPhoneRegistrationAction && (
                   <button
                     type="button"
                     className="whatsapp-business-button secondary"

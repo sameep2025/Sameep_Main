@@ -22,14 +22,18 @@ const {
   buildMetaTemplatePayload,
   createTemplate,
   exchangeEmbeddedSignupCode,
-  getPhoneNumberStatus,
+  getPhoneNumberStatusWithSystemUserToken,
   getTemplateStatus,
   findTemplateByName,
-  registerPhoneNumber,
+  registerPhoneNumberWithSystemUserToken,
   runMetaConfigurationDiagnostics,
+  runMetaSystemUserAssetDiagnostics,
   sendTemplateMessage,
   validateConnection,
 } = require("../services/metaWhatsAppService");
+
+const REELOOK_DIAGNOSTIC_WABA_ID = "1074343041678320";
+const REELOOK_DIAGNOSTIC_PHONE_NUMBER_ID = "1336796569515966";
 
 function normalizeVendorId(value) {
   const id = String(value || "").trim();
@@ -53,6 +57,24 @@ async function findVendorRecord(vendorId) {
   return null;
 }
 
+async function findReelookWhatsappDiagnosticRecord() {
+  const query = {
+    "whatsappBusiness.wabaId": REELOOK_DIAGNOSTIC_WABA_ID,
+    "whatsappBusiness.phoneNumberId": REELOOK_DIAGNOSTIC_PHONE_NUMBER_ID,
+  };
+  const dummyVendor = await DummyVendor.findOne(query).lean();
+  if (dummyVendor) {
+    return { Model: DummyVendor, vendor: dummyVendor };
+  }
+
+  const vendor = await Vendor.findOne(query).lean();
+  if (vendor) {
+    return { Model: Vendor, vendor };
+  }
+
+  return null;
+}
+
 function getAuthorizedVendorId(req) {
   return normalizeVendorId(
     req.vendorWriteAuth?.vendorId ||
@@ -69,8 +91,26 @@ function normalizeWhatsappBusinessConfig(config) {
   };
 }
 
+function normalizePhoneRegistrationLifecycleStatus(value) {
+  const status = String(value || "").trim();
+  if (status === "active") return "active";
+  if (status === "registration_submitted") return "registration_submitted";
+  if (status === "not_registered") return "not_registered";
+  if (status === "registration_required") return "registration_required";
+  if (status === "error") return "error";
+
+  // Older code wrote "registered" from code_verification_status=VERIFIED.
+  // That does not prove Cloud API messaging readiness, so keep it actionable.
+  if (status === "registered") return "registration_required";
+
+  return "registration_required";
+}
+
 function sanitizeWhatsappBusinessConfig(config) {
   const normalized = normalizeWhatsappBusinessConfig(config);
+  const phoneRegistrationStatus = normalizePhoneRegistrationLifecycleStatus(
+    normalized.phoneRegistrationStatus
+  );
 
   return {
     enabled: Boolean(normalized.enabled),
@@ -79,7 +119,7 @@ function sanitizeWhatsappBusinessConfig(config) {
     displayPhoneNumber: normalized.displayPhoneNumber || "",
     displayName: normalized.displayName || "",
     templateStatus: normalized.templateStatus || "",
-    phoneRegistrationStatus: normalized.phoneRegistrationStatus || "unknown",
+    phoneRegistrationStatus,
     phoneRegisteredAt: normalized.phoneRegisteredAt || null,
     phoneRegistrationLastError: normalized.phoneRegistrationLastError
       ? "Phone registration needs attention. Please contact YNOT support."
@@ -295,14 +335,32 @@ function formatSafeMetaForResponse(metaError) {
 }
 
 function mapPhoneRegistrationStatus(phoneStatus, fallback = "unknown") {
-  const status = String(phoneStatus?.code_verification_status || fallback || "")
+  const normalizedFallback = normalizePhoneRegistrationLifecycleStatus(fallback);
+  const codeVerificationStatus = String(phoneStatus?.code_verification_status || "")
     .trim()
     .toUpperCase();
-  if (status === "VERIFIED") return "registered";
-  if (status === "PENDING" || status === "NOT_VERIFIED" || status === "EXPIRED") return "pending";
-  if (status === "CONNECTED") return "active";
-  if (!status) return "unknown";
-  return fallback === "registered" || fallback === "active" ? fallback : "pending";
+
+  if (normalizedFallback === "active") {
+    return normalizedFallback;
+  }
+
+  if (!phoneStatus) {
+    return normalizedFallback || "unknown";
+  }
+
+  if (codeVerificationStatus === "PENDING" || codeVerificationStatus === "NOT_VERIFIED") {
+    return "registration_required";
+  }
+
+  if (codeVerificationStatus === "EXPIRED") {
+    return "not_registered";
+  }
+
+  return normalizedFallback || "registration_required";
+}
+
+function getSubmittedPhoneRegistrationStatus() {
+  return "registration_submitted";
 }
 
 function generateSixDigitPin() {
@@ -352,6 +410,7 @@ function sendPhoneRegistrationError(res, error) {
   const meta = formatSafeMetaForResponse(error.metaError);
   const status =
     error.code === "meta_token_encryption_missing" ||
+    error.code === "meta_system_user_token_missing" ||
     error.code === "meta_phone_registration_failed" ||
     error.code === "meta_phone_status_failed"
       ? 500
@@ -366,6 +425,8 @@ function sendPhoneRegistrationError(res, error) {
         : error.code === "meta_whatsapp_connection_incomplete"
         ? "WhatsApp Business connection details are incomplete."
         : error.code === "meta_token_encryption_missing"
+        ? "WhatsApp phone registration is not configured correctly. Please contact YNOT support."
+        : error.code === "meta_system_user_token_missing"
         ? "WhatsApp phone registration is not configured correctly. Please contact YNOT support."
         : "Unable to register WhatsApp number.",
     ...(meta ? { meta } : {}),
@@ -439,6 +500,129 @@ async function getMetaDiagnostics(req, res) {
     return res.status(500).json({
       success: false,
       message: "Failed to run Meta WhatsApp diagnostics",
+    });
+  }
+}
+
+async function getMetaSystemUserAssetDiagnostics(req, res) {
+  try {
+    const diagnostics = await runMetaSystemUserAssetDiagnostics();
+    return res.json(diagnostics);
+  } catch (error) {
+    console.error(
+      "Meta system-user asset diagnostics failed:",
+      error.code || error.message || error
+    );
+    return res.status(500).json({
+      success: false,
+      code: "meta_system_user_asset_diagnostics_failed",
+      message: "Failed to run Meta system-user asset diagnostics",
+    });
+  }
+}
+
+async function runSystemUserPhoneRegistrationDiagnostic(req, res) {
+  const diagnosticContext = {
+    diagnostic: "system_user_phone_registration",
+    phoneNumberId: REELOOK_DIAGNOSTIC_PHONE_NUMBER_ID,
+    wabaId: REELOOK_DIAGNOSTIC_WABA_ID,
+    tokenSource: "system_user",
+  };
+
+  try {
+    const record = await findReelookWhatsappDiagnosticRecord();
+    if (!record) {
+      return res.status(404).json({
+        success: false,
+        ...diagnosticContext,
+        code: "reelook_whatsapp_connection_not_found",
+        registrationRequestAccepted: false,
+        message: "Reelook WhatsApp connection was not found.",
+      });
+    }
+
+    const config = normalizeWhatsappBusinessConfig(record.vendor.whatsappBusiness);
+    const encryptedPin = config.metaRegistration?.pinEncrypted || "";
+    console.log("[Meta System User Phone Registration Diagnostic]", {
+      ...diagnosticContext,
+      systemUserTokenPresent: Boolean(process.env.META_SYSTEM_USER_ACCESS_TOKEN),
+      storedRegistrationPinPresent: Boolean(encryptedPin),
+    });
+
+    if (!encryptedPin) {
+      return res.status(400).json({
+        success: false,
+        ...diagnosticContext,
+        code: "meta_registration_pin_missing",
+        registrationRequestAccepted: false,
+        message: "Stored registration PIN was not found for this diagnostic.",
+      });
+    }
+
+    let pin = "";
+    try {
+      pin = decryptMetaRegistrationPin(encryptedPin);
+    } catch (error) {
+      return res.status(500).json({
+        success: false,
+        ...diagnosticContext,
+        code: error.code || "meta_registration_pin_decrypt_failed",
+        registrationRequestAccepted: false,
+        message: "Stored registration PIN could not be decrypted.",
+      });
+    }
+
+    if (!/^\d{6}$/.test(pin)) {
+      return res.status(400).json({
+        success: false,
+        ...diagnosticContext,
+        code: "meta_registration_pin_invalid",
+        registrationRequestAccepted: false,
+        message: "Stored registration PIN is not valid for this diagnostic.",
+      });
+    }
+
+    console.log("[Meta System User Phone Registration Diagnostic] request started", {
+      ...diagnosticContext,
+    });
+
+    const result = await registerPhoneNumberWithSystemUserToken({
+      phoneNumberId: REELOOK_DIAGNOSTIC_PHONE_NUMBER_ID,
+      pin,
+    });
+
+    console.log("[Meta System User Phone Registration Diagnostic] response", {
+      ...diagnosticContext,
+      registrationSuccess: Boolean(result?.success),
+    });
+
+    return res.json({
+      success: Boolean(result?.success),
+      ...diagnosticContext,
+      registrationRequestAccepted: Boolean(result?.success),
+    });
+  } catch (error) {
+    const meta = formatSafeMetaForResponse(error.metaError);
+    console.error("[Meta System User Phone Registration Diagnostic Error]", {
+      ...diagnosticContext,
+      systemUserTokenPresent: Boolean(process.env.META_SYSTEM_USER_ACCESS_TOKEN),
+      httpStatus: meta?.status || null,
+      metaType: meta?.type || "",
+      metaCode: meta?.code || "",
+      metaSubcode: meta?.subcode || "",
+      metaMessage: meta?.message || "",
+      fbtraceId: meta?.fbtraceId || "",
+      code: error.code || "",
+    });
+
+    const status = error.code === "meta_system_user_token_missing" ? 500 : 400;
+    return res.status(status).json({
+      success: false,
+      ...diagnosticContext,
+      code: error.code || "meta_system_user_phone_registration_failed",
+      registrationRequestAccepted: false,
+      ...(meta ? { meta } : {}),
+      message: "System-user phone registration diagnostic failed.",
     });
   }
 }
@@ -864,14 +1048,23 @@ async function registerWhatsappPhoneNumber(req, res) {
       phoneNumberId: String(config.phoneNumberId),
     };
 
-    const accessToken = getDecryptedMetaToken(config);
+    const hadStoredPin = Boolean(config.metaRegistration?.pinEncrypted);
     const { pin, pinEncrypted } = getOrCreateRegistrationPin(config);
+    if (!hadStoredPin) {
+      await record.Model.updateOne(
+        { _id: record.vendor._id },
+        { $set: { "whatsappBusiness.metaRegistration.pinEncrypted": pinEncrypted } }
+      );
+      config.metaRegistration = {
+        ...(config.metaRegistration || {}),
+        pinEncrypted,
+      };
+    }
     let statusBefore = null;
 
     try {
-      statusBefore = await getPhoneNumberStatus({
+      statusBefore = await getPhoneNumberStatusWithSystemUserToken({
         phoneNumberId: config.phoneNumberId,
-        accessToken,
       });
     } catch (error) {
       statusBefore = null;
@@ -883,24 +1076,25 @@ async function registerWhatsappPhoneNumber(req, res) {
     );
     let registrationResult = null;
 
-    if (beforeRegistrationStatus !== "registered" && beforeRegistrationStatus !== "active") {
-      registrationResult = await registerPhoneNumber({
+    if (
+      beforeRegistrationStatus !== "registration_submitted" &&
+      beforeRegistrationStatus !== "active"
+    ) {
+      registrationResult = await registerPhoneNumberWithSystemUserToken({
         phoneNumberId: config.phoneNumberId,
-        accessToken,
         pin,
       });
     }
 
-    const statusAfter = await getPhoneNumberStatus({
+    const statusAfter = await getPhoneNumberStatusWithSystemUserToken({
       phoneNumberId: config.phoneNumberId,
-      accessToken,
     });
-    const registrationStatus = mapPhoneRegistrationStatus(
-      statusAfter,
-      registrationResult?.success ? "registered" : beforeRegistrationStatus
-    );
+    const submittedStatus = registrationResult?.success
+      ? getSubmittedPhoneRegistrationStatus()
+      : beforeRegistrationStatus;
+    const registrationStatus = mapPhoneRegistrationStatus(statusAfter, submittedStatus);
     const registeredAt =
-      registrationStatus === "registered" || registrationStatus === "active"
+      registrationStatus === "active"
         ? config.phoneRegisteredAt || new Date()
         : null;
     const whatsappBusiness = {
@@ -1172,12 +1366,14 @@ module.exports = {
   completeMetaWhatsappConnection,
   createMetaConnectSession,
   getMetaDiagnostics,
+  getMetaSystemUserAssetDiagnostics,
   getMetaEmbeddedSignupConfig,
   getWhatsappTemplateLibrary,
   getWhatsappTemplatePreview,
   getWhatsappBusinessConfig,
   prepareWhatsappBusinessConnect,
   registerWhatsappPhoneNumber,
+  runSystemUserPhoneRegistrationDiagnostic,
   sendWhatsappTemplateTestMessage,
   submitWhatsappTemplate,
   updateWhatsappBusinessConfig,
