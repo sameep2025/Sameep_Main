@@ -22,6 +22,12 @@ const PHONE_REGISTRATION_STATUS_LABELS = {
   active: "Ready",
   error: "Error",
 };
+const MESSAGING_READINESS_STATUS_LABELS = {
+  available: "Available",
+  limited: "Limited",
+  blocked: "Blocked",
+  unknown: "Unknown",
+};
 const SAMPLE_FIELD_LABELS = {
   vendorName: "Business Name",
   billAmount: "Bill Amount",
@@ -93,6 +99,24 @@ function canRegisterPhoneNumber(status) {
 
 function getPhoneRegistrationStatusLabel(status) {
   return PHONE_REGISTRATION_STATUS_LABELS[status] || formatStatus(status || "registration_required");
+}
+
+function getMessagingReadinessStatusLabel(status) {
+  return MESSAGING_READINESS_STATUS_LABELS[status] || formatStatus(status || "unknown");
+}
+
+function getMessagingReadinessTone(status) {
+  if (status === "available") return "ready";
+  if (status === "limited" || status === "unknown") return "pending";
+  if (status === "blocked") return "error";
+  return "idle";
+}
+
+function findMessagingBlocker(blockers, errorCode) {
+  const expected = String(errorCode);
+  return (Array.isArray(blockers) ? blockers : []).find(
+    (blocker) => String(blocker?.errorCode || "") === expected
+  );
 }
 
 function getTemplateStatusLabel(status) {
@@ -494,6 +518,12 @@ export default function WhatsappBusinessDashboard({ vendorId }) {
   const statusTone = getStatusTone(status);
   const hasConnectLauncher = getHasWhatsappConnectLauncher();
   const phoneRegistrationStatus = config?.phoneRegistrationStatus || "unknown";
+  const messagingReadiness = config?.messagingReadiness || {};
+  const messagingReadinessStatus = messagingReadiness.status || "unknown";
+  const paymentMethodBlocker = findMessagingBlocker(
+    messagingReadiness.blockers,
+    "141006"
+  );
   const shouldShowPhoneRegistration =
     isConnected && !isPhoneRegistrationReady(phoneRegistrationStatus);
   const shouldShowPhoneRegistrationAction =
@@ -567,6 +597,30 @@ export default function WhatsappBusinessDashboard({ vendorId }) {
                 <span>Phone Registration</span>
                 <strong>{getPhoneRegistrationStatusLabel(phoneRegistrationStatus)}</strong>
               </div>
+              <div className="whatsapp-business-card">
+                <span>Messaging</span>
+                <strong
+                  className={`whatsapp-business-inline-status whatsapp-business-inline-status-${getMessagingReadinessTone(
+                    messagingReadinessStatus
+                  )}`}
+                >
+                  {getMessagingReadinessStatusLabel(messagingReadinessStatus)}
+                </strong>
+              </div>
+            </div>
+          ) : null}
+
+          {isConnected && dashboardMode === "overview" && paymentMethodBlocker ? (
+            <div className="whatsapp-business-alert warning">
+              <strong>Payment method required</strong>
+              <p>
+                Your WhatsApp Business Account is connected, but Meta has blocked
+                business-initiated messages because the payment method needs attention.
+              </p>
+              <p>
+                {paymentMethodBlocker.possibleSolution ||
+                  "Add or update the payment method for your WhatsApp Business Account."}
+              </p>
             </div>
           ) : null}
 

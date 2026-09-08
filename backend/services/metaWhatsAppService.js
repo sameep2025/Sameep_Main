@@ -329,6 +329,138 @@ async function runMetaSystemUserAssetDiagnostics() {
   };
 }
 
+const META_PHONE_READINESS_DIAGNOSTIC_FIELDS = [
+  "id",
+  "display_phone_number",
+  "verified_name",
+  "code_verification_status",
+  "quality_rating",
+  "platform_type",
+  "throughput",
+  "status",
+  "health_status",
+  "account_mode",
+  "is_pin_enabled",
+  "messaging_limit_tier",
+  "last_onboarded_time",
+  "name_status",
+].join(",");
+
+function sanitizePhoneReadinessData(data) {
+  return {
+    accessible: true,
+    id: String(data?.id || ""),
+    displayPhoneNumber: String(data?.display_phone_number || ""),
+    verifiedName: String(data?.verified_name || ""),
+    codeVerificationStatus: String(data?.code_verification_status || ""),
+    qualityRating: String(data?.quality_rating || ""),
+    platformType: String(data?.platform_type || ""),
+    throughput: data?.throughput || null,
+    status: String(data?.status || ""),
+    healthStatus: data?.health_status || null,
+    accountMode: String(data?.account_mode || ""),
+    isPinEnabled: typeof data?.is_pin_enabled === "boolean" ? data.is_pin_enabled : null,
+    messagingLimitTier: String(data?.messaging_limit_tier || ""),
+    lastOnboardedTime: data?.last_onboarded_time || null,
+    nameStatus: String(data?.name_status || ""),
+  };
+}
+
+async function runMetaPhoneReadinessComparisonDiagnostics() {
+  const config = getMetaWhatsAppConfig();
+  const accessToken = config.systemUserAccessToken;
+
+  if (!accessToken) {
+    return {
+      success: false,
+      code: "meta_system_user_token_missing",
+    };
+  }
+
+  const phones = [
+    {
+      key: "reelook",
+      businessName: "Reelook Beauty Saloon",
+      wabaId: "1074343041678320",
+      phoneNumberId: "1336796569515966",
+      expectedDisplayPhoneNumber: "+1 555-357-9403",
+      knownOperational: true,
+    },
+    {
+      key: "mona",
+      businessName: "Mona Makeover",
+      wabaId: "1403286735277350",
+      phoneNumberId: "1388988260959449",
+      expectedDisplayPhoneNumber: "+1 555-490-8059",
+      knownOperational: false,
+    },
+  ];
+
+  const results = {};
+  for (const phone of phones) {
+    const result = await readGraphAssetWithSystemUserToken({
+      path: phone.phoneNumberId,
+      fields: META_PHONE_READINESS_DIAGNOSTIC_FIELDS,
+      accessToken,
+    });
+
+    results[phone.key] = {
+      businessName: phone.businessName,
+      wabaId: phone.wabaId,
+      phoneNumberId: phone.phoneNumberId,
+      expectedDisplayPhoneNumber: phone.expectedDisplayPhoneNumber,
+      knownOperational: phone.knownOperational,
+      ...(result.accessible
+        ? sanitizePhoneReadinessData(result.data)
+        : {
+            accessible: false,
+            meta: result.meta,
+          }),
+    };
+  }
+
+  return {
+    success: true,
+    systemUserTokenPresent: true,
+    graphApiVersion: config.graphApiVersion,
+    requestedFields: META_PHONE_READINESS_DIAGNOSTIC_FIELDS.split(","),
+    phones: results,
+  };
+}
+
+async function getPhoneNumberReadinessWithSystemUserToken({ phoneNumberId }) {
+  const config = getMetaWhatsAppConfig();
+  const accessToken = config.systemUserAccessToken;
+  const id = String(phoneNumberId || "").trim();
+
+  if (!accessToken) {
+    const error = new Error("META_SYSTEM_USER_ACCESS_TOKEN is not configured");
+    error.code = "meta_system_user_token_missing";
+    throw error;
+  }
+
+  if (!id) {
+    const error = new Error("Meta phone number ID is required");
+    error.code = "meta_phone_number_id_required";
+    throw error;
+  }
+
+  const result = await readGraphAssetWithSystemUserToken({
+    path: id,
+    fields: META_PHONE_READINESS_DIAGNOSTIC_FIELDS,
+    accessToken,
+  });
+
+  if (!result.accessible) {
+    const error = new Error("Unable to read Meta phone readiness");
+    error.code = "meta_phone_readiness_lookup_failed";
+    error.metaError = result.meta;
+    throw error;
+  }
+
+  return result.data || {};
+}
+
 async function disconnectAuthorization() {
   // Keep external Meta assets intact. Revocation can be wired here later if YNOT
   // receives a token model where revocation is required and safe.
@@ -434,8 +566,7 @@ async function getPhoneNumberStatus({ phoneNumberId, accessToken }) {
         Authorization: `Bearer ${accessToken}`,
       },
       params: {
-        fields:
-          "id,display_phone_number,verified_name,code_verification_status,quality_rating,platform_type,throughput",
+        fields: META_PHONE_READINESS_DIAGNOSTIC_FIELDS,
       },
     });
 
@@ -596,12 +727,14 @@ module.exports = {
   getPhoneNumbers,
   getPhoneNumberStatus,
   getPhoneNumberStatusWithSystemUserToken,
+  getPhoneNumberReadinessWithSystemUserToken,
   getTemplateStatus,
   getWhatsAppBusinessAccount,
   registerPhoneNumber,
   registerMetaPhoneNumber,
   registerPhoneNumberWithSystemUserToken,
   runMetaConfigurationDiagnostics,
+  runMetaPhoneReadinessComparisonDiagnostics,
   runMetaSystemUserAssetDiagnostics,
   sendMetaTemplateMessage,
   sendTemplateMessage,

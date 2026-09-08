@@ -9,6 +9,7 @@ const {
   createMetaConnectSession,
   getMetaDiagnostics,
   getMetaEmbeddedSignupConfig,
+  getMetaPhoneReadinessComparisonDiagnostics,
   getMetaSystemUserAssetDiagnostics,
   getWhatsappTemplateLibrary,
   getWhatsappTemplatePreview,
@@ -81,6 +82,12 @@ router.get(
   "/meta/system-user-asset-diagnostics",
   requireAdminAuth,
   getMetaSystemUserAssetDiagnostics
+);
+
+router.get(
+  "/meta/phone-readiness-diagnostics",
+  requireAdminAuth,
+  getMetaPhoneReadinessComparisonDiagnostics
 );
 
 router.post(

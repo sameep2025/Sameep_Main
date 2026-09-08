@@ -109,6 +109,34 @@
   line-height: 1.2;
 }
 
+.whatsapp-business-inline-status {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  padding: 7px 12px;
+  font-size: 16px;
+}
+
+.whatsapp-business-inline-status-ready {
+  color: #bbf7d0;
+  background: rgba(34, 197, 94, 0.14);
+}
+
+.whatsapp-business-inline-status-pending {
+  color: #fde68a;
+  background: rgba(245, 158, 11, 0.14);
+}
+
+.whatsapp-business-inline-status-error {
+  color: #fecaca;
+  background: rgba(239, 68, 68, 0.14);
+}
+
+.whatsapp-business-inline-status-idle {
+  color: #d6d3d1;
+  background: rgba(120, 113, 108, 0.16);
+}
+
 .whatsapp-business-empty-card {
   max-width: 860px;
   margin-bottom: 24px;
@@ -198,6 +226,12 @@
   color: #fde68a;
   background: rgba(245, 158, 11, 0.12);
   border: 1px solid rgba(245, 158, 11, 0.26);
+}
+
+.whatsapp-business-alert p {
+  margin: 8px 0 0;
+  color: rgba(247, 242, 223, 0.76);
+  line-height: 1.45;
 }
 
 .whatsapp-template-section {

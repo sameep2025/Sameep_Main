@@ -22,15 +22,21 @@ const {
   buildMetaTemplatePayload,
   createTemplate,
   exchangeEmbeddedSignupCode,
+  getPhoneNumberReadinessWithSystemUserToken,
   getPhoneNumberStatusWithSystemUserToken,
   getTemplateStatus,
   findTemplateByName,
   registerPhoneNumberWithSystemUserToken,
   runMetaConfigurationDiagnostics,
+  runMetaPhoneReadinessComparisonDiagnostics,
   runMetaSystemUserAssetDiagnostics,
   sendTemplateMessage,
   validateConnection,
 } = require("../services/metaWhatsAppService");
+const {
+  applyPhoneRegistrationReadiness,
+  buildMessagingReadiness,
+} = require("../services/metaWhatsAppReadiness");
 
 const REELOOK_DIAGNOSTIC_WABA_ID = "1074343041678320";
 const REELOOK_DIAGNOSTIC_PHONE_NUMBER_ID = "1336796569515966";
@@ -111,6 +117,7 @@ function sanitizeWhatsappBusinessConfig(config) {
   const phoneRegistrationStatus = normalizePhoneRegistrationLifecycleStatus(
     normalized.phoneRegistrationStatus
   );
+  const messagingReadiness = normalized.messagingReadiness || buildMessagingReadiness(null);
 
   return {
     enabled: Boolean(normalized.enabled),
@@ -121,6 +128,7 @@ function sanitizeWhatsappBusinessConfig(config) {
     templateStatus: normalized.templateStatus || "",
     phoneRegistrationStatus,
     phoneRegisteredAt: normalized.phoneRegisteredAt || null,
+    messagingReadiness,
     phoneRegistrationLastError: normalized.phoneRegistrationLastError
       ? "Phone registration needs attention. Please contact YNOT support."
       : "",
@@ -129,6 +137,63 @@ function sanitizeWhatsappBusinessConfig(config) {
       ? "Connection needs attention. Please contact YNOT support."
       : "",
   };
+}
+
+async function refreshMetaPhoneReadinessForResponse(record) {
+  const config = normalizeWhatsappBusinessConfig(record.vendor.whatsappBusiness);
+  if (
+    config.provider !== "meta" ||
+    !config.phoneNumberId ||
+    (config.phoneRegistrationStatus !== "registration_submitted" &&
+      config.phoneRegistrationStatus !== "active")
+  ) {
+    return config;
+  }
+
+  try {
+    const phoneStatus = await getPhoneNumberReadinessWithSystemUserToken({
+      phoneNumberId: config.phoneNumberId,
+    });
+    const readinessResult = applyPhoneRegistrationReadiness({
+      config,
+      phoneStatus,
+    });
+    const refreshedConfig = {
+      ...readinessResult.config,
+      messagingReadiness: buildMessagingReadiness(phoneStatus?.health_status || null),
+    };
+
+    if (readinessResult.changed) {
+      await record.Model.updateOne(
+        {
+          _id: record.vendor._id,
+          "whatsappBusiness.phoneRegistrationStatus": "registration_submitted",
+        },
+        {
+          $set: {
+            "whatsappBusiness.phoneRegistrationStatus": "active",
+            "whatsappBusiness.phoneRegisteredAt": refreshedConfig.phoneRegisteredAt,
+            "whatsappBusiness.phoneRegistrationLastError": "",
+          },
+        }
+      );
+    }
+
+    return refreshedConfig;
+  } catch (error) {
+    console.error("[Meta Phone Readiness Refresh Error]", {
+      vendorId: String(record.vendor._id),
+      phoneNumberId: String(config.phoneNumberId || ""),
+      code: error.code || "",
+      metaCode: error.metaError?.code || "",
+      metaSubcode: error.metaError?.subcode || "",
+      metaMessage: error.metaError?.message || error.message || "",
+    });
+    return {
+      ...config,
+      messagingReadiness: buildMessagingReadiness(null),
+    };
+  }
 }
 
 function formatTemplateStatus(value) {
@@ -449,10 +514,11 @@ async function getWhatsappBusinessConfig(req, res) {
   try {
     const record = await findVendorRecord(getAuthorizedVendorId(req));
     if (!record) return sendVendorNotFound(res);
+    const whatsappBusiness = await refreshMetaPhoneReadinessForResponse(record);
 
     return res.json({
       success: true,
-      data: sanitizeWhatsappBusinessConfig(record.vendor.whatsappBusiness),
+      data: sanitizeWhatsappBusinessConfig(whatsappBusiness),
     });
   } catch (error) {
     console.error("Failed to fetch WhatsApp Business config:", error.message || error);
@@ -517,6 +583,23 @@ async function getMetaSystemUserAssetDiagnostics(req, res) {
       success: false,
       code: "meta_system_user_asset_diagnostics_failed",
       message: "Failed to run Meta system-user asset diagnostics",
+    });
+  }
+}
+
+async function getMetaPhoneReadinessComparisonDiagnostics(req, res) {
+  try {
+    const diagnostics = await runMetaPhoneReadinessComparisonDiagnostics();
+    return res.json(diagnostics);
+  } catch (error) {
+    console.error(
+      "Meta phone readiness diagnostics failed:",
+      error.code || error.message || error
+    );
+    return res.status(500).json({
+      success: false,
+      code: "meta_phone_readiness_diagnostics_failed",
+      message: "Failed to run Meta phone readiness diagnostics",
     });
   }
 }
@@ -1092,11 +1175,19 @@ async function registerWhatsappPhoneNumber(req, res) {
     const submittedStatus = registrationResult?.success
       ? getSubmittedPhoneRegistrationStatus()
       : beforeRegistrationStatus;
-    const registrationStatus = mapPhoneRegistrationStatus(statusAfter, submittedStatus);
+    const mappedStatus = mapPhoneRegistrationStatus(statusAfter, submittedStatus);
+    const readinessResult = applyPhoneRegistrationReadiness({
+      config: {
+        ...config,
+        phoneRegistrationStatus: mappedStatus,
+      },
+      phoneStatus: statusAfter,
+    });
+    const registrationStatus = readinessResult.config.phoneRegistrationStatus;
     const registeredAt =
       registrationStatus === "active"
-        ? config.phoneRegisteredAt || new Date()
-        : null;
+        ? readinessResult.config.phoneRegisteredAt || config.phoneRegisteredAt || new Date()
+        : config.phoneRegisteredAt || null;
     const whatsappBusiness = {
       ...config,
       enabled: false,
@@ -1107,6 +1198,10 @@ async function registerWhatsappPhoneNumber(req, res) {
         ...(config.metaRegistration || {}),
         pinEncrypted,
       },
+    };
+    const responseWhatsappBusiness = {
+      ...whatsappBusiness,
+      messagingReadiness: buildMessagingReadiness(statusAfter?.health_status || null),
     };
 
     await record.Model.updateOne(
@@ -1122,7 +1217,7 @@ async function registerWhatsappPhoneNumber(req, res) {
 
     return res.json({
       success: true,
-      data: sanitizeWhatsappBusinessConfig(whatsappBusiness),
+      data: sanitizeWhatsappBusinessConfig(responseWhatsappBusiness),
       phoneStatus: {
         displayPhoneNumber: statusAfter?.display_phone_number || "",
         verifiedName: statusAfter?.verified_name || "",
@@ -1366,6 +1461,7 @@ module.exports = {
   completeMetaWhatsappConnection,
   createMetaConnectSession,
   getMetaDiagnostics,
+  getMetaPhoneReadinessComparisonDiagnostics,
   getMetaSystemUserAssetDiagnostics,
   getMetaEmbeddedSignupConfig,
   getWhatsappTemplateLibrary,
