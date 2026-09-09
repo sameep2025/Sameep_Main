@@ -83,6 +83,10 @@ const whatsappBusinessConfigSchema = new mongoose.Schema(
     },
     connectedAt: { type: Date, default: null },
     lastError: { type: String, default: "" },
+    activation: {
+      activatedAt: { type: Date, default: null },
+      deactivatedAt: { type: Date, default: null },
+    },
     metaAuth: {
       accessTokenEncrypted: { type: String, default: "" },
       tokenType: { type: String, default: "" },
@@ -133,6 +137,10 @@ function getDefaultWhatsappBusinessConfig() {
     activeTemplatesByPurpose: {},
     connectedAt: null,
     lastError: "",
+    activation: {
+      activatedAt: null,
+      deactivatedAt: null,
+    },
     metaAuth: {
       accessTokenEncrypted: "",
       tokenType: "",

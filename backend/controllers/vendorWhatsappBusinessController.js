@@ -38,7 +38,10 @@ const {
   buildMessagingReadiness,
 } = require("../services/metaWhatsAppReadiness");
 const {
+  buildActivatedWhatsappBusinessConfig,
   buildActivationEligibility,
+  buildBillingActivationState,
+  buildDeactivatedWhatsappBusinessConfig,
   buildFailedTestMessageState,
   buildSuccessfulTestMessageState,
   normalizeTestMessageState,
@@ -134,9 +137,14 @@ function sanitizeWhatsappBusinessConfig(config) {
     },
     messagingReadiness
   );
+  const activationState = buildBillingActivationState(normalized, activationEligibility);
 
   return {
     enabled: Boolean(normalized.enabled),
+    activation: {
+      activatedAt: normalized.activation?.activatedAt || null,
+      deactivatedAt: normalized.activation?.deactivatedAt || null,
+    },
     provider: normalized.provider === "meta" ? "meta" : "msg91",
     connectionStatus: normalized.connectionStatus || "not_connected",
     displayPhoneNumber: normalized.displayPhoneNumber || "",
@@ -147,6 +155,7 @@ function sanitizeWhatsappBusinessConfig(config) {
     messagingReadiness,
     testMessage,
     activationEligibility,
+    activationState,
     phoneRegistrationLastError: normalized.phoneRegistrationLastError
       ? "Phone registration needs attention. Please contact YNOT support."
       : "",
@@ -536,6 +545,94 @@ async function getWhatsappBusinessConfig(req, res) {
     return res.status(500).json({
       success: false,
       message: "Failed to fetch WhatsApp Business configuration",
+    });
+  }
+}
+
+async function activateWhatsappBusinessBilling(req, res) {
+  try {
+    const record = await findVendorRecord(getAuthorizedVendorId(req));
+    if (!record) return sendVendorNotFound(res);
+
+    const current = await refreshMetaPhoneReadinessForResponse(record);
+    const sanitizedCurrent = sanitizeWhatsappBusinessConfig(current);
+
+    if (current.enabled) {
+      return res.json({
+        success: true,
+        data: sanitizedCurrent,
+        message: "WhatsApp billing activation is already enabled.",
+      });
+    }
+
+    if (!sanitizedCurrent.activationEligibility?.eligible) {
+      return res.status(400).json({
+        success: false,
+        code: "whatsapp_billing_not_eligible",
+        data: sanitizedCurrent,
+        checks: sanitizedCurrent.activationEligibility?.checks || {},
+        blockers: sanitizedCurrent.activationEligibility?.blockers || [],
+        message: "WhatsApp billing is not ready to activate yet.",
+      });
+    }
+
+    const whatsappBusiness = buildActivatedWhatsappBusinessConfig(current);
+    await record.Model.updateOne(
+      { _id: record.vendor._id },
+      {
+        $set: {
+          "whatsappBusiness.enabled": true,
+          "whatsappBusiness.activation": whatsappBusiness.activation,
+        },
+      }
+    );
+
+    return res.json({
+      success: true,
+      data: sanitizeWhatsappBusinessConfig(whatsappBusiness),
+      message: "WhatsApp billing activation preference has been saved.",
+    });
+  } catch (error) {
+    console.error("Failed to activate WhatsApp billing:", error.code || error.message || error);
+    return res.status(500).json({
+      success: false,
+      code: "whatsapp_billing_activation_failed",
+      message: "Unable to activate WhatsApp billing preference.",
+    });
+  }
+}
+
+async function deactivateWhatsappBusinessBilling(req, res) {
+  try {
+    const record = await findVendorRecord(getAuthorizedVendorId(req));
+    if (!record) return sendVendorNotFound(res);
+
+    const current = normalizeWhatsappBusinessConfig(record.vendor.whatsappBusiness);
+    const whatsappBusiness = buildDeactivatedWhatsappBusinessConfig(current);
+
+    await record.Model.updateOne(
+      { _id: record.vendor._id },
+      {
+        $set: {
+          "whatsappBusiness.enabled": false,
+          "whatsappBusiness.activation": whatsappBusiness.activation,
+        },
+      }
+    );
+
+    return res.json({
+      success: true,
+      data: sanitizeWhatsappBusinessConfig(whatsappBusiness),
+      message: current.enabled
+        ? "WhatsApp billing activation preference has been turned off."
+        : "WhatsApp billing activation preference is already off.",
+    });
+  } catch (error) {
+    console.error("Failed to deactivate WhatsApp billing:", error.code || error.message || error);
+    return res.status(500).json({
+      success: false,
+      code: "whatsapp_billing_deactivation_failed",
+      message: "Unable to deactivate WhatsApp billing preference.",
     });
   }
 }
@@ -1490,7 +1587,9 @@ async function disconnectWhatsappBusiness(req, res) {
 }
 
 module.exports = {
+  activateWhatsappBusinessBilling,
   checkWhatsappTemplateStatus,
+  deactivateWhatsappBusinessBilling,
   disconnectWhatsappBusiness,
   completeMetaWhatsappConnection,
   createMetaConnectSession,

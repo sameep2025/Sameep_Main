@@ -306,6 +306,12 @@
   background: rgba(245, 158, 11, 0.14);
 }
 
+.whatsapp-readiness-note {
+  margin-top: 12px;
+  color: rgba(247, 242, 223, 0.7);
+  line-height: 1.45;
+}
+
 .whatsapp-template-section {
   margin-bottom: 24px;
   border: 1px solid rgba(245, 217, 122, 0.18);

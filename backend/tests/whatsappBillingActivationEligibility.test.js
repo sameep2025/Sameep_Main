@@ -2,7 +2,10 @@ const assert = require("node:assert/strict");
 const test = require("node:test");
 
 const {
+  buildActivatedWhatsappBusinessConfig,
   buildActivationEligibility,
+  buildBillingActivationState,
+  buildDeactivatedWhatsappBusinessConfig,
   buildFailedTestMessageState,
   buildSuccessfulTestMessageState,
   normalizeTestMessageState,
@@ -241,4 +244,137 @@ test("legacy MSG91 vendor remains ineligible and unaffected", () => {
 
   assert.equal(result.eligible, false);
   assert.equal(config.enabled, false);
+});
+
+test("eligible disabled config can be activated", () => {
+  const eligibility = buildActivationEligibility(eligibleConfig({ enabled: false }), {
+    status: "limited",
+  });
+
+  assert.equal(eligibility.eligible, true);
+});
+
+test("activation sets enabled true", () => {
+  const config = buildActivatedWhatsappBusinessConfig(eligibleConfig({ enabled: false }));
+
+  assert.equal(config.enabled, true);
+});
+
+test("activation sets activatedAt", () => {
+  const now = new Date("2026-09-09T03:00:00.000Z");
+  const config = buildActivatedWhatsappBusinessConfig(eligibleConfig({ enabled: false }), now);
+
+  assert.equal(config.activation.activatedAt, now);
+});
+
+test("activation does not change Meta asset, template, or token data", () => {
+  const original = eligibleConfig({
+    wabaId: "waba-1",
+    phoneNumberId: "phone-1",
+    metaAuth: { accessTokenEncrypted: "encrypted", tokenType: "bearer" },
+    templateInstances: [{ masterTemplateKey: "BILL_STANDARD", status: "approved" }],
+  });
+  const activated = buildActivatedWhatsappBusinessConfig(original);
+
+  assert.equal(activated.wabaId, original.wabaId);
+  assert.equal(activated.phoneNumberId, original.phoneNumberId);
+  assert.deepEqual(activated.metaAuth, original.metaAuth);
+  assert.deepEqual(activated.templateInstances, original.templateInstances);
+});
+
+test("ineligible disabled config remains not ready", () => {
+  const eligibility = buildActivationEligibility(
+    eligibleConfig({ enabled: false, phoneRegistrationStatus: "registration_submitted" }),
+    { status: "limited" }
+  );
+  const state = buildBillingActivationState({ enabled: false }, eligibility);
+
+  assert.equal(eligibility.eligible, false);
+  assert.equal(state.status, "not_ready");
+});
+
+test("already enabled activation config is idempotent", () => {
+  const activatedAt = new Date("2026-09-09T02:00:00.000Z");
+  const config = buildActivatedWhatsappBusinessConfig(
+    eligibleConfig({ enabled: true, activation: { activatedAt } }),
+    new Date("2026-09-09T03:00:00.000Z")
+  );
+
+  assert.equal(config.enabled, true);
+  assert.equal(config.activation.activatedAt, activatedAt);
+});
+
+test("enabled true deactivation sets enabled false", () => {
+  const config = buildDeactivatedWhatsappBusinessConfig(eligibleConfig({ enabled: true }));
+
+  assert.equal(config.enabled, false);
+});
+
+test("deactivation sets deactivatedAt", () => {
+  const now = new Date("2026-09-09T04:00:00.000Z");
+  const config = buildDeactivatedWhatsappBusinessConfig(eligibleConfig({ enabled: true }), now);
+
+  assert.equal(config.activation.deactivatedAt, now);
+});
+
+test("already disabled deactivation is idempotent", () => {
+  const config = buildDeactivatedWhatsappBusinessConfig(eligibleConfig({ enabled: false }));
+
+  assert.equal(config.enabled, false);
+});
+
+test("deactivation does not disconnect Meta or remove credentials/templates", () => {
+  const original = eligibleConfig({
+    enabled: true,
+    provider: "meta",
+    connectionStatus: "connected",
+    metaAuth: { accessTokenEncrypted: "encrypted" },
+    templateInstances: [{ masterTemplateKey: "BILL_STANDARD", status: "approved" }],
+  });
+  const deactivated = buildDeactivatedWhatsappBusinessConfig(original);
+
+  assert.equal(deactivated.provider, "meta");
+  assert.equal(deactivated.connectionStatus, "connected");
+  assert.deepEqual(deactivated.metaAuth, original.metaAuth);
+  assert.deepEqual(deactivated.templateInstances, original.templateInstances);
+});
+
+test("eligible true and enabled false maps to Ready to Activate", () => {
+  const eligibility = buildActivationEligibility(eligibleConfig({ enabled: false }), {
+    status: "limited",
+  });
+
+  assert.equal(
+    buildBillingActivationState({ enabled: false }, eligibility).status,
+    "ready_to_activate"
+  );
+});
+
+test("eligible true and enabled true maps to Active", () => {
+  const eligibility = buildActivationEligibility(eligibleConfig({ enabled: true }), {
+    status: "limited",
+  });
+
+  assert.equal(buildBillingActivationState({ enabled: true }, eligibility).status, "active");
+});
+
+test("eligible false and enabled false maps to Not Ready", () => {
+  const eligibility = buildActivationEligibility(
+    eligibleConfig({ enabled: false, testMessage: { status: "not_tested" } }),
+    { status: "limited" }
+  );
+
+  assert.equal(buildBillingActivationState({ enabled: false }, eligibility).status, "not_ready");
+});
+
+test("eligible false and enabled true maps to Needs Attention", () => {
+  const eligibility = buildActivationEligibility(
+    eligibleConfig({ enabled: true, testMessage: { status: "failed" } }),
+    { status: "limited" }
+  );
+
+  assert.equal(
+    buildBillingActivationState({ enabled: true }, eligibility).status,
+    "needs_attention"
+  );
 });

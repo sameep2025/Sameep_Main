@@ -3,7 +3,9 @@ const { requireAdminAuth } = require("../utils/adminAuthMiddleware");
 const { requireVendorAccessFromExistingAuth } = require("../utils/vendorWriteAuth");
 const { verifyWhatsappConnectToken } = require("../utils/whatsappConnectToken");
 const {
+  activateWhatsappBusinessBilling,
   checkWhatsappTemplateStatus,
+  deactivateWhatsappBusinessBilling,
   disconnectWhatsappBusiness,
   completeMetaWhatsappConnection,
   createMetaConnectSession,
@@ -148,6 +150,18 @@ router.post(
   "/connect",
   requireVendorAccessFromExistingAuth(resolveRequestedVendorId),
   prepareWhatsappBusinessConnect
+);
+
+router.post(
+  "/activate",
+  requireVendorAccessFromExistingAuth(resolveRequestedVendorId),
+  activateWhatsappBusinessBilling
+);
+
+router.post(
+  "/deactivate",
+  requireVendorAccessFromExistingAuth(resolveRequestedVendorId),
+  deactivateWhatsappBusinessBilling
 );
 
 router.post(

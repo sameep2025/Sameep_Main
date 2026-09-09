@@ -89,9 +89,77 @@ function buildActivationEligibility(config, messagingReadiness = {}) {
   };
 }
 
+function buildBillingActivationState(config, activationEligibility) {
+  const enabled = Boolean(config?.enabled);
+  const eligible = Boolean(activationEligibility?.eligible);
+
+  if (enabled && eligible) {
+    return {
+      status: "active",
+      label: "Active",
+    };
+  }
+
+  if (enabled && !eligible) {
+    return {
+      status: "needs_attention",
+      label: "Needs Attention",
+    };
+  }
+
+  if (!enabled && eligible) {
+    return {
+      status: "ready_to_activate",
+      label: "Ready to Activate",
+    };
+  }
+
+  return {
+    status: "not_ready",
+    label: "Not Ready to Activate",
+  };
+}
+
+function buildActivatedWhatsappBusinessConfig(config, now = new Date()) {
+  const current = config && typeof config === "object" ? config : {};
+  const activation = current.activation && typeof current.activation === "object"
+    ? current.activation
+    : {};
+
+  return {
+    ...current,
+    enabled: true,
+    activation: {
+      ...activation,
+      activatedAt: activation.activatedAt || now,
+      deactivatedAt: activation.deactivatedAt || null,
+    },
+  };
+}
+
+function buildDeactivatedWhatsappBusinessConfig(config, now = new Date()) {
+  const current = config && typeof config === "object" ? config : {};
+  const activation = current.activation && typeof current.activation === "object"
+    ? current.activation
+    : {};
+
+  return {
+    ...current,
+    enabled: false,
+    activation: {
+      ...activation,
+      activatedAt: activation.activatedAt || null,
+      deactivatedAt: now,
+    },
+  };
+}
+
 module.exports = {
   BILLING_TEMPLATE_KEY,
+  buildActivatedWhatsappBusinessConfig,
   buildActivationEligibility,
+  buildBillingActivationState,
+  buildDeactivatedWhatsappBusinessConfig,
   buildFailedTestMessageState,
   buildSuccessfulTestMessageState,
   getBillingTemplateInstance,

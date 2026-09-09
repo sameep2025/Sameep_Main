@@ -40,6 +40,12 @@ const ACTIVATION_CHECK_LABELS = {
   billingTemplateApproved: "Billing Template Approved",
   testMessageSuccessful: "Test Message Successful",
 };
+const ACTIVATION_STATE_LABELS = {
+  active: "Active",
+  needs_attention: "Needs Attention",
+  ready_to_activate: "Ready to Activate",
+  not_ready: "Not Ready to Activate",
+};
 const SAMPLE_FIELD_LABELS = {
   vendorName: "Business Name",
   billAmount: "Bill Amount",
@@ -140,6 +146,16 @@ function getTestMessageStatusLabel(status) {
 function getTestMessageTone(status) {
   if (status === "successful") return "ready";
   if (status === "failed") return "error";
+  return "pending";
+}
+
+function getActivationStateLabel(status) {
+  return ACTIVATION_STATE_LABELS[status] || "Not Ready to Activate";
+}
+
+function getActivationStateTone(status) {
+  if (status === "active" || status === "ready_to_activate") return "ready";
+  if (status === "needs_attention") return "error";
   return "pending";
 }
 
@@ -289,6 +305,9 @@ export default function WhatsappBusinessDashboard({ vendorId }) {
       return json;
     } catch (err) {
       console.error("WhatsApp Business action failed", err);
+      if (err.data) {
+        setConfig(err.data);
+      }
       setError(err.message || "Unable to update WhatsApp Business settings");
       return null;
     } finally {
@@ -546,6 +565,27 @@ export default function WhatsappBusinessDashboard({ vendorId }) {
     }
   };
 
+  const handleActivateBilling = () => {
+    const connectedNumber = config?.displayPhoneNumber || "your connected WhatsApp number";
+    const shouldActivate = window.confirm(
+      `Activate WhatsApp Billing?\n\nThis prepares your account to use ${connectedNumber} for YNOT billing when actual billing routing is enabled separately.\n\nThis does not change today's live billing sender.`
+    );
+
+    if (shouldActivate) {
+      postWhatsappBusinessAction("activate");
+    }
+  };
+
+  const handleDeactivateBilling = () => {
+    const shouldDeactivate = window.confirm(
+      "Deactivate Own WhatsApp Billing?\n\nThis turns off only your saved activation preference. It does not disconnect Meta, remove templates, or change the current MSG91 billing flow."
+    );
+
+    if (shouldDeactivate) {
+      postWhatsappBusinessAction("deactivate");
+    }
+  };
+
   const status = config?.connectionStatus || "not_connected";
   const isConnected = CONNECTED_STATUSES.has(status);
   const statusTone = getStatusTone(status);
@@ -556,6 +596,16 @@ export default function WhatsappBusinessDashboard({ vendorId }) {
   const testMessageStatus = config?.testMessage?.status || "not_tested";
   const activationEligibility = config?.activationEligibility || {};
   const activationChecks = activationEligibility.checks || {};
+  const activationState = config?.activationState || {};
+  const activationStateStatus =
+    activationState.status ||
+    (config?.enabled
+      ? activationEligibility.eligible
+        ? "active"
+        : "needs_attention"
+      : activationEligibility.eligible
+      ? "ready_to_activate"
+      : "not_ready");
   const paymentMethodBlocker = findMessagingBlocker(
     messagingReadiness.blockers,
     "141006"
@@ -679,12 +729,23 @@ export default function WhatsappBusinessDashboard({ vendorId }) {
               </div>
               <div
                 className={`whatsapp-readiness-result ${
-                  activationEligibility.eligible ? "ready" : "pending"
+                  getActivationStateTone(activationStateStatus)
                 }`}
               >
                 Own WhatsApp Billing:{" "}
-                {activationEligibility.eligible ? "Ready to Activate" : "Not Ready to Activate"}
+                {getActivationStateLabel(activationStateStatus)}
               </div>
+              {activationStateStatus === "active" && (
+                <p className="whatsapp-readiness-note">
+                  Prepared sender: {config?.displayPhoneNumber || "connected WhatsApp number"}.
+                  Actual customer bill routing will be enabled separately.
+                </p>
+              )}
+              {activationStateStatus === "needs_attention" && (
+                <p className="whatsapp-readiness-note">
+                  Your activation preference is on, but one or more readiness checks now need attention.
+                </p>
+              )}
             </div>
           ) : null}
 
@@ -962,6 +1023,30 @@ export default function WhatsappBusinessDashboard({ vendorId }) {
                     {actionLoading === "meta/register-phone"
                       ? "Registering..."
                       : "Register WhatsApp Number"}
+                  </button>
+                )}
+                {activationStateStatus === "ready_to_activate" && (
+                  <button
+                    type="button"
+                    className="whatsapp-business-button primary"
+                    disabled={Boolean(actionLoading)}
+                    onClick={handleActivateBilling}
+                  >
+                    {actionLoading === "activate"
+                      ? "Activating..."
+                      : "Activate WhatsApp Billing"}
+                  </button>
+                )}
+                {config?.enabled && (
+                  <button
+                    type="button"
+                    className="whatsapp-business-button secondary"
+                    disabled={Boolean(actionLoading)}
+                    onClick={handleDeactivateBilling}
+                  >
+                    {actionLoading === "deactivate"
+                      ? "Deactivating..."
+                      : "Deactivate WhatsApp Billing"}
                   </button>
                 )}
                 <button
