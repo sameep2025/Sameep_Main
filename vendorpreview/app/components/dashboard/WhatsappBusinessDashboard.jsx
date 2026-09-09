@@ -28,6 +28,18 @@ const MESSAGING_READINESS_STATUS_LABELS = {
   blocked: "Blocked",
   unknown: "Unknown",
 };
+const TEST_MESSAGE_STATUS_LABELS = {
+  not_tested: "Not Tested",
+  successful: "Successful",
+  failed: "Failed",
+};
+const ACTIVATION_CHECK_LABELS = {
+  accountConnected: "Account Connected",
+  phoneRegistrationReady: "Phone Registration Ready",
+  messagingNotBlocked: "Messaging Available / Limited",
+  billingTemplateApproved: "Billing Template Approved",
+  testMessageSuccessful: "Test Message Successful",
+};
 const SAMPLE_FIELD_LABELS = {
   vendorName: "Business Name",
   billAmount: "Bill Amount",
@@ -66,7 +78,9 @@ async function parseApiResponse(res, fallbackMessage) {
       message,
       code: json?.code,
     });
-    throw new Error(`${message} (${res.status})`);
+    const error = new Error(`${message} (${res.status})`);
+    error.data = json?.data || null;
+    throw error;
   }
 
   return json;
@@ -119,6 +133,16 @@ function findMessagingBlocker(blockers, errorCode) {
   );
 }
 
+function getTestMessageStatusLabel(status) {
+  return TEST_MESSAGE_STATUS_LABELS[status] || formatStatus(status || "not_tested");
+}
+
+function getTestMessageTone(status) {
+  if (status === "successful") return "ready";
+  if (status === "failed") return "error";
+  return "pending";
+}
+
 function getTemplateStatusLabel(status) {
   return TEMPLATE_STATUS_LABELS[status] || formatStatus(status || "not_configured");
 }
@@ -143,9 +167,12 @@ function debugTestSend(message, data) {
 function normalizePhoneNumber(value) {
   const cleaned = String(value || "").trim().replace(/[\s()-]/g, "");
   if (!cleaned) return "";
-  const digits = cleaned.replace(/^\+/, "");
-  if (!/^\d+$/.test(digits)) return cleaned;
-  return cleaned.startsWith("+") ? `+${digits}` : `+${digits}`;
+  if (!/^\+?\d+$/.test(cleaned)) return cleaned;
+  let digits = cleaned.replace(/^\+/, "");
+  if (!cleaned.startsWith("+") && digits.length === 10) {
+    digits = `91${digits}`;
+  }
+  return `+${digits}`;
 }
 
 function isValidInternationalPhone(value) {
@@ -423,9 +450,15 @@ export default function WhatsappBusinessDashboard({ vendorId }) {
       });
       const json = await parseApiResponse(res, "Unable to send WhatsApp test message");
 
+      if (json.data) {
+        setConfig(json.data);
+      }
       setTestResult(json.message || "Test message submitted successfully.");
     } catch (err) {
       console.error("WhatsApp test message failed", err);
+      if (err.data) {
+        setConfig(err.data);
+      }
       setTestSendError(err.message || "Unable to send WhatsApp test message");
     } finally {
       setActionLoading("");
@@ -520,6 +553,9 @@ export default function WhatsappBusinessDashboard({ vendorId }) {
   const phoneRegistrationStatus = config?.phoneRegistrationStatus || "unknown";
   const messagingReadiness = config?.messagingReadiness || {};
   const messagingReadinessStatus = messagingReadiness.status || "unknown";
+  const testMessageStatus = config?.testMessage?.status || "not_tested";
+  const activationEligibility = config?.activationEligibility || {};
+  const activationChecks = activationEligibility.checks || {};
   const paymentMethodBlocker = findMessagingBlocker(
     messagingReadiness.blockers,
     "141006"
@@ -606,6 +642,48 @@ export default function WhatsappBusinessDashboard({ vendorId }) {
                 >
                   {getMessagingReadinessStatusLabel(messagingReadinessStatus)}
                 </strong>
+              </div>
+              <div className="whatsapp-business-card">
+                <span>Test Message</span>
+                <strong
+                  className={`whatsapp-business-inline-status whatsapp-business-inline-status-${getTestMessageTone(
+                    testMessageStatus
+                  )}`}
+                >
+                  {getTestMessageStatusLabel(testMessageStatus)}
+                </strong>
+              </div>
+            </div>
+          ) : null}
+
+          {isConnected && dashboardMode === "overview" ? (
+            <div className="whatsapp-readiness-card">
+              <div>
+                <h3>WhatsApp Billing Setup</h3>
+                <p>
+                  Own-number billing remains off until YNOT explicitly activates it later.
+                </p>
+              </div>
+              <div className="whatsapp-readiness-list">
+                {Object.entries(ACTIVATION_CHECK_LABELS).map(([key, label]) => (
+                  <div
+                    key={key}
+                    className={`whatsapp-readiness-item ${
+                      activationChecks[key] ? "complete" : "pending"
+                    }`}
+                  >
+                    <span>{activationChecks[key] ? "✓" : "○"}</span>
+                    <strong>{label}</strong>
+                  </div>
+                ))}
+              </div>
+              <div
+                className={`whatsapp-readiness-result ${
+                  activationEligibility.eligible ? "ready" : "pending"
+                }`}
+              >
+                Own WhatsApp Billing:{" "}
+                {activationEligibility.eligible ? "Ready to Activate" : "Not Ready to Activate"}
               </div>
             </div>
           ) : null}

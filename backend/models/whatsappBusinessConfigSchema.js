@@ -98,6 +98,16 @@ const whatsappBusinessConfigSchema = new mongoose.Schema(
     },
     phoneRegisteredAt: { type: Date, default: null },
     phoneRegistrationLastError: { type: String, default: "" },
+    testMessage: {
+      status: {
+        type: String,
+        enum: ["not_tested", "successful", "failed"],
+        default: "not_tested",
+      },
+      lastTestedAt: { type: Date, default: null },
+      lastSuccessfulAt: { type: Date, default: null },
+      lastErrorCode: { type: String, default: "" },
+    },
     lastTestSend: {
       templateKey: { type: String, default: "" },
       recipientMasked: { type: String, default: "" },
@@ -134,6 +144,12 @@ function getDefaultWhatsappBusinessConfig() {
     phoneRegistrationStatus: "unknown",
     phoneRegisteredAt: null,
     phoneRegistrationLastError: "",
+    testMessage: {
+      status: "not_tested",
+      lastTestedAt: null,
+      lastSuccessfulAt: null,
+      lastErrorCode: "",
+    },
     lastTestSend: {
       templateKey: "",
       recipientMasked: "",

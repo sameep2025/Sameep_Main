@@ -37,6 +37,13 @@ const {
   applyPhoneRegistrationReadiness,
   buildMessagingReadiness,
 } = require("../services/metaWhatsAppReadiness");
+const {
+  buildActivationEligibility,
+  buildFailedTestMessageState,
+  buildSuccessfulTestMessageState,
+  normalizeTestMessageState,
+} = require("../services/whatsappBillingActivationEligibility");
+const { normalizeWhatsappRecipientPhone } = require("../utils/whatsappRecipientPhone");
 
 const REELOOK_DIAGNOSTIC_WABA_ID = "1074343041678320";
 const REELOOK_DIAGNOSTIC_PHONE_NUMBER_ID = "1336796569515966";
@@ -118,6 +125,15 @@ function sanitizeWhatsappBusinessConfig(config) {
     normalized.phoneRegistrationStatus
   );
   const messagingReadiness = normalized.messagingReadiness || buildMessagingReadiness(null);
+  const testMessage = normalizeTestMessageState(normalized.testMessage);
+  const activationEligibility = buildActivationEligibility(
+    {
+      ...normalized,
+      phoneRegistrationStatus,
+      testMessage,
+    },
+    messagingReadiness
+  );
 
   return {
     enabled: Boolean(normalized.enabled),
@@ -129,6 +145,8 @@ function sanitizeWhatsappBusinessConfig(config) {
     phoneRegistrationStatus,
     phoneRegisteredAt: normalized.phoneRegisteredAt || null,
     messagingReadiness,
+    testMessage,
+    activationEligibility,
     phoneRegistrationLastError: normalized.phoneRegistrationLastError
       ? "Phone registration needs attention. Please contact YNOT support."
       : "",
@@ -294,16 +312,8 @@ function getTemplateName(template) {
     .replace(/[^a-z0-9_]/g, "_")}_v${template.version || 1}`;
 }
 
-function normalizeInternationalPhone(value) {
-  return String(value || "").trim().replace(/[\s()-]/g, "");
-}
-
-function isValidInternationalPhone(value) {
-  return /^\+[1-9]\d{7,14}$/.test(normalizeInternationalPhone(value));
-}
-
 function maskPhoneNumber(value) {
-  const phone = normalizeInternationalPhone(value);
+  const phone = String(value || "").trim();
   if (!phone) return "";
   const prefix = phone.startsWith("+") ? "+" : "";
   const digits = phone.replace(/\D/g, "");
@@ -448,7 +458,7 @@ function getOrCreateRegistrationPin(config) {
   };
 }
 
-function sendTestMessageError(res, error) {
+function sendTestMessageError(res, error, data = null) {
   const meta = formatSafeMetaForResponse(error.metaError);
   const status =
     error.code === "meta_test_send_failed" ||
@@ -467,6 +477,7 @@ function sendTestMessageError(res, error) {
         : error.code === "meta_token_encryption_missing"
         ? "WhatsApp test messaging is not configured correctly. Please contact YNOT support."
         : "Unable to send test WhatsApp message.",
+    ...(data ? { data } : {}),
     ...(meta ? { meta } : {}),
   });
 }
@@ -992,6 +1003,9 @@ async function checkWhatsappTemplateStatus(req, res) {
 }
 
 async function sendWhatsappTemplateTestMessage(req, res) {
+  let record = null;
+  let config = null;
+  let template = null;
   let logContext = {
     vendorId: "",
     templateKey: req.params.masterTemplateKey || "",
@@ -1001,24 +1015,27 @@ async function sendWhatsappTemplateTestMessage(req, res) {
   };
 
   try {
-    const template = getMasterTemplate(req.params.masterTemplateKey);
+    template = getMasterTemplate(req.params.masterTemplateKey);
     if (!template) {
       const error = new Error("Template not found");
       error.code = "master_template_not_found";
       throw error;
     }
 
-    const recipientPhoneNumber = normalizeInternationalPhone(req.body?.recipientPhoneNumber);
-    if (!isValidInternationalPhone(recipientPhoneNumber)) {
+    const recipient = normalizeWhatsappRecipientPhone(req.body?.recipientPhoneNumber, {
+      defaultCountry: "IN",
+    });
+    if (!recipient.valid) {
       const error = new Error("Recipient phone number must use international format");
       error.code = "recipient_phone_invalid";
       throw error;
     }
+    const recipientPhoneNumber = recipient.value;
 
-    const record = await findVendorRecord(getAuthorizedVendorId(req));
+    record = await findVendorRecord(getAuthorizedVendorId(req));
     if (!record) return sendVendorNotFound(res);
 
-    const config = normalizeWhatsappBusinessConfig(record.vendor.whatsappBusiness);
+    config = normalizeWhatsappBusinessConfig(record.vendor.whatsappBusiness);
     assertConnectedMetaConfig(config);
 
     const existing = getTemplateInstance(config, template.key);
@@ -1056,16 +1073,11 @@ async function sendWhatsappTemplateTestMessage(req, res) {
       bodyParameters,
     });
     const metaMessageId = String(result?.messages?.[0]?.id || "");
-    const lastTestSend = {
-      templateKey: template.key,
-      recipientMasked,
-      sentAt: new Date(),
-      metaMessageId,
-    };
+    const testMessage = buildSuccessfulTestMessageState(config.testMessage);
     const whatsappBusiness = {
       ...config,
       enabled: false,
-      lastTestSend,
+      testMessage,
     };
 
     await record.Model.updateOne(
@@ -1083,10 +1095,12 @@ async function sendWhatsappTemplateTestMessage(req, res) {
     return res.json({
       success: true,
       status: "submitted",
+      data: sanitizeWhatsappBusinessConfig(whatsappBusiness),
       messageId: metaMessageId,
       message: "Test message submitted successfully.",
     });
   } catch (error) {
+    let responseConfig = null;
     console.error("Failed to send WhatsApp test message:", error.code || error.message || error);
     if (error.code === "meta_test_send_failed") {
       const meta = formatSafeMetaForResponse(error.metaError);
@@ -1102,8 +1116,28 @@ async function sendWhatsappTemplateTestMessage(req, res) {
         fbtraceId: meta?.fbtraceId || "",
         hasErrorData: Boolean(meta?.hasErrorData),
       });
+
+      if (record && config) {
+        const testMessage = buildFailedTestMessageState(config.testMessage, error);
+        const whatsappBusiness = {
+          ...config,
+          enabled: false,
+          testMessage,
+        };
+        responseConfig = sanitizeWhatsappBusinessConfig(whatsappBusiness);
+
+        await record.Model.updateOne(
+          { _id: record.vendor._id },
+          { $set: { whatsappBusiness } }
+        ).catch((updateError) => {
+          console.error(
+            "Failed to persist WhatsApp test message failure:",
+            updateError.message || updateError
+          );
+        });
+      }
     }
-    return sendTestMessageError(res, error);
+    return sendTestMessageError(res, error, responseConfig);
   }
 }
 
