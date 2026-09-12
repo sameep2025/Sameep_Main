@@ -37,6 +37,7 @@ const vendorFlowRoutes = require("./routes/vendorFlowRoutes");
 const billingRoutes = require("./routes/billingRoutes");
 const loyaltyRoutes = require("./routes/loyaltyRoutes");
 const adminRoutes = require("./routes/adminRoutes");
+const adminAnalyticsRoutes = require("./routes/adminAnalyticsRoutes");
 const trustProfileRoutes = require("./routes/trustProfileRoutes");
 const locationRoutes = require("./routes/locationRoutes");
 const categoryTreeRoutes = require("./routes/categoryTreeRoutes");
@@ -199,6 +200,7 @@ app.use("/api/vendor/dashboard", require("./routes/vendorDashboardRoutes"));
 app.use("/api/vendor/dashboard", require("./routes/customerAnalyticsRoutes"));
 app.use("/api/vendor/dashboard", require("./routes/vendorCustomerRoutes"));
 app.use("/api/admin", adminRoutes);
+app.use("/api/admin/analytics", adminAnalyticsRoutes);
 app.use("/api/admin/digital-score", adminDigitalScoreRoutes);
 
 // ⭐ Vendor price nodes

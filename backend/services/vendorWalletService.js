@@ -29,6 +29,11 @@ async function deductWhatsApp(vendorId, reference) {
   return wallet.whatsappBalance;
 }
 
+async function hasAvailableWhatsAppBalance(vendorId) {
+  const wallet = await VendorWallet.findOne({ vendorId }).select("whatsappBalance").lean();
+  return Number(wallet?.whatsappBalance || 0) > 0;
+}
+
 async function deductOTP(vendorId, reference) {
   const wallet = await VendorWallet.findOne({ vendorId });
 
@@ -56,6 +61,7 @@ async function deductOTP(vendorId, reference) {
 }
 
 module.exports = {
+  hasAvailableWhatsAppBalance,
   deductWhatsApp,
   deductOTP,
 };

@@ -51,6 +51,7 @@ import DummyVendorCategoriesDetailPage from "./pages/DummyVendorCategoriesDetail
 import AppConfigurationsPage from "./pages/AppConfigurationsPage";
 import EnquiriesPage from "./pages/EnquiriesPage";
 import AdminLoginPage from "./pages/AdminLoginPage";
+import AdminAnalyticsPage from "./pages/AdminAnalyticsPage";
 import PlansPage from "./pages/subscriptionPlans/PlansPage";
 import TemplatesPage from "./pages/TemplatesPage";
 import SiteAnalyticsPage from "./pages/SiteAnalyticsPage";
@@ -86,6 +87,7 @@ function AppContent() {
 
           {/* Dashboard */}
           <Route path="/dashboard" element={<Dashboard />} />
+          <Route path="/analytics" element={<AdminAnalyticsPage />} />
 
           {/* Master Pages */}
           <Route path="/master" element={<Master />} />

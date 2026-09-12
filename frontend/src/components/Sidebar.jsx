@@ -54,6 +54,9 @@ function Sidebar() {
       <NavLink to="/dashboard" style={linkStyle}>
         📊 Dashboard
       </NavLink>
+      <NavLink to="/analytics" style={linkStyle}>
+        📈 Analytics
+      </NavLink>
       <NavLink to="/master" style={linkStyle}>
         📁 Master Data
       </NavLink>

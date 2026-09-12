@@ -5,9 +5,16 @@ const VendorLoyaltyRule = require("../models/VendorLoyaltyRule");
 const LoyaltyLedger = require("../models/LoyaltyLedger");
 const Customer = require("../models/Customer");
 const Vendor = require("../models/DummyVendor");
-const { sendBillWhatsapp } = require("../utils/whatsappService");
 const { calculateCustomerBalance } = require("../services/loyaltyService");
 const { deductOTP, deductWhatsApp } = require("../services/vendorWalletService");
+const { buildMessagingReadiness } = require("../services/metaWhatsAppReadiness");
+const {
+  getPhoneNumberReadinessWithSystemUserToken,
+} = require("../services/metaWhatsAppService");
+const {
+  isVendorMetaBillRoutingEnabled,
+  sendRoutedWhatsAppBillingMessage,
+} = require("../services/whatsappBillingRouter");
 const {
   buildPublicBillPath,
   buildPublicBillUrl,
@@ -565,16 +572,107 @@ if (!closed) {
 
     setImmediate(async () => {
       try {
-        if (!billing.customerId) return;
+        console.log("[WhatsApp Billing Trace]", {
+          stage: "started",
+          vendorId: String(billing.vendorId || ""),
+          billId: String(billing._id || ""),
+          hasCustomerId: Boolean(billing.customerId),
+        });
+
+        if (!billing.customerId) {
+          console.log("[WhatsApp Billing Trace]", {
+            stage: "skipped_no_customer",
+            vendorId: String(billing.vendorId || ""),
+            billId: String(billing._id || ""),
+          });
+          return;
+        }
 
         const [customer, vendor] = await Promise.all([
           Customer.findById(billing.customerId).lean(),
           Vendor.findById(billing.vendorId).lean(),
         ]);
+        let vendorForWhatsApp = vendor;
+
+        console.log("[WhatsApp Billing Trace]", {
+          stage: "vendor_loaded",
+          vendorId: String(billing.vendorId || ""),
+          billId: String(billing._id || ""),
+          vendorFound: Boolean(vendor),
+          vendorModel: "DummyVendor",
+          provider: vendor?.whatsappBusiness?.provider || "",
+          enabled: vendor?.whatsappBusiness?.enabled === true,
+          hasPhoneNumberId: Boolean(vendor?.whatsappBusiness?.phoneNumberId),
+        });
 
         const mobile = customer?.fullNumber || customer?.phone;
 
-        if (!mobile) return;
+        if (!mobile) {
+          console.log("[WhatsApp Billing Trace]", {
+            stage: "skipped_no_mobile",
+            vendorId: String(billing.vendorId || ""),
+            billId: String(billing._id || ""),
+          });
+          return;
+        }
+
+        const vendorMetaRoutingEnabled = isVendorMetaBillRoutingEnabled();
+        console.log("[WhatsApp Billing Trace]", {
+          stage: "global_switch",
+          vendorId: String(billing.vendorId || ""),
+          billId: String(billing._id || ""),
+          enabled: vendorMetaRoutingEnabled,
+        });
+
+        if (
+          vendorMetaRoutingEnabled &&
+          vendor?.whatsappBusiness?.provider === "meta" &&
+          vendor?.whatsappBusiness?.enabled === true &&
+          vendor?.whatsappBusiness?.phoneNumberId
+        ) {
+          try {
+            const phoneStatus = await getPhoneNumberReadinessWithSystemUserToken({
+              phoneNumberId: vendor.whatsappBusiness.phoneNumberId,
+            });
+            vendorForWhatsApp = {
+              ...vendor,
+              whatsappBusiness: {
+                ...vendor.whatsappBusiness,
+                messagingReadiness: buildMessagingReadiness(phoneStatus?.health_status || null),
+              },
+            };
+            console.log("[WhatsApp Billing Trace]", {
+              stage: "readiness",
+              vendorId: String(billing.vendorId || ""),
+              billId: String(billing._id || ""),
+              readiness: vendorForWhatsApp.whatsappBusiness.messagingReadiness.status,
+            });
+          } catch (readinessErr) {
+            vendorForWhatsApp = {
+              ...vendor,
+              whatsappBusiness: {
+                ...vendor.whatsappBusiness,
+                messagingReadiness: buildMessagingReadiness(null),
+              },
+            };
+            console.error("[WhatsApp Billing Trace]", {
+              stage: "readiness_failed",
+              vendorId: String(billing.vendorId || ""),
+              billId: String(billing._id || ""),
+              code: readinessErr?.code || "",
+              status: readinessErr?.metaError?.status || null,
+              metaCode: readinessErr?.metaError?.code || "",
+              metaSubcode: readinessErr?.metaError?.subcode || "",
+            });
+            console.error("[WhatsApp Billing Meta Readiness Refresh Failed]", {
+              vendorId: String(billing.vendorId || ""),
+              billId: String(billing._id || ""),
+              code: readinessErr?.code || "",
+              metaCode: readinessErr?.metaError?.code || "",
+              metaSubcode: readinessErr?.metaError?.subcode || "",
+            });
+          }
+        }
 
         const balance = await calculateCustomerBalance(
           billing.customerId,
@@ -589,8 +687,7 @@ if (!closed) {
         const billPath = buildPublicBillPath({
           token: billToken,
         });
-
-        await sendBillWhatsapp({
+        const messagePayload = {
           mobile,
           customerName: customer?.name || "Customer",
           vendorName: vendor?.businessName || "Vendor",
@@ -601,9 +698,31 @@ if (!closed) {
           balance,
           billUrl,
           billPath,
+        };
+
+        const sendResult = await sendRoutedWhatsAppBillingMessage({
+          vendor: vendorForWhatsApp,
+          vendorId: billing.vendorId,
+          billId: billing._id,
+          msg91Payload: messagePayload,
+          metaPayload: {
+            vendor: vendorForWhatsApp,
+            vendorId: billing.vendorId,
+            billId: billing._id,
+            recipientPhoneNumber: mobile,
+            vendorName: messagePayload.vendorName,
+            billAmount: messagePayload.billAmount,
+            pointsEarned: messagePayload.earned,
+            pointsRedeemed: messagePayload.redeemed,
+            finalPaid: messagePayload.finalPaid,
+            loyaltyBalance: balance,
+            billUrl,
+          },
         });
 
-        await deductWhatsApp(billing.vendorId, `billing:${billing._id}`);
+        if (sendResult?.status === "accepted" && sendResult?.provider === "ynot_msg91") {
+          await deductWhatsApp(billing.vendorId, `billing:${billing._id}`);
+        }
       } catch (err) {
         console.error("WhatsApp send failed:", err?.message || err);
       }
