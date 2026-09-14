@@ -37,5 +37,16 @@ const VendorWalletLedgerSchema = new mongoose.Schema({
 
 VendorWalletLedgerSchema.index({ vendorId: 1 });
 VendorWalletLedgerSchema.index({ createdAt: 1 });
+VendorWalletLedgerSchema.index(
+  { vendorId: 1, channel: 1, reference: 1 },
+  {
+    unique: true,
+    partialFilterExpression: {
+      channel: "OTP",
+      type: "OTP_USAGE",
+      reference: { $type: "string", $gt: "" },
+    },
+  }
+);
 
 module.exports = mongoose.model("VendorWalletLedger", VendorWalletLedgerSchema);

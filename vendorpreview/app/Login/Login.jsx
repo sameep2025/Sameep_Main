@@ -20,6 +20,7 @@ const categoryId =
   const [mobile, setMobile] = useState("");
   const [countryCode, setCountryCode] = useState("+91");
   const [otp, setOtp] = useState("");
+  const [otpAttemptToken, setOtpAttemptToken] = useState("");
   const [otpSent, setOtpSent] = useState(false);
 
   const [adminMode, setAdminMode] = useState(false);
@@ -43,13 +44,16 @@ const categoryId =
           body: JSON.stringify({
             countryCode,
             phone: mobile,
+            vendorId,
+            categoryId,
           }),
         }
       );
 
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
 
-      if (data.message === "OTP sent") {
+      if (res.ok && data.message === "OTP sent") {
+        setOtpAttemptToken(data?.otpAttemptToken || "");
         setOtpSent(true);
       } else {
         alert(data.message || "OTP sending failed");
@@ -78,21 +82,27 @@ const categoryId =
             countryCode,
             phone: mobile,
             otp,
+            vendorId,
+            categoryId,
+            otpAttemptToken,
           }),
         }
       );
 
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
 
-      if (data.message === "OTP verified") {
+      if (res.ok && (data.message === "OTP verified" || data.message === "verified")) {
         localStorage.setItem("authToken", data.token);
         localStorage.setItem("loginTime", String(Date.now()));
 
         localStorage.setItem(
           "userData",
           JSON.stringify({
-            name: `${data.customer.firstName} ${data.customer.lastName}`,
-            phone: data.customer.phNo,
+            name:
+              data?.customer?.name ||
+              `${data?.customer?.firstName || ""} ${data?.customer?.lastName || ""}`.trim() ||
+              "Customer",
+            phone: data?.customer?.phone || data?.customer?.fullNumber || mobile,
           })
         );
 

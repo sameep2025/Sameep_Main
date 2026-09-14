@@ -1145,6 +1145,7 @@ function ExploreContent({ onReady, onOpenServices }) {
   const [hrCategory, setHrCategory] = useState(null);
   const [mobile, setMobile] = useState("");
   const [otp, setOtp] = useState("");
+  const [otpAttemptToken, setOtpAttemptToken] = useState("");
   const [otpSent, setOtpSent] = useState(false);
   const [loadingOtp, setLoadingOtp] = useState(false);
 
@@ -1224,6 +1225,7 @@ function ExploreContent({ onReady, onOpenServices }) {
   const [showVendorLogin, setShowVendorLogin] = useState(false);
   const [vendorMobile, setVendorMobile] = useState("");
   const [vendorOtp, setVendorOtp] = useState("");
+  const [vendorOtpAttemptToken, setVendorOtpAttemptToken] = useState("");
   const [showVendorOtp, setShowVendorOtp] = useState(false);
   const [loginAsAdmin, setLoginAsAdmin] = useState(false);
   const [pendingAction, setPendingAction] = useState(null);
@@ -1233,6 +1235,18 @@ function ExploreContent({ onReady, onOpenServices }) {
 
   const [showAdminPasscode, setShowAdminPasscode] = useState(false);
   const [adminPasscode, setAdminPasscode] = useState("");
+
+  const getWhatsAppBillingWarning = (response) => {
+    const whatsapp = response?.whatsapp || {};
+    if (
+      whatsapp.provider === "ynot_msg91" &&
+      whatsapp.sendExpected === false &&
+      whatsapp.reason === "insufficient_balance"
+    ) {
+      return "Bill generated successfully. WhatsApp message was not sent because your WhatsApp balance is 0. Please recharge to continue sending bills on WhatsApp.";
+    }
+    return "";
+  };
 
 
   const handleVendorLogin = async () => {
@@ -1252,6 +1266,8 @@ function ExploreContent({ onReady, onOpenServices }) {
       const payload = {
         countryCode: "91",
         phone: vendorMobile,
+        vendorId,
+        categoryId: rootCategoryId,
       };
 
       const res = await fetch(`${API_BASE_URL}/api/customers/request-otp`, {
@@ -1268,6 +1284,7 @@ function ExploreContent({ onReady, onOpenServices }) {
         return;
       }
 
+      setVendorOtpAttemptToken(data?.otpAttemptToken || "");
       setShowVendorOtp(true);
     } catch (err) {
       console.error(err);
@@ -1291,12 +1308,19 @@ function ExploreContent({ onReady, onOpenServices }) {
           phone: vendorMobile,
           otp: vendorOtp,
           vendorId,
+          categoryId: rootCategoryId,
+          otpAttemptToken: vendorOtpAttemptToken,
           deviceId,
         }),
       });
 
       const data = await res.json().catch(() => ({}));
       console.log("VERIFY OTP RESPONSE:", data);
+
+      if (!res.ok || data?.success === false) {
+        alert(data?.message || "Something went wrong");
+        return;
+      }
 
       const alreadyVerified =
         typeof data?.message === "string" &&
@@ -1560,13 +1584,14 @@ function ExploreContent({ onReady, onOpenServices }) {
             countryCode: "91",
             phone: mobile,
             otp: otp,
+            otpAttemptToken,
           }),
         }
       );
 
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
 
-      if (!res.ok) {
+      if (!res.ok || data?.success === false) {
         alert(data.message || "OTP verification failed");
         return;
       }
@@ -1660,8 +1685,9 @@ function ExploreContent({ onReady, onOpenServices }) {
       const payload = {
         countryCode: "91",
         phone: mobile,
+        vendorId,
+        categoryId: rootCategoryId,
       };
-      console.log("[OTP] request payload:", payload);
       const res = await fetch(otpUrl, {
         method: "POST",
         headers: {
@@ -1682,6 +1708,7 @@ function ExploreContent({ onReady, onOpenServices }) {
         return;
       }
 
+      setOtpAttemptToken(data?.otpAttemptToken || "");
       setOtpSent(true);
     } catch (err) {
       console.error(err);
@@ -1933,7 +1960,8 @@ function ExploreContent({ onReady, onOpenServices }) {
 
       if (completeData?.success) {
         setBillSuccessMessage(
-          "OTP verified successfully and the bill generated."
+          getWhatsAppBillingWarning(completeData) ||
+            "OTP verified successfully and the bill generated."
         );
         setShowBillSuccess(true);
         setCartItems([]);
@@ -2810,15 +2838,15 @@ function ExploreContent({ onReady, onOpenServices }) {
         }),
       });
 
-      const completeData = await completeRes.json();
-      if (!completeData?.success) {
+      const completeData = await completeRes.json().catch(() => null);
+      if (!completeRes.ok || !completeData?.success) {
         alert(completeData?.message || "Billing completion failed");
         return;
       }
 
       const isWalkIn = !customerMobile;
       setBillType(isWalkIn ? "walkin" : "customer");
-      setBillSuccessMessage("");
+      setBillSuccessMessage(getWhatsAppBillingWarning(completeData));
       setMenuSearch("");
       setShowBillSuccess(true);
       resetBillingState();

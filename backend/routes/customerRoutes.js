@@ -1,6 +1,7 @@
 const express = require("express");
 const axios = require("axios");
 const jwt = require("jsonwebtoken");
+const crypto = require("crypto");
 const Customer = require("../models/Customer");
 const Session = require("../models/Session");
 const LoginHistory = require("../models/LoginHistory");
@@ -9,6 +10,7 @@ const Vendor = require("../models/Vendor");
 const { getSessionValidityHours } = require("../utils/sessionConfig");
 const { getAdminPasscode } = require("../utils/adminConfig");
 const { requireCustomerSession } = require("../utils/authMiddleware");
+const { deductOTP, hasAvailableOTPBalance } = require("../services/vendorWalletService");
 
 const router = express.Router();
 
@@ -30,6 +32,44 @@ const buildFull = (countryCode, phone) => {
   return `${cc}${ph}`;
 };
 
+const LOGIN_OTP_ATTEMPT_SCOPE = "customer_login_otp";
+const LOGIN_OTP_WALLET_MESSAGE = "Insufficient OTP balance. Please recharge OTP credits to continue.";
+
+function createLoginOtpAttemptToken({ vendorId, categoryId, mobile }) {
+  const jti = crypto.randomUUID();
+  return jwt.sign(
+    {
+      scope: LOGIN_OTP_ATTEMPT_SCOPE,
+      vendorId: String(vendorId || ""),
+      categoryId: categoryId ? String(categoryId) : "",
+      mobile: String(mobile || ""),
+      jti,
+    },
+    JWT_SECRET,
+    { expiresIn: "10m" }
+  );
+}
+
+function verifyLoginOtpAttemptToken({ token, vendorId, categoryId, mobile }) {
+  const decoded = jwt.verify(token, JWT_SECRET);
+  const matchesCategory =
+    !categoryId || !decoded.categoryId || String(decoded.categoryId) === String(categoryId);
+
+  if (
+    decoded?.scope !== LOGIN_OTP_ATTEMPT_SCOPE ||
+    String(decoded.vendorId || "") !== String(vendorId || "") ||
+    String(decoded.mobile || "") !== String(mobile || "") ||
+    !matchesCategory ||
+    !decoded.jti
+  ) {
+    const error = new Error("Invalid OTP login attempt");
+    error.code = "invalid_login_otp_attempt";
+    throw error;
+  }
+
+  return decoded;
+}
+
 // helper: log duration
 function logApi(req, res, label) {
   const start = Date.now();
@@ -43,13 +83,37 @@ function logApi(req, res, label) {
 router.post("/request-otp", async (req, res) => {
   logApi(req, res, "request-otp");
   try {
-    const { countryCode, phone } = req.body;
+    const { countryCode, phone, vendorId, categoryId } = req.body;
     if (!countryCode || !phone) {
       return res.status(400).json({ message: "countryCode and phone required" });
     }
 
     const mobile = buildFull(countryCode, phone);
     const deviceInfo = req.headers["user-agent"] || "";
+    let otpAttemptToken = "";
+
+    if (vendorId) {
+      const vendor = await DummyVendor.findById(vendorId).select("_id").lean();
+      if (!vendor) {
+        return res.status(400).json({
+          success: false,
+          message: "Vendor account not found",
+        });
+      }
+
+      if (!(await hasAvailableOTPBalance(vendor._id))) {
+        return res.status(400).json({
+          success: false,
+          message: LOGIN_OTP_WALLET_MESSAGE,
+        });
+      }
+
+      otpAttemptToken = createLoginOtpAttemptToken({
+        vendorId: vendor._id,
+        categoryId,
+        mobile,
+      });
+    }
 
     const sendResp = await axios.post(
       "https://control.msg91.com/api/v5/otp",
@@ -68,7 +132,11 @@ router.post("/request-otp", async (req, res) => {
     console.log("MSG91 OTP Response:", sendResp.data);
 
     if (sendResp.data.type && sendResp.data.type === "success") {
-      return res.json({ message: "OTP sent" });
+      return res.json({
+        success: true,
+        message: "OTP sent",
+        ...(otpAttemptToken ? { otpAttemptToken } : {}),
+      });
     }
 
     return res.status(400).json({ message: sendResp.data.message || "Failed to send OTP" });
@@ -428,7 +496,7 @@ router.post("/logout", async (req, res) => {
 router.post("/verify-otp", async (req, res) => {
   logApi(req, res, "verify-otp");
   try {
-    const { countryCode, phone, otp, vendorId, categoryId } = req.body;
+    const { countryCode, phone, otp, vendorId, categoryId, otpAttemptToken } = req.body;
     if (!countryCode || !phone || !otp) {
       return res.status(400).json({ message: "countryCode, phone and otp required" });
     }
@@ -448,6 +516,39 @@ router.post("/verify-otp", async (req, res) => {
     console.log("MSG91 Verify Response:", verifyResp.data);
 
     if (verifyResp.data.type && verifyResp.data.type === "success") {
+      let loginOtpAttempt = null;
+      if (vendorId) {
+        if (!otpAttemptToken) {
+          return res.status(400).json({
+            success: false,
+            message: "OTP session expired. Please request a new OTP.",
+          });
+        }
+
+        try {
+          loginOtpAttempt = verifyLoginOtpAttemptToken({
+            token: otpAttemptToken,
+            vendorId,
+            categoryId,
+            mobile,
+          });
+        } catch (attemptErr) {
+          return res.status(400).json({
+            success: false,
+            message: "OTP session expired. Please request a new OTP.",
+          });
+        }
+
+        try {
+          await deductOTP(vendorId, `login-otp:${loginOtpAttempt.jti}`);
+        } catch (walletErr) {
+          return res.status(400).json({
+            success: false,
+            message: LOGIN_OTP_WALLET_MESSAGE,
+          });
+        }
+      }
+
       // create customer if not exists
       const fullNumber = mobile;
       let customer = await Customer.findOne({ fullNumber });

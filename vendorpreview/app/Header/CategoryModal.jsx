@@ -55,6 +55,7 @@ const [serviceAreas, setServiceAreas] = useState(null);
   const [isEditingInfo, setIsEditingInfo] = useState(false);
   const [mobile, setMobile] = useState("");
   const [otp, setOtp] = useState("");
+  const [otpAttemptToken, setOtpAttemptToken] = useState("");
   const [otpSent, setOtpSent] = useState(false);
   const [loadingOtp, setLoadingOtp] = useState(false);
 
@@ -601,21 +602,25 @@ const normalizePhone = (phone) => {
     try {
       setLoadingOtp(true);
       setMobile(normalizedMobile);
+      const otpVendorId = exploreVendorId || vendorId || null;
       const res = await fetch(`${API_BASE_URL}/api/customers/request-otp`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           countryCode,
           phone: normalizedMobile,
+          ...(otpVendorId ? { vendorId: otpVendorId } : {}),
+          ...(confirmedCategory?._id ? { categoryId: confirmedCategory._id } : {}),
         }),
       });
 
-      const data = await res.json();
-      if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || data?.success === false) {
         alert(data.message || "OTP request failed");
         return;
       }
 
+      setOtpAttemptToken(data?.otpAttemptToken || "");
       setOtpSent(true);
       setStep("VERIFY_OTP");
     } catch (err) {
@@ -685,6 +690,7 @@ const normalizePhone = (phone) => {
 
     try {
       setLoadingOtp(true);
+      const otpVendorId = exploreVendorId || vendorId || null;
       const res = await fetch(`${API_BASE_URL}/api/customers/verify-otp`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -692,11 +698,14 @@ const normalizePhone = (phone) => {
           countryCode,
           phone: normalizedPhone,
           otp,
+          ...(otpVendorId ? { vendorId: otpVendorId } : {}),
+          ...(confirmedCategory?._id ? { categoryId: confirmedCategory._id } : {}),
+          ...(otpAttemptToken ? { otpAttemptToken } : {}),
         }),
       });
 
-      const data = await res.json();
-      if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || data?.success === false) {
         alert(data?.message || "OTP verification failed");
         return;
       }

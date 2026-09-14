@@ -10,6 +10,7 @@ const {
   deductOTP,
   deductWhatsApp,
   hasAvailableOTPBalance,
+  hasAvailableWhatsAppBalance,
 } = require("../services/vendorWalletService");
 const { buildMessagingReadiness } = require("../services/metaWhatsAppReadiness");
 const {
@@ -17,6 +18,7 @@ const {
 } = require("../services/metaWhatsAppService");
 const {
   isVendorMetaBillRoutingEnabled,
+  resolveBillingWhatsappProvider,
   sendRoutedWhatsAppBillingMessage,
 } = require("../services/whatsappBillingRouter");
 const {
@@ -113,6 +115,23 @@ async function buildPublicBillResponse(bill) {
       finalPaid: Number(bill.totalAmount || 0) - Number(bill.pointsRedeemed || 0),
       balance: Number(balance || 0),
     },
+  };
+}
+
+async function buildWhatsAppCompletionStatus(billing) {
+  if (!billing?.customerId) return null;
+
+  const vendor = await Vendor.findById(billing.vendorId).select("whatsappBusiness").lean();
+  const decision = resolveBillingWhatsappProvider({ vendor });
+  if (decision.provider !== "ynot_msg91") return null;
+
+  const hasMsg91Balance = await hasAvailableWhatsAppBalance(billing.vendorId);
+  if (hasMsg91Balance) return null;
+
+  return {
+    provider: "ynot_msg91",
+    sendExpected: false,
+    reason: "insufficient_balance",
   };
 }
 
@@ -588,6 +607,8 @@ if (!closed) {
   });
 }
 
+    const whatsapp = await buildWhatsAppCompletionStatus(closed);
+
     setImmediate(async () => {
       try {
         console.log("[WhatsApp Billing Trace]", {
@@ -751,6 +772,7 @@ if (!closed) {
       type: isWalkIn ? "WALK_IN" : "CUSTOMER",
       message: isWalkIn ? "Walk-in bill generated" : "Bill generated",
       transaction,
+      ...(whatsapp ? { whatsapp } : {}),
     });
 
   } catch (err) {

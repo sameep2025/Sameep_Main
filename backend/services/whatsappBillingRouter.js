@@ -38,6 +38,25 @@ function isUncertainSendError(error) {
   );
 }
 
+function resolveBillingWhatsappProvider({ vendor, env = process.env } = {}) {
+  if (!isVendorMetaBillRoutingEnabled(env)) {
+    return {
+      route: ROUTES.YNOT_MSG91,
+      provider: ROUTES.YNOT_MSG91,
+      reason: "global_vendor_meta_routing_disabled",
+    };
+  }
+
+  const decision = resolveWhatsAppBillingRoute({
+    whatsappBusiness: vendor?.whatsappBusiness || {},
+  });
+
+  return {
+    ...decision,
+    provider: decision.route,
+  };
+}
+
 function logSafeBillingSendEvent(label, details = {}, logger = console) {
   if (!logger || typeof logger.log !== "function") return;
   logger.log(label, details);
@@ -248,5 +267,6 @@ async function sendRoutedWhatsAppBillingMessage(
 module.exports = {
   isUncertainSendError,
   isVendorMetaBillRoutingEnabled,
+  resolveBillingWhatsappProvider,
   sendRoutedWhatsAppBillingMessage,
 };
