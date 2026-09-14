@@ -6,7 +6,11 @@ const LoyaltyLedger = require("../models/LoyaltyLedger");
 const Customer = require("../models/Customer");
 const Vendor = require("../models/DummyVendor");
 const { calculateCustomerBalance } = require("../services/loyaltyService");
-const { deductOTP, deductWhatsApp } = require("../services/vendorWalletService");
+const {
+  deductOTP,
+  deductWhatsApp,
+  hasAvailableOTPBalance,
+} = require("../services/vendorWalletService");
 const { buildMessagingReadiness } = require("../services/metaWhatsAppReadiness");
 const {
   getPhoneNumberReadinessWithSystemUserToken,
@@ -315,6 +319,13 @@ exports.requestRedeemOTP = async (req, res) => {
       });
     }
 
+    if (!(await hasAvailableOTPBalance(billing.vendorId))) {
+      return res.status(400).json({
+        success: false,
+        message: "Insufficient OTP balance. Please recharge OTP credits.",
+      });
+    }
+
     await axios.post(
       "https://control.msg91.com/api/v5/otp",
       {
@@ -397,7 +408,14 @@ exports.verifyRedeemOTP = async (req, res) => {
     }
 
     if (!billing.otpVerified) {
-      await deductOTP(billing.vendorId, `billing-redemption:${billing._id}`);
+      try {
+        await deductOTP(billing.vendorId, `billing-redemption:${billing._id}`);
+      } catch (walletErr) {
+        return res.status(400).json({
+          success: false,
+          message: "Insufficient OTP balance. Please recharge OTP credits.",
+        });
+      }
     }
 
     billing.otpVerified = true;

@@ -34,19 +34,21 @@ async function hasAvailableWhatsAppBalance(vendorId) {
   return Number(wallet?.whatsappBalance || 0) > 0;
 }
 
+async function hasAvailableOTPBalance(vendorId) {
+  const wallet = await VendorWallet.findOne({ vendorId }).select("otpBalance").lean();
+  return Number(wallet?.otpBalance || 0) > 0;
+}
+
 async function deductOTP(vendorId, reference) {
-  const wallet = await VendorWallet.findOne({ vendorId });
+  const wallet = await VendorWallet.findOneAndUpdate(
+    { vendorId, otpBalance: { $gt: 0 } },
+    { $inc: { otpBalance: -1 } },
+    { new: true }
+  );
 
   if (!wallet) {
-    throw new Error("Vendor wallet not found");
-  }
-
-  if (wallet.otpBalance <= 0) {
     throw new Error("Insufficient OTP balance");
   }
-
-  wallet.otpBalance -= 1;
-  await wallet.save();
 
   await VendorWalletLedger.create({
     vendorId,
@@ -61,6 +63,7 @@ async function deductOTP(vendorId, reference) {
 }
 
 module.exports = {
+  hasAvailableOTPBalance,
   hasAvailableWhatsAppBalance,
   deductWhatsApp,
   deductOTP,

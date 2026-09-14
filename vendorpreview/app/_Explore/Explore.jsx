@@ -1895,7 +1895,7 @@ function ExploreContent({ onReady, onOpenServices }) {
     try {
       setVerifyingOtp(true);
 
-      await fetch(`${API_BASE_URL}/api/billing/verify-otp`, {
+      const verifyRes = await fetch(`${API_BASE_URL}/api/billing/verify-otp`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -1906,6 +1906,12 @@ function ExploreContent({ onReady, onOpenServices }) {
           otp,
         }),
       });
+
+      const verifyData = await verifyRes.json().catch(() => null);
+      if (!verifyRes.ok || !verifyData?.success) {
+        alert(verifyData?.message || "OTP verification failed");
+        return;
+      }
 
       const completeRes = await fetch(`${API_BASE_URL}/api/billing/complete`, {
         method: "POST",
@@ -1919,7 +1925,12 @@ function ExploreContent({ onReady, onOpenServices }) {
         }),
       });
 
-      const completeData = await completeRes.json();
+      const completeData = await completeRes.json().catch(() => null);
+      if (!completeRes.ok || !completeData?.success) {
+        alert(completeData?.message || "Billing completion failed");
+        return;
+      }
+
       if (completeData?.success) {
         setBillSuccessMessage(
           "OTP verified successfully and the bill generated."
@@ -2776,8 +2787,8 @@ function ExploreContent({ onReady, onOpenServices }) {
           }),
         });
 
-        const otpData = await otpRes.json();
-        if (!otpData?.success) {
+        const otpData = await otpRes.json().catch(() => null);
+        if (!otpRes.ok || !otpData?.success) {
           alert(otpData?.message || "OTP request failed");
           return;
         }
