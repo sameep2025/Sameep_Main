@@ -7,6 +7,7 @@ const VendorWallet = require("../models/VendorWallet");
 const VendorWalletLedger = require("../models/VendorWalletLedger");
 const { deductOTP } = require("../services/vendorWalletService");
 const {
+  isProviderDecisionPendingMetaReadiness,
   resolveBillingWhatsappProvider,
 } = require("../services/whatsappBillingRouter");
 
@@ -239,6 +240,90 @@ test("billing provider decision resolves vendor_meta for fully eligible Meta ven
   assert.equal(decision.provider, "vendor_meta");
 });
 
+function buildMetaBillingVendor(overrides = {}) {
+  return {
+    whatsappBusiness: {
+      provider: "meta",
+      enabled: true,
+      connectionStatus: "connected",
+      phoneRegistrationStatus: "active",
+      messagingReadiness: { status: "available" },
+      templateInstances: [
+        {
+          masterTemplateKey: "BILL_STANDARD",
+          status: "approved",
+        },
+      ],
+      testMessage: { status: "successful" },
+      ...overrides,
+    },
+  };
+}
+
+test("pre-response warning treats active Meta billing with unknown stored readiness as pending, not definite MSG91", () => {
+  const vendor = buildMetaBillingVendor({ messagingReadiness: null });
+  const decision = resolveBillingWhatsappProvider({
+    env: { WHATSAPP_VENDOR_META_BILL_ROUTING_ENABLED: "true" },
+    vendor,
+  });
+
+  assert.equal(decision.provider, "ynot_msg91");
+  assert.deepEqual(decision.blockers, ["messaging_unknown"]);
+  assert.equal(isProviderDecisionPendingMetaReadiness({ vendor, decision }), true);
+});
+
+test("pre-response warning does not treat fully ready Meta billing as pending", () => {
+  const vendor = buildMetaBillingVendor({ messagingReadiness: { status: "limited" } });
+  const decision = resolveBillingWhatsappProvider({
+    env: { WHATSAPP_VENDOR_META_BILL_ROUTING_ENABLED: "true" },
+    vendor,
+  });
+
+  assert.equal(decision.provider, "vendor_meta");
+  assert.equal(isProviderDecisionPendingMetaReadiness({ vendor, decision }), false);
+});
+
+test("pre-response warning keeps definite MSG91 for Meta-disabled vendors", () => {
+  const vendor = buildMetaBillingVendor({ enabled: false, messagingReadiness: null });
+  const decision = resolveBillingWhatsappProvider({
+    env: { WHATSAPP_VENDOR_META_BILL_ROUTING_ENABLED: "true" },
+    vendor,
+  });
+
+  assert.equal(decision.provider, "ynot_msg91");
+  assert.equal(isProviderDecisionPendingMetaReadiness({ vendor, decision }), false);
+});
+
+test("pre-response warning keeps definite MSG91 for definitely ineligible Meta template state", () => {
+  const vendor = buildMetaBillingVendor({
+    messagingReadiness: null,
+    templateInstances: [
+      {
+        masterTemplateKey: "BILL_STANDARD",
+        status: "pending",
+      },
+    ],
+  });
+  const decision = resolveBillingWhatsappProvider({
+    env: { WHATSAPP_VENDOR_META_BILL_ROUTING_ENABLED: "true" },
+    vendor,
+  });
+
+  assert.equal(decision.provider, "ynot_msg91");
+  assert.equal(isProviderDecisionPendingMetaReadiness({ vendor, decision }), false);
+});
+
+test("pre-response warning keeps definite MSG91 for normal YNOT route", () => {
+  const vendor = { whatsappBusiness: { provider: "msg91", enabled: false } };
+  const decision = resolveBillingWhatsappProvider({
+    env: { WHATSAPP_VENDOR_META_BILL_ROUTING_ENABLED: "true" },
+    vendor,
+  });
+
+  assert.equal(decision.provider, "ynot_msg91");
+  assert.equal(isProviderDecisionPendingMetaReadiness({ vendor, decision }), false);
+});
+
 test("billing provider decision falls back to ynot_msg91 for Meta-configured but ineligible vendors", () => {
   const decision = resolveBillingWhatsappProvider({
     env: { WHATSAPP_VENDOR_META_BILL_ROUTING_ENABLED: "true" },
@@ -268,6 +353,7 @@ test("billing completion warning metadata is tied only to ynot_msg91 zero balanc
 
   assert.match(source, /resolveBillingWhatsappProvider\(\{ vendor \}\)/);
   assert.match(source, /decision\.provider !== "ynot_msg91"/);
+  assert.match(source, /isProviderDecisionPendingMetaReadiness\(\{ vendor, decision \}\)/);
   assert.match(source, /hasAvailableWhatsAppBalance\(billing\.vendorId\)/);
   assert.match(source, /provider: "ynot_msg91"/);
   assert.match(source, /sendExpected: false/);

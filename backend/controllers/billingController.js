@@ -17,6 +17,7 @@ const {
   getPhoneNumberReadinessWithSystemUserToken,
 } = require("../services/metaWhatsAppService");
 const {
+  isProviderDecisionPendingMetaReadiness,
   isVendorMetaBillRoutingEnabled,
   resolveBillingWhatsappProvider,
   sendRoutedWhatsAppBillingMessage,
@@ -124,6 +125,7 @@ async function buildWhatsAppCompletionStatus(billing) {
   const vendor = await Vendor.findById(billing.vendorId).select("whatsappBusiness").lean();
   const decision = resolveBillingWhatsappProvider({ vendor });
   if (decision.provider !== "ynot_msg91") return null;
+  if (isProviderDecisionPendingMetaReadiness({ vendor, decision })) return null;
 
   const hasMsg91Balance = await hasAvailableWhatsAppBalance(billing.vendorId);
   if (hasMsg91Balance) return null;

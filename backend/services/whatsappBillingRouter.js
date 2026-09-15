@@ -57,6 +57,29 @@ function resolveBillingWhatsappProvider({ vendor, env = process.env } = {}) {
   };
 }
 
+function isProviderDecisionPendingMetaReadiness({ vendor, decision } = {}) {
+  const whatsappBusiness = vendor?.whatsappBusiness || {};
+  const checks = decision?.checks || {};
+  const blockers = Array.isArray(decision?.blockers) ? decision.blockers : [];
+  const readinessStatus = String(whatsappBusiness?.messagingReadiness?.status || "").trim();
+
+  return (
+    (decision?.provider === ROUTES.YNOT_MSG91 || decision?.route === ROUTES.YNOT_MSG91) &&
+    whatsappBusiness.provider === "meta" &&
+    whatsappBusiness.enabled === true &&
+    (readinessStatus === "" || readinessStatus === "unknown") &&
+    blockers.length === 1 &&
+    blockers[0] === "messaging_unknown" &&
+    checks.providerMeta === true &&
+    checks.explicitlyEnabled === true &&
+    checks.connectionReady === true &&
+    checks.phoneRegistrationReady === true &&
+    checks.messagingOperational === false &&
+    checks.billingTemplateApproved === true &&
+    checks.testMessageSuccessful === true
+  );
+}
+
 function logSafeBillingSendEvent(label, details = {}, logger = console) {
   if (!logger || typeof logger.log !== "function") return;
   logger.log(label, details);
@@ -265,6 +288,7 @@ async function sendRoutedWhatsAppBillingMessage(
 }
 
 module.exports = {
+  isProviderDecisionPendingMetaReadiness,
   isUncertainSendError,
   isVendorMetaBillRoutingEnabled,
   resolveBillingWhatsappProvider,
