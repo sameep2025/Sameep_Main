@@ -359,3 +359,39 @@ test("billing completion warning metadata is tied only to ynot_msg91 zero balanc
   assert.match(source, /sendExpected: false/);
   assert.match(source, /reason: "insufficient_balance"/);
 });
+
+test("WhatsApp template test-send preserves activation state and handles display-name approval errors", () => {
+  const source = fs.readFileSync(
+    path.join(__dirname, "../controllers/vendorWhatsappBusinessController.js"),
+    "utf8"
+  );
+  const section = source.slice(
+    source.indexOf("async function sendWhatsappTemplateTestMessage"),
+    source.indexOf("async function registerWhatsappPhoneNumber")
+  );
+
+  assert.match(section, /enabled: config\.enabled === true/);
+  assert.doesNotMatch(section, /enabled: false/);
+  assert.match(section, /buildSendEligibleDisplayNameReadiness\(config\.displayNameReadiness\)/);
+  assert.match(section, /buildTestMessageStateAfterFailure\(config\.testMessage, error\)/);
+  assert.match(section, /buildDisplayNameReadinessFromSendError\(config\.displayNameReadiness, error\)/);
+  assert.match(source, /meta_display_name_approval_required/);
+  assert.match(source, /Your WhatsApp display name is awaiting Meta approval/);
+});
+
+test("Meta reconnection resets previous test validation when WABA or phone changes", () => {
+  const source = fs.readFileSync(
+    path.join(__dirname, "../controllers/vendorWhatsappBusinessController.js"),
+    "utf8"
+  );
+  const section = source.slice(
+    source.indexOf("async function completeMetaWhatsappConnection"),
+    source.indexOf("module.exports")
+  );
+
+  assert.match(section, /metaConfigurationChanged/);
+  assert.match(section, /String\(current\.wabaId \|\| ""\) !== resolvedWabaId/);
+  assert.match(section, /String\(current\.phoneNumberId \|\| ""\) !== resolvedPhoneNumberId/);
+  assert.match(section, /testMessage: metaConfigurationChanged/);
+  assert.match(section, /defaultWhatsappBusiness\.testMessage/);
+});

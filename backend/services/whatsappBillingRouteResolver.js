@@ -28,6 +28,7 @@ function resolveWhatsAppBillingRoute(vendorContext = {}) {
     connectionReady: Boolean(eligibility.checks.accountConnected),
     phoneRegistrationReady: Boolean(eligibility.checks.phoneRegistrationReady),
     messagingOperational: Boolean(eligibility.checks.messagingNotBlocked),
+    displayNameSendReady: Boolean(eligibility.checks.displayNameSendReady),
     billingTemplateApproved: Boolean(eligibility.checks.billingTemplateApproved),
     testMessageSuccessful: Boolean(eligibility.checks.testMessageSuccessful),
   };
@@ -37,6 +38,7 @@ function resolveWhatsAppBillingRoute(vendorContext = {}) {
     checks.connectionReady &&
     checks.phoneRegistrationReady &&
     checks.messagingOperational &&
+    checks.displayNameSendReady &&
     checks.billingTemplateApproved &&
     checks.testMessageSuccessful
       ? ROUTES.VENDOR_META

@@ -6,8 +6,13 @@ const {
   buildActivationEligibility,
   buildBillingActivationState,
   buildDeactivatedWhatsappBusinessConfig,
+  buildDisplayNameReadinessFromNameStatus,
+  buildDisplayNameReadinessFromSendError,
   buildFailedTestMessageState,
+  buildSendEligibleDisplayNameReadiness,
   buildSuccessfulTestMessageState,
+  buildTestMessageStateAfterFailure,
+  normalizeDisplayNameReadiness,
   normalizeTestMessageState,
 } = require("../services/whatsappBillingActivationEligibility");
 
@@ -82,6 +87,80 @@ test("failed controlled Meta send stores only sanitized error code", () => {
   assert.equal(state.lastErrorCode, "131026");
 });
 
+test("transient failed re-test preserves previous successful validation", () => {
+  const priorSuccess = new Date("2026-09-09T01:00:00.000Z");
+  const state = buildTestMessageStateAfterFailure(
+    {
+      status: "successful",
+      lastTestedAt: priorSuccess,
+      lastSuccessfulAt: priorSuccess,
+      lastErrorCode: "",
+    },
+    { code: "meta_test_send_failed" }
+  );
+
+  assert.equal(state.status, "successful");
+  assert.equal(state.lastSuccessfulAt, priorSuccess);
+  assert.equal(state.lastErrorCode, "");
+});
+
+test("first-ever failed test records failed validation", () => {
+  const state = buildTestMessageStateAfterFailure(
+    {
+      status: "not_tested",
+      lastTestedAt: null,
+      lastSuccessfulAt: null,
+      lastErrorCode: "",
+    },
+    { code: "meta_test_send_failed" }
+  );
+
+  assert.equal(state.status, "failed");
+  assert.equal(state.lastSuccessfulAt, null);
+  assert.equal(state.lastErrorCode, "meta_test_send_failed");
+});
+
+test("Meta 131037 records display-name approval pending", () => {
+  const readiness = buildDisplayNameReadinessFromSendError(
+    {},
+    {
+      metaError: {
+        code: 131037,
+        message: "(#131037) WhatsApp provided number needs display name approval before message can be sent.",
+      },
+    }
+  );
+
+  assert.equal(readiness.status, "pending");
+  assert.equal(readiness.canSend, false);
+  assert.equal(readiness.reason, "display_name_approval_pending");
+  assert.equal(readiness.lastErrorCode, "131037");
+});
+
+test("successful test marks display-name readiness as send eligible", () => {
+  const readiness = buildSendEligibleDisplayNameReadiness({
+    status: "pending",
+    canSend: false,
+    reason: "display_name_approval_pending",
+    lastErrorCode: "131037",
+  });
+
+  assert.equal(readiness.status, "send_eligible");
+  assert.equal(readiness.canSend, true);
+  assert.equal(readiness.reason, "");
+  assert.equal(readiness.lastErrorCode, "");
+});
+
+test("raw display-name status normalization preserves exact known raw status", () => {
+  const readiness = normalizeDisplayNameReadiness({
+    rawStatus: "AVAILABLE_WITHOUT_REVIEW",
+  });
+
+  assert.equal(readiness.status, "send_eligible");
+  assert.equal(readiness.rawStatus, "AVAILABLE_WITHOUT_REVIEW");
+  assert.equal(readiness.canSend, true);
+});
+
 test("test-message tracking does not persist recipient number", () => {
   const state = buildSuccessfulTestMessageState({
     recipientPhoneNumber: "+919381520396",
@@ -97,6 +176,74 @@ test("all prerequisites plus successful test is eligible", () => {
     buildActivationEligibility(eligibleConfig(), { status: "limited" }).eligible,
     true
   );
+});
+
+test("missing display-name readiness remains backward compatible", () => {
+  const result = buildActivationEligibility(eligibleConfig(), { status: "limited" });
+
+  assert.equal(result.checks.displayNameSendReady, true);
+  assert.equal(result.eligible, true);
+});
+
+test("approved display-name readiness is send eligible", () => {
+  const displayNameReadiness = buildDisplayNameReadinessFromNameStatus("APPROVED");
+  const result = buildActivationEligibility(
+    eligibleConfig({ displayNameReadiness }),
+    { status: "limited" }
+  );
+
+  assert.equal(displayNameReadiness.status, "send_eligible");
+  assert.equal(result.checks.displayNameSendReady, true);
+  assert.equal(result.eligible, true);
+});
+
+test("available-without-review display-name readiness is send eligible", () => {
+  const displayNameReadiness = buildDisplayNameReadinessFromNameStatus("AVAILABLE_WITHOUT_REVIEW");
+  const result = buildActivationEligibility(
+    eligibleConfig({ displayNameReadiness }),
+    { status: "limited" }
+  );
+
+  assert.equal(displayNameReadiness.status, "send_eligible");
+  assert.equal(result.checks.displayNameSendReady, true);
+  assert.equal(result.eligible, true);
+});
+
+test("pending display-name readiness blocks activation eligibility", () => {
+  const displayNameReadiness = buildDisplayNameReadinessFromNameStatus("PENDING_REVIEW");
+  const result = buildActivationEligibility(
+    eligibleConfig({ displayNameReadiness }),
+    { status: "limited" }
+  );
+
+  assert.equal(displayNameReadiness.status, "pending");
+  assert.equal(result.checks.displayNameSendReady, false);
+  assert.equal(result.eligible, false);
+  assert.ok(result.blockers.includes("display_name_pending"));
+});
+
+test("declined display-name readiness blocks activation eligibility", () => {
+  const displayNameReadiness = buildDisplayNameReadinessFromNameStatus("DECLINED");
+  const result = buildActivationEligibility(
+    eligibleConfig({ displayNameReadiness }),
+    { status: "limited" }
+  );
+
+  assert.equal(displayNameReadiness.status, "rejected");
+  assert.equal(result.checks.displayNameSendReady, false);
+  assert.equal(result.eligible, false);
+});
+
+test("limited messaging plus send-eligible display name remains eligible", () => {
+  const displayNameReadiness = buildDisplayNameReadinessFromNameStatus("APPROVED");
+  const result = buildActivationEligibility(
+    eligibleConfig({ displayNameReadiness }),
+    { status: "limited" }
+  );
+
+  assert.equal(result.checks.messagingNotBlocked, true);
+  assert.equal(result.checks.displayNameSendReady, true);
+  assert.equal(result.eligible, true);
 });
 
 test("disconnected account is not eligible", () => {

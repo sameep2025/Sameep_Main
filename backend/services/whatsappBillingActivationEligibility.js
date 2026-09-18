@@ -1,6 +1,106 @@
 const BILLING_TEMPLATE_KEY = "BILL_STANDARD";
 const CONNECTED_STATUSES = new Set(["connected", "template_pending", "ready"]);
 const TEST_MESSAGE_STATUSES = new Set(["not_tested", "successful", "failed"]);
+const DISPLAY_NAME_SEND_ELIGIBLE_STATUSES = new Set(["APPROVED", "AVAILABLE_WITHOUT_REVIEW"]);
+const DISPLAY_NAME_PENDING_STATUSES = new Set(["PENDING_REVIEW"]);
+const DISPLAY_NAME_REJECTED_STATUSES = new Set(["DECLINED"]);
+const DISPLAY_NAME_NON_SEND_READY_STATUSES = new Set(["EXPIRED", "NONE"]);
+
+function normalizeDisplayNameReadinessStatus(rawStatus) {
+  const status = String(rawStatus || "").trim().toUpperCase();
+  if (DISPLAY_NAME_SEND_ELIGIBLE_STATUSES.has(status)) {
+    return { status: "send_eligible", canSend: true, reason: "" };
+  }
+  if (DISPLAY_NAME_PENDING_STATUSES.has(status)) {
+    return { status: "pending", canSend: false, reason: "display_name_approval_pending" };
+  }
+  if (DISPLAY_NAME_REJECTED_STATUSES.has(status)) {
+    return { status: "rejected", canSend: false, reason: "display_name_approval_rejected" };
+  }
+  if (DISPLAY_NAME_NON_SEND_READY_STATUSES.has(status)) {
+    return { status: status.toLowerCase(), canSend: false, reason: "display_name_not_send_ready" };
+  }
+
+  return { status: "unknown", canSend: null, reason: "" };
+}
+
+function normalizeDisplayNameReadiness(value) {
+  const source = value && typeof value === "object" ? value : {};
+  const rawStatus = String(source.rawStatus || source.nameStatus || "").trim().toUpperCase();
+  const normalized = rawStatus
+    ? normalizeDisplayNameReadinessStatus(rawStatus)
+    : {
+        status: String(source.status || "unknown").trim() || "unknown",
+        canSend:
+          typeof source.canSend === "boolean"
+            ? source.canSend
+            : source.status === "send_eligible"
+            ? true
+            : source.status === "pending" ||
+              source.status === "rejected" ||
+              source.status === "expired" ||
+              source.status === "none"
+            ? false
+            : null,
+        reason: String(source.reason || "").trim(),
+      };
+
+  return {
+    status: normalized.status,
+    rawStatus,
+    canSend: normalized.canSend,
+    reason: normalized.reason || String(source.reason || "").trim(),
+    lastCheckedAt: source.lastCheckedAt || null,
+    lastErrorCode: String(source.lastErrorCode || "").trim(),
+    lastErrorMessage: String(source.lastErrorMessage || "").trim(),
+  };
+}
+
+function buildDisplayNameReadinessFromNameStatus(rawStatus, now = new Date()) {
+  const normalized = normalizeDisplayNameReadinessStatus(rawStatus);
+  const status = String(rawStatus || "").trim().toUpperCase();
+
+  return {
+    status: normalized.status,
+    rawStatus: status,
+    canSend: normalized.canSend,
+    reason: normalized.reason,
+    lastCheckedAt: now,
+    lastErrorCode: "",
+    lastErrorMessage: "",
+  };
+}
+
+function buildDisplayNameReadinessFromSendError(previous, error, now = new Date()) {
+  const normalized = normalizeDisplayNameReadiness(previous);
+  const errorCode = String(error?.metaError?.code || error?.code || "").trim();
+  const errorMessage = String(error?.metaError?.message || error?.message || "").trim();
+
+  if (errorCode !== "131037") return normalized;
+
+  return {
+    ...normalized,
+    status: "pending",
+    canSend: false,
+    reason: "display_name_approval_pending",
+    lastCheckedAt: now,
+    lastErrorCode: "131037",
+    lastErrorMessage: errorMessage,
+  };
+}
+
+function buildSendEligibleDisplayNameReadiness(previous, now = new Date()) {
+  const current = normalizeDisplayNameReadiness(previous);
+  return {
+    ...current,
+    status: "send_eligible",
+    canSend: true,
+    reason: "",
+    lastCheckedAt: now,
+    lastErrorCode: "",
+    lastErrorMessage: "",
+  };
+}
 
 function normalizeTestMessageStatus(value) {
   const status = String(value || "").trim();
@@ -47,6 +147,15 @@ function buildFailedTestMessageState(previous, error, now = new Date()) {
   };
 }
 
+function buildTestMessageStateAfterFailure(previous, error) {
+  const current = normalizeTestMessageState(previous);
+  if (current.status === "successful" || current.lastSuccessfulAt) {
+    return current;
+  }
+
+  return buildFailedTestMessageState(current, error);
+}
+
 function getBillingTemplateInstance(config) {
   const instances = Array.isArray(config?.templateInstances) ? config.templateInstances : [];
   return (
@@ -64,11 +173,13 @@ function buildActivationEligibility(config, messagingReadiness = {}) {
   const current = config && typeof config === "object" ? config : {};
   const messagingStatus = String(messagingReadiness?.status || "unknown").trim();
   const testMessage = normalizeTestMessageState(current.testMessage);
+  const displayNameReadiness = normalizeDisplayNameReadiness(current.displayNameReadiness);
   const checks = {
     accountConnected:
       current.provider === "meta" && CONNECTED_STATUSES.has(current.connectionStatus),
     phoneRegistrationReady: current.phoneRegistrationStatus === "active",
     messagingNotBlocked: messagingStatus === "available" || messagingStatus === "limited",
+    displayNameSendReady: displayNameReadiness.canSend !== false,
     billingTemplateApproved: isBillingTemplateApproved(current),
     testMessageSuccessful: testMessage.status === "successful",
   };
@@ -79,6 +190,7 @@ function buildActivationEligibility(config, messagingReadiness = {}) {
   if (!checks.messagingNotBlocked) {
     blockers.push(messagingStatus === "blocked" ? "messaging_blocked" : "messaging_unknown");
   }
+  if (!checks.displayNameSendReady) blockers.push(`display_name_${displayNameReadiness.status}`);
   if (!checks.billingTemplateApproved) blockers.push("billing_template_not_approved");
   if (!checks.testMessageSuccessful) blockers.push(`test_message_${testMessage.status}`);
 
@@ -160,9 +272,14 @@ module.exports = {
   buildActivationEligibility,
   buildBillingActivationState,
   buildDeactivatedWhatsappBusinessConfig,
+  buildDisplayNameReadinessFromNameStatus,
+  buildDisplayNameReadinessFromSendError,
   buildFailedTestMessageState,
+  buildSendEligibleDisplayNameReadiness,
   buildSuccessfulTestMessageState,
+  buildTestMessageStateAfterFailure,
   getBillingTemplateInstance,
   isBillingTemplateApproved,
+  normalizeDisplayNameReadiness,
   normalizeTestMessageState,
 };

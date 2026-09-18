@@ -75,6 +75,7 @@ function isProviderDecisionPendingMetaReadiness({ vendor, decision } = {}) {
     checks.connectionReady === true &&
     checks.phoneRegistrationReady === true &&
     checks.messagingOperational === false &&
+    checks.displayNameSendReady === true &&
     checks.billingTemplateApproved === true &&
     checks.testMessageSuccessful === true
   );

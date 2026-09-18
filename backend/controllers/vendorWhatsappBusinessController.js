@@ -42,8 +42,12 @@ const {
   buildActivationEligibility,
   buildBillingActivationState,
   buildDeactivatedWhatsappBusinessConfig,
-  buildFailedTestMessageState,
+  buildDisplayNameReadinessFromNameStatus,
+  buildDisplayNameReadinessFromSendError,
+  buildSendEligibleDisplayNameReadiness,
   buildSuccessfulTestMessageState,
+  buildTestMessageStateAfterFailure,
+  normalizeDisplayNameReadiness,
   normalizeTestMessageState,
 } = require("../services/whatsappBillingActivationEligibility");
 const { normalizeWhatsappRecipientPhone } = require("../utils/whatsappRecipientPhone");
@@ -129,11 +133,13 @@ function sanitizeWhatsappBusinessConfig(config) {
   );
   const messagingReadiness = normalized.messagingReadiness || buildMessagingReadiness(null);
   const testMessage = normalizeTestMessageState(normalized.testMessage);
+  const displayNameReadiness = normalizeDisplayNameReadiness(normalized.displayNameReadiness);
   const activationEligibility = buildActivationEligibility(
     {
       ...normalized,
       phoneRegistrationStatus,
       testMessage,
+      displayNameReadiness,
     },
     messagingReadiness
   );
@@ -149,6 +155,7 @@ function sanitizeWhatsappBusinessConfig(config) {
     connectionStatus: normalized.connectionStatus || "not_connected",
     displayPhoneNumber: normalized.displayPhoneNumber || "",
     displayName: normalized.displayName || "",
+    displayNameReadiness,
     templateStatus: normalized.templateStatus || "",
     phoneRegistrationStatus,
     phoneRegisteredAt: normalized.phoneRegisteredAt || null,
@@ -185,23 +192,40 @@ async function refreshMetaPhoneReadinessForResponse(record) {
       config,
       phoneStatus,
     });
+    const hasNameStatus = Object.prototype.hasOwnProperty.call(phoneStatus || {}, "name_status");
+    const displayNameReadiness = hasNameStatus
+      ? buildDisplayNameReadinessFromNameStatus(phoneStatus?.name_status)
+      : normalizeDisplayNameReadiness(config.displayNameReadiness);
     const refreshedConfig = {
       ...readinessResult.config,
       messagingReadiness: buildMessagingReadiness(phoneStatus?.health_status || null),
+      displayNameReadiness,
     };
 
-    if (readinessResult.changed) {
+    const displayNameReadinessChanged =
+      JSON.stringify(normalizeDisplayNameReadiness(config.displayNameReadiness)) !==
+      JSON.stringify(displayNameReadiness);
+
+    if (readinessResult.changed || displayNameReadinessChanged) {
+      const updates = {};
+      if (readinessResult.changed) {
+        updates["whatsappBusiness.phoneRegistrationStatus"] = "active";
+        updates["whatsappBusiness.phoneRegisteredAt"] = refreshedConfig.phoneRegisteredAt;
+        updates["whatsappBusiness.phoneRegistrationLastError"] = "";
+      }
+      if (displayNameReadinessChanged) {
+        updates["whatsappBusiness.displayNameReadiness"] = displayNameReadiness;
+      }
+
       await record.Model.updateOne(
         {
           _id: record.vendor._id,
-          "whatsappBusiness.phoneRegistrationStatus": "registration_submitted",
+          ...(readinessResult.changed
+            ? { "whatsappBusiness.phoneRegistrationStatus": "registration_submitted" }
+            : {}),
         },
         {
-          $set: {
-            "whatsappBusiness.phoneRegistrationStatus": "active",
-            "whatsappBusiness.phoneRegisteredAt": refreshedConfig.phoneRegisteredAt,
-            "whatsappBusiness.phoneRegistrationLastError": "",
-          },
+          $set: updates,
         }
       );
     }
@@ -469,26 +493,35 @@ function getOrCreateRegistrationPin(config) {
 
 function sendTestMessageError(res, error, data = null) {
   const meta = formatSafeMetaForResponse(error.metaError);
+  const metaCode = String(error?.metaError?.code || error?.code || "").trim();
   const status =
-    error.code === "meta_test_send_failed" ||
-    error.code === "meta_token_encryption_missing"
+    metaCode === "131037"
+      ? 409
+      : error.code === "meta_test_send_failed" ||
+        error.code === "meta_token_encryption_missing"
       ? 500
       : 400;
 
   return res.status(status).json({
     success: false,
-    code: error.code || "meta_test_send_error",
+    code: metaCode === "131037" ? "meta_display_name_approval_required" : error.code || "meta_test_send_error",
     message:
-      error.code === "recipient_phone_invalid"
+      metaCode === "131037"
+        ? "Your WhatsApp display name is awaiting Meta approval. Messages cannot be sent from this number until Meta approves the display name."
+      : error.code === "recipient_phone_invalid"
         ? "Enter a valid WhatsApp number in international format, for example +919381520396."
       : error.code === "meta_template_not_approved"
         ? "This WhatsApp template must be approved before sending a test message."
-        : error.code === "meta_token_encryption_missing"
+      : error.code === "meta_token_encryption_missing"
         ? "WhatsApp test messaging is not configured correctly. Please contact YNOT support."
         : "Unable to send test WhatsApp message.",
     ...(data ? { data } : {}),
     ...(meta ? { meta } : {}),
   });
+}
+
+function isMetaDisplayNameApprovalError(error) {
+  return String(error?.metaError?.code || error?.code || "").trim() === "131037";
 }
 
 function sendPhoneRegistrationError(res, error) {
@@ -1173,7 +1206,8 @@ async function sendWhatsappTemplateTestMessage(req, res) {
     const testMessage = buildSuccessfulTestMessageState(config.testMessage);
     const whatsappBusiness = {
       ...config,
-      enabled: false,
+      enabled: config.enabled === true,
+      displayNameReadiness: buildSendEligibleDisplayNameReadiness(config.displayNameReadiness),
       testMessage,
     };
 
@@ -1215,10 +1249,14 @@ async function sendWhatsappTemplateTestMessage(req, res) {
       });
 
       if (record && config) {
-        const testMessage = buildFailedTestMessageState(config.testMessage, error);
+        const testMessage = buildTestMessageStateAfterFailure(config.testMessage, error);
+        const displayNameReadiness = isMetaDisplayNameApprovalError(error)
+          ? buildDisplayNameReadinessFromSendError(config.displayNameReadiness, error)
+          : normalizeDisplayNameReadiness(config.displayNameReadiness);
         const whatsappBusiness = {
           ...config,
-          enabled: false,
+          enabled: config.enabled === true,
+          displayNameReadiness,
           testMessage,
         };
         responseConfig = sanitizeWhatsappBusinessConfig(whatsappBusiness);
@@ -1319,12 +1357,16 @@ async function registerWhatsappPhoneNumber(req, res) {
       registrationStatus === "active"
         ? readinessResult.config.phoneRegisteredAt || config.phoneRegisteredAt || new Date()
         : config.phoneRegisteredAt || null;
+    const displayNameReadiness = buildDisplayNameReadinessFromNameStatus(
+      statusAfter?.name_status || ""
+    );
     const whatsappBusiness = {
       ...config,
       enabled: false,
       phoneRegistrationStatus: registrationStatus,
       phoneRegisteredAt: registeredAt,
       phoneRegistrationLastError: "",
+      displayNameReadiness,
       metaRegistration: {
         ...(config.metaRegistration || {}),
         pinEncrypted,
@@ -1356,6 +1398,7 @@ async function registerWhatsappPhoneNumber(req, res) {
         qualityRating: statusAfter?.quality_rating || "",
         platformType: statusAfter?.platform_type || "",
         throughput: statusAfter?.throughput || null,
+        nameStatus: statusAfter?.name_status || "",
       },
       message: "WhatsApp number registration request completed.",
     });
@@ -1497,17 +1540,27 @@ async function completeMetaWhatsappConnection(req, res) {
 
     const selectedPhone = validation.selectedPhone || {};
     const account = validation.account || {};
+    const resolvedWabaId = String(account.id || wabaId);
+    const resolvedPhoneNumberId = String(selectedPhone.id || phoneNumberId);
+    const metaConfigurationChanged =
+      String(current.wabaId || "") !== resolvedWabaId ||
+      String(current.phoneNumberId || "") !== resolvedPhoneNumberId;
+    const defaultWhatsappBusiness = getDefaultWhatsappBusinessConfig();
     const whatsappBusiness = {
       ...current,
       enabled: false,
       provider: "meta",
       connectionStatus: "connected",
       businessId,
-      wabaId: String(account.id || wabaId),
-      phoneNumberId: String(selectedPhone.id || phoneNumberId),
+      wabaId: resolvedWabaId,
+      phoneNumberId: resolvedPhoneNumberId,
       displayPhoneNumber: selectedPhone.display_phone_number || "",
       displayName: selectedPhone.verified_name || account.name || "",
+      displayNameReadiness: buildDisplayNameReadinessFromNameStatus(selectedPhone.name_status || ""),
       templateStatus: "not_configured",
+      testMessage: metaConfigurationChanged
+        ? defaultWhatsappBusiness.testMessage
+        : current.testMessage,
       connectedAt: new Date(),
       lastError: "",
       metaAuth: {

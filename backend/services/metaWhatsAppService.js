@@ -147,7 +147,7 @@ async function getPhoneNumbers(wabaId, accessToken) {
   try {
     const response = await axios.get(graphUrl(`${id}/phone_numbers`), {
       params: {
-        fields: "id,display_phone_number,verified_name",
+        fields: "id,display_phone_number,verified_name,name_status",
         access_token: accessToken,
       },
     });

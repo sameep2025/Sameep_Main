@@ -73,6 +73,33 @@ test("available messaging allows vendor_meta", () => {
   assert.equal(resolve({ messagingReadiness: { status: "available" } }).route, ROUTES.VENDOR_META);
 });
 
+test("send-eligible display name allows vendor_meta", () => {
+  assert.equal(
+    resolve({
+      displayNameReadiness: {
+        status: "send_eligible",
+        rawStatus: "APPROVED",
+        canSend: true,
+      },
+    }).route,
+    ROUTES.VENDOR_META
+  );
+});
+
+test("pending display name resolves to ynot_msg91", () => {
+  const decision = resolve({
+    displayNameReadiness: {
+      status: "pending",
+      rawStatus: "PENDING_REVIEW",
+      canSend: false,
+    },
+  });
+
+  assert.equal(decision.route, ROUTES.YNOT_MSG91);
+  assert.equal(decision.checks.displayNameSendReady, false);
+  assert.ok(decision.blockers.includes("display_name_pending"));
+});
+
 test("pending template resolves to ynot_msg91", () => {
   assert.equal(
     resolve({ templateInstances: [{ masterTemplateKey: "BILL_STANDARD", status: "pending" }] }).route,

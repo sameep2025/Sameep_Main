@@ -28,6 +28,14 @@ const MESSAGING_READINESS_STATUS_LABELS = {
   blocked: "Blocked",
   unknown: "Unknown",
 };
+const DISPLAY_NAME_READINESS_STATUS_LABELS = {
+  send_eligible: "Approved",
+  pending: "Approval Pending",
+  rejected: "Rejected",
+  expired: "Expired",
+  none: "Not Available",
+  unknown: "Unknown",
+};
 const TEST_MESSAGE_STATUS_LABELS = {
   not_tested: "Not Tested",
   successful: "Successful",
@@ -129,6 +137,17 @@ function getMessagingReadinessTone(status) {
   if (status === "available") return "ready";
   if (status === "limited" || status === "unknown") return "pending";
   if (status === "blocked") return "error";
+  return "idle";
+}
+
+function getDisplayNameReadinessStatusLabel(status) {
+  return DISPLAY_NAME_READINESS_STATUS_LABELS[status] || formatStatus(status || "unknown");
+}
+
+function getDisplayNameReadinessTone(status) {
+  if (status === "send_eligible") return "ready";
+  if (status === "pending" || status === "unknown") return "pending";
+  if (status === "rejected" || status === "expired" || status === "none") return "error";
   return "idle";
 }
 
@@ -593,6 +612,8 @@ export default function WhatsappBusinessDashboard({ vendorId }) {
   const phoneRegistrationStatus = config?.phoneRegistrationStatus || "unknown";
   const messagingReadiness = config?.messagingReadiness || {};
   const messagingReadinessStatus = messagingReadiness.status || "unknown";
+  const displayNameReadiness = config?.displayNameReadiness || {};
+  const displayNameReadinessStatus = displayNameReadiness.status || "unknown";
   const testMessageStatus = config?.testMessage?.status || "not_tested";
   const activationEligibility = config?.activationEligibility || {};
   const activationChecks = activationEligibility.checks || {};
@@ -691,6 +712,16 @@ export default function WhatsappBusinessDashboard({ vendorId }) {
                   )}`}
                 >
                   {getMessagingReadinessStatusLabel(messagingReadinessStatus)}
+                </strong>
+              </div>
+              <div className="whatsapp-business-card">
+                <span>Display Name</span>
+                <strong
+                  className={`whatsapp-business-inline-status whatsapp-business-inline-status-${getDisplayNameReadinessTone(
+                    displayNameReadinessStatus
+                  )}`}
+                >
+                  {getDisplayNameReadinessStatusLabel(displayNameReadinessStatus)}
                 </strong>
               </div>
               <div className="whatsapp-business-card">
