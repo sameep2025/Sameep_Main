@@ -40,6 +40,32 @@ function formatItemResource(item) {
   return String(item?.resourceName || "").trim();
 }
 
+function getNumber(value, fallback = 0) {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : fallback;
+}
+
+function hasAmount(value) {
+  return typeof value === "number" && Number.isFinite(value);
+}
+
+function getBillFinancials(bill) {
+  const billValue = getNumber(bill?.billValue ?? bill?.grossAmount ?? bill?.netBillValue ?? bill?.total);
+  const netBillValue = getNumber(bill?.netBillValue ?? bill?.total);
+  const rewardsRedeemedValue = getNumber(bill?.rewardsRedeemedValue ?? bill?.redeemed);
+  const netCollected = getNumber(
+    bill?.netCollected ?? Math.max(netBillValue - rewardsRedeemedValue, 0)
+  );
+
+  return {
+    discountAmount: hasAmount(bill?.discountAmount) ? getNumber(bill.discountAmount) : null,
+    billValue,
+    netBillValue,
+    rewardsRedeemedValue,
+    netCollected: Math.max(netCollected, 0),
+  };
+}
+
 export default function YearRevenue({
   vendorId,
   hrEnabled = true,
@@ -276,22 +302,43 @@ export default function YearRevenue({
     const summaryRevenue = Number(
       summary?.thisYearRevenue ?? summary?.yearRevenue ?? summary?.yearlyRevenue ?? 0
     );
-    const monthlyRevenue = months.reduce(
-      (acc, month) => acc + Number(month?.revenue || 0),
+    const monthlyBillValue = months.reduce(
+      (acc, month) => acc + getNumber(month?.billValue ?? month?.netBillValue ?? month?.revenue),
+      0
+    );
+    const discountsGiven = months.reduce(
+      (acc, month) => acc + getNumber(month?.discountsGiven),
+      0
+    );
+    const rewardsRedeemed = months.reduce(
+      (acc, month) => acc + getNumber(month?.rewardsRedeemed),
+      0
+    );
+    const netCollected = months.reduce(
+      (acc, month) => acc + getNumber(month?.netCollected),
       0
     );
     const totalOrders = months.reduce((acc, month) => acc + Number(month?.orders || 0), 0);
     const bestMonth = months.reduce((best, month) => {
-      if (!best || Number(month?.revenue || 0) > Number(best?.revenue || 0)) {
+      if (
+        !best ||
+        getNumber(month?.billValue ?? month?.netBillValue ?? month?.revenue) >
+          getNumber(best?.billValue ?? best?.netBillValue ?? best?.revenue)
+      ) {
         return month;
       }
       return best;
     }, null);
 
     return {
-      totalRevenue: monthlyRevenue || summaryRevenue,
+      billValue: monthlyBillValue || summaryRevenue,
+      discountsGiven,
+      rewardsRedeemed,
+      netCollected,
       totalOrders,
-      activeMonths: months.filter((month) => Number(month?.revenue || 0) > 0).length,
+      activeMonths: months.filter((month) =>
+        getNumber(month?.billValue ?? month?.netBillValue ?? month?.revenue) > 0
+      ).length,
       bestMonth,
     };
   }, [months, summary]);
@@ -339,21 +386,33 @@ export default function YearRevenue({
           <>
             <div className="revenue-panel-stat-grid">
               <div className="revenue-panel-stat-card">
-                <div className="revenue-panel-stat-label">{selectedMonthLabel} Revenue</div>
+                <div className="revenue-panel-stat-label">Bill Value</div>
                 <div className="revenue-panel-stat-value">
-                  {currencyFmt.format(Number(selectedMonth?.revenue || 0))}
+                  {currencyFmt.format(totals.billValue || 0)}
                 </div>
               </div>
               <div className="revenue-panel-stat-card">
-                <div className="revenue-panel-stat-label">{selectedMonthLabel} Orders</div>
+                <div className="revenue-panel-stat-label">Discounts Given</div>
                 <div className="revenue-panel-stat-value">
-                  {Number(selectedMonth?.orders || 0)}
+                  {currencyFmt.format(totals.discountsGiven || 0)}
                 </div>
               </div>
               <div className="revenue-panel-stat-card">
-                <div className="revenue-panel-stat-label">Last 12 Months Total</div>
+                <div className="revenue-panel-stat-label">Rewards Redeemed</div>
                 <div className="revenue-panel-stat-value">
-                  {currencyFmt.format(totals.totalRevenue)}
+                  {currencyFmt.format(totals.rewardsRedeemed || 0)}
+                </div>
+              </div>
+              <div className="revenue-panel-stat-card">
+                <div className="revenue-panel-stat-label">Net Collected</div>
+                <div className="revenue-panel-stat-value">
+                  {currencyFmt.format(totals.netCollected || 0)}
+                </div>
+              </div>
+              <div className="revenue-panel-stat-card">
+                <div className="revenue-panel-stat-label">Total Bills</div>
+                <div className="revenue-panel-stat-value">
+                  {totals.totalOrders}
                 </div>
               </div>
             </div>
@@ -387,7 +446,7 @@ export default function YearRevenue({
                         <div className="revenue-panel-month-year">{month.year}</div>
                       ) : null}
                       <div className="revenue-panel-month-revenue">
-                        {currencyFmt.format(Number(month.revenue || 0))}
+                        {currencyFmt.format(getNumber(month.billValue ?? month.netBillValue ?? month.revenue))}
                       </div>
                       <div className="revenue-panel-month-meta">
                         {Number(month.orders || 0)} orders • Avg{" "}
@@ -418,6 +477,7 @@ export default function YearRevenue({
                     const billKey = bill.billId || `${bill.phone}-${bill.createdAt}`;
                     const isExpanded = expandedBills[billKey] === true;
                     const billItems = Array.isArray(bill.items) ? bill.items : [];
+                    const financials = getBillFinancials(bill);
 
                     return (
                       <div key={billKey} className="revenue-panel-list-item">
@@ -429,8 +489,21 @@ export default function YearRevenue({
                             {bill.phone || "Walk-in"} • {formatDateTime(bill.createdAt)}
                           </div>
                           <div className="revenue-panel-chip-row">
+                            <span className="revenue-panel-chip">
+                              Bill Value {currencyFmt.format(financials.billValue)}
+                            </span>
+                            {financials.discountAmount !== null ? (
+                              <span className="revenue-panel-chip">
+                                Discount {currencyFmt.format(financials.discountAmount)}
+                              </span>
+                            ) : null}
+                            <span className="revenue-panel-chip">
+                              Redeemed {currencyFmt.format(financials.rewardsRedeemedValue)}
+                            </span>
+                            <span className="revenue-panel-chip">
+                              Collected {currencyFmt.format(financials.netCollected)}
+                            </span>
                             <span className="revenue-panel-chip">Earned {Number(bill.earned || 0)}</span>
-                            <span className="revenue-panel-chip">Redeemed {Number(bill.redeemed || 0)}</span>
                             <span className="revenue-panel-chip">{billItems.length} item(s)</span>
                           </div>
                           <div className="revenue-panel-bill-meta">
@@ -463,7 +536,7 @@ export default function YearRevenue({
                         </div>
                         <div className="revenue-panel-bill-actions">
                           <div className="revenue-panel-list-value">
-                            {currencyFmt.format(Number(bill.total || 0))}
+                            {currencyFmt.format(financials.netCollected)}
                           </div>
                           {billItems.length > 0 ? (
                             <button

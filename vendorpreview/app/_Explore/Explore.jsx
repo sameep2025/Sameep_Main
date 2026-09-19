@@ -2792,6 +2792,8 @@ function ExploreContent({ onReady, onOpenServices }) {
         body: JSON.stringify({
           billingId: newBillingId,
           cartItems: billingCartItems,
+          grossAmount: billingSubtotal,
+          discountAmount: billingDiscount,
         }),
       });
 

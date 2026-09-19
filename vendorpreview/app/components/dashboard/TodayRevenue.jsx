@@ -41,6 +41,32 @@ function formatItemResource(item) {
   return String(item?.resourceName || "").trim();
 }
 
+function getNumber(value, fallback = 0) {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : fallback;
+}
+
+function hasAmount(value) {
+  return typeof value === "number" && Number.isFinite(value);
+}
+
+function getBillFinancials(bill) {
+  const billValue = getNumber(bill?.billValue ?? bill?.grossAmount ?? bill?.netBillValue ?? bill?.total);
+  const netBillValue = getNumber(bill?.netBillValue ?? bill?.total);
+  const rewardsRedeemedValue = getNumber(bill?.rewardsRedeemedValue ?? bill?.redeemed);
+  const netCollected = getNumber(
+    bill?.netCollected ?? Math.max(netBillValue - rewardsRedeemedValue, 0)
+  );
+
+  return {
+    discountAmount: hasAmount(bill?.discountAmount) ? getNumber(bill.discountAmount) : null,
+    billValue,
+    netBillValue,
+    rewardsRedeemedValue,
+    netCollected: Math.max(netCollected, 0),
+  };
+}
+
 function getTodayRange() {
   const start = new Date();
   start.setHours(0, 0, 0, 0);
@@ -182,10 +208,20 @@ function TodayRevenue({
     return bills.reduce(
       (acc, bill) => {
         acc.totalBills += 1;
-        acc.totalRevenue += Number(bill?.total || 0);
+        const financials = getBillFinancials(bill);
+        acc.billValue += financials.billValue;
+        acc.discountsGiven += financials.discountAmount || 0;
+        acc.rewardsRedeemed += financials.rewardsRedeemedValue;
+        acc.netCollected += financials.netCollected;
         return acc;
       },
-      { totalBills: 0, totalRevenue: 0 }
+      {
+        totalBills: 0,
+        billValue: 0,
+        discountsGiven: 0,
+        rewardsRedeemed: 0,
+        netCollected: 0,
+      }
     );
   }, [bills]);
 
@@ -256,7 +292,10 @@ function TodayRevenue({
 
             <div className="today-revenue-summary-grid">
               {[
-                { label: "Total Revenue", value: currencyFmt.format(summary.totalRevenue || 0) },
+                { label: "Bill Value", value: currencyFmt.format(summary.billValue || 0) },
+                { label: "Discounts Given", value: currencyFmt.format(summary.discountsGiven || 0) },
+                { label: "Rewards Redeemed", value: currencyFmt.format(summary.rewardsRedeemed || 0) },
+                { label: "Net Collected", value: currencyFmt.format(summary.netCollected || 0) },
                 { label: "Total Bills", value: summary.totalBills },
               ].map((card) => (
                 <div key={card.label} className="today-revenue-summary-card">
@@ -276,6 +315,7 @@ function TodayRevenue({
                 {bills.map((bill) => {
                   const billKey = bill.billId || `${bill.phone}-${bill.createdAt}`;
                   const isExpanded = expandedBills[billKey] !== false;
+                  const financials = getBillFinancials(bill);
 
                   return (
                   <div key={billKey} className="today-revenue-bill-card">
@@ -288,8 +328,21 @@ function TodayRevenue({
                           {bill.phone || "Walk-in"} • {formatDateTime(bill.createdAt)}
                         </div>
                         <div className="today-revenue-bill-chip-row">
+                          <span className="today-revenue-bill-chip">
+                            Bill Value {currencyFmt.format(financials.billValue)}
+                          </span>
+                          {financials.discountAmount !== null ? (
+                            <span className="today-revenue-bill-chip">
+                              Discount {currencyFmt.format(financials.discountAmount)}
+                            </span>
+                          ) : null}
+                          <span className="today-revenue-bill-chip">
+                            Redeemed {currencyFmt.format(financials.rewardsRedeemedValue)}
+                          </span>
+                          <span className="today-revenue-bill-chip">
+                            Collected {currencyFmt.format(financials.netCollected)}
+                          </span>
                           <span className="today-revenue-bill-chip">Earned {Number(bill.earned || 0)}</span>
-                          <span className="today-revenue-bill-chip">Redeemed {Number(bill.redeemed || 0)}</span>
                           <span className="today-revenue-bill-chip">
                             {Array.isArray(bill.items) ? bill.items.length : 0} item(s)
                           </span>
@@ -297,7 +350,7 @@ function TodayRevenue({
                       </div>
                       <div className="today-revenue-bill-actions">
                         <div className="today-revenue-bill-total">
-                          {currencyFmt.format(Number(bill.total || 0))}
+                          {currencyFmt.format(financials.netCollected)}
                         </div>
                         <button
                           type="button"

@@ -25,6 +25,18 @@ const TransactionSchema = new mongoose.Schema(
 
     totalAmount: Number,
 
+    grossAmount: {
+      type: Number,
+      min: 0,
+      default: undefined,
+    },
+
+    discountAmount: {
+      type: Number,
+      min: 0,
+      default: undefined,
+    },
+
     redeemedPoints: Number,
     redeemValue: Number,
 

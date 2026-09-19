@@ -59,6 +59,18 @@ const BillingSessionSchema = new mongoose.Schema(
       default: 0,
     },
 
+    grossAmount: {
+      type: Number,
+      min: 0,
+      default: undefined,
+    },
+
+    discountAmount: {
+      type: Number,
+      min: 0,
+      default: undefined,
+    },
+
     pointsEarned: {
       type: Number,
       default: 0,

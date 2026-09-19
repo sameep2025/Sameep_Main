@@ -30,6 +30,27 @@ const {
   verifyBillAccessToken,
 } = require("../utils/billLink");
 
+function parseOptionalMoney(value) {
+  if (value === undefined || value === null || value === "") {
+    return null;
+  }
+
+  const number = Number(value);
+  if (!Number.isFinite(number) || number < 0) {
+    return null;
+  }
+
+  return number;
+}
+
+function getCartRoundingTolerance(cartItems = []) {
+  const totalQuantity = cartItems.reduce((sum, item) => {
+    return sum + Math.max(Number(item?.qty) || 0, 0);
+  }, 0);
+
+  return Math.max(1, totalQuantity);
+}
+
 async function buildPublicBillResponse(bill) {
   const [customer, vendor] = await Promise.all([
     bill.customerId ? Customer.findById(bill.customerId).lean() : null,
@@ -172,7 +193,7 @@ exports.createBillingSession = async (req, res) => {
 // ✅ Update Cart
 exports.updateBillingCart = async (req, res) => {
   try {
-    const { billingId, cartItems } = req.body;
+    const { billingId, cartItems, grossAmount, discountAmount } = req.body;
 
     let totalAmount = 0;
 
@@ -181,12 +202,44 @@ exports.updateBillingCart = async (req, res) => {
       totalAmount += item.total;
     });
 
+    const hasFinancialSnapshot =
+      grossAmount !== undefined || discountAmount !== undefined;
+    const update = {
+      cartItems,
+      totalAmount,
+    };
+
+    if (hasFinancialSnapshot) {
+      const sanitizedGrossAmount = parseOptionalMoney(grossAmount);
+      const sanitizedDiscountAmount = parseOptionalMoney(discountAmount);
+
+      if (sanitizedGrossAmount === null || sanitizedDiscountAmount === null) {
+        return res.status(400).json({
+          success: false,
+          message: "Invalid billing financial snapshot",
+        });
+      }
+
+      const expectedTotal = sanitizedGrossAmount - sanitizedDiscountAmount;
+      const tolerance = getCartRoundingTolerance(cartItems);
+
+      if (
+        expectedTotal < 0 ||
+        Math.abs(expectedTotal - totalAmount) > tolerance
+      ) {
+        return res.status(400).json({
+          success: false,
+          message: "Billing financial snapshot does not match cart total",
+        });
+      }
+
+      update.grossAmount = sanitizedGrossAmount;
+      update.discountAmount = sanitizedDiscountAmount;
+    }
+
     const updated = await BillingSession.findByIdAndUpdate(
       billingId,
-      {
-        cartItems,
-        totalAmount,
-      },
+      update,
       { new: true }
     );
 
@@ -489,6 +542,8 @@ exports.completeBillingSession = async (req, res) => {
       customerId: billing.customerId || null,
       billingSessionId: billing._id,
       totalAmount: billing.totalAmount,
+      grossAmount: billing.grossAmount,
+      discountAmount: billing.discountAmount,
       redeemedPoints: billing.pointsRedeemed || 0,
       redeemValue: billing.pointsRedeemed || 0,
       finalPaidAmount:

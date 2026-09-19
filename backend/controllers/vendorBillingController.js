@@ -1,6 +1,42 @@
 const BillingSession = require("../models/BillingSession");
 const Customer = require("../models/Customer");
+const Transaction = require("../models/Transaction");
 const mongoose = require("mongoose");
+
+function toSafeNumber(value, fallback = 0) {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : fallback;
+}
+
+function hasStoredNumber(value) {
+  return typeof value === "number" && Number.isFinite(value);
+}
+
+function buildBillFinancials(bill = {}, transaction = null) {
+  const netBillValue = toSafeNumber(bill.totalAmount);
+  const hasGrossAmount = hasStoredNumber(bill.grossAmount);
+  const hasDiscountAmount = hasStoredNumber(bill.discountAmount);
+  const billValue = hasGrossAmount ? toSafeNumber(bill.grossAmount) : netBillValue;
+  const fallbackRewardsRedeemed = toSafeNumber(bill.pointsRedeemed);
+  const rewardsRedeemedValue = transaction
+    ? toSafeNumber(transaction.redeemValue)
+    : fallbackRewardsRedeemed;
+  const rawCollected = transaction
+    ? toSafeNumber(transaction.finalPaidAmount)
+    : netBillValue - rewardsRedeemedValue;
+
+  return {
+    grossAmount: hasGrossAmount ? toSafeNumber(bill.grossAmount) : null,
+    discountAmount: hasDiscountAmount ? toSafeNumber(bill.discountAmount) : null,
+    billValue,
+    netBillValue,
+    rewardsRedeemedValue,
+    netCollected: Math.max(rawCollected, 0),
+    financialSnapshotAvailable:
+      hasGrossAmount && hasDiscountAmount,
+    transactionMissing: !transaction,
+  };
+}
 
 exports.getVendorBills = async (req, res) => {
   try {
@@ -10,7 +46,10 @@ exports.getVendorBills = async (req, res) => {
       return res.status(400).json({ success: false, message: "vendorId required" });
     }
 
-    const query = { vendorId: new mongoose.Types.ObjectId(vendorId) };
+    const query = {
+      vendorId: new mongoose.Types.ObjectId(vendorId),
+      status: "COMPLETED",
+    };
 
     if (from || to) {
       query.createdAt = {};
@@ -22,6 +61,15 @@ exports.getVendorBills = async (req, res) => {
       .sort({ createdAt: -1 })
       .limit(Number(limit))
       .lean();
+    const billIds = bills.map((bill) => bill._id).filter(Boolean);
+    const transactions = billIds.length
+      ? await Transaction.find({ billingSessionId: { $in: billIds } }).lean()
+      : [];
+    const transactionMap = new Map(
+      transactions
+        .filter((transaction) => transaction?.billingSessionId)
+        .map((transaction) => [String(transaction.billingSessionId), transaction])
+    );
 
     const formatted = await Promise.all(
       bills.map(async (bill) => {
@@ -35,10 +83,20 @@ exports.getVendorBills = async (req, res) => {
             phone = maskPhone(customer.fullNumber);
           }
         }
+        const transaction = transactionMap.get(String(bill._id)) || null;
+        const financials = buildBillFinancials(bill, transaction);
 
         return {
           billId: bill._id,
           total: bill.totalAmount,
+          grossAmount: financials.grossAmount,
+          discountAmount: financials.discountAmount,
+          billValue: financials.billValue,
+          netBillValue: financials.netBillValue,
+          rewardsRedeemedValue: financials.rewardsRedeemedValue,
+          netCollected: financials.netCollected,
+          financialSnapshotAvailable: financials.financialSnapshotAvailable,
+          transactionMissing: financials.transactionMissing,
           earned: bill.pointsEarned || 0,
           redeemed: bill.pointsRedeemed || 0,
           items: bill.items || bill.cartItems || [],

@@ -40,6 +40,32 @@ function formatItemResource(item) {
   return String(item?.resourceName || "").trim();
 }
 
+function getNumber(value, fallback = 0) {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : fallback;
+}
+
+function hasAmount(value) {
+  return typeof value === "number" && Number.isFinite(value);
+}
+
+function getBillFinancials(bill) {
+  const billValue = getNumber(bill?.billValue ?? bill?.grossAmount ?? bill?.netBillValue ?? bill?.total);
+  const netBillValue = getNumber(bill?.netBillValue ?? bill?.total);
+  const rewardsRedeemedValue = getNumber(bill?.rewardsRedeemedValue ?? bill?.redeemed);
+  const netCollected = getNumber(
+    bill?.netCollected ?? Math.max(netBillValue - rewardsRedeemedValue, 0)
+  );
+
+  return {
+    discountAmount: hasAmount(bill?.discountAmount) ? getNumber(bill.discountAmount) : null,
+    billValue,
+    netBillValue,
+    rewardsRedeemedValue,
+    netCollected: Math.max(netCollected, 0),
+  };
+}
+
 function getMonthRange() {
   const start = new Date();
   start.setDate(1);
@@ -173,12 +199,22 @@ export default function MonthRevenue({
     return bills.reduce(
       (acc, bill) => {
         acc.totalBills += 1;
-        acc.totalRevenue += Number(bill?.total || 0);
+        const financials = getBillFinancials(bill);
+        acc.billValue += financials.billValue;
+        acc.discountsGiven += financials.discountAmount || 0;
+        acc.rewardsRedeemed += financials.rewardsRedeemedValue;
+        acc.netCollected += financials.netCollected;
         acc.totalDistributed += Number(bill?.earned || 0);
-        acc.totalRedeemed += Number(bill?.redeemed || 0);
         return acc;
       },
-      { totalBills: 0, totalRevenue: 0, totalDistributed: 0, totalRedeemed: 0 }
+      {
+        totalBills: 0,
+        billValue: 0,
+        discountsGiven: 0,
+        rewardsRedeemed: 0,
+        netCollected: 0,
+        totalDistributed: 0,
+      }
     );
   }, [bills]);
 
@@ -233,9 +269,27 @@ export default function MonthRevenue({
           <>
             <div className="revenue-panel-stat-grid">
               <div className="revenue-panel-stat-card">
-                <div className="revenue-panel-stat-label">Total Revenue</div>
+                <div className="revenue-panel-stat-label">Bill Value</div>
                 <div className="revenue-panel-stat-value">
-                  {currencyFmt.format(summary.totalRevenue || 0)}
+                  {currencyFmt.format(summary.billValue || 0)}
+                </div>
+              </div>
+              <div className="revenue-panel-stat-card">
+                <div className="revenue-panel-stat-label">Discounts Given</div>
+                <div className="revenue-panel-stat-value">
+                  {currencyFmt.format(summary.discountsGiven || 0)}
+                </div>
+              </div>
+              <div className="revenue-panel-stat-card">
+                <div className="revenue-panel-stat-label">Rewards Redeemed</div>
+                <div className="revenue-panel-stat-value">
+                  {currencyFmt.format(summary.rewardsRedeemed || 0)}
+                </div>
+              </div>
+              <div className="revenue-panel-stat-card">
+                <div className="revenue-panel-stat-label">Net Collected</div>
+                <div className="revenue-panel-stat-value">
+                  {currencyFmt.format(summary.netCollected || 0)}
                 </div>
               </div>
               <div className="revenue-panel-stat-card">
@@ -245,10 +299,6 @@ export default function MonthRevenue({
               <div className="revenue-panel-stat-card">
                 <div className="revenue-panel-stat-label">Points Distributed</div>
                 <div className="revenue-panel-stat-value">{summary.totalDistributed}</div>
-              </div>
-              <div className="revenue-panel-stat-card">
-                <div className="revenue-panel-stat-label">Points Redeemed</div>
-                <div className="revenue-panel-stat-value">{summary.totalRedeemed}</div>
               </div>
             </div>
 
@@ -261,6 +311,7 @@ export default function MonthRevenue({
                   {bills.map((bill) => {
                     const billKey = bill.billId || `${bill.phone}-${bill.createdAt}`;
                     const isExpanded = expandedBills[billKey] === true;
+                    const financials = getBillFinancials(bill);
 
                     return (
                     <div
@@ -275,8 +326,21 @@ export default function MonthRevenue({
                           {bill.phone || "Walk-in"} • {formatDateTime(bill.createdAt)}
                         </div>
                         <div className="revenue-panel-chip-row">
+                          <span className="revenue-panel-chip">
+                            Bill Value {currencyFmt.format(financials.billValue)}
+                          </span>
+                          {financials.discountAmount !== null ? (
+                            <span className="revenue-panel-chip">
+                              Discount {currencyFmt.format(financials.discountAmount)}
+                            </span>
+                          ) : null}
+                          <span className="revenue-panel-chip">
+                            Redeemed {currencyFmt.format(financials.rewardsRedeemedValue)}
+                          </span>
+                          <span className="revenue-panel-chip">
+                            Collected {currencyFmt.format(financials.netCollected)}
+                          </span>
                           <span className="revenue-panel-chip">Earned {Number(bill.earned || 0)}</span>
-                          <span className="revenue-panel-chip">Redeemed {Number(bill.redeemed || 0)}</span>
                           <span className="revenue-panel-chip">
                             {Array.isArray(bill.items) ? bill.items.length : 0} item(s)
                           </span>
@@ -311,7 +375,7 @@ export default function MonthRevenue({
                       </div>
                       <div className="revenue-panel-bill-actions">
                         <div className="revenue-panel-list-value">
-                          {currencyFmt.format(Number(bill.total || 0))}
+                          {currencyFmt.format(financials.netCollected)}
                         </div>
                         <button
                           type="button"
