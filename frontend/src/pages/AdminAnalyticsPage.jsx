@@ -25,6 +25,20 @@ const analyticsSectionNavItems = [
   { id: "subscriptions", label: "Subscriptions" },
 ];
 
+const vendorStatusOptions = [
+  { value: "all", label: "All Vendors" },
+  { value: "Accepted", label: "Accepted" },
+  { value: "Pending", label: "Pending" },
+  { value: "Rejected", label: "Rejected" },
+  { value: "Waiting for Approval", label: "Waiting for Approval" },
+  { value: "Registered", label: "Registered" },
+  { value: "Profile Setup", label: "Profile Setup" },
+  { value: "Preview", label: "Preview" },
+  { value: "Published", label: "Published" },
+  { value: "Inactive", label: "Inactive" },
+  { value: "Active", label: "Active" },
+];
+
 function getCurrentIstYearMonth() {
   const shifted = new Date(Date.now() + IST_OFFSET_MS);
   return {
@@ -155,9 +169,23 @@ function formatTrendBucket(bucket, periodOption) {
   return periodOption.period === "thisYear" ? monthLabel : `${monthLabel} ${year}`;
 }
 
-function KpiCard({ label, value, loading, compact = false }) {
+function KpiCard({ label, value, loading, compact = false, onClick, active = false }) {
+  const Component = onClick ? "button" : "div";
+
   return (
-    <div style={{ ...cardStyle, minHeight: compact ? "90px" : "116px" }}>
+    <Component
+      type={onClick ? "button" : undefined}
+      onClick={onClick}
+      style={{
+        ...cardStyle,
+        minHeight: compact ? "90px" : "116px",
+        width: "100%",
+        textAlign: "left",
+        cursor: onClick ? "pointer" : "default",
+        borderColor: active ? "#2563eb" : cardStyle.border.split(" ").pop(),
+        background: active ? "#eff6ff" : cardStyle.background,
+      }}
+    >
       <div style={{ ...mutedTextStyle, fontWeight: 700 }}>{label}</div>
       <div
         style={{
@@ -170,7 +198,7 @@ function KpiCard({ label, value, loading, compact = false }) {
       >
         {loading ? "..." : value}
       </div>
-    </div>
+    </Component>
   );
 }
 
@@ -1604,6 +1632,237 @@ function SubscriptionCategoryCoverageTable({ rows }) {
   );
 }
 
+function CustomerDrilldownPanel({
+  type,
+  data,
+  loading,
+  error,
+  page,
+  onPageChange,
+  searchInput,
+  onSearchInputChange,
+  onSearchSubmit,
+  onSearchClear,
+  onClose,
+}) {
+  if (!type) return null;
+
+  const title = type === "crossVendor" ? "Cross-Vendor Customers" : "Repeat Customers";
+  const rows = data?.rows || [];
+  const pagination = data?.pagination || {};
+  const totalPages = Number(pagination.totalPages || 1);
+
+  return (
+    <div style={{ ...cardStyle, marginBottom: "16px", borderColor: "#bfdbfe" }}>
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "flex-start",
+          gap: "12px",
+          flexWrap: "wrap",
+          marginBottom: "14px",
+        }}
+      >
+        <div>
+          <h3 style={{ margin: 0, color: "#0f172a" }}>{title} Drilldown</h3>
+          <p style={{ margin: "6px 0 0", color: "#64748b" }}>
+            Customer mobile, bill count, billing value, vendor count and vendor visit details.
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={onClose}
+          style={{
+            border: "1px solid #d1d5db",
+            borderRadius: "10px",
+            background: "#ffffff",
+            color: "#334155",
+            cursor: "pointer",
+            fontWeight: 800,
+            padding: "8px 12px",
+          }}
+        >
+          Close
+        </button>
+      </div>
+
+      <form
+        onSubmit={onSearchSubmit}
+        style={{ display: "flex", gap: "10px", flexWrap: "wrap", marginBottom: "14px" }}
+      >
+        <input
+          value={searchInput}
+          onChange={(event) => onSearchInputChange(event.target.value)}
+          placeholder="Search by mobile number"
+          style={{
+            flex: "1 1 240px",
+            padding: "10px 12px",
+            borderRadius: "10px",
+            border: "1px solid #d1d5db",
+          }}
+        />
+        <button
+          type="submit"
+          style={{
+            padding: "10px 14px",
+            borderRadius: "10px",
+            border: "1px solid #2563eb",
+            background: "#2563eb",
+            color: "#ffffff",
+            cursor: "pointer",
+            fontWeight: 800,
+          }}
+        >
+          Search
+        </button>
+        <button
+          type="button"
+          onClick={onSearchClear}
+          style={{
+            padding: "10px 14px",
+            borderRadius: "10px",
+            border: "1px solid #d1d5db",
+            background: "#ffffff",
+            color: "#334155",
+            cursor: "pointer",
+            fontWeight: 800,
+          }}
+        >
+          Clear
+        </button>
+      </form>
+
+      {error ? (
+        <div
+          role="alert"
+          style={{
+            border: "1px solid #fecaca",
+            borderRadius: "12px",
+            background: "#fef2f2",
+            color: "#991b1b",
+            padding: "12px",
+            marginBottom: "12px",
+            fontWeight: 700,
+          }}
+        >
+          {error}
+        </div>
+      ) : null}
+
+      {loading ? (
+        <div style={{ color: "#64748b" }}>Loading customer drilldown...</div>
+      ) : (
+        <div style={{ overflowX: "auto" }}>
+          <table style={{ width: "100%", borderCollapse: "collapse", minWidth: "980px" }}>
+            <thead>
+              <tr>
+                <th style={tableHeaderStyle}>Customer Mobile</th>
+                <th style={tableHeaderStyle}>Completed Bills</th>
+                <th style={tableHeaderStyle}>Billing Value</th>
+                <th style={tableHeaderStyle}>Vendor Count</th>
+                <th style={tableHeaderStyle}>First Bill</th>
+                <th style={tableHeaderStyle}>Latest Bill</th>
+                <th style={tableHeaderStyle}>Vendor Details</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.length ? (
+                rows.map((row) => (
+                  <tr key={row.customerId}>
+                    <td style={tableCellStyle}>
+                      {row.fullNumber || row.phone || getSafeCustomerLabel(row.customerId, 0)}
+                    </td>
+                    <td style={tableCellStyle}>{formatInteger(row.totalCompletedBills)}</td>
+                    <td style={tableCellStyle}>{formatCurrency(row.billingValue)}</td>
+                    <td style={tableCellStyle}>{formatInteger(row.distinctVendorCount)}</td>
+                    <td style={tableCellStyle}>{formatDateOnly(row.firstBillAt)}</td>
+                    <td style={tableCellStyle}>{formatDateOnly(row.latestBillAt)}</td>
+                    <td style={{ ...tableCellStyle, whiteSpace: "normal", minWidth: "280px" }}>
+                      {(row.vendors || []).map((vendor) => (
+                        <div key={vendor.vendorId} style={{ marginBottom: "8px" }}>
+                          <strong>{vendor.businessName || "Unknown Vendor"}</strong>
+                          <span style={{ color: "#64748b" }}>
+                            {" "}
+                            ({vendor.vendorStatus || "Status unknown"})
+                          </span>
+                          <div style={{ color: "#475569" }}>
+                            {formatInteger(vendor.completedBills)} bill(s),{" "}
+                            {formatCurrency(vendor.billingValue)}
+                          </div>
+                          <div style={{ color: "#64748b", fontSize: "13px" }}>
+                            {formatDateOnly(vendor.firstVisitAt)} to{" "}
+                            {formatDateOnly(vendor.latestVisitAt)}
+                          </div>
+                        </div>
+                      ))}
+                    </td>
+                  </tr>
+                ))
+              ) : (
+                <tr>
+                  <td colSpan="7" style={{ ...tableCellStyle, color: "#64748b" }}>
+                    No customers found for this filter.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          gap: "12px",
+          flexWrap: "wrap",
+          marginTop: "14px",
+          color: "#64748b",
+        }}
+      >
+        <span>
+          Page {formatInteger(page)} of {formatInteger(totalPages)} ·{" "}
+          {formatInteger(pagination.total)} customer(s)
+        </span>
+        <div style={{ display: "flex", gap: "8px" }}>
+          <button
+            type="button"
+            onClick={() => onPageChange(Math.max(1, page - 1))}
+            disabled={page <= 1 || loading}
+            style={{
+              padding: "8px 12px",
+              borderRadius: "10px",
+              border: "1px solid #d1d5db",
+              background: page <= 1 || loading ? "#f1f5f9" : "#ffffff",
+              cursor: page <= 1 || loading ? "not-allowed" : "pointer",
+              fontWeight: 800,
+            }}
+          >
+            Previous
+          </button>
+          <button
+            type="button"
+            onClick={() => onPageChange(Math.min(totalPages, page + 1))}
+            disabled={page >= totalPages || loading}
+            style={{
+              padding: "8px 12px",
+              borderRadius: "10px",
+              border: "1px solid #d1d5db",
+              background: page >= totalPages || loading ? "#f1f5f9" : "#ffffff",
+              cursor: page >= totalPages || loading ? "not-allowed" : "pointer",
+              fontWeight: 800,
+            }}
+          >
+            Next
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 const tableHeaderStyle = {
   textAlign: "left",
   borderBottom: "1px solid #e5e7eb",
@@ -1629,10 +1888,19 @@ export default function AdminAnalyticsPage() {
   const rewardsRef = useRef(null);
   const subscriptionsRef = useRef(null);
   const [selectedPeriod, setSelectedPeriod] = useState("thisMonth");
+  const [selectedVendorStatus, setSelectedVendorStatus] = useState("all");
   const [activeSection, setActiveSection] = useState("overview");
+  const [showBackToTop, setShowBackToTop] = useState(false);
   const [overview, setOverview] = useState(null);
   const [billingAnalytics, setBillingAnalytics] = useState(null);
   const [customerAnalytics, setCustomerAnalytics] = useState(null);
+  const [customerDrilldownType, setCustomerDrilldownType] = useState(null);
+  const [customerDrilldown, setCustomerDrilldown] = useState(null);
+  const [customerDrilldownLoading, setCustomerDrilldownLoading] = useState(false);
+  const [customerDrilldownError, setCustomerDrilldownError] = useState("");
+  const [customerDrilldownPage, setCustomerDrilldownPage] = useState(1);
+  const [customerDrilldownSearch, setCustomerDrilldownSearch] = useState("");
+  const [customerDrilldownSearchInput, setCustomerDrilldownSearchInput] = useState("");
   const [vendorAnalytics, setVendorAnalytics] = useState(null);
   const [rewardsAnalytics, setRewardsAnalytics] = useState(null);
   const [subscriptionAnalytics, setSubscriptionAnalytics] = useState(null);
@@ -1689,10 +1957,13 @@ export default function AdminAnalyticsPage() {
   const selectedPeriodOption =
     periodOptions.find((option) => option.value === selectedPeriod) || periodOptions[1];
 
-  const requestParams = useMemo(
-    () => buildAnalyticsParams(selectedPeriodOption),
-    [selectedPeriodOption]
-  );
+  const requestParams = useMemo(() => {
+    const params = buildAnalyticsParams(selectedPeriodOption);
+    if (selectedVendorStatus !== "all") {
+      params.vendorStatus = selectedVendorStatus;
+    }
+    return params;
+  }, [selectedPeriodOption, selectedVendorStatus]);
 
   const loadOverview = useCallback(async () => {
     setOverviewLoading(true);
@@ -1744,6 +2015,31 @@ export default function AdminAnalyticsPage() {
       setCustomerLoading(false);
     }
   }, [requestParams]);
+
+  const loadCustomerDrilldown = useCallback(async () => {
+    if (!customerDrilldownType) return;
+
+    setCustomerDrilldownLoading(true);
+    setCustomerDrilldownError("");
+    try {
+      const { data } = await API.get("/api/admin/analytics/customers/drilldown", {
+        params: {
+          ...requestParams,
+          type: customerDrilldownType,
+          page: customerDrilldownPage,
+          limit: 50,
+          search: customerDrilldownSearch || undefined,
+        },
+      });
+      setCustomerDrilldown(data || null);
+    } catch (err) {
+      setCustomerDrilldownError(
+        err?.response?.data?.message || "Unable to load customer drilldown."
+      );
+    } finally {
+      setCustomerDrilldownLoading(false);
+    }
+  }, [customerDrilldownPage, customerDrilldownSearch, customerDrilldownType, requestParams]);
 
   const loadVendors = useCallback(async () => {
     setVendorLoading(true);
@@ -1820,6 +2116,26 @@ export default function AdminAnalyticsPage() {
   useEffect(() => {
     loadDashboard();
   }, [loadDashboard]);
+
+  useEffect(() => {
+    if (customerDrilldownType) {
+      loadCustomerDrilldown();
+    }
+  }, [customerDrilldownType, loadCustomerDrilldown]);
+
+  useEffect(() => {
+    setCustomerDrilldownPage(1);
+  }, [selectedPeriod, selectedVendorStatus, customerDrilldownSearch, customerDrilldownType]);
+
+  useEffect(() => {
+    const handleScroll = () => {
+      setShowBackToTop(window.scrollY > 420);
+    };
+
+    handleScroll();
+    window.addEventListener("scroll", handleScroll, { passive: true });
+    return () => window.removeEventListener("scroll", handleScroll);
+  }, []);
 
   useEffect(() => {
     const observer = new IntersectionObserver(
@@ -2284,6 +2600,42 @@ export default function AdminAnalyticsPage() {
     }));
   };
 
+  const handleCustomerDrilldownOpen = (type) => {
+    setCustomerDrilldownType(type);
+    setCustomerDrilldownPage(1);
+    setCustomerDrilldownSearch("");
+    setCustomerDrilldownSearchInput("");
+    setCustomerDrilldown(null);
+    setCustomerDrilldownError("");
+  };
+
+  const handleCustomerDrilldownSearchSubmit = (event) => {
+    event.preventDefault();
+    setCustomerDrilldownPage(1);
+    setCustomerDrilldownSearch(customerDrilldownSearchInput.trim());
+  };
+
+  const handleCustomerDrilldownSearchClear = () => {
+    setCustomerDrilldownSearchInput("");
+    setCustomerDrilldownSearch("");
+    setCustomerDrilldownPage(1);
+  };
+
+  const handleCustomerDrilldownClose = () => {
+    setCustomerDrilldownType(null);
+    setCustomerDrilldown(null);
+    setCustomerDrilldownError("");
+    setCustomerDrilldownPage(1);
+    setCustomerDrilldownSearch("");
+    setCustomerDrilldownSearchInput("");
+  };
+
+  const getCustomerDrilldownTypeForCard = (label) => {
+    if (label === "Repeat Customers") return "repeat";
+    if (label === "Cross-Vendor Customers") return "crossVendor";
+    return null;
+  };
+
   const refreshDisabled =
     overviewLoading ||
     billingLoading ||
@@ -2321,10 +2673,9 @@ export default function AdminAnalyticsPage() {
       <div
         style={{
           display: "flex",
-          justifyContent: "space-between",
+          flexDirection: "column",
           alignItems: "flex-start",
-          gap: "16px",
-          flexWrap: "wrap",
+          gap: "14px",
           marginBottom: "22px",
         }}
       >
@@ -2341,6 +2692,8 @@ export default function AdminAnalyticsPage() {
             alignItems: "center",
             gap: "12px",
             flexWrap: "wrap",
+            justifyContent: "flex-start",
+            maxWidth: "100%",
           }}
         >
           <label style={{ display: "flex", alignItems: "center", gap: "10px" }}>
@@ -2357,6 +2710,27 @@ export default function AdminAnalyticsPage() {
               }}
             >
               {periodOptions.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <label style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+            <span style={{ color: "#475569", fontWeight: 700 }}>Vendor Status</span>
+            <select
+              value={selectedVendorStatus}
+              onChange={(event) => setSelectedVendorStatus(event.target.value)}
+              style={{
+                padding: "10px 12px",
+                borderRadius: "10px",
+                border: "1px solid #d1d5db",
+                background: "#ffffff",
+                minWidth: "180px",
+              }}
+            >
+              {vendorStatusOptions.map((option) => (
                 <option key={option.value} value={option.value}>
                   {option.label}
                 </option>
@@ -2596,21 +2970,42 @@ export default function AdminAnalyticsPage() {
             marginBottom: "12px",
           }}
         >
-          {customerSummaryCards.map((card) => (
-            <KpiCard
-              key={`customer-${card.label}`}
-              label={card.label}
-              value={card.value}
-              loading={customerLoading}
-              compact
-            />
-          ))}
+          {customerSummaryCards.map((card) => {
+            const drilldownType = getCustomerDrilldownTypeForCard(card.label);
+            return (
+              <KpiCard
+                key={`customer-${card.label}`}
+                label={card.label}
+                value={card.value}
+                loading={customerLoading}
+                compact
+                onClick={
+                  drilldownType ? () => handleCustomerDrilldownOpen(drilldownType) : undefined
+                }
+                active={Boolean(drilldownType && customerDrilldownType === drilldownType)}
+              />
+            );
+          })}
         </div>
 
         <div style={{ ...mutedTextStyle, marginBottom: "16px" }}>
           Walk-in bills: {customerLoading ? "..." : formatInteger(customerSummary.walkInBills)}.
           Walk-in bills are excluded from identified customer counts and customer billing value.
         </div>
+
+        <CustomerDrilldownPanel
+          type={customerDrilldownType}
+          data={customerDrilldown}
+          loading={customerDrilldownLoading}
+          error={customerDrilldownError}
+          page={customerDrilldownPage}
+          onPageChange={setCustomerDrilldownPage}
+          searchInput={customerDrilldownSearchInput}
+          onSearchInputChange={setCustomerDrilldownSearchInput}
+          onSearchSubmit={handleCustomerDrilldownSearchSubmit}
+          onSearchClear={handleCustomerDrilldownSearchClear}
+          onClose={handleCustomerDrilldownClose}
+        />
 
         <div style={{ marginBottom: "16px" }}>
           {customerLoading && !customerAnalytics ? (
@@ -3135,6 +3530,29 @@ export default function AdminAnalyticsPage() {
           </div>
         )}
       </section>
+      {showBackToTop ? (
+        <button
+          type="button"
+          onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })}
+          style={{
+            position: "fixed",
+            right: "22px",
+            bottom: "22px",
+            zIndex: 40,
+            border: "1px solid #2563eb",
+            borderRadius: "999px",
+            background: "#2563eb",
+            color: "#ffffff",
+            cursor: "pointer",
+            fontWeight: 900,
+            padding: "12px 16px",
+            boxShadow: "0 12px 28px rgba(37, 99, 235, 0.28)",
+          }}
+          aria-label="Back to top"
+        >
+          Back to top
+        </button>
+      ) : null}
     </main>
   );
 }

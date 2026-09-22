@@ -1,4 +1,5 @@
 const BillingSession = require("../models/BillingSession");
+const Customer = require("../models/Customer");
 const DummyCategory = require("../models/dummyCategory");
 const DummyVendor = require("../models/DummyVendor");
 const LoyaltyLedger = require("../models/LoyaltyLedger");
@@ -8,12 +9,76 @@ const {
   getAdminAnalyticsDateRange,
 } = require("./adminAnalyticsDateRanges");
 
+const ALL_VENDOR_STATUSES = "all";
+const SUPPORTED_VENDOR_STATUSES = [
+  "Accepted",
+  "Pending",
+  "Rejected",
+  "Waiting for Approval",
+  "Registered",
+  "Profile Setup",
+  "Preview",
+  "Published",
+  "Inactive",
+  "Active",
+];
+const SUPPORTED_VENDOR_STATUS_SET = new Set(SUPPORTED_VENDOR_STATUSES);
+
 function getFirstAggregationRow(result) {
   return Array.isArray(result) && result.length ? result[0] : {};
 }
 
 function calculateAverage(total, count) {
   return count > 0 ? total / count : 0;
+}
+
+function normalizeVendorStatusFilter(vendorStatus) {
+  const status = String(vendorStatus || "").trim();
+  if (!status || status.toLowerCase() === ALL_VENDOR_STATUSES) {
+    return ALL_VENDOR_STATUSES;
+  }
+
+  if (!SUPPORTED_VENDOR_STATUS_SET.has(status)) {
+    const error = new Error("Invalid vendor status filter");
+    error.statusCode = 400;
+    error.code = "invalid_vendor_status";
+    throw error;
+  }
+
+  return status;
+}
+
+async function buildVendorStatusContext(vendorStatus) {
+  const normalizedVendorStatus = normalizeVendorStatusFilter(vendorStatus);
+
+  if (normalizedVendorStatus === ALL_VENDOR_STATUSES) {
+    return {
+      vendorStatus: ALL_VENDOR_STATUSES,
+      isFiltered: false,
+      vendorIds: null,
+    };
+  }
+
+  const vendorIds = await DummyVendor.find({ status: normalizedVendorStatus }).distinct("_id");
+
+  return {
+    vendorStatus: normalizedVendorStatus,
+    isFiltered: true,
+    vendorIds,
+  };
+}
+
+function applyVendorStatusToMatch(match, vendorStatusContext) {
+  if (!vendorStatusContext?.isFiltered) return { ...match };
+  return {
+    ...match,
+    vendorId: { $in: vendorStatusContext.vendorIds },
+  };
+}
+
+function buildDummyVendorMatch(vendorStatusContext) {
+  if (!vendorStatusContext?.isFiltered) return {};
+  return { status: vendorStatusContext.vendorStatus };
 }
 
 async function buildCategoryNameMap(categoryIds = []) {
@@ -33,11 +98,11 @@ function resolveCategoryName(categoryId, categoryNameMap) {
   return categoryNameMap.get(String(categoryId)) || "Unknown Category";
 }
 
-function buildCompletedBillMatch(range) {
-  return {
+function buildCompletedBillMatch(range, vendorStatusContext = null) {
+  return applyVendorStatusToMatch({
     status: "COMPLETED",
     ...buildCreatedAtMatch(range),
-  };
+  }, vendorStatusContext);
 }
 
 function getBillingTrendBucket(period) {
@@ -65,10 +130,18 @@ function getAnalyticsTrendBucket(period) {
   return getBillingTrendBucket(period);
 }
 
-async function getOverviewMetrics({ period, month } = {}) {
+async function getOverviewMetrics({ period, month, vendorStatus } = {}) {
   const range = getAdminAnalyticsDateRange(period, new Date(), { month });
+  const vendorStatusContext = await buildVendorStatusContext(vendorStatus);
   const createdAtMatch = buildCreatedAtMatch(range);
-  const completedBillMatch = buildCompletedBillMatch(range);
+  const completedBillMatch = buildCompletedBillMatch(range, vendorStatusContext);
+  const ledgerMatch = applyVendorStatusToMatch(
+    {
+      type: { $in: ["EARN", "REDEEM"] },
+      ...createdAtMatch,
+    },
+    vendorStatusContext
+  );
 
   const [
     billingRows,
@@ -112,12 +185,7 @@ async function getOverviewMetrics({ period, month } = {}) {
       { $count: "activeBillingVendors" },
     ]),
     LoyaltyLedger.aggregate([
-      {
-        $match: {
-          type: { $in: ["EARN", "REDEEM"] },
-          ...createdAtMatch,
-        },
-      },
+      { $match: ledgerMatch },
       {
         $group: {
           _id: null,
@@ -146,6 +214,7 @@ async function getOverviewMetrics({ period, month } = {}) {
 
   return {
     period: range.period,
+    vendorStatus: vendorStatusContext.vendorStatus,
     timezone: range.timezone,
     range: {
       from: range.from ? range.from.toISOString() : null,
@@ -170,9 +239,10 @@ async function getOverviewMetrics({ period, month } = {}) {
   };
 }
 
-async function getBillingAnalytics({ period, month } = {}) {
+async function getBillingAnalytics({ period, month, vendorStatus } = {}) {
   const range = getAdminAnalyticsDateRange(period, new Date(), { month });
-  const completedBillMatch = buildCompletedBillMatch(range);
+  const vendorStatusContext = await buildVendorStatusContext(vendorStatus);
+  const completedBillMatch = buildCompletedBillMatch(range, vendorStatusContext);
   const trendBucket = getBillingTrendBucket(period);
 
   const [summaryRows, trendRows, vendorPerformanceRows] = await Promise.all([
@@ -315,6 +385,7 @@ async function getBillingAnalytics({ period, month } = {}) {
 
   return {
     period: range.period,
+    vendorStatus: vendorStatusContext.vendorStatus,
     timezone: range.timezone,
     range: {
       from: range.from ? range.from.toISOString() : null,
@@ -337,13 +408,17 @@ async function getBillingAnalytics({ period, month } = {}) {
   };
 }
 
-async function getRewardsAnalytics({ period, month } = {}) {
+async function getRewardsAnalytics({ period, month, vendorStatus } = {}) {
   const range = getAdminAnalyticsDateRange(period, new Date(), { month });
+  const vendorStatusContext = await buildVendorStatusContext(vendorStatus);
   const createdAtMatch = buildCreatedAtMatch(range);
-  const ledgerMatch = {
-    type: { $in: ["EARN", "REDEEM"] },
-    ...createdAtMatch,
-  };
+  const ledgerMatch = applyVendorStatusToMatch(
+    {
+      type: { $in: ["EARN", "REDEEM"] },
+      ...createdAtMatch,
+    },
+    vendorStatusContext
+  );
   const trendBucket = getAnalyticsTrendBucket(period);
   const now = new Date();
 
@@ -649,6 +724,7 @@ async function getRewardsAnalytics({ period, month } = {}) {
 
   return {
     period: range.period,
+    vendorStatus: vendorStatusContext.vendorStatus,
     timezone: range.timezone,
     range: {
       from: range.from ? range.from.toISOString() : null,
@@ -715,9 +791,10 @@ function buildDateInRangeExpression(fieldPath, range) {
   return { $and: conditions };
 }
 
-async function getCustomerAnalytics({ period, month } = {}) {
+async function getCustomerAnalytics({ period, month, vendorStatus } = {}) {
   const range = getAdminAnalyticsDateRange(period, new Date(), { month });
-  const completedBillMatch = buildCompletedBillMatch(range);
+  const vendorStatusContext = await buildVendorStatusContext(vendorStatus);
+  const completedBillMatch = buildCompletedBillMatch(range, vendorStatusContext);
   const identifiedBillMatch = {
     ...completedBillMatch,
     customerId: { $ne: null },
@@ -760,14 +837,19 @@ async function getCustomerAnalytics({ period, month } = {}) {
       ...completedBillMatch,
       customerId: null,
     }),
-    BillingSession.aggregate([
-      {
-        $match: {
-          status: "COMPLETED",
-          customerId: { $ne: null },
-          createdAt: { $lte: range.to },
-        },
-      },
+	    BillingSession.aggregate([
+	      {
+	        $match: {
+	          ...applyVendorStatusToMatch(
+	            {
+	              status: "COMPLETED",
+	              customerId: { $ne: null },
+	              createdAt: { $lte: range.to },
+	            },
+	            vendorStatusContext
+	          ),
+	        },
+	      },
       {
         $group: {
           _id: "$customerId",
@@ -844,14 +926,19 @@ async function getCustomerAnalytics({ period, month } = {}) {
         },
       },
     ]),
-    BillingSession.aggregate([
-      {
-        $match: {
-          status: "COMPLETED",
-          customerId: { $ne: null },
-          createdAt: { $lte: range.to },
-        },
-      },
+	    BillingSession.aggregate([
+	      {
+	        $match: {
+	          ...applyVendorStatusToMatch(
+	            {
+	              status: "COMPLETED",
+	              customerId: { $ne: null },
+	              createdAt: { $lte: range.to },
+	            },
+	            vendorStatusContext
+	          ),
+	        },
+	      },
       {
         $group: {
           _id: "$customerId",
@@ -1122,6 +1209,7 @@ async function getCustomerAnalytics({ period, month } = {}) {
 
   return {
     period: range.period,
+    vendorStatus: vendorStatusContext.vendorStatus,
     timezone: range.timezone,
     range: {
       from: range.from ? range.from.toISOString() : null,
@@ -1257,14 +1345,17 @@ function calculateSubscriptionFlags(subscription, now) {
   };
 }
 
-async function getSubscriptionAnalytics({ period, month } = {}) {
+async function getSubscriptionAnalytics({ period, month, vendorStatus } = {}) {
   const range = getAdminAnalyticsDateRange(period, new Date(), { month });
+  const vendorStatusContext = await buildVendorStatusContext(vendorStatus);
+  const dummyVendorMatch = buildDummyVendorMatch(vendorStatusContext);
   const now = range.to;
   const next7Cutoff = new Date(now.getTime() + 7 * DAY_MS);
   const next30Cutoff = new Date(now.getTime() + 30 * DAY_MS);
 
   const [platformVendors, subscriptionRows] = await Promise.all([
     DummyVendor.aggregate([
+      ...(Object.keys(dummyVendorMatch).length ? [{ $match: dummyVendorMatch }] : []),
       {
         $project: {
           _id: 0,
@@ -1300,6 +1391,9 @@ async function getSubscriptionAnalytics({ period, month } = {}) {
         },
       },
       { $unwind: { path: "$vendor", preserveNullAndEmptyArrays: true } },
+      ...(vendorStatusContext.isFiltered
+        ? [{ $match: { "vendor.status": vendorStatusContext.vendorStatus } }]
+        : []),
       {
         $project: {
           subscriptionId: { $toString: "$_id" },
@@ -1554,6 +1648,7 @@ async function getSubscriptionAnalytics({ period, month } = {}) {
 
   return {
     period: range.period,
+    vendorStatus: vendorStatusContext.vendorStatus,
     timezone: range.timezone,
     range: {
       from: range.from ? range.from.toISOString() : null,
@@ -1665,10 +1760,19 @@ async function getSubscriptionAnalytics({ period, month } = {}) {
   };
 }
 
-async function getVendorAnalytics({ period, month } = {}) {
+async function getVendorAnalytics({ period, month, vendorStatus } = {}) {
   const range = getAdminAnalyticsDateRange(period, new Date(), { month });
-  const completedBillMatch = buildCompletedBillMatch(range);
+  const vendorStatusContext = await buildVendorStatusContext(vendorStatus);
+  const completedBillMatch = buildCompletedBillMatch(range, vendorStatusContext);
   const createdAtMatch = buildCreatedAtMatch(range);
+  const ledgerMatch = applyVendorStatusToMatch(
+    {
+      type: { $in: ["EARN", "REDEEM"] },
+      ...createdAtMatch,
+    },
+    vendorStatusContext
+  );
+  const dummyVendorMatch = buildDummyVendorMatch(vendorStatusContext);
   const trendBucket = getAnalyticsTrendBucket(period);
   const now = new Date();
 
@@ -1687,6 +1791,7 @@ async function getVendorAnalytics({ period, month } = {}) {
     subscriptionAnalyticsRows,
   ] = await Promise.all([
     DummyVendor.aggregate([
+      ...(Object.keys(dummyVendorMatch).length ? [{ $match: dummyVendorMatch }] : []),
       {
         $project: {
           _id: 0,
@@ -1763,7 +1868,14 @@ async function getVendorAnalytics({ period, month } = {}) {
       },
     ]),
     BillingSession.aggregate([
-      { $match: { status: "COMPLETED", vendorId: { $ne: null } } },
+      {
+        $match: {
+          ...applyVendorStatusToMatch(
+            { status: "COMPLETED", vendorId: { $ne: null } },
+            vendorStatusContext
+          ),
+        },
+      },
       {
         $group: {
           _id: "$vendorId",
@@ -1787,12 +1899,7 @@ async function getVendorAnalytics({ period, month } = {}) {
       },
     ]),
     LoyaltyLedger.aggregate([
-      {
-        $match: {
-          type: { $in: ["EARN", "REDEEM"] },
-          ...createdAtMatch,
-        },
-      },
+      { $match: ledgerMatch },
       {
         $group: {
           _id: "$vendorId",
@@ -1828,12 +1935,7 @@ async function getVendorAnalytics({ period, month } = {}) {
       },
     ]),
     LoyaltyLedger.aggregate([
-      {
-        $match: {
-          type: { $in: ["EARN", "REDEEM"] },
-          ...createdAtMatch,
-        },
-      },
+      { $match: ledgerMatch },
       {
         $group: {
           _id: null,
@@ -1885,7 +1987,14 @@ async function getVendorAnalytics({ period, month } = {}) {
       },
     ]),
     BillingSession.aggregate([
-      { $match: { status: "COMPLETED", vendorId: { $ne: null } } },
+      {
+        $match: {
+          ...applyVendorStatusToMatch(
+            { status: "COMPLETED", vendorId: { $ne: null } },
+            vendorStatusContext
+          ),
+        },
+      },
       {
         $group: {
           _id: "$vendorId",
@@ -1936,12 +2045,7 @@ async function getVendorAnalytics({ period, month } = {}) {
       },
     ]),
     LoyaltyLedger.aggregate([
-      {
-        $match: {
-          type: { $in: ["EARN", "REDEEM"] },
-          ...createdAtMatch,
-        },
-      },
+      { $match: ledgerMatch },
       {
         $facet: {
           rewardRowsMissingVendorId: [
@@ -1966,6 +2070,7 @@ async function getVendorAnalytics({ period, month } = {}) {
       },
     ]),
     DummyVendor.aggregate([
+      ...(Object.keys(dummyVendorMatch).length ? [{ $match: dummyVendorMatch }] : []),
       {
         $group: {
           _id: {
@@ -2001,6 +2106,9 @@ async function getVendorAnalytics({ period, month } = {}) {
         },
       },
       { $unwind: { path: "$vendor", preserveNullAndEmptyArrays: true } },
+      ...(vendorStatusContext.isFiltered
+        ? [{ $match: { "vendor.status": vendorStatusContext.vendorStatus } }]
+        : []),
       {
         $addFields: {
           isTrialPlan: {
@@ -2368,6 +2476,7 @@ async function getVendorAnalytics({ period, month } = {}) {
 
   return {
     period: range.period,
+    vendorStatus: vendorStatusContext.vendorStatus,
     timezone: range.timezone,
     range: {
       from: range.from ? range.from.toISOString() : null,
@@ -2458,11 +2567,257 @@ async function getVendorAnalytics({ period, month } = {}) {
   };
 }
 
+function normalizeDrilldownPagination({ page, limit } = {}) {
+  const parsedPage = Math.max(Number.parseInt(page, 10) || 1, 1);
+  const parsedLimit = Math.min(Math.max(Number.parseInt(limit, 10) || 50, 1), 100);
+
+  return {
+    page: parsedPage,
+    limit: parsedLimit,
+    skip: (parsedPage - 1) * parsedLimit,
+  };
+}
+
+function normalizeCustomerDrilldownType(type) {
+  const normalizedType = String(type || "").trim();
+  if (normalizedType === "repeat" || normalizedType === "crossVendor") {
+    return normalizedType;
+  }
+
+  const error = new Error("Invalid customer drilldown type");
+  error.statusCode = 400;
+  error.code = "invalid_customer_drilldown_type";
+  throw error;
+}
+
+function escapeRegex(value) {
+  return String(value || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+async function buildCustomerSearchMatch(search) {
+  const normalizedSearch = String(search || "").trim();
+  if (!normalizedSearch) return null;
+
+  const safeRegex = new RegExp(escapeRegex(normalizedSearch), "i");
+  const customerIds = await Customer.find(
+    {
+      $or: [
+        { fullNumber: safeRegex },
+        { phone: safeRegex },
+        { countryCode: safeRegex },
+      ],
+    },
+    { _id: 1 }
+  )
+    .limit(1000)
+    .lean();
+
+  return {
+    customerId: { $in: customerIds.map((customer) => customer._id) },
+  };
+}
+
+async function getCustomerDrilldownAnalytics({
+  type,
+  period,
+  month,
+  vendorStatus,
+  page,
+  limit,
+  search,
+} = {}) {
+  const drilldownType = normalizeCustomerDrilldownType(type);
+  const range = getAdminAnalyticsDateRange(period, new Date(), { month });
+  const vendorStatusContext = await buildVendorStatusContext(vendorStatus);
+  const { page: normalizedPage, limit: normalizedLimit, skip } = normalizeDrilldownPagination({
+    page,
+    limit,
+  });
+  const searchMatch = await buildCustomerSearchMatch(search);
+
+  const baseMatch = {
+    ...buildCompletedBillMatch(range, vendorStatusContext),
+    customerId: { $ne: null },
+    ...(searchMatch || {}),
+  };
+  const qualifyingMatch =
+    drilldownType === "repeat"
+      ? { totalCompletedBills: { $gte: 2 } }
+      : { distinctVendorCount: { $gt: 1 } };
+
+  const rows = await BillingSession.aggregate([
+    { $match: baseMatch },
+    {
+      $group: {
+        _id: {
+          customerId: "$customerId",
+          vendorId: "$vendorId",
+        },
+        completedBills: { $sum: 1 },
+        billingValue: { $sum: { $ifNull: ["$totalAmount", 0] } },
+        firstVisitAt: { $min: "$createdAt" },
+        latestVisitAt: { $max: "$createdAt" },
+      },
+    },
+    {
+      $group: {
+        _id: "$_id.customerId",
+        totalCompletedBills: { $sum: "$completedBills" },
+        billingValue: { $sum: "$billingValue" },
+        distinctVendorIds: { $addToSet: "$_id.vendorId" },
+        latestBillAt: { $max: "$latestVisitAt" },
+        firstBillAt: { $min: "$firstVisitAt" },
+        vendors: {
+          $push: {
+            vendorId: "$_id.vendorId",
+            completedBills: "$completedBills",
+            billingValue: "$billingValue",
+            firstVisitAt: "$firstVisitAt",
+            latestVisitAt: "$latestVisitAt",
+          },
+        },
+      },
+    },
+    {
+      $project: {
+        totalCompletedBills: 1,
+        billingValue: 1,
+        firstBillAt: 1,
+        latestBillAt: 1,
+        distinctVendorIds: { $setDifference: ["$distinctVendorIds", [null]] },
+        vendors: 1,
+      },
+    },
+    {
+      $addFields: {
+        distinctVendorCount: { $size: "$distinctVendorIds" },
+      },
+    },
+    { $match: qualifyingMatch },
+    {
+      $lookup: {
+        from: "customers",
+        localField: "_id",
+        foreignField: "_id",
+        as: "customer",
+      },
+    },
+    { $unwind: { path: "$customer", preserveNullAndEmptyArrays: true } },
+    {
+      $lookup: {
+        from: "dummyvendors",
+        localField: "distinctVendorIds",
+        foreignField: "_id",
+        as: "vendorDocs",
+      },
+    },
+    { $sort: { billingValue: -1, totalCompletedBills: -1, latestBillAt: -1, _id: 1 } },
+    {
+      $facet: {
+        metadata: [{ $count: "total" }],
+        data: [
+          { $skip: skip },
+          { $limit: normalizedLimit },
+          {
+            $project: {
+              _id: 0,
+              customerId: { $toString: "$_id" },
+              fullNumber: "$customer.fullNumber",
+              phone: "$customer.phone",
+              countryCode: "$customer.countryCode",
+              totalCompletedBills: 1,
+              distinctVendorCount: 1,
+              billingValue: 1,
+              firstBillAt: 1,
+              latestBillAt: 1,
+              vendors: {
+                $map: {
+                  input: "$vendors",
+                  as: "vendor",
+                  in: {
+                    vendorId: {
+                      $cond: [
+                        { $ne: ["$$vendor.vendorId", null] },
+                        { $toString: "$$vendor.vendorId" },
+                        null,
+                      ],
+                    },
+                    completedBills: "$$vendor.completedBills",
+                    billingValue: "$$vendor.billingValue",
+                    firstVisitAt: "$$vendor.firstVisitAt",
+                    latestVisitAt: "$$vendor.latestVisitAt",
+                    businessName: {
+                      $let: {
+                        vars: {
+                          matchedVendor: {
+                            $first: {
+                              $filter: {
+                                input: "$vendorDocs",
+                                as: "vendorDoc",
+                                cond: { $eq: ["$$vendorDoc._id", "$$vendor.vendorId"] },
+                              },
+                            },
+                          },
+                        },
+                        in: { $ifNull: ["$$matchedVendor.businessName", "Unknown Vendor"] },
+                      },
+                    },
+                    vendorStatus: {
+                      $let: {
+                        vars: {
+                          matchedVendor: {
+                            $first: {
+                              $filter: {
+                                input: "$vendorDocs",
+                                as: "vendorDoc",
+                                cond: { $eq: ["$$vendorDoc._id", "$$vendor.vendorId"] },
+                              },
+                            },
+                          },
+                        },
+                        in: { $ifNull: ["$$matchedVendor.status", "Unknown"] },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        ],
+      },
+    },
+  ]);
+
+  const result = getFirstAggregationRow(rows);
+  const total = result?.metadata?.[0]?.total || 0;
+
+  return {
+    type: drilldownType,
+    period: range.period,
+    vendorStatus: vendorStatusContext.vendorStatus,
+    range: {
+      from: range.from ? range.from.toISOString() : null,
+      to: range.to.toISOString(),
+    },
+    pagination: {
+      page: normalizedPage,
+      limit: normalizedLimit,
+      total,
+      totalPages: Math.max(Math.ceil(total / normalizedLimit), 1),
+    },
+    search: String(search || "").trim(),
+    rows: result?.data || [],
+  };
+}
+
 module.exports = {
   getBillingAnalytics,
+  getCustomerDrilldownAnalytics,
   getCustomerAnalytics,
   getOverviewMetrics,
   getRewardsAnalytics,
   getSubscriptionAnalytics,
   getVendorAnalytics,
+  normalizeVendorStatusFilter,
+  SUPPORTED_VENDOR_STATUSES,
 };

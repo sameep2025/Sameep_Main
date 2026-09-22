@@ -67,6 +67,23 @@ function getBillFinancials(bill) {
   };
 }
 
+function getPaymentModeLabel(bill) {
+  if (bill?.paymentModeLabel) return bill.paymentModeLabel;
+  if (bill?.paymentMode === "ONLINE") return "Online";
+  if (bill?.paymentMode === "CASH") return "Cash";
+  return "Not Recorded";
+}
+
+function addToPaymentBreakdown(acc, bill, amount) {
+  if (bill?.paymentMode === "ONLINE") {
+    acc.onlineCollected += amount;
+  } else if (bill?.paymentMode === "CASH") {
+    acc.cashCollected += amount;
+  } else {
+    acc.notRecordedCollected += amount;
+  }
+}
+
 function getTodayRange() {
   const start = new Date();
   start.setHours(0, 0, 0, 0);
@@ -213,6 +230,7 @@ function TodayRevenue({
         acc.discountsGiven += financials.discountAmount || 0;
         acc.rewardsRedeemed += financials.rewardsRedeemedValue;
         acc.netCollected += financials.netCollected;
+        addToPaymentBreakdown(acc, bill, financials.netCollected);
         return acc;
       },
       {
@@ -221,6 +239,9 @@ function TodayRevenue({
         discountsGiven: 0,
         rewardsRedeemed: 0,
         netCollected: 0,
+        onlineCollected: 0,
+        cashCollected: 0,
+        notRecordedCollected: 0,
       }
     );
   }, [bills]);
@@ -305,6 +326,22 @@ function TodayRevenue({
               ))}
             </div>
 
+            <div className="today-revenue-payment-breakdown">
+              <div className="today-revenue-payment-title">Payment Breakdown</div>
+              <div className="today-revenue-payment-row">
+                <span>Online</span>
+                <strong>{currencyFmt.format(summary.onlineCollected || 0)}</strong>
+              </div>
+              <div className="today-revenue-payment-row">
+                <span>Cash</span>
+                <strong>{currencyFmt.format(summary.cashCollected || 0)}</strong>
+              </div>
+              <div className="today-revenue-payment-row">
+                <span>Not Recorded</span>
+                <strong>{currencyFmt.format(summary.notRecordedCollected || 0)}</strong>
+              </div>
+            </div>
+
             <div className="today-revenue-section-title">Bill List</div>
             {bills.length === 0 ? (
               <div className="today-revenue-empty">
@@ -341,6 +378,9 @@ function TodayRevenue({
                           </span>
                           <span className="today-revenue-bill-chip">
                             Collected {currencyFmt.format(financials.netCollected)}
+                          </span>
+                          <span className="today-revenue-bill-chip">
+                            Payment {getPaymentModeLabel(bill)}
                           </span>
                           <span className="today-revenue-bill-chip">Earned {Number(bill.earned || 0)}</span>
                           <span className="today-revenue-bill-chip">

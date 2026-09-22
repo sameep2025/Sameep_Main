@@ -81,6 +81,12 @@ const BillingSessionSchema = new mongoose.Schema(
       default: 0,
     },
 
+    paymentMode: {
+      type: String,
+      enum: ["ONLINE", "CASH"],
+      default: undefined,
+    },
+
     otpVerified: {
       type: Boolean,
       default: false,

@@ -44,7 +44,7 @@ const TransactionSchema = new mongoose.Schema(
 
     paymentMode: {
       type: String,
-      enum: ["CASH", "UPI", "CARD"],
+      enum: ["CASH", "UPI", "CARD", "ONLINE"],
     },
 
     paymentStatus: {

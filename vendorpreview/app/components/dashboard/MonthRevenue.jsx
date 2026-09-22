@@ -66,6 +66,23 @@ function getBillFinancials(bill) {
   };
 }
 
+function getPaymentModeLabel(bill) {
+  if (bill?.paymentModeLabel) return bill.paymentModeLabel;
+  if (bill?.paymentMode === "ONLINE") return "Online";
+  if (bill?.paymentMode === "CASH") return "Cash";
+  return "Not Recorded";
+}
+
+function addToPaymentBreakdown(acc, bill, amount) {
+  if (bill?.paymentMode === "ONLINE") {
+    acc.onlineCollected += amount;
+  } else if (bill?.paymentMode === "CASH") {
+    acc.cashCollected += amount;
+  } else {
+    acc.notRecordedCollected += amount;
+  }
+}
+
 function getMonthRange() {
   const start = new Date();
   start.setDate(1);
@@ -204,6 +221,7 @@ export default function MonthRevenue({
         acc.discountsGiven += financials.discountAmount || 0;
         acc.rewardsRedeemed += financials.rewardsRedeemedValue;
         acc.netCollected += financials.netCollected;
+        addToPaymentBreakdown(acc, bill, financials.netCollected);
         acc.totalDistributed += Number(bill?.earned || 0);
         return acc;
       },
@@ -213,6 +231,9 @@ export default function MonthRevenue({
         discountsGiven: 0,
         rewardsRedeemed: 0,
         netCollected: 0,
+        onlineCollected: 0,
+        cashCollected: 0,
+        notRecordedCollected: 0,
         totalDistributed: 0,
       }
     );
@@ -302,6 +323,22 @@ export default function MonthRevenue({
               </div>
             </div>
 
+            <div className="revenue-panel-payment-breakdown">
+              <div className="revenue-panel-payment-title">Payment Breakdown</div>
+              <div className="revenue-panel-payment-row">
+                <span>Online</span>
+                <strong>{currencyFmt.format(summary.onlineCollected || 0)}</strong>
+              </div>
+              <div className="revenue-panel-payment-row">
+                <span>Cash</span>
+                <strong>{currencyFmt.format(summary.cashCollected || 0)}</strong>
+              </div>
+              <div className="revenue-panel-payment-row">
+                <span>Not Recorded</span>
+                <strong>{currencyFmt.format(summary.notRecordedCollected || 0)}</strong>
+              </div>
+            </div>
+
             <div className="revenue-panel-section">
               <div className="revenue-panel-section-title">Recent Bills</div>
               {bills.length === 0 ? (
@@ -339,6 +376,9 @@ export default function MonthRevenue({
                           </span>
                           <span className="revenue-panel-chip">
                             Collected {currencyFmt.format(financials.netCollected)}
+                          </span>
+                          <span className="revenue-panel-chip">
+                            Payment {getPaymentModeLabel(bill)}
                           </span>
                           <span className="revenue-panel-chip">Earned {Number(bill.earned || 0)}</span>
                           <span className="revenue-panel-chip">

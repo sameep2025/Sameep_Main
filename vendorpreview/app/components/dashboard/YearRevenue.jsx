@@ -66,6 +66,23 @@ function getBillFinancials(bill) {
   };
 }
 
+function getPaymentModeLabel(bill) {
+  if (bill?.paymentModeLabel) return bill.paymentModeLabel;
+  if (bill?.paymentMode === "ONLINE") return "Online";
+  if (bill?.paymentMode === "CASH") return "Cash";
+  return "Not Recorded";
+}
+
+function addToPaymentBreakdown(acc, bill, amount) {
+  if (bill?.paymentMode === "ONLINE") {
+    acc.onlineCollected += amount;
+  } else if (bill?.paymentMode === "CASH") {
+    acc.cashCollected += amount;
+  } else {
+    acc.notRecordedCollected += amount;
+  }
+}
+
 export default function YearRevenue({
   vendorId,
   hrEnabled = true,
@@ -318,6 +335,18 @@ export default function YearRevenue({
       (acc, month) => acc + getNumber(month?.netCollected),
       0
     );
+    const onlineCollected = months.reduce(
+      (acc, month) => acc + getNumber(month?.onlineCollected),
+      0
+    );
+    const cashCollected = months.reduce(
+      (acc, month) => acc + getNumber(month?.cashCollected),
+      0
+    );
+    const notRecordedCollected = months.reduce(
+      (acc, month) => acc + getNumber(month?.notRecordedCollected),
+      0
+    );
     const totalOrders = months.reduce((acc, month) => acc + Number(month?.orders || 0), 0);
     const bestMonth = months.reduce((best, month) => {
       if (
@@ -335,6 +364,9 @@ export default function YearRevenue({
       discountsGiven,
       rewardsRedeemed,
       netCollected,
+      onlineCollected,
+      cashCollected,
+      notRecordedCollected,
       totalOrders,
       activeMonths: months.filter((month) =>
         getNumber(month?.billValue ?? month?.netBillValue ?? month?.revenue) > 0
@@ -344,6 +376,32 @@ export default function YearRevenue({
   }, [months, summary]);
 
   const selectedMonthLabel = selectedMonth?.label || selectedMonth?.month || "Selected Month";
+  const selectedMonthSummary = useMemo(() => {
+    return selectedBills.reduce(
+      (acc, bill) => {
+        const financials = getBillFinancials(bill);
+        acc.billValue += financials.billValue;
+        acc.discountsGiven += financials.discountAmount || 0;
+        acc.rewardsRedeemed += financials.rewardsRedeemedValue;
+        acc.netCollected += financials.netCollected;
+        acc.totalBills += 1;
+        acc.pointsDistributed += Number(bill?.earned || 0);
+        addToPaymentBreakdown(acc, bill, financials.netCollected);
+        return acc;
+      },
+      {
+        billValue: 0,
+        discountsGiven: 0,
+        rewardsRedeemed: 0,
+        netCollected: 0,
+        totalBills: 0,
+        pointsDistributed: 0,
+        onlineCollected: 0,
+        cashCollected: 0,
+        notRecordedCollected: 0,
+      }
+    );
+  }, [selectedBills]);
 
   const toggleBill = (billKey) => {
     setExpandedBills((prev) => ({
@@ -417,6 +475,22 @@ export default function YearRevenue({
               </div>
             </div>
 
+            <div className="revenue-panel-payment-breakdown">
+              <div className="revenue-panel-payment-title">Payment Breakdown</div>
+              <div className="revenue-panel-payment-row">
+                <span>Online</span>
+                <strong>{currencyFmt.format(totals.onlineCollected || 0)}</strong>
+              </div>
+              <div className="revenue-panel-payment-row">
+                <span>Cash</span>
+                <strong>{currencyFmt.format(totals.cashCollected || 0)}</strong>
+              </div>
+              <div className="revenue-panel-payment-row">
+                <span>Not Recorded</span>
+                <strong>{currencyFmt.format(totals.notRecordedCollected || 0)}</strong>
+              </div>
+            </div>
+
             <div className="revenue-panel-section">
               <div className="revenue-panel-section-title">
                 Monthly Breakdown
@@ -456,6 +530,62 @@ export default function YearRevenue({
                   ))}
                 </div>
               )}
+            </div>
+
+            <div className="revenue-panel-section">
+              <div className="revenue-panel-section-title">{selectedMonthLabel} Summary</div>
+              <div className="revenue-panel-stat-grid">
+                <div className="revenue-panel-stat-card">
+                  <div className="revenue-panel-stat-label">Bill Value</div>
+                  <div className="revenue-panel-stat-value">
+                    {currencyFmt.format(selectedMonthSummary.billValue || 0)}
+                  </div>
+                </div>
+                <div className="revenue-panel-stat-card">
+                  <div className="revenue-panel-stat-label">Discounts Given</div>
+                  <div className="revenue-panel-stat-value">
+                    {currencyFmt.format(selectedMonthSummary.discountsGiven || 0)}
+                  </div>
+                </div>
+                <div className="revenue-panel-stat-card">
+                  <div className="revenue-panel-stat-label">Rewards Redeemed</div>
+                  <div className="revenue-panel-stat-value">
+                    {currencyFmt.format(selectedMonthSummary.rewardsRedeemed || 0)}
+                  </div>
+                </div>
+                <div className="revenue-panel-stat-card">
+                  <div className="revenue-panel-stat-label">Net Collected</div>
+                  <div className="revenue-panel-stat-value">
+                    {currencyFmt.format(selectedMonthSummary.netCollected || 0)}
+                  </div>
+                </div>
+                <div className="revenue-panel-stat-card">
+                  <div className="revenue-panel-stat-label">Total Bills</div>
+                  <div className="revenue-panel-stat-value">{selectedMonthSummary.totalBills}</div>
+                </div>
+                <div className="revenue-panel-stat-card">
+                  <div className="revenue-panel-stat-label">Points Distributed</div>
+                  <div className="revenue-panel-stat-value">
+                    {selectedMonthSummary.pointsDistributed}
+                  </div>
+                </div>
+              </div>
+
+              <div className="revenue-panel-payment-breakdown">
+                <div className="revenue-panel-payment-title">Payment Breakdown</div>
+                <div className="revenue-panel-payment-row">
+                  <span>Online</span>
+                  <strong>{currencyFmt.format(selectedMonthSummary.onlineCollected || 0)}</strong>
+                </div>
+                <div className="revenue-panel-payment-row">
+                  <span>Cash</span>
+                  <strong>{currencyFmt.format(selectedMonthSummary.cashCollected || 0)}</strong>
+                </div>
+                <div className="revenue-panel-payment-row">
+                  <span>Not Recorded</span>
+                  <strong>{currencyFmt.format(selectedMonthSummary.notRecordedCollected || 0)}</strong>
+                </div>
+              </div>
             </div>
 
             <div className="revenue-panel-section">
@@ -502,6 +632,9 @@ export default function YearRevenue({
                             </span>
                             <span className="revenue-panel-chip">
                               Collected {currencyFmt.format(financials.netCollected)}
+                            </span>
+                            <span className="revenue-panel-chip">
+                              Payment {getPaymentModeLabel(bill)}
                             </span>
                             <span className="revenue-panel-chip">Earned {Number(bill.earned || 0)}</span>
                             <span className="revenue-panel-chip">{billItems.length} item(s)</span>

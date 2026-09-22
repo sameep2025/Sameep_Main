@@ -1111,6 +1111,7 @@ function ExploreContent({ onReady, onOpenServices }) {
   const [discountMode, setDiscountMode] = useState(null); // "amount" | "percent"
   const [appliedDiscount, setAppliedDiscount] = useState(0);
   const [showDiscountPopup, setShowDiscountPopup] = useState(false);
+  const [paymentMode, setPaymentMode] = useState("ONLINE");
 
 
   const [resources, setResources] = useState([]);
@@ -1513,6 +1514,45 @@ function ExploreContent({ onReady, onOpenServices }) {
   const hrSelectorLabel = hrSingularLabel;
   const hrSelectorPlaceholder = `Select ${hrSingularLabel}`;
   const hrPerformanceTitle = `${hrSingularLabel} Performance`;
+  const renderPaymentModeSelector = () => (
+    <div style={{ marginTop: 14 }}>
+      <div style={{ color: "#e6c37a", fontSize: 14, marginBottom: 8 }}>
+        Payment Mode
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+        {[
+          { value: "ONLINE", label: "Online" },
+          { value: "CASH", label: "Cash" },
+        ].map((option) => {
+          const selected = paymentMode === option.value;
+
+          return (
+            <button
+              key={option.value}
+              type="button"
+              onClick={() => setPaymentMode(option.value)}
+              aria-pressed={selected}
+              style={{
+                border: selected
+                  ? "1px solid #e6c37a"
+                  : "1px solid rgba(245, 217, 122, 0.25)",
+                background: selected
+                  ? "linear-gradient(135deg, rgba(245, 217, 122, 0.22), rgba(245, 217, 122, 0.08))"
+                  : "#111",
+                color: selected ? "#F5D97A" : "rgba(255,255,255,0.86)",
+                borderRadius: 10,
+                padding: "10px 12px",
+                fontWeight: 700,
+                cursor: "pointer",
+              }}
+            >
+              {option.label}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
   useEffect(() => {
     if (!hrEnabled && viewMode === "stylists-dashboard") {
       setViewMode("new-dashboard");
@@ -1948,7 +1988,7 @@ function ExploreContent({ onReady, onOpenServices }) {
         },
         body: JSON.stringify({
           billingId,
-          paymentMode: "CASH",
+          paymentMode,
         }),
       });
 
@@ -2659,6 +2699,7 @@ function ExploreContent({ onReady, onOpenServices }) {
     setDiscountPercent(0);
     setAppliedDiscount(0);
     setDiscountMode(null);
+    setPaymentMode("ONLINE");
   };
 
   const resetBillingState = () => {
@@ -2676,6 +2717,7 @@ function ExploreContent({ onReady, onOpenServices }) {
     setDiscountPercent(0);
     setAppliedDiscount(0);
     setDiscountMode(null);
+    setPaymentMode("ONLINE");
 
     // optional safety
     localStorage.removeItem("ynot_cart");
@@ -2836,7 +2878,7 @@ function ExploreContent({ onReady, onOpenServices }) {
         },
         body: JSON.stringify({
           billingId: newBillingId,
-          paymentMode: "CASH",
+          paymentMode,
         }),
       });
 
@@ -4539,6 +4581,7 @@ function ExploreContent({ onReady, onOpenServices }) {
                                     )}
                                   </>
                                 )}
+                                {renderPaymentModeSelector()}
                                 <button
                                   onClick={() => {
                                     const vendorToken =
@@ -5032,9 +5075,10 @@ function ExploreContent({ onReady, onOpenServices }) {
                                         >
                                           {verifyingOtp ? "Verifying..." : "Verify OTP"}
                                         </button>
-                                      )}
-                                    </>
-                                  )}
+                                    )}
+                                  </>
+                                )}
+                                  {renderPaymentModeSelector()}
                                   <button
                                     onClick={() => {
                                       const vendorToken =

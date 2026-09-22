@@ -51,6 +51,18 @@ function getCartRoundingTolerance(cartItems = []) {
   return Math.max(1, totalQuantity);
 }
 
+function normalizeBillingPaymentMode(value) {
+  if (value === undefined || value === null || value === "") {
+    return "ONLINE";
+  }
+
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  return ["ONLINE", "CASH"].includes(value) ? value : null;
+}
+
 async function buildPublicBillResponse(bill) {
   const [customer, vendor] = await Promise.all([
     bill.customerId ? Customer.findById(bill.customerId).lean() : null,
@@ -514,6 +526,14 @@ exports.verifyRedeemOTP = async (req, res) => {
 exports.completeBillingSession = async (req, res) => {
   try {
     const { billingId, paymentMode } = req.body;
+    const normalizedPaymentMode = normalizeBillingPaymentMode(paymentMode);
+
+    if (!normalizedPaymentMode) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid payment mode. Please choose Online or Cash.",
+      });
+    }
 
     const billing = await BillingSession.findById(billingId);
 
@@ -548,7 +568,7 @@ exports.completeBillingSession = async (req, res) => {
       redeemValue: billing.pointsRedeemed || 0,
       finalPaidAmount:
         billing.totalAmount - (billing.pointsRedeemed || 0),
-      paymentMode,
+      paymentMode: normalizedPaymentMode,
       paymentStatus: "OFFLINE_PAID",
       billingSource: "POS_OFFLINE",
     });
@@ -649,11 +669,16 @@ exports.completeBillingSession = async (req, res) => {
       billing.pointsRedeemed = 0;
     }
 
+    billing.paymentMode = normalizedPaymentMode;
+
     await billing.save();
 
     const closed = await BillingSession.findOneAndUpdate(
       { _id: billingId, status: "ACTIVE" },
-      { status: "COMPLETED" },
+      {
+        status: "COMPLETED",
+        paymentMode: normalizedPaymentMode,
+      },
       { new: true }
     );
 

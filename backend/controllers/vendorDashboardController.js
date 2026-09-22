@@ -60,12 +60,30 @@ function buildBillFinancials(bill = {}, transaction = null) {
   };
 }
 
+function getPaymentModeLabel(paymentMode) {
+  if (paymentMode === "ONLINE") return "Online";
+  if (paymentMode === "CASH") return "Cash";
+  return "Not Recorded";
+}
+
+function getNormalizedPaymentMode(paymentMode) {
+  return ["ONLINE", "CASH"].includes(paymentMode) ? paymentMode : null;
+}
+
 function getFinancialAccumulatorStage() {
   const rewardsExpression = {
     $ifNull: ["$transaction.redeemValue", { $ifNull: ["$pointsRedeemed", 0] }],
   };
   const billValueExpression = {
     $ifNull: ["$grossAmount", { $ifNull: ["$totalAmount", 0] }],
+  };
+  const netCollectedExpression = {
+    $max: [
+      {
+        $subtract: [{ $ifNull: ["$totalAmount", 0] }, rewardsExpression],
+      },
+      0,
+    ],
   };
 
   return {
@@ -75,12 +93,24 @@ function getFinancialAccumulatorStage() {
     discountsGiven: { $sum: { $ifNull: ["$discountAmount", 0] } },
     rewardsRedeemed: { $sum: rewardsExpression },
     netCollected: {
+      $sum: netCollectedExpression,
+    },
+    onlineCollected: {
       $sum: {
-        $max: [
-          {
-            $subtract: [{ $ifNull: ["$totalAmount", 0] }, rewardsExpression],
-          },
+        $cond: [{ $eq: ["$paymentMode", "ONLINE"] }, netCollectedExpression, 0],
+      },
+    },
+    cashCollected: {
+      $sum: {
+        $cond: [{ $eq: ["$paymentMode", "CASH"] }, netCollectedExpression, 0],
+      },
+    },
+    notRecordedCollected: {
+      $sum: {
+        $cond: [
+          { $in: ["$paymentMode", ["ONLINE", "CASH"]] },
           0,
+          netCollectedExpression,
         ],
       },
     },
@@ -121,6 +151,9 @@ function buildFinancialSummary(row = {}) {
     discountsGiven: row.discountsGiven || 0,
     rewardsRedeemed: row.rewardsRedeemed || 0,
     netCollected: row.netCollected || 0,
+    onlineCollected: row.onlineCollected || 0,
+    cashCollected: row.cashCollected || 0,
+    notRecordedCollected: row.notRecordedCollected || 0,
     totalBills: row.totalBills || row.orders || 0,
   };
 }
@@ -227,6 +260,9 @@ exports.getDashboardSummary = async (req, res) => {
         todayDiscountsGiven: todayFinancials.discountsGiven,
         todayRewardsRedeemed: todayFinancials.rewardsRedeemed,
         todayNetCollected: todayFinancials.netCollected,
+        todayOnlineCollected: todayFinancials.onlineCollected,
+        todayCashCollected: todayFinancials.cashCollected,
+        todayNotRecordedCollected: todayFinancials.notRecordedCollected,
         monthRevenue,
         monthOrders,
         monthAvgBill,
@@ -235,6 +271,9 @@ exports.getDashboardSummary = async (req, res) => {
         monthDiscountsGiven: monthFinancials.discountsGiven,
         monthRewardsRedeemed: monthFinancials.rewardsRedeemed,
         monthNetCollected: monthFinancials.netCollected,
+        monthOnlineCollected: monthFinancials.onlineCollected,
+        monthCashCollected: monthFinancials.cashCollected,
+        monthNotRecordedCollected: monthFinancials.notRecordedCollected,
         loyaltyEarned: loyaltyRow.earned || 0,
         loyaltyRedeemed: loyaltyRow.redeemed || 0,
       },
@@ -301,6 +340,9 @@ exports.getFinancialYearMonthly = async (req, res) => {
         discountsGiven: m.discountsGiven || 0,
         rewardsRedeemed: m.rewardsRedeemed || 0,
         netCollected: m.netCollected || 0,
+        onlineCollected: m.onlineCollected || 0,
+        cashCollected: m.cashCollected || 0,
+        notRecordedCollected: m.notRecordedCollected || 0,
         totalBills: m.totalBills || m.orders || 0,
         orders: m.orders || 0,
         avgBill: m.orders ? Math.round(m.revenue / m.orders) : 0,
@@ -331,6 +373,9 @@ exports.getFinancialYearMonthly = async (req, res) => {
         discountsGiven: row.discountsGiven || 0,
         rewardsRedeemed: row.rewardsRedeemed || 0,
         netCollected: row.netCollected || 0,
+        onlineCollected: row.onlineCollected || 0,
+        cashCollected: row.cashCollected || 0,
+        notRecordedCollected: row.notRecordedCollected || 0,
         totalBills: row.totalBills || row.orders || 0,
         orders: row.orders || 0,
         avgBill: row.avgBill || 0,
@@ -452,6 +497,7 @@ exports.getBillsDrilldown = async (req, res) => {
         }
         const transaction = transactionMap.get(String(bill._id)) || null;
         const financials = buildBillFinancials(bill, transaction);
+        const normalizedPaymentMode = getNormalizedPaymentMode(bill.paymentMode);
 
         return {
           billId: bill._id,
@@ -466,6 +512,8 @@ exports.getBillsDrilldown = async (req, res) => {
           transactionMissing: financials.transactionMissing,
           earned: bill.pointsEarned || 0,
           redeemed: bill.pointsRedeemed || 0,
+          paymentMode: normalizedPaymentMode,
+          paymentModeLabel: getPaymentModeLabel(normalizedPaymentMode),
           items: bill.items || bill.cartItems || [],
           createdAt: bill.createdAt,
           phone,

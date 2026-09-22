@@ -1,6 +1,7 @@
 const { SUPPORTED_PERIODS } = require("../services/adminAnalyticsDateRanges");
 const {
   getBillingAnalytics,
+  getCustomerDrilldownAnalytics,
   getCustomerAnalytics,
   getOverviewMetrics,
   getRewardsAnalytics,
@@ -30,6 +31,20 @@ function getAnalyticsRequestParams(req, res) {
   return {
     period,
     month: period === "month" ? String(req.query.month || "").trim() : undefined,
+    vendorStatus: String(req.query.vendorStatus || "").trim() || undefined,
+  };
+}
+
+function getCustomerDrilldownRequestParams(req, res) {
+  const params = getAnalyticsRequestParams(req, res);
+  if (!params) return null;
+
+  return {
+    ...params,
+    type: String(req.query.type || "").trim(),
+    page: req.query.page,
+    limit: req.query.limit,
+    search: String(req.query.search || "").trim(),
   };
 }
 
@@ -117,6 +132,27 @@ async function getCustomers(req, res) {
   }
 }
 
+async function getCustomerDrilldown(req, res) {
+  try {
+    const params = getCustomerDrilldownRequestParams(req, res);
+    if (!params) return null;
+
+    const drilldown = await getCustomerDrilldownAnalytics(params);
+
+    return res.json({
+      success: true,
+      ...drilldown,
+    });
+  } catch (error) {
+    console.error("Admin analytics customer drilldown error:", error.message || error);
+    return res.status(error.statusCode || 500).json({
+      success: false,
+      code: error.code || "admin_analytics_customer_drilldown_failed",
+      message: "Failed to load admin customer analytics drilldown.",
+    });
+  }
+}
+
 async function getVendors(req, res) {
   try {
     const params = getAnalyticsRequestParams(req, res);
@@ -161,6 +197,7 @@ async function getSubscriptions(req, res) {
 
 module.exports = {
   getBilling,
+  getCustomerDrilldown,
   getCustomers,
   getOverview,
   getRewards,

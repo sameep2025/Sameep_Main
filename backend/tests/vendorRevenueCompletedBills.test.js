@@ -6,7 +6,10 @@ const mongoose = require("mongoose");
 
 const BillingSession = require("../models/BillingSession");
 const Customer = require("../models/Customer");
+const LoyaltyLedger = require("../models/LoyaltyLedger");
 const Transaction = require("../models/Transaction");
+const Vendor = require("../models/DummyVendor");
+const VendorLoyaltyRule = require("../models/VendorLoyaltyRule");
 const billingController = require("../controllers/billingController");
 const vendorDashboardController = require("../controllers/vendorDashboardController");
 const vendorBillingController = require("../controllers/vendorBillingController");
@@ -16,6 +19,7 @@ const CUSTOMER_ID = "690d8bf7a6dc67fbf8757115";
 const ACTIVE_BILL_ID = "6aacc880dac53725ac8225bb";
 const COMPLETED_BILL_ID = "6aacc888dac53725ac8225c4";
 const OUT_OF_RANGE_BILL_ID = "6aacc96cdac53725ac8225f2";
+const ONLINE_BILL_ID = "6aacc9acdac53725ac822601";
 
 function buildBill({
   id,
@@ -28,6 +32,7 @@ function buildBill({
   pointsRedeemed = 0,
   customerId = CUSTOMER_ID,
   whatsappStatus = "skipped",
+  paymentMode,
 }) {
   return {
     _id: new mongoose.Types.ObjectId(id),
@@ -39,6 +44,7 @@ function buildBill({
     ...(discountAmount !== undefined ? { discountAmount } : {}),
     pointsEarned,
     pointsRedeemed,
+    ...(paymentMode !== undefined ? { paymentMode } : {}),
     createdAt: new Date(createdAt),
     whatsappStatus,
     cartItems: [
@@ -68,6 +74,7 @@ const sampleBills = [
     discountAmount: 200,
     pointsEarned: 1200,
     pointsRedeemed: 300,
+    paymentMode: "CASH",
     createdAt: "2026-09-18T05:13:44.771Z",
     whatsappStatus: "insufficient_balance",
   }),
@@ -77,6 +84,16 @@ const sampleBills = [
     totalAmount: 1500,
     pointsEarned: 30,
     createdAt: "2026-09-17T05:17:32.714Z",
+  }),
+  buildBill({
+    id: ONLINE_BILL_ID,
+    status: "COMPLETED",
+    totalAmount: 700,
+    grossAmount: 1000,
+    discountAmount: 300,
+    pointsEarned: 14,
+    paymentMode: "ONLINE",
+    createdAt: "2026-09-16T05:17:32.714Z",
   }),
 ];
 
@@ -98,6 +115,18 @@ const sampleTransactions = [
     redeemedPoints: 0,
     redeemValue: 0,
     finalPaidAmount: 1500,
+    paymentMode: "CASH",
+  },
+  {
+    _id: new mongoose.Types.ObjectId("6aacc9acdac53725ac822602"),
+    billingSessionId: new mongoose.Types.ObjectId(ONLINE_BILL_ID),
+    totalAmount: 700,
+    grossAmount: 1000,
+    discountAmount: 300,
+    redeemedPoints: 0,
+    redeemValue: 0,
+    finalPaidAmount: 700,
+    paymentMode: "CARD",
   },
 ];
 
@@ -227,6 +256,8 @@ test(
     assert.equal(bills[0].transactionMissing, false);
     assert.equal(bills[0].earned, 1200);
     assert.equal(bills[0].redeemed, 300);
+    assert.equal(bills[0].paymentMode, "CASH");
+    assert.equal(bills[0].paymentModeLabel, "Cash");
     assert.equal(bills[0].items[0].resourceName, "Riya");
     assert.equal(typeof bills[0].phone, "string");
   })
@@ -253,6 +284,25 @@ test(
     assert.equal(res.payload.data[0].netCollected, 1500);
     assert.equal(res.payload.data[0].financialSnapshotAvailable, false);
     assert.equal(res.payload.data[0].transactionMissing, false);
+    assert.equal(res.payload.data[0].paymentMode, null);
+    assert.equal(res.payload.data[0].paymentModeLabel, "Not Recorded");
+  })
+);
+
+test(
+  "vendor revenue drilldown returns ONLINE payment labels from BillingSession only",
+  withMockedBillingSessionFind(async () => {
+    const res = await callController(vendorDashboardController.getBillsDrilldown, {
+      from: "2026-09-16T00:00:00.000Z",
+      to: "2026-09-16T23:59:59.999Z",
+    });
+
+    assert.equal(res.statusCode, 200);
+    assert.equal(res.payload.data.length, 1);
+    assert.equal(String(res.payload.data[0].billId), ONLINE_BILL_ID);
+    assert.equal(res.payload.data[0].paymentMode, "ONLINE");
+    assert.equal(res.payload.data[0].paymentModeLabel, "Online");
+    assert.equal(res.payload.data[0].netCollected, 700);
   })
 );
 
@@ -602,4 +652,230 @@ test("vendor revenue period summary and chart aggregations require COMPLETED sta
   assert.match(monthlySection, /billValue/);
   assert.match(dailyTrendSection, /status:\s*"COMPLETED"/);
   assert.match(stylistSection, /status:\s*"COMPLETED"/);
+});
+
+test("vendor revenue payment breakdown buckets net collected by BillingSession paymentMode only", () => {
+  const source = fs.readFileSync(
+    path.join(__dirname, "../controllers/vendorDashboardController.js"),
+    "utf8"
+  );
+  const accumulatorSection = source.slice(
+    source.indexOf("function getFinancialAccumulatorStage"),
+    source.indexOf("function getFinancialGroupStage")
+  );
+  const drilldownSection = source.slice(
+    source.indexOf("exports.getBillsDrilldown"),
+    source.indexOf("exports.getStylistPerformance")
+  );
+
+  assert.match(accumulatorSection, /onlineCollected/);
+  assert.match(accumulatorSection, /cashCollected/);
+  assert.match(accumulatorSection, /notRecordedCollected/);
+  assert.match(accumulatorSection, /\$eq:\s*\[\s*"\$paymentMode",\s*"ONLINE"\s*\]/);
+  assert.match(accumulatorSection, /\$eq:\s*\[\s*"\$paymentMode",\s*"CASH"\s*\]/);
+  assert.match(accumulatorSection, /netCollectedExpression/);
+  assert.equal(accumulatorSection.includes("transaction.paymentMode"), false);
+  assert.match(drilldownSection, /getNormalizedPaymentMode\(bill\.paymentMode\)/);
+  assert.equal(drilldownSection.includes("transaction.paymentMode"), false);
+});
+
+function buildCompletionResponse() {
+  return {
+    statusCode: 200,
+    payload: null,
+    status(code) {
+      this.statusCode = code;
+      return this;
+    },
+    json(payload) {
+      this.payload = payload;
+      return this;
+    },
+  };
+}
+
+function buildCompletionBilling(overrides = {}) {
+  return {
+    _id: new mongoose.Types.ObjectId(COMPLETED_BILL_ID),
+    vendorId: new mongoose.Types.ObjectId(VENDOR_ID),
+    customerId: null,
+    billingMode: "WALK_IN",
+    status: "ACTIVE",
+    totalAmount: 800,
+    grossAmount: 1000,
+    discountAmount: 200,
+    pointsEarned: 0,
+    pointsRedeemed: 0,
+    otpVerified: false,
+    saveCalled: false,
+    async save() {
+      this.saveCalled = true;
+      return this;
+    },
+    ...overrides,
+  };
+}
+
+async function withMockedCompletionFlow(billing, fn) {
+  const originals = {
+    findById: BillingSession.findById,
+    findOneAndUpdate: BillingSession.findOneAndUpdate,
+    transactionCreate: Transaction.create,
+    loyaltyFind: LoyaltyLedger.find,
+    loyaltyCreate: LoyaltyLedger.create,
+    loyaltyRuleFindOne: VendorLoyaltyRule.findOne,
+    vendorFindById: Vendor.findById,
+    setImmediate: global.setImmediate,
+  };
+  const state = {
+    transactionPayload: null,
+    closeUpdate: null,
+    ledgerCreates: [],
+  };
+
+  BillingSession.findById = async () => billing;
+  BillingSession.findOneAndUpdate = async (_query, update) => {
+    state.closeUpdate = update;
+    billing.status = update.status;
+    billing.paymentMode = update.paymentMode;
+    return { ...billing, ...update };
+  };
+  Transaction.create = async (payload) => {
+    state.transactionPayload = payload;
+    return {
+      _id: new mongoose.Types.ObjectId("6aacc888dac53725ac8225c5"),
+      ...payload,
+    };
+  };
+  LoyaltyLedger.find = () => ({
+    sort: async () => [
+      {
+        remainingPoints: 500,
+        async save() {
+          return this;
+        },
+      },
+    ],
+  });
+  LoyaltyLedger.create = async (payload) => {
+    state.ledgerCreates.push(payload);
+    return payload;
+  };
+  VendorLoyaltyRule.findOne = async () => null;
+  Vendor.findById = () => ({
+    select: () => ({
+      lean: async () => ({ whatsappBusiness: {} }),
+    }),
+  });
+  global.setImmediate = () => {};
+
+  try {
+    await fn(state);
+  } finally {
+    BillingSession.findById = originals.findById;
+    BillingSession.findOneAndUpdate = originals.findOneAndUpdate;
+    Transaction.create = originals.transactionCreate;
+    LoyaltyLedger.find = originals.loyaltyFind;
+    LoyaltyLedger.create = originals.loyaltyCreate;
+    VendorLoyaltyRule.findOne = originals.loyaltyRuleFindOne;
+    Vendor.findById = originals.vendorFindById;
+    global.setImmediate = originals.setImmediate;
+  }
+}
+
+test("billing completion defaults missing paymentMode to ONLINE and stores it", async () => {
+  const billing = buildCompletionBilling();
+
+  await withMockedCompletionFlow(billing, async (state) => {
+    const res = buildCompletionResponse();
+    await billingController.completeBillingSession(
+      { body: { billingId: COMPLETED_BILL_ID } },
+      res
+    );
+
+    assert.equal(res.statusCode, 200);
+    assert.equal(state.transactionPayload.paymentMode, "ONLINE");
+    assert.equal(state.closeUpdate.paymentMode, "ONLINE");
+    assert.equal(billing.paymentMode, "ONLINE");
+    assert.equal(state.transactionPayload.totalAmount, 800);
+    assert.equal(state.transactionPayload.grossAmount, 1000);
+    assert.equal(state.transactionPayload.discountAmount, 200);
+    assert.equal(state.transactionPayload.finalPaidAmount, 800);
+  });
+});
+
+test("billing completion accepts ONLINE paymentMode without changing financials", async () => {
+  const billing = buildCompletionBilling();
+
+  await withMockedCompletionFlow(billing, async (state) => {
+    const res = buildCompletionResponse();
+    await billingController.completeBillingSession(
+      { body: { billingId: COMPLETED_BILL_ID, paymentMode: "ONLINE" } },
+      res
+    );
+
+    assert.equal(res.statusCode, 200);
+    assert.equal(state.transactionPayload.paymentMode, "ONLINE");
+    assert.equal(state.closeUpdate.paymentMode, "ONLINE");
+    assert.equal(state.transactionPayload.totalAmount, 800);
+    assert.equal(state.transactionPayload.finalPaidAmount, 800);
+  });
+});
+
+test("billing completion accepts CASH with redeemed points financial snapshot unchanged", async () => {
+  const billing = buildCompletionBilling({
+    pointsRedeemed: 300,
+  });
+
+  await withMockedCompletionFlow(billing, async (state) => {
+    const res = buildCompletionResponse();
+    await billingController.completeBillingSession(
+      { body: { billingId: COMPLETED_BILL_ID, paymentMode: "CASH" } },
+      res
+    );
+
+    assert.equal(res.statusCode, 200);
+    assert.equal(state.transactionPayload.paymentMode, "CASH");
+    assert.equal(state.closeUpdate.paymentMode, "CASH");
+    assert.equal(billing.paymentMode, "CASH");
+    assert.equal(state.transactionPayload.totalAmount, 800);
+    assert.equal(state.transactionPayload.grossAmount, 1000);
+    assert.equal(state.transactionPayload.discountAmount, 200);
+    assert.equal(state.transactionPayload.redeemedPoints, 300);
+    assert.equal(state.transactionPayload.redeemValue, 300);
+    assert.equal(state.transactionPayload.finalPaidAmount, 500);
+    assert.equal(state.ledgerCreates.length, 0);
+  });
+});
+
+test("billing completion rejects invalid paymentMode", async () => {
+  const billing = buildCompletionBilling();
+
+  await withMockedCompletionFlow(billing, async (state) => {
+    const res = buildCompletionResponse();
+    await billingController.completeBillingSession(
+      { body: { billingId: COMPLETED_BILL_ID, paymentMode: "UPI" } },
+      res
+    );
+
+    assert.equal(res.statusCode, 400);
+    assert.equal(res.payload.success, false);
+    assert.match(res.payload.message, /Invalid payment mode/);
+    assert.equal(state.transactionPayload, null);
+    assert.equal(state.closeUpdate, null);
+  });
+});
+
+test("billing and transaction paymentMode schemas remain backward compatible", () => {
+  assert.equal(new BillingSession({ vendorId: VENDOR_ID }).validateSync(), undefined);
+  assert.equal(new BillingSession({ vendorId: VENDOR_ID, paymentMode: "ONLINE" }).validateSync(), undefined);
+  assert.equal(new BillingSession({ vendorId: VENDOR_ID, paymentMode: "CASH" }).validateSync(), undefined);
+
+  for (const paymentMode of ["CASH", "UPI", "CARD", "ONLINE"]) {
+    const transaction = new Transaction({
+      vendorId: VENDOR_ID,
+      paymentMode,
+    });
+    assert.equal(transaction.validateSync(), undefined);
+  }
 });
