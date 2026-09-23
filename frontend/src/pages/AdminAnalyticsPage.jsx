@@ -100,6 +100,24 @@ function formatCurrency(value) {
   }).format(Number(value || 0));
 }
 
+function formatCompactCurrency(value) {
+  const amount = Number(value || 0);
+  const absoluteAmount = Math.abs(amount);
+  const sign = amount < 0 ? "-" : "";
+
+  if (absoluteAmount >= 100000) {
+    const lakhs = absoluteAmount / 100000;
+    return `${sign}₹${lakhs >= 10 ? lakhs.toFixed(1) : lakhs.toFixed(2).replace(/\.?0+$/, "")}L`;
+  }
+
+  if (absoluteAmount >= 1000) {
+    const thousands = absoluteAmount / 1000;
+    return `${sign}₹${thousands >= 10 ? thousands.toFixed(1) : thousands.toFixed(1).replace(/\.0$/, "")}K`;
+  }
+
+  return `${sign}₹${Math.round(absoluteAmount).toLocaleString("en-IN")}`;
+}
+
 function formatDecimal(value) {
   return Number(value || 0).toLocaleString("en-IN", {
     maximumFractionDigits: 2,
@@ -259,7 +277,7 @@ function BillingTrendChart({ trend, periodOption }) {
   const width = 720;
   const height = 190;
   const sidePadding = 34;
-  const topPadding = 22;
+  const topPadding = 42;
   const bottomPadding = 42;
   const chartBottom = height - bottomPadding;
   const maxValue = Math.max(
@@ -333,6 +351,22 @@ function BillingTrendChart({ trend, periodOption }) {
                   )}, ${formatInteger(point.completedBills)} bills`}
                 </title>
               </circle>
+              {Number(point.grossBillingValue || 0) > 0 ? (
+                <text
+                  x={point.x}
+                  y={Math.max(14, point.y - 10)}
+                  textAnchor="middle"
+                  fill="#0f172a"
+                  fontSize="10"
+                  fontWeight="800"
+                  paintOrder="stroke"
+                  stroke="#ffffff"
+                  strokeWidth="3"
+                  strokeLinejoin="round"
+                >
+                  {formatCompactCurrency(point.grossBillingValue)}
+                </text>
+              ) : null}
             </g>
           ))}
           {points.map((point, index) =>
