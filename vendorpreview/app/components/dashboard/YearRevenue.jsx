@@ -73,14 +73,43 @@ function getPaymentModeLabel(bill) {
   return "Not Recorded";
 }
 
-function addToPaymentBreakdown(acc, bill, amount) {
-  if (bill?.paymentMode === "ONLINE") {
-    acc.onlineCollected += amount;
-  } else if (bill?.paymentMode === "CASH") {
-    acc.cashCollected += amount;
-  } else {
-    acc.notRecordedCollected += amount;
-  }
+function createEmptyRevenueSummary() {
+  return {
+    billValue: 0,
+    discountsGiven: 0,
+    rewardsRedeemed: 0,
+    netCollected: 0,
+    totalBills: 0,
+    pointsDistributed: 0,
+    onlineCollected: 0,
+    cashCollected: 0,
+    notRecordedCollected: 0,
+  };
+}
+
+function normalizeRevenueSummary(source) {
+  const summary = source || {};
+  return {
+    billValue: getNumber(summary.billValue),
+    discountsGiven: getNumber(summary.discountsGiven),
+    rewardsRedeemed: getNumber(summary.rewardsRedeemed),
+    netCollected: getNumber(summary.netCollected),
+    totalBills: getNumber(summary.totalBills),
+    pointsDistributed: getNumber(summary.pointsDistributed),
+    onlineCollected: getNumber(summary.onlineCollected),
+    cashCollected: getNumber(summary.cashCollected),
+    notRecordedCollected: getNumber(summary.notRecordedCollected),
+  };
+}
+
+function getMonthlyCardNetCollected(month) {
+  return getNumber(month?.netCollected);
+}
+
+function getMonthlyCardAverage(month) {
+  const orders = Number(month?.orders || month?.totalBills || 0);
+  if (!orders) return 0;
+  return Math.round(getMonthlyCardNetCollected(month) / orders);
 }
 
 export default function YearRevenue({
@@ -97,6 +126,9 @@ export default function YearRevenue({
   const [stylists, setStylists] = useState([]);
   const [loadingStylists, setLoadingStylists] = useState(true);
   const [selectedBills, setSelectedBills] = useState([]);
+  const [selectedMonthSummary, setSelectedMonthSummary] = useState(() =>
+    createEmptyRevenueSummary()
+  );
   const [loadingBills, setLoadingBills] = useState(false);
   const [expandedBills, setExpandedBills] = useState({});
 
@@ -259,6 +291,7 @@ export default function YearRevenue({
   useEffect(() => {
     if (!vendorId || !selectedMonth?.startDate || !selectedMonth?.endDate) {
       setSelectedBills([]);
+      setSelectedMonthSummary(createEmptyRevenueSummary());
       setExpandedBills({});
       setLoadingBills(false);
       return;
@@ -275,29 +308,41 @@ export default function YearRevenue({
           to: selectedMonth.endDate,
           limit: "250",
         });
-        const res = await fetch(
-          `${API_BASE_URL}/api/vendor/dashboard/bills?${params.toString()}`,
-          { cache: "no-store" }
-        );
+        const summaryParams = new URLSearchParams({
+          vendorId,
+          from: selectedMonth.startDate,
+          to: selectedMonth.endDate,
+        });
+        const [summaryRes, billsRes] = await Promise.all([
+          fetch(`${API_BASE_URL}/api/vendor/dashboard/bills-summary?${summaryParams.toString()}`, {
+            cache: "no-store",
+          }),
+          fetch(`${API_BASE_URL}/api/vendor/dashboard/bills?${params.toString()}`, {
+            cache: "no-store",
+          }),
+        ]);
 
-        if (!res.ok) {
+        if (!summaryRes.ok || !billsRes.ok) {
           throw new Error("Failed to load selected month bills");
         }
 
-        const json = await res.json();
-        const rawBills = Array.isArray(json)
-          ? json
-          : Array.isArray(json?.data)
-            ? json.data
+        const summaryJson = await summaryRes.json();
+        const billsJson = await billsRes.json();
+        const rawBills = Array.isArray(billsJson)
+          ? billsJson
+          : Array.isArray(billsJson?.data)
+            ? billsJson.data
             : [];
 
         if (!cancelled) {
+          setSelectedMonthSummary(normalizeRevenueSummary(summaryJson?.data));
           setSelectedBills(rawBills.filter((bill) => Number(bill?.total || 0) > 0));
           setExpandedBills({});
         }
       } catch (error) {
         console.error("Failed to fetch selected month bills", error);
         if (!cancelled) {
+          setSelectedMonthSummary(createEmptyRevenueSummary());
           setSelectedBills([]);
           setExpandedBills({});
         }
@@ -376,33 +421,6 @@ export default function YearRevenue({
   }, [months, summary]);
 
   const selectedMonthLabel = selectedMonth?.label || selectedMonth?.month || "Selected Month";
-  const selectedMonthSummary = useMemo(() => {
-    return selectedBills.reduce(
-      (acc, bill) => {
-        const financials = getBillFinancials(bill);
-        acc.billValue += financials.billValue;
-        acc.discountsGiven += financials.discountAmount || 0;
-        acc.rewardsRedeemed += financials.rewardsRedeemedValue;
-        acc.netCollected += financials.netCollected;
-        acc.totalBills += 1;
-        acc.pointsDistributed += Number(bill?.earned || 0);
-        addToPaymentBreakdown(acc, bill, financials.netCollected);
-        return acc;
-      },
-      {
-        billValue: 0,
-        discountsGiven: 0,
-        rewardsRedeemed: 0,
-        netCollected: 0,
-        totalBills: 0,
-        pointsDistributed: 0,
-        onlineCollected: 0,
-        cashCollected: 0,
-        notRecordedCollected: 0,
-      }
-    );
-  }, [selectedBills]);
-
   const toggleBill = (billKey) => {
     setExpandedBills((prev) => ({
       ...prev,
@@ -520,11 +538,11 @@ export default function YearRevenue({
                         <div className="revenue-panel-month-year">{month.year}</div>
                       ) : null}
                       <div className="revenue-panel-month-revenue">
-                        {currencyFmt.format(getNumber(month.billValue ?? month.netBillValue ?? month.revenue))}
+                        {currencyFmt.format(getMonthlyCardNetCollected(month))}
                       </div>
                       <div className="revenue-panel-month-meta">
                         {Number(month.orders || 0)} orders • Avg{" "}
-                        {currencyFmt.format(Number(month.avgBill || 0))}
+                        {currencyFmt.format(getMonthlyCardAverage(month))}
                       </div>
                     </button>
                   ))}

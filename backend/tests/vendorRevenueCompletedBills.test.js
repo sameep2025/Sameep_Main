@@ -329,6 +329,101 @@ test(
   })
 );
 
+test("vendor revenue bill summary aggregates all completed bills beyond drilldown limit", async () => {
+  const originalAggregate = BillingSession.aggregate;
+  const aggregatePipelines = [];
+  const completedBillCount = 142;
+  const netCollectedPerBill = 890;
+  const onlineBills = 50;
+  const cashBills = 60;
+  const notRecordedBills = completedBillCount - onlineBills - cashBills;
+
+  BillingSession.aggregate = async (pipeline) => {
+    aggregatePipelines.push(pipeline);
+    return [
+      {
+        billValue: completedBillCount * 1000,
+        netBillValue: completedBillCount * 900,
+        discountsGiven: completedBillCount * 100,
+        rewardsRedeemed: completedBillCount * 10,
+        netCollected: completedBillCount * netCollectedPerBill,
+        onlineCollected: onlineBills * netCollectedPerBill,
+        cashCollected: cashBills * netCollectedPerBill,
+        notRecordedCollected: notRecordedBills * netCollectedPerBill,
+        pointsDistributed: completedBillCount * 5,
+        totalBills: completedBillCount,
+        orders: completedBillCount,
+      },
+    ];
+  };
+
+  try {
+    const res = await callController(vendorDashboardController.getBillsSummary, {
+      from: "2026-09-01T00:00:00.000Z",
+      to: "2026-09-30T23:59:59.999Z",
+    });
+
+    assert.equal(res.statusCode, 200);
+    assert.equal(res.payload.success, true);
+    assert.equal(res.payload.data.totalBills, 142);
+    assert.equal(res.payload.data.billValue, 142000);
+    assert.equal(res.payload.data.discountsGiven, 14200);
+    assert.equal(res.payload.data.rewardsRedeemed, 1420);
+    assert.equal(res.payload.data.netCollected, 126380);
+    assert.equal(res.payload.data.pointsDistributed, 710);
+    assert.equal(
+      res.payload.data.onlineCollected +
+        res.payload.data.cashCollected +
+        res.payload.data.notRecordedCollected,
+      res.payload.data.netCollected
+    );
+
+    const pipeline = aggregatePipelines[0];
+    assert.equal(pipeline[0].$match.status, "COMPLETED");
+    assert.ok(pipeline[0].$match.createdAt.$gte instanceof Date);
+    assert.ok(pipeline[0].$match.createdAt.$lte instanceof Date);
+    assert.equal(JSON.stringify(pipeline).includes("$limit"), false);
+  } finally {
+    BillingSession.aggregate = originalAggregate;
+  }
+});
+
+test("historical month bill summary does not truncate beyond 250 bills", async () => {
+  const originalAggregate = BillingSession.aggregate;
+  const completedBillCount = 300;
+
+  BillingSession.aggregate = async () => [
+    {
+      billValue: completedBillCount * 500,
+      netBillValue: completedBillCount * 500,
+      discountsGiven: 0,
+      rewardsRedeemed: 0,
+      netCollected: completedBillCount * 500,
+      onlineCollected: completedBillCount * 500,
+      cashCollected: 0,
+      notRecordedCollected: 0,
+      pointsDistributed: completedBillCount * 2,
+      totalBills: completedBillCount,
+      orders: completedBillCount,
+    },
+  ];
+
+  try {
+    const res = await callController(vendorDashboardController.getBillsSummary, {
+      from: "2026-08-01T00:00:00.000Z",
+      to: "2026-09-01T00:00:00.000Z",
+    });
+
+    assert.equal(res.statusCode, 200);
+    assert.equal(res.payload.data.totalBills, 300);
+    assert.equal(res.payload.data.billValue, 150000);
+    assert.equal(res.payload.data.netCollected, 150000);
+    assert.equal(res.payload.data.pointsDistributed, 600);
+  } finally {
+    BillingSession.aggregate = originalAggregate;
+  }
+});
+
 test(
   "legacy vendor bill-list endpoint also requires COMPLETED status",
   withMockedBillingSessionFind(async (state) => {

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { API_BASE_URL } from "../../../config";
 import "./TodayRevenue.css";
 
@@ -74,16 +74,6 @@ function getPaymentModeLabel(bill) {
   return "Not Recorded";
 }
 
-function addToPaymentBreakdown(acc, bill, amount) {
-  if (bill?.paymentMode === "ONLINE") {
-    acc.onlineCollected += amount;
-  } else if (bill?.paymentMode === "CASH") {
-    acc.cashCollected += amount;
-  } else {
-    acc.notRecordedCollected += amount;
-  }
-}
-
 function getTodayRange() {
   const start = new Date();
   start.setHours(0, 0, 0, 0);
@@ -97,6 +87,35 @@ function getTodayRange() {
   };
 }
 
+function createEmptyRevenueSummary() {
+  return {
+    totalBills: 0,
+    billValue: 0,
+    discountsGiven: 0,
+    rewardsRedeemed: 0,
+    netCollected: 0,
+    onlineCollected: 0,
+    cashCollected: 0,
+    notRecordedCollected: 0,
+    pointsDistributed: 0,
+  };
+}
+
+function normalizeRevenueSummary(source) {
+  const summary = source || {};
+  return {
+    totalBills: getNumber(summary.totalBills),
+    billValue: getNumber(summary.billValue),
+    discountsGiven: getNumber(summary.discountsGiven),
+    rewardsRedeemed: getNumber(summary.rewardsRedeemed),
+    netCollected: getNumber(summary.netCollected),
+    onlineCollected: getNumber(summary.onlineCollected),
+    cashCollected: getNumber(summary.cashCollected),
+    notRecordedCollected: getNumber(summary.notRecordedCollected),
+    pointsDistributed: getNumber(summary.pointsDistributed),
+  };
+}
+
 function TodayRevenue({
   vendorId,
   onBack,
@@ -107,6 +126,7 @@ function TodayRevenue({
 }) {
   const [activeSection, setActiveSection] = useState("revenue");
   const [bills, setBills] = useState([]);
+  const [summary, setSummary] = useState(() => createEmptyRevenueSummary());
   const [stylists, setStylists] = useState([]);
   const [loadingRevenue, setLoadingRevenue] = useState(true);
   const [loadingStylists, setLoadingStylists] = useState(true);
@@ -121,6 +141,7 @@ function TodayRevenue({
   useEffect(() => {
     if (!vendorId) {
       setBills([]);
+      setSummary(createEmptyRevenueSummary());
       setStylists([]);
       setLoadingRevenue(false);
       setLoadingStylists(false);
@@ -129,24 +150,30 @@ function TodayRevenue({
 
     let cancelled = false;
 
-    const loadBills = async () => {
+    const loadRevenue = async () => {
       try {
         setLoadingRevenue(true);
         const { from, to } = getTodayRange();
-        const res = await fetch(
-          `${API_BASE_URL}/api/vendor/dashboard/bills?vendorId=${encodeURIComponent(vendorId)}&from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`,
-          { cache: "no-store" }
-        );
+        const query = `vendorId=${encodeURIComponent(vendorId)}&from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`;
+        const [summaryRes, billsRes] = await Promise.all([
+          fetch(`${API_BASE_URL}/api/vendor/dashboard/bills-summary?${query}`, {
+            cache: "no-store",
+          }),
+          fetch(`${API_BASE_URL}/api/vendor/dashboard/bills?${query}`, {
+            cache: "no-store",
+          }),
+        ]);
 
-        if (!res.ok) {
+        if (!summaryRes.ok || !billsRes.ok) {
           throw new Error("Failed to load today's revenue");
         }
 
-        const json = await res.json();
-        const rawBills = Array.isArray(json)
-          ? json
-          : Array.isArray(json?.data)
-            ? json.data
+        const summaryJson = await summaryRes.json();
+        const billsJson = await billsRes.json();
+        const rawBills = Array.isArray(billsJson)
+          ? billsJson
+          : Array.isArray(billsJson?.data)
+            ? billsJson.data
             : [];
 
         const filteredBills = rawBills.filter(
@@ -157,11 +184,13 @@ function TodayRevenue({
         );
 
         if (!cancelled) {
+          setSummary(normalizeRevenueSummary(summaryJson?.data));
           setBills(filteredBills);
         }
       } catch (err) {
         console.error("Failed to fetch today's bills", err);
         if (!cancelled) {
+          setSummary(createEmptyRevenueSummary());
           setBills([]);
         }
       } finally {
@@ -213,38 +242,13 @@ function TodayRevenue({
       }
     };
 
-    loadBills();
+    loadRevenue();
     loadStylists();
 
     return () => {
       cancelled = true;
     };
   }, [vendorId, hrEnabled, hrLabelSingular]);
-
-  const summary = useMemo(() => {
-    return bills.reduce(
-      (acc, bill) => {
-        acc.totalBills += 1;
-        const financials = getBillFinancials(bill);
-        acc.billValue += financials.billValue;
-        acc.discountsGiven += financials.discountAmount || 0;
-        acc.rewardsRedeemed += financials.rewardsRedeemedValue;
-        acc.netCollected += financials.netCollected;
-        addToPaymentBreakdown(acc, bill, financials.netCollected);
-        return acc;
-      },
-      {
-        totalBills: 0,
-        billValue: 0,
-        discountsGiven: 0,
-        rewardsRedeemed: 0,
-        netCollected: 0,
-        onlineCollected: 0,
-        cashCollected: 0,
-        notRecordedCollected: 0,
-      }
-    );
-  }, [bills]);
 
   useEffect(() => {
     setExpandedBills(

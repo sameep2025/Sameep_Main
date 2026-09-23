@@ -114,6 +114,7 @@ function getFinancialAccumulatorStage() {
         ],
       },
     },
+    pointsDistributed: { $sum: { $ifNull: ["$pointsEarned", 0] } },
     orders: { $sum: 1 },
     totalBills: { $sum: 1 },
   };
@@ -155,6 +156,7 @@ function buildFinancialSummary(row = {}) {
     cashCollected: row.cashCollected || 0,
     notRecordedCollected: row.notRecordedCollected || 0,
     totalBills: row.totalBills || row.orders || 0,
+    pointsDistributed: row.pointsDistributed || 0,
   };
 }
 
@@ -524,6 +526,53 @@ exports.getBillsDrilldown = async (req, res) => {
     res.json({ success: true, data: formatted });
   } catch (err) {
     console.error("getBillsDrilldown error", err);
+    res.status(500).json({ success: false, message: "Server error" });
+  }
+};
+
+exports.getBillsSummary = async (req, res) => {
+  try {
+    const { vendorId, from, to } = req.query;
+
+    if (!vendorId) {
+      return res.status(400).json({ success: false, message: "vendorId required" });
+    }
+
+    const match = {
+      vendorId: new mongoose.Types.ObjectId(vendorId),
+      status: "COMPLETED",
+    };
+
+    if (from || to) {
+      match.createdAt = {};
+      if (from) match.createdAt.$gte = new Date(from);
+      if (to) match.createdAt.$lte = new Date(to);
+    }
+
+    const rows = await BillingSession.aggregate([
+      { $match: match },
+      ...withTransactionLookupStages(),
+      { $group: getFinancialGroupStage() },
+    ]);
+
+    const summary = buildFinancialSummary(rows?.[0] || {});
+
+    res.json({
+      success: true,
+      data: {
+        billValue: summary.billValue,
+        discountsGiven: summary.discountsGiven,
+        rewardsRedeemed: summary.rewardsRedeemed,
+        netCollected: summary.netCollected,
+        totalBills: summary.totalBills,
+        pointsDistributed: summary.pointsDistributed,
+        onlineCollected: summary.onlineCollected,
+        cashCollected: summary.cashCollected,
+        notRecordedCollected: summary.notRecordedCollected,
+      },
+    });
+  } catch (err) {
+    console.error("getBillsSummary error", err);
     res.status(500).json({ success: false, message: "Server error" });
   }
 };
