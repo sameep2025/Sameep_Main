@@ -5529,6 +5529,7 @@ function ExploreContent({ onReady, onOpenServices }) {
                 {activeRevenueTab === "today" && (
                   <TodayRevenue
                     vendorId={vendorId}
+                    businessName={vendorInfo?.businessName || vendorInfo?.name || "Your Business"}
                     embedded
                     hrEnabled={hrEnabled}
                     hrLabelSingular={hrSingularLabel}
@@ -5539,6 +5540,7 @@ function ExploreContent({ onReady, onOpenServices }) {
                 {activeRevenueTab === "month" && (
                   <MonthRevenue
                     vendorId={vendorId}
+                    businessName={vendorInfo?.businessName || vendorInfo?.name || "Your Business"}
                     hrEnabled={hrEnabled}
                     hrLabelSingular={hrSingularLabel}
                     hrPerformanceTitle={hrPerformanceTitle}
@@ -5548,6 +5550,7 @@ function ExploreContent({ onReady, onOpenServices }) {
                 {activeRevenueTab === "year" && (
                   <YearRevenue
                     vendorId={vendorId}
+                    businessName={vendorInfo?.businessName || vendorInfo?.name || "Your Business"}
                     hrEnabled={hrEnabled}
                     hrLabelSingular={hrSingularLabel}
                     hrPerformanceTitle={hrPerformanceTitle}

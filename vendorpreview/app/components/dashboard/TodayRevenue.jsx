@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { API_BASE_URL } from "../../../config";
+import RevenueSnapshot from "./RevenueSnapshot";
 import "./TodayRevenue.css";
 
 const currencyFmt = new Intl.NumberFormat("en-IN", {
@@ -87,6 +88,14 @@ function getTodayRange() {
   };
 }
 
+function getTodaySnapshotFileName() {
+  const date = new Date();
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `ynot-revenue-report-${year}-${month}-${day}.png`;
+}
+
 function createEmptyRevenueSummary() {
   return {
     totalBills: 0,
@@ -120,6 +129,7 @@ function TodayRevenue({
   vendorId,
   onBack,
   embedded = false,
+  businessName = "Your Business",
   hrEnabled = true,
   hrLabelSingular = "Stylist",
   hrPerformanceTitle = "Stylist Performance",
@@ -131,6 +141,7 @@ function TodayRevenue({
   const [loadingRevenue, setLoadingRevenue] = useState(true);
   const [loadingStylists, setLoadingStylists] = useState(true);
   const [expandedBills, setExpandedBills] = useState({});
+  const [showSnapshot, setShowSnapshot] = useState(false);
 
   useEffect(() => {
     if (!hrEnabled && activeSection === "stylists") {
@@ -269,6 +280,20 @@ function TodayRevenue({
 
   return (
     <div className={`today-revenue-page ${embedded ? "today-revenue-page-embedded" : ""}`}>
+      <RevenueSnapshot
+        isOpen={showSnapshot}
+        onClose={() => setShowSnapshot(false)}
+        businessName={businessName}
+        title="Today's Revenue Summary"
+        periodLabel={new Date().toLocaleDateString("en-IN", {
+          day: "2-digit",
+          month: "long",
+          year: "numeric",
+        })}
+        summary={summary}
+        fileName={getTodaySnapshotFileName()}
+      />
+
       {!embedded ? (
         <div className="today-revenue-header">
           {onBack ? (
@@ -314,6 +339,15 @@ function TodayRevenue({
         ) : (
           <>
             <div className="today-revenue-section-title">Revenue</div>
+            <div className="revenue-snapshot-trigger-row">
+              <button
+                type="button"
+                className="revenue-snapshot-trigger"
+                onClick={() => setShowSnapshot(true)}
+              >
+                Revenue Snapshot
+              </button>
+            </div>
 
             <div className="today-revenue-summary-grid">
               {[

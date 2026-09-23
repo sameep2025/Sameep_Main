@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { API_BASE_URL } from "../../../config";
+import RevenueSnapshot from "./RevenueSnapshot";
 import "./RevenuePanels.css";
 
 const currencyFmt = new Intl.NumberFormat("en-IN", {
@@ -112,8 +113,17 @@ function getMonthlyCardAverage(month) {
   return Math.round(getMonthlyCardNetCollected(month) / orders);
 }
 
+function getRollingSnapshotFileName() {
+  const date = new Date();
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `ynot-revenue-report-last-12-months-${year}-${month}-${day}.png`;
+}
+
 export default function YearRevenue({
   vendorId,
+  businessName = "Your Business",
   hrEnabled = true,
   hrLabelSingular = "Stylist",
   hrPerformanceTitle = "Stylist Performance",
@@ -131,6 +141,7 @@ export default function YearRevenue({
   );
   const [loadingBills, setLoadingBills] = useState(false);
   const [expandedBills, setExpandedBills] = useState({});
+  const [showSnapshot, setShowSnapshot] = useState(false);
 
   useEffect(() => {
     if (!hrEnabled && activeSection === "stylists") {
@@ -421,6 +432,18 @@ export default function YearRevenue({
   }, [months, summary]);
 
   const selectedMonthLabel = selectedMonth?.label || selectedMonth?.month || "Selected Month";
+  const rollingPeriodLabel = useMemo(() => {
+    if (months.length === 0) return "Rolling 12-month period";
+
+    const first = months[0]?.label || months[0]?.month;
+    const last = months[months.length - 1]?.label || months[months.length - 1]?.month;
+
+    if (first && last) {
+      return `${first} to ${last}`;
+    }
+
+    return "Rolling 12-month period";
+  }, [months]);
   const toggleBill = (billKey) => {
     setExpandedBills((prev) => ({
       ...prev,
@@ -430,6 +453,26 @@ export default function YearRevenue({
 
   return (
     <section className="revenue-panel">
+      <RevenueSnapshot
+        isOpen={showSnapshot}
+        onClose={() => setShowSnapshot(false)}
+        businessName={businessName}
+        title="Last 12 Months Revenue Summary"
+        periodLabel={rollingPeriodLabel}
+        summary={{
+          billValue: totals.billValue,
+          discountsGiven: totals.discountsGiven,
+          rewardsRedeemed: totals.rewardsRedeemed,
+          netCollected: totals.netCollected,
+          totalBills: totals.totalOrders,
+          onlineCollected: totals.onlineCollected,
+          cashCollected: totals.cashCollected,
+          notRecordedCollected: totals.notRecordedCollected,
+        }}
+        showPointsDistributed={false}
+        fileName={getRollingSnapshotFileName()}
+      />
+
       <div className="revenue-panel-header">
         <div className="revenue-panel-title">Last 12 Months Revenue</div>
         <div className="revenue-panel-subtitle">
@@ -460,6 +503,16 @@ export default function YearRevenue({
           <div className="revenue-panel-loading">Loading last 12 months revenue...</div>
         ) : (
           <>
+            <div className="revenue-snapshot-trigger-row">
+              <button
+                type="button"
+                className="revenue-snapshot-trigger"
+                onClick={() => setShowSnapshot(true)}
+              >
+                Revenue Snapshot
+              </button>
+            </div>
+
             <div className="revenue-panel-stat-grid">
               <div className="revenue-panel-stat-card">
                 <div className="revenue-panel-stat-label">Bill Value</div>

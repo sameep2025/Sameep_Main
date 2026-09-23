@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { API_BASE_URL } from "../../../config";
+import RevenueSnapshot from "./RevenueSnapshot";
 import "./RevenuePanels.css";
 
 const currencyFmt = new Intl.NumberFormat("en-IN", {
@@ -87,6 +88,13 @@ function getMonthRange() {
   };
 }
 
+function getMonthSnapshotFileName() {
+  const date = new Date();
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  return `ynot-revenue-report-${year}-${month}.png`;
+}
+
 function createEmptyRevenueSummary() {
   return {
     totalBills: 0,
@@ -118,6 +126,7 @@ function normalizeRevenueSummary(source) {
 
 export default function MonthRevenue({
   vendorId,
+  businessName = "Your Business",
   hrEnabled = true,
   hrLabelSingular = "Stylist",
   hrPerformanceTitle = "Stylist Performance",
@@ -129,6 +138,7 @@ export default function MonthRevenue({
   const [stylists, setStylists] = useState([]);
   const [loadingStylists, setLoadingStylists] = useState(true);
   const [expandedBills, setExpandedBills] = useState({});
+  const [showSnapshot, setShowSnapshot] = useState(false);
 
   useEffect(() => {
     if (!hrEnabled && activeSection === "stylists") {
@@ -260,6 +270,23 @@ export default function MonthRevenue({
 
   return (
     <section className="revenue-panel">
+      <RevenueSnapshot
+        isOpen={showSnapshot}
+        onClose={() => setShowSnapshot(false)}
+        businessName={businessName}
+        title={`${new Date().toLocaleDateString("en-IN", {
+          month: "long",
+          year: "numeric",
+        })} Revenue Summary`}
+        periodLabel={`As of ${new Date().toLocaleDateString("en-IN", {
+          day: "2-digit",
+          month: "long",
+          year: "numeric",
+        })}`}
+        summary={summary}
+        fileName={getMonthSnapshotFileName()}
+      />
+
       <div className="revenue-panel-header">
         <div className="revenue-panel-title">This Month Revenue</div>
         <div className="revenue-panel-subtitle">
@@ -290,6 +317,16 @@ export default function MonthRevenue({
           <div className="revenue-panel-loading">Loading monthly revenue...</div>
         ) : (
           <>
+            <div className="revenue-snapshot-trigger-row">
+              <button
+                type="button"
+                className="revenue-snapshot-trigger"
+                onClick={() => setShowSnapshot(true)}
+              >
+                Revenue Snapshot
+              </button>
+            </div>
+
             <div className="revenue-panel-stat-grid">
               <div className="revenue-panel-stat-card">
                 <div className="revenue-panel-stat-label">Bill Value</div>
