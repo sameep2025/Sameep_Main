@@ -1138,6 +1138,7 @@ function ExploreContent({ onReady, onOpenServices }) {
   const [showBillSuccess, setShowBillSuccess] = useState(false);
   const [billType, setBillType] = useState("customer");
   const [billSuccessMessage, setBillSuccessMessage] = useState("");
+  const [receiptSnapshot, setReceiptSnapshot] = useState(null);
 
 
   const [vendorLoaded, setVendorLoaded] = useState(false);
@@ -1247,6 +1248,330 @@ function ExploreContent({ onReady, onOpenServices }) {
       return "Bill generated successfully. WhatsApp message was not sent because your WhatsApp balance is 0. Please recharge to continue sending bills on WhatsApp.";
     }
     return "";
+  };
+
+  const formatReceiptCurrency = (value) => {
+    const amount = Number(value || 0);
+    return `₹${amount.toLocaleString("en-IN")}`;
+  };
+
+  const getReceiptDisplayBillId = (value) => {
+    return String(value || "").slice(-8).toUpperCase();
+  };
+
+  const getReceiptVendorPhone = () => {
+    return String(
+      vendorInfo?.phone ||
+      vendorInfo?.mobile ||
+      vendorInfo?.businessPhone ||
+      vendorInfo?.contactPhone ||
+      ""
+    ).trim();
+  };
+
+  const getReceiptVendorAddress = () => {
+    return String(
+      vendorInfo?.location?.address ||
+      vendorInfo?.address ||
+      vendorInfo?.businessAddress ||
+      vendorInfo?.fullAddress ||
+      ""
+    ).trim();
+  };
+
+  const buildBillingCartItemsSnapshot = () => {
+    const discountFactor =
+      cartTotal > 0 ? (cartTotal - appliedDiscount) / cartTotal : 1;
+
+    return cartItems.map((item) => {
+      const discountedPrice = Math.round((item.price || 0) * discountFactor);
+
+      return {
+        itemId: item.itemId,
+        categoryId: item.categoryId,
+        name: item.name,
+        price: discountedPrice,
+        qty: Number(item.qty) || 1,
+        total: discountedPrice * (item.qty || 1),
+        resourceId: item.resourceId || null,
+        resourceName: item.resourceName || "",
+        parentId: item.parentId || null,
+        rootCategoryId: item.rootCategoryId || null,
+        nodePath: item.nodePath || [],
+        categoryPathIds: item.categoryPathIds || [],
+      };
+    });
+  };
+
+  const buildReceiptSnapshot = ({ billingSessionId, billingItems, completeData }) => {
+    const transaction = completeData?.transaction || {};
+    const redeemedValue =
+      transaction.redeemValue ??
+      transaction.redeemedPoints ??
+      redeemPoints ??
+      0;
+    const netCollected =
+      transaction.finalPaidAmount ??
+      Math.max(finalTotal - Number(redeemedValue || 0), 0);
+
+    return {
+      vendorName: String(vendorInfo?.businessName || vendorInfo?.name || "YNOT Vendor").trim(),
+      vendorPhone: getReceiptVendorPhone(),
+      vendorAddress: getReceiptVendorAddress(),
+      completedAt: new Date().toISOString(),
+      billingSessionId: String(
+        transaction.billingSessionId || billingSessionId || ""
+      ),
+      customerLabel: customerMobile ? `+91 ${customerMobile}` : "Walk-in",
+      items: (billingItems || []).map((item) => ({
+        name: String(item.name || "Item"),
+        qty: Number(item.qty || 0),
+        price: Number(item.price || 0),
+        total: Number(item.total || 0),
+      })),
+      grossAmount: Number(transaction.grossAmount ?? cartTotal ?? 0),
+      discountAmount: Number(transaction.discountAmount ?? appliedDiscount ?? 0),
+      rewardsRedeemed: Number(redeemedValue || 0),
+      netCollected: Number(netCollected || 0),
+      paymentMode: String(transaction.paymentMode || paymentMode || "ONLINE"),
+    };
+  };
+
+  const handlePrintReceipt = () => {
+    if (!receiptSnapshot || typeof window === "undefined") return;
+
+    const printWindow = window.open("", "_blank", "width=420,height=720");
+    if (!printWindow) {
+      alert("Unable to open print window. Please allow pop-ups and try again.");
+      return;
+    }
+
+    const doc = printWindow.document;
+    doc.open();
+    doc.write(`<!doctype html>
+      <html>
+        <head>
+          <title>Print Bill</title>
+          <style>
+            @page { margin: 3mm; }
+            * { box-sizing: border-box; }
+            body {
+              margin: 0;
+              background: #fff;
+              color: #000;
+              font-family: Arial, Helvetica, sans-serif;
+              font-size: 12px;
+              line-height: 1.35;
+            }
+            .receipt {
+              width: 100%;
+              max-width: 80mm;
+              padding: 3mm;
+              margin: 0 auto;
+            }
+            .center { text-align: center; }
+            .business {
+              font-size: 16px;
+              font-weight: 800;
+              text-transform: uppercase;
+              margin-bottom: 4px;
+            }
+            .muted { font-size: 11px; color: #222; word-break: break-word; }
+            .title {
+              font-size: 14px;
+              font-weight: 800;
+              margin: 12px 0 8px;
+              padding: 6px 0;
+              border-top: 1px dashed #000;
+              border-bottom: 1px dashed #000;
+            }
+            .meta-row,
+            .total-row {
+              display: flex;
+              justify-content: space-between;
+              gap: 8px;
+              margin: 3px 0;
+            }
+            .meta-row span:first-child,
+            .total-row span:first-child {
+              color: #222;
+            }
+            .items {
+              margin-top: 10px;
+              border-top: 1px dashed #000;
+              border-bottom: 1px dashed #000;
+              padding: 6px 0;
+            }
+            .item-header,
+            .item-row {
+              display: grid;
+              grid-template-columns: minmax(0, 1fr) 24px minmax(46px, max-content);
+              gap: 6px;
+              align-items: start;
+            }
+            .item-header {
+              font-weight: 800;
+              margin-bottom: 4px;
+            }
+            .item-row {
+              margin: 5px 0;
+            }
+            .right { text-align: right; }
+            .item-name {
+              word-break: break-word;
+              overflow-wrap: anywhere;
+              min-width: 0;
+            }
+            .totals {
+              margin-top: 10px;
+            }
+            .net {
+              font-size: 14px;
+              font-weight: 900;
+              border-top: 1px solid #000;
+              border-bottom: 1px solid #000;
+              padding: 5px 0;
+              margin-top: 6px;
+            }
+            .footer {
+              margin-top: 12px;
+              padding-top: 8px;
+              border-top: 1px dashed #000;
+              text-align: center;
+              font-size: 11px;
+            }
+            @media screen {
+              body { background: #f3f3f3; }
+              .receipt {
+                background: #fff;
+                box-shadow: 0 12px 32px rgba(0, 0, 0, 0.12);
+              }
+            }
+            @media print {
+              .receipt {
+                max-width: 80mm;
+              }
+            }
+          </style>
+        </head>
+        <body><main id="receipt-root" class="receipt"></main></body>
+      </html>`);
+    doc.close();
+
+    const root = doc.getElementById("receipt-root");
+    const addText = (text, className = "") => {
+      const el = doc.createElement("div");
+      if (className) el.className = className;
+      el.textContent = text;
+      root.appendChild(el);
+      return el;
+    };
+    const addRow = (label, value, className = "meta-row", parent = root) => {
+      const row = doc.createElement("div");
+      row.className = className;
+      const labelEl = doc.createElement("span");
+      labelEl.textContent = label;
+      const valueEl = doc.createElement("strong");
+      valueEl.textContent = value;
+      row.append(labelEl, valueEl);
+      parent.appendChild(row);
+    };
+
+    const header = doc.createElement("div");
+    header.className = "center";
+    root.appendChild(header);
+
+    const business = doc.createElement("div");
+    business.className = "business";
+    business.textContent = receiptSnapshot.vendorName;
+    header.appendChild(business);
+
+    if (receiptSnapshot.vendorPhone) {
+      const phone = doc.createElement("div");
+      phone.className = "muted";
+      phone.textContent = receiptSnapshot.vendorPhone;
+      header.appendChild(phone);
+    }
+
+    if (receiptSnapshot.vendorAddress) {
+      const address = doc.createElement("div");
+      address.className = "muted";
+      address.textContent = receiptSnapshot.vendorAddress;
+      header.appendChild(address);
+    }
+
+    addText("BILL", "title center");
+    addRow(
+      "Date",
+      new Intl.DateTimeFormat("en-IN", {
+        dateStyle: "medium",
+        timeStyle: "short",
+      }).format(new Date(receiptSnapshot.completedAt))
+    );
+    if (receiptSnapshot.billingSessionId) {
+      addRow("Bill ID", getReceiptDisplayBillId(receiptSnapshot.billingSessionId));
+    }
+    addRow("Customer", receiptSnapshot.customerLabel);
+
+    const itemsBlock = doc.createElement("section");
+    itemsBlock.className = "items";
+    root.appendChild(itemsBlock);
+
+    const itemHeader = doc.createElement("div");
+    itemHeader.className = "item-header";
+    ["Service", "Qty", "Amount"].forEach((text, index) => {
+      const el = doc.createElement("span");
+      el.className = index === 0 ? "" : "right";
+      el.textContent = text;
+      itemHeader.appendChild(el);
+    });
+    itemsBlock.appendChild(itemHeader);
+
+    receiptSnapshot.items.forEach((item) => {
+      const row = doc.createElement("div");
+      row.className = "item-row";
+
+      const name = doc.createElement("span");
+      name.className = "item-name";
+      name.textContent = item.name;
+
+      const qty = doc.createElement("span");
+      qty.className = "right";
+      qty.textContent = String(item.qty);
+
+      const total = doc.createElement("span");
+      total.className = "right";
+      total.textContent = formatReceiptCurrency(item.total);
+
+      row.append(name, qty, total);
+      itemsBlock.appendChild(row);
+    });
+
+    const totals = doc.createElement("section");
+    totals.className = "totals";
+    root.appendChild(totals);
+    addRow("Bill Value", formatReceiptCurrency(receiptSnapshot.grossAmount), "total-row", totals);
+    if (Number(receiptSnapshot.discountAmount || 0) > 0) {
+      addRow("Discount", `-${formatReceiptCurrency(receiptSnapshot.discountAmount)}`, "total-row", totals);
+    }
+    if (Number(receiptSnapshot.rewardsRedeemed || 0) > 0) {
+      addRow("Rewards Redeemed", `-${formatReceiptCurrency(receiptSnapshot.rewardsRedeemed)}`, "total-row", totals);
+    }
+    addRow("NET COLLECTED", formatReceiptCurrency(receiptSnapshot.netCollected), "total-row net", totals);
+    addRow(
+      "Payment Mode",
+      receiptSnapshot.paymentMode === "CASH" ? "Cash" : "Online",
+      "total-row",
+      totals
+    );
+
+    addText("Thank you for visiting!", "footer");
+    addText("Powered by YNOT", "center muted");
+
+    printWindow.focus();
+    setTimeout(() => {
+      printWindow.print();
+    }, 250);
   };
 
 
@@ -1999,6 +2324,13 @@ function ExploreContent({ onReady, onOpenServices }) {
       }
 
       if (completeData?.success) {
+        setReceiptSnapshot(
+          buildReceiptSnapshot({
+            billingSessionId: billingId,
+            billingItems: buildBillingCartItemsSnapshot(),
+            completeData,
+          })
+        );
         setBillSuccessMessage(
           getWhatsAppBillingWarning(completeData) ||
             "OTP verified successfully and the bill generated."
@@ -2798,33 +3130,9 @@ function ExploreContent({ onReady, onOpenServices }) {
       setBillingId(newBillingId);
 
       // STEP 2 - Update cart with hierarchy fields
-      const discountFactor =
-        cartTotal > 0 ? (cartTotal - appliedDiscount) / cartTotal : 1;
-      const billingCartItems = cartItems.map((item) => {
-        const originalTotal =
-          Number(item.total) ||
-          Number(item.price) * Number(item.qty || 1);
-        const discountedPrice = Math.round((item.price || 0) * discountFactor);
-
-
-        return {
-          itemId: item.itemId,
-          categoryId: item.categoryId,
-          name: item.name,
-          price: discountedPrice,
-          qty: Number(item.qty) || 1,
-          total: discountedPrice * (item.qty || 1),
-          resourceId: item.resourceId || null,
-          resourceName: item.resourceName || "",
-          parentId: item.parentId || null,
-          rootCategoryId: item.rootCategoryId || null,
-          nodePath: item.nodePath || [],
-          categoryPathIds: item.categoryPathIds || [],
-        };
-      });
+      const billingCartItems = buildBillingCartItemsSnapshot();
       const billingSubtotal = cartTotal;
       const billingDiscount = appliedDiscount;
-      const billingFinalTotal = Math.max(billingSubtotal - billingDiscount, 0);
       const updateRes = await fetch(`${API_BASE_URL}/api/billing/update`, {
         method: "POST",
         headers: {
@@ -2889,6 +3197,13 @@ function ExploreContent({ onReady, onOpenServices }) {
       }
 
       const isWalkIn = !customerMobile;
+      setReceiptSnapshot(
+        buildReceiptSnapshot({
+          billingSessionId: newBillingId,
+          billingItems: billingCartItems,
+          completeData,
+        })
+      );
       setBillType(isWalkIn ? "walkin" : "customer");
       setBillSuccessMessage(getWhatsAppBillingWarning(completeData));
       setMenuSearch("");
@@ -5819,15 +6134,25 @@ function ExploreContent({ onReady, onOpenServices }) {
                   ? "Walk-in bill generated successfully."
                   : "Customer bill generated successfully.")}
             </div>
-            <button
-              className="bill-success-btn"
-              onClick={() => {
-                setShowBillSuccess(false);
-                setBillSuccessMessage("");
-              }}
-            >
-              OK
-            </button>
+            <div className="bill-success-actions">
+              {receiptSnapshot && (
+                <button
+                  className="bill-success-btn bill-success-print-btn"
+                  onClick={handlePrintReceipt}
+                >
+                  Print Bill
+                </button>
+              )}
+              <button
+                className="bill-success-btn"
+                onClick={() => {
+                  setShowBillSuccess(false);
+                  setBillSuccessMessage("");
+                }}
+              >
+                OK
+              </button>
+            </div>
           </div>
         </div>
       )}

@@ -160,16 +160,20 @@ function formatDateOnly(value) {
 
 function formatTrendBucket(bucket, periodOption) {
   if (!bucket) return "";
+  const rawBucket = String(bucket);
+  const period = periodOption?.period;
 
-  if (periodOption.period === "today") {
-    return bucket;
+  if (period === "today") {
+    return rawBucket;
   }
 
-  if (periodOption.period === "thisMonth" || periodOption.period === "month") {
-    const [year, month, day] = String(bucket).split("-");
+  if (period === "thisMonth" || period === "month") {
+    const [year, month, day] = rawBucket.split("-");
     const date = new Date(
       Date.UTC(Number(year || 1970), Number(month || 1) - 1, Number(day || 1))
     );
+    if (Number.isNaN(date.getTime())) return rawBucket;
+
     const monthLabel = new Intl.DateTimeFormat("en-IN", {
       month: "short",
       timeZone: "Asia/Kolkata",
@@ -177,14 +181,16 @@ function formatTrendBucket(bucket, periodOption) {
     return `${Number(day)} ${monthLabel}`;
   }
 
-  const [year, month] = String(bucket).split("-");
+  const [year, month] = rawBucket.split("-");
   const date = new Date(Date.UTC(Number(year || 1970), Number(month || 1) - 1, 1));
+  if (Number.isNaN(date.getTime())) return rawBucket;
+
   const monthLabel = new Intl.DateTimeFormat("en-IN", {
     month: "short",
     timeZone: "Asia/Kolkata",
   }).format(date);
 
-  return periodOption.period === "thisYear" ? monthLabel : `${monthLabel} ${year}`;
+  return period === "thisYear" ? monthLabel : `${monthLabel} ${year}`;
 }
 
 function KpiCard({ label, value, loading, compact = false, onClick, active = false }) {
@@ -1921,6 +1927,8 @@ export default function AdminAnalyticsPage() {
   const vendorsRef = useRef(null);
   const rewardsRef = useRef(null);
   const subscriptionsRef = useRef(null);
+  const dashboardRequestIdRef = useRef(0);
+  const customerDrilldownRequestIdRef = useRef(0);
   const [selectedPeriod, setSelectedPeriod] = useState("thisMonth");
   const [selectedVendorStatus, setSelectedVendorStatus] = useState("all");
   const [activeSection, setActiveSection] = useState("overview");
@@ -1999,60 +2007,96 @@ export default function AdminAnalyticsPage() {
     return params;
   }, [selectedPeriodOption, selectedVendorStatus]);
 
-  const loadOverview = useCallback(async () => {
-    setOverviewLoading(true);
-    setOverviewError("");
+  const getDashboardRequestId = useCallback((options) => {
+    if (options && typeof options === "object" && typeof options.requestId === "number") {
+      return options.requestId;
+    }
+
+    dashboardRequestIdRef.current += 1;
+    return dashboardRequestIdRef.current;
+  }, []);
+
+  const isLatestDashboardRequest = useCallback((requestId) => {
+    return dashboardRequestIdRef.current === requestId;
+  }, []);
+
+  const loadOverview = useCallback(async (options) => {
+    const requestId = getDashboardRequestId(options);
+    if (isLatestDashboardRequest(requestId)) {
+      setOverviewLoading(true);
+      setOverviewError("");
+    }
     try {
       const { data } = await API.get("/api/admin/analytics/overview", {
         params: requestParams,
       });
+      if (!isLatestDashboardRequest(requestId)) return false;
       setOverview(data || null);
       return true;
     } catch (err) {
+      if (!isLatestDashboardRequest(requestId)) return false;
       setOverviewError(err?.response?.data?.message || "Unable to load analytics data.");
       return false;
     } finally {
-      setOverviewLoading(false);
+      if (isLatestDashboardRequest(requestId)) {
+        setOverviewLoading(false);
+      }
     }
-  }, [requestParams]);
+  }, [getDashboardRequestId, isLatestDashboardRequest, requestParams]);
 
-  const loadBilling = useCallback(async () => {
-    setBillingLoading(true);
-    setBillingError("");
+  const loadBilling = useCallback(async (options) => {
+    const requestId = getDashboardRequestId(options);
+    if (isLatestDashboardRequest(requestId)) {
+      setBillingLoading(true);
+      setBillingError("");
+    }
     try {
       const { data } = await API.get("/api/admin/analytics/billing", {
         params: requestParams,
       });
+      if (!isLatestDashboardRequest(requestId)) return false;
       setBillingAnalytics(data || null);
       return true;
     } catch (err) {
+      if (!isLatestDashboardRequest(requestId)) return false;
       setBillingError("Unable to load billing analytics.");
       return false;
     } finally {
-      setBillingLoading(false);
+      if (isLatestDashboardRequest(requestId)) {
+        setBillingLoading(false);
+      }
     }
-  }, [requestParams]);
+  }, [getDashboardRequestId, isLatestDashboardRequest, requestParams]);
 
-  const loadCustomers = useCallback(async () => {
-    setCustomerLoading(true);
-    setCustomerError("");
+  const loadCustomers = useCallback(async (options) => {
+    const requestId = getDashboardRequestId(options);
+    if (isLatestDashboardRequest(requestId)) {
+      setCustomerLoading(true);
+      setCustomerError("");
+    }
     try {
       const { data } = await API.get("/api/admin/analytics/customers", {
         params: requestParams,
       });
+      if (!isLatestDashboardRequest(requestId)) return false;
       setCustomerAnalytics(data || null);
       return true;
     } catch (err) {
+      if (!isLatestDashboardRequest(requestId)) return false;
       setCustomerError("Unable to load customer analytics.");
       return false;
     } finally {
-      setCustomerLoading(false);
+      if (isLatestDashboardRequest(requestId)) {
+        setCustomerLoading(false);
+      }
     }
-  }, [requestParams]);
+  }, [getDashboardRequestId, isLatestDashboardRequest, requestParams]);
 
   const loadCustomerDrilldown = useCallback(async () => {
     if (!customerDrilldownType) return;
 
+    const requestId = customerDrilldownRequestIdRef.current + 1;
+    customerDrilldownRequestIdRef.current = requestId;
     setCustomerDrilldownLoading(true);
     setCustomerDrilldownError("");
     try {
@@ -2065,68 +2109,103 @@ export default function AdminAnalyticsPage() {
           search: customerDrilldownSearch || undefined,
         },
       });
+      if (customerDrilldownRequestIdRef.current !== requestId) return;
       setCustomerDrilldown(data || null);
     } catch (err) {
+      if (customerDrilldownRequestIdRef.current !== requestId) return;
       setCustomerDrilldownError(
         err?.response?.data?.message || "Unable to load customer drilldown."
       );
     } finally {
-      setCustomerDrilldownLoading(false);
+      if (customerDrilldownRequestIdRef.current === requestId) {
+        setCustomerDrilldownLoading(false);
+      }
     }
   }, [customerDrilldownPage, customerDrilldownSearch, customerDrilldownType, requestParams]);
 
-  const loadVendors = useCallback(async () => {
-    setVendorLoading(true);
-    setVendorError("");
+  const loadVendors = useCallback(async (options) => {
+    const requestId = getDashboardRequestId(options);
+    if (isLatestDashboardRequest(requestId)) {
+      setVendorLoading(true);
+      setVendorError("");
+    }
     try {
       const { data } = await API.get("/api/admin/analytics/vendors", {
         params: requestParams,
       });
+      if (!isLatestDashboardRequest(requestId)) return false;
       setVendorAnalytics(data || null);
       return true;
     } catch (err) {
+      if (!isLatestDashboardRequest(requestId)) return false;
       setVendorError("Unable to load vendor analytics.");
       return false;
     } finally {
-      setVendorLoading(false);
+      if (isLatestDashboardRequest(requestId)) {
+        setVendorLoading(false);
+      }
     }
-  }, [requestParams]);
+  }, [getDashboardRequestId, isLatestDashboardRequest, requestParams]);
 
-  const loadRewards = useCallback(async () => {
-    setRewardsLoading(true);
-    setRewardsError("");
+  const loadRewards = useCallback(async (options) => {
+    const requestId = getDashboardRequestId(options);
+    if (isLatestDashboardRequest(requestId)) {
+      setRewardsLoading(true);
+      setRewardsError("");
+    }
     try {
       const { data } = await API.get("/api/admin/analytics/rewards", {
         params: requestParams,
       });
+      if (!isLatestDashboardRequest(requestId)) return false;
       setRewardsAnalytics(data || null);
       return true;
     } catch (err) {
+      if (!isLatestDashboardRequest(requestId)) return false;
       setRewardsError("Unable to load rewards analytics.");
       return false;
     } finally {
-      setRewardsLoading(false);
+      if (isLatestDashboardRequest(requestId)) {
+        setRewardsLoading(false);
+      }
     }
-  }, [requestParams]);
+  }, [getDashboardRequestId, isLatestDashboardRequest, requestParams]);
 
-  const loadSubscriptions = useCallback(async () => {
-    setSubscriptionLoading(true);
-    setSubscriptionError("");
+  const loadSubscriptions = useCallback(async (options) => {
+    const requestId = getDashboardRequestId(options);
+    if (isLatestDashboardRequest(requestId)) {
+      setSubscriptionLoading(true);
+      setSubscriptionError("");
+    }
     try {
       const { data } = await API.get("/api/admin/analytics/subscriptions", {
         params: requestParams,
       });
+      if (!isLatestDashboardRequest(requestId)) return false;
       setSubscriptionAnalytics(data || null);
       return true;
     } catch (err) {
+      if (!isLatestDashboardRequest(requestId)) return false;
       setSubscriptionError("Unable to load subscription analytics.");
       return false;
     } finally {
-      setSubscriptionLoading(false);
+      if (isLatestDashboardRequest(requestId)) {
+        setSubscriptionLoading(false);
+      }
     }
-  }, [requestParams]);
+  }, [getDashboardRequestId, isLatestDashboardRequest, requestParams]);
 
   const loadDashboard = useCallback(async () => {
+    const requestId = dashboardRequestIdRef.current + 1;
+    dashboardRequestIdRef.current = requestId;
+
+    setOverview(null);
+    setBillingAnalytics(null);
+    setCustomerAnalytics(null);
+    setVendorAnalytics(null);
+    setRewardsAnalytics(null);
+    setSubscriptionAnalytics(null);
+
     const [
       overviewOk,
       billingOk,
@@ -2135,17 +2214,33 @@ export default function AdminAnalyticsPage() {
       rewardsOk,
       subscriptionsOk,
     ] = await Promise.all([
-      loadOverview(),
-      loadBilling(),
-      loadCustomers(),
-      loadVendors(),
-      loadRewards(),
-      loadSubscriptions(),
+      loadOverview({ requestId }),
+      loadBilling({ requestId }),
+      loadCustomers({ requestId }),
+      loadVendors({ requestId }),
+      loadRewards({ requestId }),
+      loadSubscriptions({ requestId }),
     ]);
-    if (overviewOk && billingOk && customerOk && vendorOk && rewardsOk && subscriptionsOk) {
+    if (
+      isLatestDashboardRequest(requestId) &&
+      overviewOk &&
+      billingOk &&
+      customerOk &&
+      vendorOk &&
+      rewardsOk &&
+      subscriptionsOk
+    ) {
       setLastRefreshedAt(new Date());
     }
-  }, [loadBilling, loadCustomers, loadOverview, loadRewards, loadSubscriptions, loadVendors]);
+  }, [
+    isLatestDashboardRequest,
+    loadBilling,
+    loadCustomers,
+    loadOverview,
+    loadRewards,
+    loadSubscriptions,
+    loadVendors,
+  ]);
 
   useEffect(() => {
     loadDashboard();
