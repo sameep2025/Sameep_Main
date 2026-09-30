@@ -35,6 +35,7 @@ import {
   ADMIN_OPEN_DASHBOARD_EVENT,
   ADMIN_OPEN_MENU_EVENT,
 } from "../utils/adminQuickActions";
+import { getVendorAuthHeaders } from "../utils/vendorAuth";
 const FOOTER_GALLERY_OPEN_EVENT = "ynot-footer-open-gallery";
 
 function normalizePreviewTemplateKey(value) {
@@ -1203,6 +1204,7 @@ function ExploreContent({ onReady, onOpenServices }) {
   useEffect(() => {
     const handleSessionExpired = () => {
       vendorLogout();
+      resetQuickLoginPasscodeModal();
       setShowSessionExpiredPopup(true);
       setShowVendorLogin(false);
       setShowLogin(false);
@@ -1229,14 +1231,55 @@ function ExploreContent({ onReady, onOpenServices }) {
   const [vendorOtp, setVendorOtp] = useState("");
   const [vendorOtpAttemptToken, setVendorOtpAttemptToken] = useState("");
   const [showVendorOtp, setShowVendorOtp] = useState(false);
+  const [showVendorPasscode, setShowVendorPasscode] = useState(false);
+  const [vendorPasscode, setVendorPasscode] = useState("");
+  const [vendorPasscodeError, setVendorPasscodeError] = useState("");
+  const [verifyingVendorPasscode, setVerifyingVendorPasscode] = useState(false);
   const [loginAsAdmin, setLoginAsAdmin] = useState(false);
   const [pendingAction, setPendingAction] = useState(null);
   const [hasActiveVendorSession, setHasActiveVendorSession] = useState(false);
+  const [isAdminImpersonationSession, setIsAdminImpersonationSession] = useState(false);
+  const [showQuickLoginPasscodeModal, setShowQuickLoginPasscodeModal] = useState(false);
+  const [quickLoginPasscode, setQuickLoginPasscode] = useState("");
+  const [quickLoginConfirmPasscode, setQuickLoginConfirmPasscode] = useState("");
+  const [quickLoginPasscodeError, setQuickLoginPasscodeError] = useState("");
+  const [quickLoginPasscodeNotice, setQuickLoginPasscodeNotice] = useState("");
+  const [savingQuickLoginPasscode, setSavingQuickLoginPasscode] = useState(false);
 
   const finalTotal = Math.max(cartTotal - appliedDiscount, 0);
 
   const [showAdminPasscode, setShowAdminPasscode] = useState(false);
   const [adminPasscode, setAdminPasscode] = useState("");
+
+  const resetVendorPasscodeState = () => {
+    setShowVendorPasscode(false);
+    setVendorPasscode("");
+    setVendorPasscodeError("");
+    setVerifyingVendorPasscode(false);
+  };
+
+  const resetQuickLoginPasscodeModal = () => {
+    setShowQuickLoginPasscodeModal(false);
+    setQuickLoginPasscode("");
+    setQuickLoginConfirmPasscode("");
+    setQuickLoginPasscodeError("");
+    setSavingQuickLoginPasscode(false);
+  };
+
+  const resetVendorLoginState = ({ clearPendingAction = true } = {}) => {
+    setShowVendorLogin(false);
+    setLoginAsAdmin(false);
+    setShowAdminPasscode(false);
+    setAdminPasscode("");
+    setShowVendorOtp(false);
+    setVendorOtp("");
+    setVendorOtpAttemptToken("");
+    resetVendorPasscodeState();
+    resetQuickLoginPasscodeModal();
+    if (clearPendingAction) {
+      setPendingAction(null);
+    }
+  };
 
   const getWhatsAppBillingWarning = (response) => {
     const whatsapp = response?.whatsapp || {};
@@ -1575,8 +1618,7 @@ function ExploreContent({ onReady, onOpenServices }) {
   };
 
 
-  const handleVendorLogin = async () => {
-
+  const validateVendorLoginMobile = () => {
     const pageVendorPhone =
       vendorInfo?.phone ||
       vendorInfo?.mobile ||
@@ -1585,12 +1627,66 @@ function ExploreContent({ onReady, onOpenServices }) {
     const clean = (num) => num?.replace(/\D/g, "").slice(-10);
     if (clean(vendorMobile) !== clean(pageVendorPhone)) {
       alert("This number is not the vendor phone");
+      return false;
+    }
+
+    return true;
+  };
+
+  const completeVendorLogin = async (data, deviceId) => {
+    localStorage.setItem("sessionDeviceId", deviceId);
+
+    if (data?.token) {
+      localStorage.setItem(`vendorToken:${vendorId}`, data.token);
+    }
+    localStorage.setItem("vendorLoginTime", String(Date.now()));
+    localStorage.setItem("userType", "vendor");
+    if (vendorId) {
+      localStorage.setItem("vendorSessionVendorId", String(vendorId));
+    }
+    localStorage.removeItem("isAdminLogin");
+    window.dispatchEvent(new Event("storage"));
+    window.dispatchEvent(new Event("auth-changed"));
+
+    setShowVendorLogin(false);
+    setShowVendorOtp(false);
+    setVendorOtp("");
+    setVendorOtpAttemptToken("");
+    setLoginAsAdmin(false);
+    setShowAdminPasscode(false);
+    setAdminPasscode("");
+    resetVendorPasscodeState();
+
+    if (pendingAction === "GENERATE_BILL") {
+      await handleGenerateBill();
+      setPendingAction(null);
+    } else {
+      persistViewMode("new-dashboard");
+    }
+  };
+
+  const handleVendorLogin = () => {
+    if (!validateVendorLoginMobile()) {
+      return;
+    }
+
+    setShowVendorPasscode(true);
+    setShowVendorOtp(false);
+    setVendorOtp("");
+    setVendorOtpAttemptToken("");
+    setVendorPasscode("");
+    setVendorPasscodeError("");
+  };
+
+  const requestVendorOtpLogin = async () => {
+    if (!validateVendorLoginMobile()) {
       return;
     }
 
     try {
+      setLoadingOtp(true);
       const payload = {
-        countryCode: "91",
+        countryCode,
         phone: vendorMobile,
         vendorId,
         categoryId: rootCategoryId,
@@ -1611,12 +1707,134 @@ function ExploreContent({ onReady, onOpenServices }) {
       }
 
       setVendorOtpAttemptToken(data?.otpAttemptToken || "");
+      setShowVendorPasscode(false);
+      setVendorPasscode("");
+      setVendorPasscodeError("");
       setShowVendorOtp(true);
     } catch (err) {
       console.error(err);
       alert("Something went wrong");
+    } finally {
+      setLoadingOtp(false);
     }
   };
+
+  const loginWithVendorPasscode = async () => {
+    const nextPasscode = String(vendorPasscode || "").replace(/\D/g, "").slice(0, 4);
+    if (!/^\d{4}$/.test(nextPasscode)) {
+      setVendorPasscodeError("Enter your 4-digit passcode.");
+      return;
+    }
+
+    if (verifyingVendorPasscode) return;
+
+    try {
+      setVerifyingVendorPasscode(true);
+      setVendorPasscodeError("");
+
+      const deviceId =
+        localStorage.getItem("deviceId") || getSafeDeviceId();
+
+      localStorage.setItem("deviceId", deviceId);
+
+      const res = await fetch(`${API_BASE_URL}/api/customers/vendor-passcode-login`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          countryCode,
+          phone: vendorMobile,
+          vendorId,
+          categoryId: rootCategoryId,
+          passcode: nextPasscode,
+        }),
+      });
+
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || data?.success === false) {
+        setVendorPasscode("");
+        setVendorPasscodeError(data?.message || "Invalid mobile number or passcode.");
+        return;
+      }
+
+      const passcodeSuccess = data?.token || data?.message === "verified";
+      if (!passcodeSuccess) {
+        setVendorPasscode("");
+        setVendorPasscodeError("Unable to login. Please try again.");
+        return;
+      }
+
+      await completeVendorLogin(data, deviceId);
+    } catch (err) {
+      console.error(err);
+      setVendorPasscode("");
+      setVendorPasscodeError("Something went wrong. Please try again.");
+    } finally {
+      setVerifyingVendorPasscode(false);
+    }
+  };
+
+  const handleQuickLoginPasscodeChange = (setter) => (event) => {
+    const nextValue = event.target.value.replace(/\D/g, "").slice(0, 4);
+    setter(nextValue);
+    setQuickLoginPasscodeError("");
+    setQuickLoginPasscodeNotice("");
+  };
+
+  const saveQuickLoginPasscode = async () => {
+    const passcode = String(quickLoginPasscode || "").replace(/\D/g, "").slice(0, 4);
+    const confirmPasscode = String(quickLoginConfirmPasscode || "").replace(/\D/g, "").slice(0, 4);
+
+    if (!/^\d{4}$/.test(passcode) || !/^\d{4}$/.test(confirmPasscode)) {
+      setQuickLoginPasscodeError("Enter a 4-digit passcode.");
+      return;
+    }
+
+    if (passcode !== confirmPasscode) {
+      setQuickLoginPasscodeError("Passcodes do not match.");
+      return;
+    }
+
+    if (savingQuickLoginPasscode) return;
+
+    try {
+      setSavingQuickLoginPasscode(true);
+      setQuickLoginPasscodeError("");
+      setQuickLoginPasscodeNotice("");
+
+      const res = await fetch(`${API_BASE_URL}/api/customers/vendor-passcode`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...getVendorAuthHeaders(vendorId),
+        },
+        body: JSON.stringify({
+          passcode,
+          confirmPasscode,
+        }),
+      });
+
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || data?.success === false) {
+        setQuickLoginPasscode("");
+        setQuickLoginConfirmPasscode("");
+        setQuickLoginPasscodeError(data?.message || "Unable to save passcode. Please try again.");
+        return;
+      }
+
+      resetQuickLoginPasscodeModal();
+      setQuickLoginPasscodeNotice("Quick Login passcode saved.");
+    } catch (err) {
+      console.error("Quick Login passcode save failed:", err?.message || err);
+      setQuickLoginPasscode("");
+      setQuickLoginConfirmPasscode("");
+      setQuickLoginPasscodeError("Unable to save passcode. Please try again.");
+    } finally {
+      setSavingQuickLoginPasscode(false);
+    }
+  };
+
   const verifyVendorOtp = async () => {
     try {
       const deviceId =
@@ -1654,32 +1872,7 @@ function ExploreContent({ onReady, onOpenServices }) {
 
       const otpSuccess = data?.success || data?.token || alreadyVerified;
       if (otpSuccess) {
-        localStorage.setItem("sessionDeviceId", deviceId);
-
-        if (data?.token) {
-          localStorage.setItem(`vendorToken:${vendorId}`, data.token);
-        }
-        localStorage.setItem("vendorLoginTime", String(Date.now()));
-        localStorage.setItem("userType", "vendor");
-        if (vendorId) {
-          localStorage.setItem("vendorSessionVendorId", String(vendorId));
-        }
-        localStorage.removeItem("isAdminLogin");
-        window.dispatchEvent(new Event("storage"));
-        window.dispatchEvent(new Event("auth-changed"));
-
-        setShowVendorLogin(false);
-        setShowVendorOtp(false);
-        setLoginAsAdmin(false);
-        setShowAdminPasscode(false);
-        setAdminPasscode("");
-
-        if (pendingAction === "GENERATE_BILL") {
-          await handleGenerateBill();
-          setPendingAction(null);
-        } else {
-          persistViewMode("new-dashboard");
-        }
+        await completeVendorLogin(data, deviceId);
         return;
       }
 
@@ -2269,6 +2462,13 @@ function ExploreContent({ onReady, onOpenServices }) {
         : null;
 
     if (!vendorToken) {
+      setLoginAsAdmin(false);
+      setShowAdminPasscode(false);
+      setAdminPasscode("");
+      setShowVendorOtp(false);
+      setVendorOtp("");
+      setVendorOtpAttemptToken("");
+      resetVendorPasscodeState();
       setShowVendorLogin(true);
       return;
     }
@@ -2280,6 +2480,13 @@ function ExploreContent({ onReady, onOpenServices }) {
 
     if (storedVendorId !== String(vendorId)) {
       // Different vendor → force login
+      setLoginAsAdmin(false);
+      setShowAdminPasscode(false);
+      setAdminPasscode("");
+      setShowVendorOtp(false);
+      setVendorOtp("");
+      setVendorOtpAttemptToken("");
+      resetVendorPasscodeState();
       setShowVendorLogin(true);
       return;
     }
@@ -2494,6 +2701,8 @@ function ExploreContent({ onReady, onOpenServices }) {
       setShowAdminPasscode(false);
       setShowVendorLogin(false);
       setAdminPasscode("");
+      setShowVendorOtp(false);
+      resetVendorPasscodeState();
 
       if (pendingAction === "GENERATE_BILL") {
         await handleGenerateBill();
@@ -3085,6 +3294,13 @@ function ExploreContent({ onReady, onOpenServices }) {
 
     if (!vendorToken) {
       setPendingAction("GENERATE_BILL");
+      setLoginAsAdmin(false);
+      setShowAdminPasscode(false);
+      setAdminPasscode("");
+      setShowVendorOtp(false);
+      setVendorOtp("");
+      setVendorOtpAttemptToken("");
+      resetVendorPasscodeState();
       setShowVendorLogin(true);
       return;
     }
@@ -3097,6 +3313,13 @@ function ExploreContent({ onReady, onOpenServices }) {
     if (storedVendorId !== String(vendorId)) {
       // Different vendor → force login
       setPendingAction("GENERATE_BILL");
+      setLoginAsAdmin(false);
+      setShowAdminPasscode(false);
+      setAdminPasscode("");
+      setShowVendorOtp(false);
+      setVendorOtp("");
+      setVendorOtpAttemptToken("");
+      resetVendorPasscodeState();
       setShowVendorLogin(true);
       return;
     }
@@ -3248,6 +3471,9 @@ function ExploreContent({ onReady, onOpenServices }) {
       setShowAdminPasscode(false);
       setAdminPasscode("");
       setShowVendorOtp(false);
+      setVendorOtp("");
+      setVendorOtpAttemptToken("");
+      resetVendorPasscodeState();
       setShowVendorLogin(true);
       return;
     }
@@ -3263,6 +3489,9 @@ function ExploreContent({ onReady, onOpenServices }) {
       setShowAdminPasscode(false);
       setAdminPasscode("");
       setShowVendorOtp(false);
+      setVendorOtp("");
+      setVendorOtpAttemptToken("");
+      resetVendorPasscodeState();
       setShowVendorLogin(true);
       return;
     }
@@ -3352,8 +3581,13 @@ function ExploreContent({ onReady, onOpenServices }) {
       const isActive =
         Boolean(vendorToken) &&
         (!sessionVendorId || String(sessionVendorId) === resolvedVendorId);
+      const isAdminSession = isActive && localStorage.getItem("isAdminLogin") === "true";
 
       setHasActiveVendorSession(isActive);
+      setIsAdminImpersonationSession(isAdminSession);
+      if (!isActive || isAdminSession) {
+        resetQuickLoginPasscodeModal();
+      }
     };
 
     syncVendorSessionState();
@@ -4906,6 +5140,13 @@ function ExploreContent({ onReady, onOpenServices }) {
 
                                     if (!vendorToken) {
                                       setPendingAction("GENERATE_BILL");
+                                      setLoginAsAdmin(false);
+                                      setShowAdminPasscode(false);
+                                      setAdminPasscode("");
+                                      setShowVendorOtp(false);
+                                      setVendorOtp("");
+                                      setVendorOtpAttemptToken("");
+                                      resetVendorPasscodeState();
                                       setShowVendorLogin(true);
                                       return;
                                     }
@@ -4917,6 +5158,13 @@ function ExploreContent({ onReady, onOpenServices }) {
 
                                     if (storedVendorId !== String(vendorId)) {
                                       setPendingAction("GENERATE_BILL");
+                                      setLoginAsAdmin(false);
+                                      setShowAdminPasscode(false);
+                                      setAdminPasscode("");
+                                      setShowVendorOtp(false);
+                                      setVendorOtp("");
+                                      setVendorOtpAttemptToken("");
+                                      resetVendorPasscodeState();
                                       setShowVendorLogin(true);
                                       return;
                                     }
@@ -5403,6 +5651,13 @@ function ExploreContent({ onReady, onOpenServices }) {
 
                                       if (!vendorToken) {
                                         setPendingAction("GENERATE_BILL");
+                                        setLoginAsAdmin(false);
+                                        setShowAdminPasscode(false);
+                                        setAdminPasscode("");
+                                        setShowVendorOtp(false);
+                                        setVendorOtp("");
+                                        setVendorOtpAttemptToken("");
+                                        resetVendorPasscodeState();
                                         setShowVendorLogin(true);
                                         return;
                                       }
@@ -5414,6 +5669,13 @@ function ExploreContent({ onReady, onOpenServices }) {
 
                                       if (storedVendorId !== String(vendorId)) {
                                         setPendingAction("GENERATE_BILL");
+                                        setLoginAsAdmin(false);
+                                        setShowAdminPasscode(false);
+                                        setAdminPasscode("");
+                                        setShowVendorOtp(false);
+                                        setVendorOtp("");
+                                        setVendorOtpAttemptToken("");
+                                        resetVendorPasscodeState();
                                         setShowVendorLogin(true);
                                         return;
                                       }
@@ -5614,6 +5876,11 @@ function ExploreContent({ onReady, onOpenServices }) {
         <div className="new-dashboard-overlay">
           <div className="new-dashboard-shell">
             {renderDashboardHeader("Dashboard", () => setViewMode("preview"))}
+            {quickLoginPasscodeNotice && (
+              <div className="quick-login-passcode-notice">
+                {quickLoginPasscodeNotice}
+              </div>
+            )}
 
             <div className="new-dashboard-grid">
               <div
@@ -5690,6 +5957,19 @@ function ExploreContent({ onReady, onOpenServices }) {
                     setViewMode("subscription-dashboard");
                   },
                 },
+                ...(!isAdminImpersonationSession
+                  ? [{
+                      title: "Quick Login Passcode",
+                      description: "Set or change your 4-digit passcode for faster login.",
+                      onClick: () => {
+                        setQuickLoginPasscodeNotice("");
+                        setQuickLoginPasscodeError("");
+                        setQuickLoginPasscode("");
+                        setQuickLoginConfirmPasscode("");
+                        setShowQuickLoginPasscodeModal(true);
+                      },
+                    }]
+                  : []),
               ].map((card) => (
                 <div
                   key={card.title}
@@ -5718,6 +5998,81 @@ function ExploreContent({ onReady, onOpenServices }) {
               ))}
             </div>
           </div>
+        </div>
+      )}
+      {showQuickLoginPasscodeModal && (
+        <div
+          className="login-overlay quick-login-passcode-overlay"
+          onClick={resetQuickLoginPasscodeModal}
+        >
+          <form
+            className="login-modal quick-login-passcode-modal"
+            onClick={(event) => event.stopPropagation()}
+            onSubmit={(event) => {
+              event.preventDefault();
+              saveQuickLoginPasscode();
+            }}
+          >
+            <div>
+              <div className="login-small">Quick Login Passcode</div>
+              <div className="login-title">Quick Login Passcode</div>
+              <p className="login-desc">
+                Create a 4-digit passcode for faster login without OTP.
+              </p>
+            </div>
+
+            <label className="quick-login-passcode-field">
+              <span>New Passcode</span>
+              <input
+                className="login-input quick-login-passcode-input"
+                type="password"
+                inputMode="numeric"
+                autoComplete="new-password"
+                placeholder="••••"
+                maxLength={4}
+                value={quickLoginPasscode}
+                onChange={handleQuickLoginPasscodeChange(setQuickLoginPasscode)}
+              />
+            </label>
+
+            <label className="quick-login-passcode-field">
+              <span>Confirm Passcode</span>
+              <input
+                className="login-input quick-login-passcode-input"
+                type="password"
+                inputMode="numeric"
+                autoComplete="new-password"
+                placeholder="••••"
+                maxLength={4}
+                value={quickLoginConfirmPasscode}
+                onChange={handleQuickLoginPasscodeChange(setQuickLoginConfirmPasscode)}
+              />
+            </label>
+
+            {quickLoginPasscodeError && (
+              <div className="vendor-passcode-error">
+                {quickLoginPasscodeError}
+              </div>
+            )}
+
+            <div className="quick-login-passcode-actions">
+              <button
+                type="button"
+                className="login-btn-secondary quick-login-passcode-cancel"
+                onClick={resetQuickLoginPasscodeModal}
+                disabled={savingQuickLoginPasscode}
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                className="vendor-login-btn vendor-login-btn-primary"
+                disabled={savingQuickLoginPasscode}
+              >
+                {savingQuickLoginPasscode ? "Saving..." : "Save Passcode"}
+              </button>
+            </div>
+          </form>
         </div>
       )}
       {showInvalidMobilePopup && (
@@ -6002,11 +6357,7 @@ function ExploreContent({ onReady, onOpenServices }) {
         <div
           className="login-overlay vendor-login-overlay"
           onClick={() => {
-            setShowVendorLogin(false);
-            setLoginAsAdmin(false);   // ✅ reset
-            setShowAdminPasscode(false);
-            setAdminPasscode("");
-            setPendingAction(null);
+            resetVendorLoginState();
           }}
         >
 
@@ -6035,6 +6386,7 @@ function ExploreContent({ onReady, onOpenServices }) {
                       setShowAdminPasscode(false);
                       setLoginAsAdmin(false);
                       setAdminPasscode("");
+                      resetVendorPasscodeState();
                     }}
                   >
                     Back
@@ -6048,6 +6400,68 @@ function ExploreContent({ onReady, onOpenServices }) {
                   </button>
                 </div>
               </>
+            ) : showVendorPasscode ? (
+
+              <>
+                <div className="vendor-passcode-copy">
+                  <div className="vendor-passcode-heading">Quick Login</div>
+                  <div className="vendor-passcode-subtitle">Enter your 4-digit passcode</div>
+                </div>
+
+                <input
+                  className="login-input vendor-login-input vendor-passcode-input"
+                  type="password"
+                  inputMode="numeric"
+                  autoComplete="off"
+                  placeholder="••••"
+                  maxLength={4}
+                  value={vendorPasscode}
+                  onChange={(e) => {
+                    const nextValue = e.target.value.replace(/\D/g, "").slice(0, 4);
+                    setVendorPasscode(nextValue);
+                    setVendorPasscodeError("");
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      loginWithVendorPasscode();
+                    }
+                  }}
+                />
+
+                {vendorPasscodeError && (
+                  <div className="vendor-passcode-error">
+                    {vendorPasscodeError}
+                  </div>
+                )}
+
+                <button
+                  className="login-btn-main vendor-login-btn vendor-login-btn-primary"
+                  onClick={loginWithVendorPasscode}
+                  disabled={verifyingVendorPasscode}
+                >
+                  {verifyingVendorPasscode ? "Logging in..." : "Login"}
+                </button>
+
+                <button
+                  type="button"
+                  className="vendor-login-link-btn"
+                  onClick={requestVendorOtpLogin}
+                  disabled={loadingOtp || verifyingVendorPasscode}
+                >
+                  {loadingOtp ? "Sending OTP..." : "Login with OTP"}
+                </button>
+
+                <button
+                  className="login-btn-secondary vendor-login-btn vendor-login-btn-secondary"
+                  type="button"
+                  onClick={() => {
+                    resetVendorPasscodeState();
+                  }}
+                >
+                  Back
+                </button>
+              </>
+
             ) : !showVendorOtp ? (
 
               <>
@@ -6064,7 +6478,13 @@ function ExploreContent({ onReady, onOpenServices }) {
                   <input
                     placeholder="Enter mobile number"
                     value={vendorMobile}
-                    onChange={(e) => setVendorMobile(e.target.value)}
+                    onChange={(e) => {
+                      setVendorMobile(e.target.value);
+                      resetVendorPasscodeState();
+                      setShowVendorOtp(false);
+                      setVendorOtp("");
+                      setVendorOtpAttemptToken("");
+                    }}
                     className="login-input vendor-login-input"
                   />
                 </div>
@@ -6082,10 +6502,12 @@ function ExploreContent({ onReady, onOpenServices }) {
                         setVendorMobile("");       // clear mobile
                         setShowAdminPasscode(true);
                         setShowVendorOtp(false);
+                        resetVendorPasscodeState();
                       } else {
                         setShowAdminPasscode(false);
                         setAdminPasscode("");
                         setShowVendorOtp(false);
+                        resetVendorPasscodeState();
                       }
                     }}
                   />
@@ -6107,15 +6529,31 @@ function ExploreContent({ onReady, onOpenServices }) {
                 <input
                   placeholder="Enter OTP"
                   value={vendorOtp}
-                  onChange={(e) => setVendorOtp(e.target.value)}
+                  onChange={(e) => setVendorOtp(e.target.value.replace(/\D/g, "").slice(0, 6))}
                   className="login-input vendor-login-input"
                 />
 
                 <button
                   className="login-btn-main vendor-login-btn vendor-login-btn-primary"
                   onClick={verifyVendorOtp}
+                  disabled={loadingOtp}
                 >
-                  Verify OTP
+                  {loadingOtp ? "Verifying..." : "Verify OTP"}
+                </button>
+
+                <button
+                  className="login-btn-secondary vendor-login-btn vendor-login-btn-secondary"
+                  type="button"
+                  onClick={() => {
+                    setShowVendorOtp(false);
+                    setVendorOtp("");
+                    setVendorOtpAttemptToken("");
+                    setShowVendorPasscode(true);
+                    setVendorPasscode("");
+                    setVendorPasscodeError("");
+                  }}
+                >
+                  Back
                 </button>
               </>
             )}

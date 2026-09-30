@@ -180,6 +180,25 @@ trustSummary: {
     default: {},
   },
 
+  billingPreferences: {
+    sendWhatsAppBill: {
+      type: Boolean,
+      default: true,
+    },
+  },
+
+  vendorLogin: {
+    passcodeHash: {
+      type: String,
+      default: "",
+      select: false,
+    },
+    passcodeUpdatedAt: {
+      type: Date,
+      default: null,
+    },
+  },
+
   whatsappBusiness: {
     type: whatsappBusinessConfigSchema,
     default: getDefaultWhatsappBusinessConfig,

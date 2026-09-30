@@ -110,7 +110,38 @@
 }
 
 .loyalty-settings-card-wide {
-  grid-column: span 1;
+  grid-column: 1 / -1;
+}
+
+.loyalty-settings-whatsapp-card {
+  padding-block: 18px;
+}
+
+.loyalty-settings-whatsapp-row {
+  gap: 24px;
+}
+
+.loyalty-settings-whatsapp-copy {
+  min-width: 0;
+}
+
+.loyalty-settings-whatsapp-copy .loyalty-settings-help {
+  max-width: 620px;
+}
+
+.loyalty-settings-whatsapp-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 14px;
+  flex: 0 0 auto;
+  margin-left: auto;
+}
+
+.loyalty-settings-whatsapp-status {
+  color: #fff;
+  font-size: 14px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
 }
 
 
@@ -313,6 +344,22 @@
 
   .loyalty-settings-card-wide {
     grid-column: span 1;
+  }
+
+  .loyalty-settings-whatsapp-row {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 16px;
+  }
+
+  .loyalty-settings-whatsapp-copy .loyalty-settings-help {
+    max-width: none;
+  }
+
+  .loyalty-settings-whatsapp-control {
+    justify-content: space-between;
+    margin-left: 0;
+    width: 100%;
   }
 
   .loyalty-settings-actions {

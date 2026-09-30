@@ -53,8 +53,10 @@ const digitalScoreRoutes = require("./routes/digitalScoreRoutes");
 const adminDigitalScoreRoutes = require("./routes/adminDigitalScoreRoutes");
 const paymentRoutes = require("./routes/paymentRoutes");
 const vendorPaymentConfigRoutes = require("./routes/vendorPaymentConfigRoutes");
+const vendorBillingPreferencesRoutes = require("./routes/vendorBillingPreferencesRoutes");
 const vendorWhatsappBusinessRoutes = require("./routes/vendorWhatsappBusinessRoutes");
 const metaWhatsappWebhookRoutes = require("./routes/metaWhatsappWebhookRoutes");
+const customerPortalRoutes = require("./routes/customerPortalRoutes");
 
 const vendorPriceNodeRoutes = require(
   path.resolve(__dirname, "routes", "vendorPriceNodeRoutes")
@@ -166,6 +168,7 @@ app.use("/api/combos", comboRoutes);
 app.use("/api/dummy-combos", dummyComboRoutes);
 app.use("/api/vendor-combo-pricing", vendorComboPricingRoutes);
 app.use("/api/customers", customerRoutes);
+app.use("/api/customer-portal", customerPortalRoutes);
 app.use("/api/vendorPricing", vendorPricingRoutes);
 app.use("/api/models", modelRoutes);
 app.use("/api/dummy-categories", dummyCategoryRoutes);
@@ -195,6 +198,7 @@ app.use("/api/site-analytics", siteAnalyticsRoutes);
 app.use("/api/digital-score", digitalScoreRoutes);
 app.use("/api/payments", paymentRoutes);
 app.use("/api/vendor-payment-config", vendorPaymentConfigRoutes);
+app.use("/api/vendor-billing-preferences", vendorBillingPreferencesRoutes);
 // Vendor Dashboard APIs
 app.use("/api/vendor/dashboard", require("./routes/vendorDashboardRoutes"));
 app.use("/api/vendor/dashboard", require("./routes/customerAnalyticsRoutes"));

@@ -53,6 +53,8 @@ async function validateCustomerSession(token) {
     vendorId,
     categoryId,
     sessionId,
+    authMethod: session.authMethod || "UNKNOWN",
+    sessionType: session.sessionType || "STANDARD",
     session,
   };
 }
@@ -78,6 +80,8 @@ async function requireCustomerSession(req, res, next) {
       vendorId: result.vendorId,
       categoryId: result.categoryId,
       sessionId: result.sessionId,
+      authMethod: result.authMethod,
+      sessionType: result.sessionType,
     };
 
     return next();

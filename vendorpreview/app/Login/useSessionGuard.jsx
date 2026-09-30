@@ -23,7 +23,6 @@ const guardState = {
   focusHandler: null,
   storageHandler: null,
   sessionCheckInFlight: false,
-  setupTimerInFlight: false,
 };
 
 const clearLogoutTimer = () => {
@@ -70,21 +69,6 @@ const notifySessionExpired = (reason) => {
   );
 };
 
-const getStoredLoginTimeMs = () => {
-  const raw =
-    localStorage.getItem("loginTime") ||
-    localStorage.getItem("authLoginTime") ||
-    localStorage.getItem("vendorLoginTime");
-  const ms = Number(raw);
-  if (!Number.isFinite(ms) || ms <= 0) return null;
-
-  if (!localStorage.getItem("loginTime")) {
-    localStorage.setItem("loginTime", String(ms));
-  }
-
-  return ms;
-};
-
 const forceLogout = () => {
   console.warn("Session expired -> logging out");
 
@@ -92,6 +76,20 @@ const forceLogout = () => {
   clearLogoutTimer();
   window.dispatchEvent(new Event("storage"));
   notifySessionExpired("expired");
+};
+
+const scheduleLogoutAt = (expiryTime) => {
+  const expiryMs = new Date(expiryTime).getTime();
+  if (!Number.isFinite(expiryMs)) return;
+
+  const remainingTime = expiryMs - Date.now();
+  if (remainingTime <= 0) {
+    forceLogout();
+    return;
+  }
+
+  clearLogoutTimer();
+  guardState.logoutTimerId = setTimeout(forceLogout, remainingTime);
 };
 
 const checkSession = async () => {
@@ -134,6 +132,8 @@ const body = deviceId
         clearLogoutTimer();
         window.dispatchEvent(new Event("storage"));
         notifySessionExpired("inactive");
+      } else {
+        scheduleLogoutAt(data?.expiryTime);
       }
     } else if (!res.ok) {
       console.warn("Session check failed");
@@ -145,89 +145,22 @@ const body = deviceId
   }
 };
 
-const setupSessionTimer = async () => {
-  if (guardState.setupTimerInFlight) return;
-  guardState.setupTimerInFlight = true;
-
-  try {
-    const token = getSessionToken();
-    if (!token) {
-      clearLogoutTimer();
-      return;
-    }
-
-    const res = await fetch(
-      `${process.env.NEXT_PUBLIC_API_BASE_URL}/api/app-config/session-validity`
-    );
-
-    let selectedHour = null;
-
-    if (res.ok) {
-      const data = await res.json();
-      const selectedHourRaw = data?.selectedHour;
-      const parsedHour = Number(selectedHourRaw);
-      if (Number.isFinite(parsedHour) && parsedHour > 0) {
-        selectedHour = parsedHour;
-        localStorage.setItem("sessionHour", String(parsedHour));
-      }
-    }
-
-    if (!Number.isFinite(selectedHour) || selectedHour <= 0) {
-      const storedHour = Number(localStorage.getItem("sessionHour"));
-      if (Number.isFinite(storedHour) && storedHour > 0) {
-        selectedHour = storedHour;
-      } else {
-        return;
-      }
-    }
-
-    const sessionDuration = selectedHour * 60 * 60 * 1000;
-
-    console.log("Session duration (ms):", sessionDuration);
-
-    let loginTimeMs = getStoredLoginTimeMs();
-    if (!loginTimeMs) {
-      loginTimeMs = Date.now();
-      localStorage.setItem("loginTime", String(loginTimeMs));
-    }
-
-    const remainingTime = sessionDuration - (Date.now() - loginTimeMs);
-
-    if (remainingTime <= 0) {
-      forceLogout();
-      return;
-    }
-
-    clearLogoutTimer();
-    guardState.logoutTimerId = setTimeout(forceLogout, remainingTime);
-  } catch {
-    console.warn("Failed to setup session timer");
-  } finally {
-    guardState.setupTimerInFlight = false;
-  }
-};
-
 const startSessionGuard = () => {
   if (guardState.intervalId) return;
 
   checkSession();
   guardState.intervalId = setInterval(checkSession, SESSION_CHECK_INTERVAL_MS);
 
-  setupSessionTimer();
-
   guardState.visibilityHandler = () => {
     if (document.visibilityState === "visible") {
       checkSession();
-      setupSessionTimer();
     }
   };
   guardState.focusHandler = () => {
     checkSession();
-    setupSessionTimer();
   };
   guardState.storageHandler = () => {
     checkSession();
-    setupSessionTimer();
   };
 
   document.addEventListener("visibilitychange", guardState.visibilityHandler);

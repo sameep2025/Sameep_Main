@@ -1634,6 +1634,98 @@ margin-left: 15px;
               font-size: 14px;
               color: #e3c886;
             }
+            .vendor-passcode-copy {
+              display: flex;
+              flex-direction: column;
+              gap: 4px;
+            }
+            .vendor-passcode-heading {
+              font-size: 18px;
+              font-weight: 700;
+              color: #ffd575;
+            }
+            .vendor-passcode-subtitle {
+              font-size: 13px;
+              color: rgba(255, 255, 255, 0.72);
+            }
+            .vendor-passcode-input {
+              text-align: center;
+              letter-spacing: 0.45em;
+              font-size: 20px;
+              font-weight: 700;
+            }
+            .vendor-passcode-error {
+              color: #ffb4a8;
+              font-size: 13px;
+              line-height: 1.4;
+            }
+            .vendor-login-link-btn {
+              background: transparent;
+              border: 0;
+              color: #f5d97a;
+              cursor: pointer;
+              font-size: 14px;
+              font-weight: 600;
+              padding: 4px 8px;
+              text-decoration: underline;
+              text-underline-offset: 4px;
+            }
+            .vendor-login-link-btn:disabled {
+              cursor: not-allowed;
+              opacity: 0.65;
+            }
+            .login-overlay.quick-login-passcode-overlay {
+              z-index: 11000;
+            }
+            .login-overlay.quick-login-passcode-overlay .quick-login-passcode-modal {
+              position: relative;
+              z-index: 11001;
+              pointer-events: auto;
+            }
+            .quick-login-passcode-modal {
+              gap: 16px;
+            }
+            .quick-login-passcode-field {
+              display: flex;
+              flex-direction: column;
+              gap: 8px;
+              color: rgba(255, 255, 255, 0.82);
+              font-size: 13px;
+              font-weight: 700;
+            }
+            .quick-login-passcode-input {
+              text-align: center;
+              letter-spacing: 0.45em;
+              font-size: 20px;
+              font-weight: 700;
+            }
+            .quick-login-passcode-actions {
+              display: flex;
+              gap: 12px;
+              align-items: center;
+            }
+            .quick-login-passcode-cancel {
+              height: 44px;
+            }
+            .quick-login-passcode-notice {
+              margin: 0 0 16px;
+              padding: 12px 14px;
+              border: 1px solid rgba(125, 211, 158, 0.45);
+              border-radius: 14px;
+              background: rgba(38, 128, 74, 0.16);
+              color: #b9f5c8;
+              font-size: 14px;
+              font-weight: 700;
+            }
+            @media (max-width: 420px) {
+              .quick-login-passcode-actions {
+                flex-direction: column-reverse;
+              }
+              .quick-login-passcode-actions .vendor-login-btn,
+              .quick-login-passcode-actions .login-btn-secondary {
+                width: 100%;
+              }
+            }
           .login-input-row {
   display: flex;
   gap: 10px;

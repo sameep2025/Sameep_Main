@@ -811,7 +811,19 @@ function buildCompletionBilling(overrides = {}) {
   };
 }
 
-async function withMockedCompletionFlow(billing, fn) {
+function buildMockEarn(remainingPoints, overrides = {}) {
+  return {
+    remainingPoints,
+    saveCalled: 0,
+    async save() {
+      this.saveCalled += 1;
+      return this;
+    },
+    ...overrides,
+  };
+}
+
+async function withMockedCompletionFlow(billing, fn, options = {}) {
   const originals = {
     findById: BillingSession.findById,
     findOneAndUpdate: BillingSession.findOneAndUpdate,
@@ -819,6 +831,7 @@ async function withMockedCompletionFlow(billing, fn) {
     loyaltyFind: LoyaltyLedger.find,
     loyaltyCreate: LoyaltyLedger.create,
     loyaltyRuleFindOne: VendorLoyaltyRule.findOne,
+    customerFindById: Customer.findById,
     vendorFindById: Vendor.findById,
     setImmediate: global.setImmediate,
   };
@@ -826,6 +839,20 @@ async function withMockedCompletionFlow(billing, fn) {
     transactionPayload: null,
     closeUpdate: null,
     ledgerCreates: [],
+    loyaltyFindCalls: 0,
+    immediatePromises: [],
+    loyaltyEarns:
+      options.loyaltyEarns ||
+      [
+        {
+          remainingPoints: 500,
+          saveCalled: 0,
+          async save() {
+            this.saveCalled += 1;
+            return this;
+          },
+        },
+      ],
   };
 
   BillingSession.findById = async () => billing;
@@ -833,7 +860,7 @@ async function withMockedCompletionFlow(billing, fn) {
     state.closeUpdate = update;
     billing.status = update.status;
     billing.paymentMode = update.paymentMode;
-    return { ...billing, ...update };
+    return { ...billing, ...update, customerId: options.closedCustomerId ?? null };
   };
   Transaction.create = async (payload) => {
     state.transactionPayload = payload;
@@ -842,30 +869,44 @@ async function withMockedCompletionFlow(billing, fn) {
       ...payload,
     };
   };
-  LoyaltyLedger.find = () => ({
-    sort: async () => [
-      {
-        remainingPoints: 500,
-        async save() {
-          return this;
-        },
-      },
-    ],
-  });
+  LoyaltyLedger.find = () => {
+    state.loyaltyFindCalls += 1;
+    return {
+      sort: async () => state.loyaltyEarns,
+    };
+  };
   LoyaltyLedger.create = async (payload) => {
     state.ledgerCreates.push(payload);
     return payload;
   };
-  VendorLoyaltyRule.findOne = async () => null;
-  Vendor.findById = () => ({
-    select: () => ({
-      lean: async () => ({ whatsappBusiness: {} }),
-    }),
+  VendorLoyaltyRule.findOne = async () => options.loyaltyRule || null;
+  Customer.findById = () => ({
+    lean: async () => options.customer || {
+      _id: new mongoose.Types.ObjectId(CUSTOMER_ID),
+      fullNumber: "919381520396",
+      phone: "9381520396",
+      name: "Customer",
+    },
   });
-  global.setImmediate = () => {};
+  Vendor.findById = () => {
+    const vendor = options.vendor || { whatsappBusiness: {} };
+    return {
+      select: () => ({
+        lean: async () => vendor,
+      }),
+      lean: async () => vendor,
+    };
+  };
+  global.setImmediate = (callback) => {
+    if (!options.runImmediate) return undefined;
+    const promise = Promise.resolve().then(callback);
+    state.immediatePromises.push(promise);
+    return promise;
+  };
 
   try {
     await fn(state);
+    await Promise.all(state.immediatePromises);
   } finally {
     BillingSession.findById = originals.findById;
     BillingSession.findOneAndUpdate = originals.findOneAndUpdate;
@@ -873,6 +914,7 @@ async function withMockedCompletionFlow(billing, fn) {
     LoyaltyLedger.find = originals.loyaltyFind;
     LoyaltyLedger.create = originals.loyaltyCreate;
     VendorLoyaltyRule.findOne = originals.loyaltyRuleFindOne;
+    Customer.findById = originals.customerFindById;
     Vendor.findById = originals.vendorFindById;
     global.setImmediate = originals.setImmediate;
   }
@@ -941,6 +983,310 @@ test("billing completion accepts CASH with redeemed points financial snapshot un
     assert.equal(state.transactionPayload.finalPaidAmount, 500);
     assert.equal(state.ledgerCreates.length, 0);
   });
+});
+
+test("billing completion redemption below available points deducts FIFO and records exact REDEEM", async () => {
+  const firstEarn = buildMockEarn(100);
+  const secondEarn = buildMockEarn(100);
+  const billing = buildCompletionBilling({
+    customerId: new mongoose.Types.ObjectId(CUSTOMER_ID),
+    billingMode: "CUSTOMER",
+    pointsRedeemed: 80,
+    otpVerified: true,
+  });
+
+  await withMockedCompletionFlow(
+    billing,
+    async (state) => {
+      const res = buildCompletionResponse();
+      await billingController.completeBillingSession(
+        { body: { billingId: COMPLETED_BILL_ID, paymentMode: "ONLINE" } },
+        res
+      );
+
+      assert.equal(res.statusCode, 200);
+      assert.equal(firstEarn.remainingPoints, 20);
+      assert.equal(secondEarn.remainingPoints, 100);
+      assert.equal(firstEarn.saveCalled, 1);
+      assert.equal(secondEarn.saveCalled, 0);
+      assert.equal(state.ledgerCreates.length, 1);
+      assert.equal(state.ledgerCreates[0].type, "REDEEM");
+      assert.equal(String(state.ledgerCreates[0].vendorId), String(billing.vendorId));
+      assert.equal(String(state.ledgerCreates[0].customerId), String(billing.customerId));
+      assert.equal(String(state.ledgerCreates[0].transactionId), "6aacc888dac53725ac8225c5");
+      assert.equal(state.ledgerCreates[0].points, -80);
+      assert.equal(state.transactionPayload.redeemValue, 80);
+      assert.equal(state.transactionPayload.finalPaidAmount, 720);
+    },
+    { loyaltyEarns: [firstEarn, secondEarn] }
+  );
+});
+
+test("billing completion redemption equal to available points deducts all points and records exact REDEEM", async () => {
+  const firstEarn = buildMockEarn(40);
+  const secondEarn = buildMockEarn(60);
+  const billing = buildCompletionBilling({
+    customerId: new mongoose.Types.ObjectId(CUSTOMER_ID),
+    billingMode: "CUSTOMER",
+    pointsRedeemed: 100,
+    otpVerified: true,
+  });
+
+  await withMockedCompletionFlow(
+    billing,
+    async (state) => {
+      const res = buildCompletionResponse();
+      await billingController.completeBillingSession(
+        { body: { billingId: COMPLETED_BILL_ID, paymentMode: "ONLINE" } },
+        res
+      );
+
+      assert.equal(res.statusCode, 200);
+      assert.equal(firstEarn.remainingPoints, 0);
+      assert.equal(secondEarn.remainingPoints, 0);
+      assert.equal(firstEarn.saveCalled, 1);
+      assert.equal(secondEarn.saveCalled, 1);
+      assert.equal(state.ledgerCreates.length, 1);
+      assert.equal(state.ledgerCreates[0].points, -100);
+      assert.equal(state.transactionPayload.redeemValue, 100);
+      assert.equal(state.transactionPayload.finalPaidAmount, 700);
+    },
+    { loyaltyEarns: [firstEarn, secondEarn] }
+  );
+});
+
+test("billing completion rejects redemption above authoritative available points before any mutation", async () => {
+  const firstEarn = buildMockEarn(50);
+  const secondEarn = buildMockEarn(100);
+  const billing = buildCompletionBilling({
+    customerId: new mongoose.Types.ObjectId(CUSTOMER_ID),
+    billingMode: "CUSTOMER",
+    pointsRedeemed: 199,
+    otpVerified: true,
+  });
+
+  await withMockedCompletionFlow(
+    billing,
+    async (state) => {
+      const res = buildCompletionResponse();
+      await billingController.completeBillingSession(
+        { body: { billingId: COMPLETED_BILL_ID, paymentMode: "ONLINE" } },
+        res
+      );
+
+      assert.equal(res.statusCode, 400);
+      assert.equal(res.payload.success, false);
+      assert.match(res.payload.message, /Insufficient reward points/);
+      assert.equal(firstEarn.remainingPoints, 50);
+      assert.equal(secondEarn.remainingPoints, 100);
+      assert.equal(firstEarn.saveCalled, 0);
+      assert.equal(secondEarn.saveCalled, 0);
+      assert.equal(state.transactionPayload, null);
+      assert.equal(state.closeUpdate, null);
+      assert.equal(state.ledgerCreates.length, 0);
+    },
+    { loyaltyEarns: [firstEarn, secondEarn] }
+  );
+});
+
+test("billing completion does not let expired points satisfy redemption", async () => {
+  const billing = buildCompletionBilling({
+    customerId: new mongoose.Types.ObjectId(CUSTOMER_ID),
+    billingMode: "CUSTOMER",
+    pointsRedeemed: 1,
+    otpVerified: true,
+  });
+
+  await withMockedCompletionFlow(
+    billing,
+    async (state) => {
+      const res = buildCompletionResponse();
+      await billingController.completeBillingSession(
+        { body: { billingId: COMPLETED_BILL_ID, paymentMode: "ONLINE" } },
+        res
+      );
+
+      assert.equal(res.statusCode, 400);
+      assert.match(res.payload.message, /Insufficient reward points/);
+      assert.equal(state.transactionPayload, null);
+      assert.equal(state.ledgerCreates.length, 0);
+    },
+    { loyaltyEarns: [] }
+  );
+});
+
+test("billing completion with zero-point redemption does not create REDEEM ledger", async () => {
+  const billing = buildCompletionBilling({
+    customerId: new mongoose.Types.ObjectId(CUSTOMER_ID),
+    billingMode: "CUSTOMER",
+    pointsRedeemed: 0,
+    otpVerified: false,
+  });
+
+  await withMockedCompletionFlow(billing, async (state) => {
+    const res = buildCompletionResponse();
+    await billingController.completeBillingSession(
+      { body: { billingId: COMPLETED_BILL_ID, paymentMode: "ONLINE" } },
+      res
+    );
+
+    assert.equal(res.statusCode, 200);
+    assert.equal(state.loyaltyFindCalls, 0);
+    assert.equal(state.ledgerCreates.length, 0);
+    assert.equal(state.transactionPayload.redeemValue, 0);
+    assert.equal(state.transactionPayload.finalPaidAmount, 800);
+  });
+});
+
+test("sendWhatsAppBill false completes bill and reports intentional WhatsApp skip", async () => {
+  const billing = buildCompletionBilling({
+    customerId: new mongoose.Types.ObjectId(CUSTOMER_ID),
+    billingMode: "CUSTOMER",
+  });
+
+  await withMockedCompletionFlow(
+    billing,
+    async (state) => {
+      const res = buildCompletionResponse();
+      await billingController.completeBillingSession(
+        { body: { billingId: COMPLETED_BILL_ID, paymentMode: "ONLINE" } },
+        res
+      );
+
+      assert.equal(res.statusCode, 200);
+      assert.equal(state.transactionPayload.billingSessionId, billing._id);
+      assert.equal(state.closeUpdate.status, "COMPLETED");
+      assert.deepEqual(res.payload.whatsapp, {
+        provider: "disabled",
+        sendExpected: false,
+        reason: "vendor_disabled",
+      });
+      assert.equal(state.ledgerCreates.length, 0);
+    },
+    {
+      closedCustomerId: new mongoose.Types.ObjectId(CUSTOMER_ID),
+      runImmediate: true,
+      vendor: {
+        billingPreferences: { sendWhatsAppBill: false },
+        whatsappBusiness: {
+          provider: "msg91",
+          enabled: false,
+        },
+      },
+    }
+  );
+});
+
+test("sendWhatsAppBill false does not block loyalty earning", async () => {
+  const billing = buildCompletionBilling({
+    customerId: new mongoose.Types.ObjectId(CUSTOMER_ID),
+    billingMode: "CUSTOMER",
+  });
+
+  await withMockedCompletionFlow(
+    billing,
+    async (state) => {
+      const res = buildCompletionResponse();
+      await billingController.completeBillingSession(
+        { body: { billingId: COMPLETED_BILL_ID, paymentMode: "CASH" } },
+        res
+      );
+
+      assert.equal(res.statusCode, 200);
+      assert.equal(billing.pointsEarned, 80);
+      assert.equal(state.ledgerCreates.length, 1);
+      assert.equal(state.ledgerCreates[0].type, "EARN");
+      assert.equal(state.ledgerCreates[0].points, 80);
+      assert.equal(state.transactionPayload.paymentMode, "CASH");
+      assert.equal(state.closeUpdate.status, "COMPLETED");
+    },
+    {
+      closedCustomerId: new mongoose.Types.ObjectId(CUSTOMER_ID),
+      runImmediate: true,
+      vendor: {
+        billingPreferences: { sendWhatsAppBill: false },
+        whatsappBusiness: {},
+      },
+      loyaltyRule: {
+        earn: { percentPer100: 10 },
+        expiry: { expiryDays: 30 },
+      },
+    }
+  );
+});
+
+test("sendWhatsAppBill false does not block reward redemption", async () => {
+  const firstEarn = buildMockEarn(100);
+  const billing = buildCompletionBilling({
+    customerId: new mongoose.Types.ObjectId(CUSTOMER_ID),
+    billingMode: "CUSTOMER",
+    pointsRedeemed: 80,
+    otpVerified: true,
+  });
+
+  await withMockedCompletionFlow(
+    billing,
+    async (state) => {
+      const res = buildCompletionResponse();
+      await billingController.completeBillingSession(
+        { body: { billingId: COMPLETED_BILL_ID, paymentMode: "ONLINE" } },
+        res
+      );
+
+      assert.equal(res.statusCode, 200);
+      assert.equal(firstEarn.remainingPoints, 20);
+      assert.equal(state.ledgerCreates.length, 1);
+      assert.equal(state.ledgerCreates[0].type, "REDEEM");
+      assert.equal(state.ledgerCreates[0].points, -80);
+      assert.equal(state.transactionPayload.finalPaidAmount, 720);
+      assert.equal(state.closeUpdate.status, "COMPLETED");
+    },
+    {
+      closedCustomerId: new mongoose.Types.ObjectId(CUSTOMER_ID),
+      runImmediate: true,
+      loyaltyEarns: [firstEarn],
+      vendor: {
+        billingPreferences: { sendWhatsAppBill: false },
+        whatsappBusiness: {},
+      },
+    }
+  );
+});
+
+test("billing completion consumes multiple EARN batches FIFO for redemption", async () => {
+  const firstEarn = buildMockEarn(30);
+  const secondEarn = buildMockEarn(50);
+  const thirdEarn = buildMockEarn(100);
+  const billing = buildCompletionBilling({
+    customerId: new mongoose.Types.ObjectId(CUSTOMER_ID),
+    billingMode: "CUSTOMER",
+    pointsRedeemed: 120,
+    otpVerified: true,
+  });
+
+  await withMockedCompletionFlow(
+    billing,
+    async (state) => {
+      const res = buildCompletionResponse();
+      await billingController.completeBillingSession(
+        { body: { billingId: COMPLETED_BILL_ID, paymentMode: "CASH" } },
+        res
+      );
+
+      assert.equal(res.statusCode, 200);
+      assert.equal(firstEarn.remainingPoints, 0);
+      assert.equal(secondEarn.remainingPoints, 0);
+      assert.equal(thirdEarn.remainingPoints, 60);
+      assert.equal(firstEarn.saveCalled, 1);
+      assert.equal(secondEarn.saveCalled, 1);
+      assert.equal(thirdEarn.saveCalled, 1);
+      assert.equal(state.ledgerCreates.length, 1);
+      assert.equal(state.ledgerCreates[0].points, -120);
+      assert.equal(state.transactionPayload.redeemValue, 120);
+      assert.equal(state.transactionPayload.finalPaidAmount, 680);
+    },
+    { loyaltyEarns: [firstEarn, secondEarn, thirdEarn] }
+  );
 });
 
 test("billing completion rejects invalid paymentMode", async () => {

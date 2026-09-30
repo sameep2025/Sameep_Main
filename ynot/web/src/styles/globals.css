@@ -58,6 +58,1021 @@ button {
   color: inherit;
 }
 
+.customerPortalPage {
+  min-height: 100vh;
+  position: relative;
+  overflow-x: hidden;
+  padding: 28px 18px 48px;
+}
+
+.customerPortalBackdrop {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(circle at 18% 10%, rgba(255, 193, 7, 0.32), transparent 22%),
+    radial-gradient(circle at 84% 0%, rgba(16, 26, 52, 0.1), transparent 22%),
+    linear-gradient(160deg, #fffdfa 0%, #f4f2ea 58%, #fff7d6 100%);
+}
+
+.customerPortalShell {
+  position: relative;
+  z-index: 1;
+  width: min(860px, 100%);
+  margin: 0 auto;
+}
+
+.portalAuthCard,
+.customerPortalDashboard,
+.portalStateCard,
+.portalRewardCard,
+.portalBillCard,
+.portalDetailPanel {
+  border: 1px solid rgba(16, 26, 52, 0.08);
+  background: rgba(255, 255, 255, 0.88);
+  box-shadow: var(--shadow-card);
+  backdrop-filter: blur(18px);
+}
+
+.portalAuthCard {
+  width: min(520px, 100%);
+  margin: clamp(48px, 12vh, 110px) auto 0;
+  border-radius: 34px;
+  padding: clamp(28px, 6vw, 46px);
+}
+
+.portalEyebrow {
+  display: inline-flex;
+  padding: 8px 14px;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: #875400;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
+.portalAuthCard h1,
+.customerPortalHeaderText h1,
+.portalDetailTitle h2 {
+  font-family: "Avenir Next Condensed", "Trebuchet MS", sans-serif;
+  letter-spacing: -0.05em;
+}
+
+.portalAuthCard h1 {
+  margin-top: 18px;
+  font-size: clamp(2.7rem, 10vw, 4.25rem);
+  line-height: 0.94;
+}
+
+.portalIntro {
+  margin-top: 18px;
+  color: var(--muted);
+  font-size: 1.05rem;
+  line-height: 1.7;
+}
+
+.portalForm {
+  margin-top: 28px;
+  display: grid;
+  gap: 14px;
+}
+
+.portalForm label {
+  color: #5c6477;
+  font-weight: 800;
+}
+
+.portalPhoneRow {
+  display: grid;
+  grid-template-columns: 94px 1fr;
+  gap: 10px;
+}
+
+.portalCountryCode,
+.portalForm input {
+  min-height: 56px;
+  border-radius: 18px;
+  border: 1px solid rgba(16, 26, 52, 0.12);
+  background: #fff;
+}
+
+.portalCountryCode {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 14px;
+  color: var(--muted);
+}
+
+.portalCountryCode input,
+.portalForm input {
+  width: 100%;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--ink);
+  font-weight: 800;
+}
+
+.portalForm input {
+  padding: 0 18px;
+}
+
+.portalOtpBoxGroup {
+  position: relative;
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: clamp(6px, 2vw, 10px);
+}
+
+.portalOtpBoxGroup .portalOtpInput {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  opacity: 0;
+  caret-color: transparent;
+  z-index: 2;
+}
+
+.portalOtpBoxGroup span {
+  min-width: 0;
+  aspect-ratio: 1;
+  border-radius: 14px;
+  border: 1.5px solid rgba(16, 26, 52, 0.18);
+  background: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--ink);
+  font-size: clamp(1.15rem, 6vw, 1.55rem);
+  font-weight: 900;
+  box-shadow: inset 0 0 0 1px rgba(255, 193, 7, 0);
+  transition: border-color 0.2s ease, box-shadow 0.2s ease, background 0.2s ease;
+}
+
+.portalOtpBoxGroup:focus-within span.active {
+  border-color: #d9aa4e;
+  background: #fffaf0;
+  box-shadow: 0 0 0 3px rgba(255, 193, 7, 0.18);
+}
+
+.portalPrimaryButton,
+.portalSecondaryButton,
+.portalLoadMoreButton,
+.portalStateCard button {
+  min-height: 52px;
+  border-radius: 999px;
+  cursor: pointer;
+  font-weight: 900;
+  transition: transform 0.2s ease, opacity 0.2s ease;
+}
+
+.portalPrimaryButton {
+  margin-top: 8px;
+  background: #050505;
+  color: #fff;
+}
+
+.portalSecondaryButton,
+.portalLoadMoreButton,
+.portalStateCard button {
+  border: 1px solid rgba(16, 26, 52, 0.12);
+  background: #fff;
+  color: var(--ink);
+  padding: 0 22px;
+}
+
+.portalPrimaryButton:hover,
+.portalSecondaryButton:hover,
+.portalLoadMoreButton:hover,
+.portalStateCard button:hover {
+  transform: translateY(-1px);
+}
+
+.portalPrimaryButton:disabled,
+.portalSecondaryButton:disabled,
+.portalLoadMoreButton:disabled,
+.portalAuthActions button:disabled {
+  cursor: not-allowed;
+  opacity: 0.58;
+}
+
+.portalError,
+.portalSuccess {
+  border-radius: 16px;
+  padding: 12px 14px;
+  font-weight: 800;
+  line-height: 1.45;
+}
+
+.portalError {
+  background: #fff1f0;
+  color: #9f1d16;
+  border: 1px solid rgba(159, 29, 22, 0.16);
+}
+
+.portalSuccess {
+  background: #edfdf5;
+  color: #166534;
+  border: 1px solid rgba(22, 101, 52, 0.16);
+}
+
+.portalAuthActions {
+  margin-top: 22px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  justify-content: space-between;
+}
+
+.portalAuthActions button {
+  cursor: pointer;
+  color: #5f4600;
+  font-weight: 850;
+}
+
+.customerPortalDashboard {
+  margin-top: 18px;
+  border-radius: 30px;
+  padding: clamp(14px, 3vw, 24px);
+}
+
+.customerPortalHeader {
+  display: grid;
+  grid-template-columns: 92px 1fr auto;
+  gap: 16px;
+  align-items: center;
+}
+
+.customerPortalBrand {
+  display: block;
+  border-radius: 20px;
+  background: #070707;
+  padding: 12px;
+}
+
+.customerPortalBrand img {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.customerPortalHeaderText p,
+.portalDetailTitle p {
+  color: #875400;
+  font-size: 0.78rem;
+  font-weight: 900;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.customerPortalHeaderText h1 {
+  margin-top: 4px;
+  font-size: clamp(1.85rem, 5vw, 3rem);
+  line-height: 0.96;
+}
+
+.customerPortalHeaderText span {
+  display: block;
+  margin-top: 6px;
+  color: var(--muted);
+  line-height: 1.55;
+  font-size: 0.95rem;
+}
+
+.customerPortalHeaderActions {
+  display: grid;
+  gap: 10px;
+  justify-items: end;
+}
+
+.customerPortalHeaderActions span {
+  color: var(--muted);
+  font-weight: 800;
+}
+
+.customerPortalHeaderActions button,
+.portalDetailClose {
+  cursor: pointer;
+  border-radius: 999px;
+  border: 1px solid rgba(16, 26, 52, 0.12);
+  background: #fff;
+  padding: 12px 18px;
+  font-weight: 900;
+}
+
+.portalTabs {
+  position: sticky;
+  top: 10px;
+  z-index: 30;
+  margin: 20px 0 18px;
+  display: inline-flex;
+  gap: 8px;
+  padding: 6px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.9);
+  border: 1px solid rgba(16, 26, 52, 0.08);
+  box-shadow: 0 12px 26px rgba(16, 26, 52, 0.08);
+  backdrop-filter: blur(16px);
+}
+
+.portalTabs button {
+  min-height: 42px;
+  min-width: 112px;
+  border-radius: 999px;
+  cursor: pointer;
+  color: var(--muted);
+  font-weight: 950;
+  padding: 0 18px;
+}
+
+.portalTabs button.active {
+  background: #050505;
+  color: #fff;
+  box-shadow: 0 14px 24px rgba(0, 0, 0, 0.12);
+}
+
+.portalStateCard {
+  border-radius: 24px;
+  padding: 28px;
+  color: var(--muted);
+  line-height: 1.6;
+}
+
+.portalStateCard h3 {
+  color: var(--ink);
+  font-size: 1.45rem;
+  margin-bottom: 6px;
+}
+
+.portalStateCard button {
+  margin-top: 16px;
+}
+
+.portalCardStack {
+  display: grid;
+  gap: 14px;
+}
+
+.portalRewardsOverview {
+  border-radius: 24px;
+  padding: clamp(16px, 3vw, 22px);
+  margin-bottom: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.74);
+  background:
+    radial-gradient(circle at top right, rgba(255, 193, 7, 0.2), transparent 34%),
+    rgba(255, 255, 255, 0.88);
+  box-shadow: 0 18px 46px rgba(16, 26, 52, 0.08);
+}
+
+.portalRewardsOverviewTop {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(156px, 0.34fr);
+  gap: 16px;
+  align-items: center;
+}
+
+.portalSectionKicker,
+.portalRewardsSectionHeading {
+  color: #6f4900;
+  font-size: 0.78rem;
+  font-weight: 950;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.portalRewardsOverview h2 {
+  margin-top: 5px;
+  color: var(--ink);
+  font-size: clamp(1.25rem, 3.8vw, 1.75rem);
+  line-height: 1.1;
+}
+
+.portalRewardsNote {
+  margin-top: 8px;
+  color: var(--muted);
+  font-size: 0.92rem;
+  line-height: 1.5;
+}
+
+.portalRewardsAvailable {
+  padding: 14px 16px;
+  border-radius: 20px;
+  background:
+    linear-gradient(135deg, rgba(255, 193, 7, 0.94), rgba(255, 232, 154, 0.96)),
+    #ffc107;
+  text-align: center;
+}
+
+.portalRewardsAvailable strong {
+  display: block;
+  margin-bottom: 4px;
+  color: var(--ink);
+  font-size: clamp(2.1rem, 9vw, 3.35rem);
+  line-height: 0.92;
+}
+
+.portalRewardsAvailable span,
+.portalRewardsSummaryGrid span {
+  display: block;
+  color: rgba(16, 26, 52, 0.68);
+  font-size: 0.72rem;
+  font-weight: 900;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+
+.portalRewardsSummaryGrid {
+  margin-top: 12px;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.portalRewardsSummaryGrid div {
+  border-radius: 15px;
+  background: rgba(16, 26, 52, 0.04);
+  padding: 10px 12px;
+}
+
+.portalRewardsSummaryGrid strong {
+  display: inline-block;
+  margin-top: 5px;
+  color: var(--ink);
+  font-size: 1rem;
+}
+
+.portalRewardsExpiryNotice {
+  margin-top: 12px;
+  border-radius: 16px;
+  border: 1px solid rgba(135, 84, 0, 0.16);
+  background: #fff8dc;
+  color: #6f4900;
+  padding: 10px 12px;
+  font-weight: 900;
+}
+
+.portalRewardsFinePrint {
+  margin-top: 10px;
+  color: var(--muted);
+  font-size: 0.86rem;
+  line-height: 1.45;
+}
+
+.portalScratchRewardsSection {
+  margin-bottom: 14px;
+}
+
+.portalScratchSectionHeader {
+  margin-bottom: 10px;
+}
+
+.portalScratchSectionHeader h2 {
+  margin-top: 4px;
+  color: var(--ink);
+  font-size: clamp(1.15rem, 3.4vw, 1.45rem);
+  line-height: 1.15;
+}
+
+.portalScratchGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 210px), 240px));
+  gap: 12px;
+  align-items: start;
+}
+
+.portalScratchRewardCard {
+  width: min(100%, 240px);
+  aspect-ratio: 1 / 1;
+  border-radius: 24px;
+  padding: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.78);
+  background:
+    radial-gradient(circle at top left, rgba(255, 193, 7, 0.32), transparent 38%),
+    linear-gradient(135deg, rgba(255, 255, 255, 0.94), rgba(255, 248, 220, 0.9));
+  box-shadow: 0 18px 46px rgba(16, 26, 52, 0.1);
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+}
+
+.portalScratchHeader {
+  display: block;
+  margin-bottom: 8px;
+}
+
+.portalScratchHeader h3 {
+  margin-top: 4px;
+  color: var(--ink);
+  font-size: 1rem;
+  line-height: 1.18;
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.portalScratchCount {
+  flex: 0 0 auto;
+  border-radius: 999px;
+  padding: 7px 10px;
+  background: rgba(111, 73, 0, 0.1);
+  color: #6f4900;
+  font-size: 0.75rem;
+  font-weight: 950;
+}
+
+.portalScratchIntro {
+  margin-bottom: 4px;
+  color: var(--ink);
+  font-size: 1rem;
+  font-weight: 900;
+}
+
+.portalScratchHint {
+  margin-bottom: 12px;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.portalScratchCanvasWrap {
+  width: 100%;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  border-radius: 18px;
+  border: 1px solid rgba(111, 73, 0, 0.14);
+  background: #fff8dc;
+}
+
+.portalScratchCanvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  max-width: 100%;
+  border-radius: 18px;
+  cursor: crosshair;
+  touch-action: none;
+  user-select: none;
+}
+
+.portalScratchFallback {
+  width: 100%;
+  min-height: 30px;
+  margin-top: 6px;
+  font-size: 0.82rem;
+}
+
+.portalScratchError {
+  margin-top: 6px;
+  border-radius: 14px;
+  padding: 8px 10px;
+  border: 1px solid rgba(159, 29, 22, 0.18);
+  background: #fff1f1;
+  color: #9f1d16;
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
+.portalScratchError button {
+  min-height: 30px;
+  margin-top: 6px;
+  border-radius: 999px;
+  padding: 0 12px;
+  background: #9f1d16;
+  color: #fff;
+  font-size: 0.78rem;
+  font-weight: 900;
+  cursor: pointer;
+}
+
+.portalScratchResult {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  justify-content: center;
+  min-height: 0;
+  padding: 4px 0 0;
+  text-align: center;
+}
+
+.portalScratchResult span {
+  color: var(--muted);
+  font-size: 0.82rem;
+  font-weight: 850;
+}
+
+.portalScratchResult strong {
+  display: block;
+  margin: 2px 0 0;
+  color: var(--ink);
+  font-size: clamp(2.25rem, 7vw, 3.15rem);
+  line-height: 0.95;
+}
+
+.portalScratchResult em {
+  color: rgba(16, 26, 52, 0.68);
+  font-size: 0.7rem;
+  font-style: normal;
+  font-weight: 950;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.portalScratchResult p {
+  color: var(--muted);
+  font-size: 0.82rem;
+  font-weight: 800;
+  line-height: 1.25;
+}
+
+.portalScratchBalance {
+  margin: 8px auto 0;
+  border-radius: 14px;
+  padding: 8px 10px;
+  background: rgba(22, 101, 52, 0.08);
+  color: #166534;
+  font-size: 0.78rem;
+  font-weight: 850;
+}
+
+.portalScratchBalance strong {
+  display: inline;
+  margin: 0;
+  color: inherit;
+  font-size: inherit;
+  line-height: inherit;
+}
+
+.portalScratchExpiry {
+  margin-top: 7px;
+}
+
+.portalRewardsSectionHeading {
+  margin: 14px 0 10px;
+}
+
+.portalRewardCard,
+.portalBillCard {
+  border-radius: 24px;
+  padding: clamp(14px, 3vw, 20px);
+}
+
+.portalRewardCompact {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(126px, 0.34fr);
+  gap: 16px;
+  align-items: center;
+}
+
+.portalVendorHeader,
+.portalBillTop {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.portalVendorHeader h3,
+.portalBillTop h3 {
+  font-size: 1.18rem;
+  line-height: 1.2;
+}
+
+.portalVendorHeader a,
+.portalBillTop p {
+  margin-top: 6px;
+  color: var(--muted);
+  font-size: 0.92rem;
+}
+
+.portalVendorHeader a {
+  display: inline-flex;
+  font-weight: 850;
+  color: #6f4900;
+}
+
+.portalVendorHeader img {
+  width: 48px;
+  height: 48px;
+  object-fit: cover;
+  border-radius: 16px;
+  border: 1px solid rgba(16, 26, 52, 0.08);
+}
+
+.portalPointsHero {
+  margin-top: 0;
+  padding: 14px 16px;
+  border-radius: 20px;
+  background:
+    linear-gradient(135deg, rgba(255, 193, 7, 0.92), rgba(255, 232, 154, 0.94)),
+    #ffc107;
+  text-align: center;
+}
+
+.portalPointsHero span,
+.portalMiniGrid span {
+  display: block;
+  color: rgba(16, 26, 52, 0.68);
+  font-size: 0.78rem;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.portalPointsHero strong {
+  display: block;
+  margin: 0 0 4px;
+  font-size: clamp(2rem, 8vw, 3rem);
+  line-height: 0.95;
+}
+
+.portalMiniGrid {
+  margin-top: 12px;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.portalMiniGrid div {
+  border-radius: 15px;
+  background: rgba(16, 26, 52, 0.04);
+  padding: 10px 12px;
+}
+
+.portalMiniGrid strong {
+  display: inline-block;
+  margin-top: 5px;
+  font-size: 1rem;
+}
+
+.portalExpiryNotice {
+  margin-top: 12px;
+  border-radius: 16px;
+  border: 1px solid rgba(135, 84, 0, 0.16);
+  background: #fff8dc;
+  color: #6f4900;
+  padding: 10px 12px;
+  font-weight: 900;
+}
+
+.portalRewardDetails {
+  margin-top: 12px;
+  border-top: 1px solid rgba(16, 26, 52, 0.08);
+  padding-top: 12px;
+}
+
+.portalExpiryBox {
+  margin-top: 0;
+  border-radius: 16px;
+  border: 1px solid rgba(135, 84, 0, 0.16);
+  background: #fff8dc;
+  padding: 12px;
+}
+
+.portalExpiryBox strong {
+  display: block;
+  color: #6f4900;
+  margin-bottom: 8px;
+}
+
+.portalExpiryBox p {
+  color: #6f4900;
+  line-height: 1.5;
+}
+
+.portalActivity {
+  margin-top: 12px;
+  border-top: 1px solid rgba(16, 26, 52, 0.08);
+  padding-top: 12px;
+}
+
+.portalActivity h4 {
+  margin-bottom: 10px;
+}
+
+.portalActivityRow,
+.portalBillRows > div,
+.portalItemsHeader,
+.portalItemRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 14px;
+  align-items: center;
+}
+
+.portalActivityRow {
+  padding: 6px 0;
+  color: var(--muted);
+  align-items: start;
+}
+
+.portalActivityText {
+  min-width: 0;
+}
+
+.portalActivityText,
+.portalActivityDetail {
+  display: block;
+}
+
+.portalActivityDetail {
+  margin-top: 3px;
+  color: #6b7280;
+  font-size: 0.82rem;
+  font-weight: 700;
+  line-height: 1.35;
+}
+
+.portalTextButton {
+  margin-top: 12px;
+  min-height: 40px;
+  cursor: pointer;
+  color: #6f4900;
+  font-weight: 950;
+}
+
+.portalPositive {
+  color: #166534;
+  font-weight: 900;
+}
+
+.portalNegative {
+  color: #9f1d16;
+  font-weight: 900;
+}
+
+.portalBillTop > span,
+.portalPaymentPill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  background: #101a34;
+  color: #fff;
+  padding: 8px 12px;
+  font-size: 0.76rem;
+  font-weight: 950;
+  letter-spacing: 0.08em;
+}
+
+.portalBillPaid {
+  flex-shrink: 0;
+  min-width: 124px;
+  border-radius: 18px;
+  background: #101a34;
+  color: #fff;
+  padding: 12px 14px;
+  text-align: right;
+}
+
+.portalBillPaid span {
+  display: block;
+  color: rgba(255, 255, 255, 0.72);
+  font-size: 0.72rem;
+  font-weight: 900;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+
+.portalBillPaid strong {
+  display: block;
+  margin-top: 3px;
+  font-size: 1.18rem;
+}
+
+.portalBillRows {
+  margin-top: 12px;
+  display: grid;
+  gap: 6px;
+}
+
+.portalBillRows > div {
+  min-height: 28px;
+  color: var(--muted);
+}
+
+.portalBillRows strong {
+  color: var(--ink);
+}
+
+.portalAmountPaid {
+  margin-top: 4px;
+  padding-top: 12px;
+  border-top: 1px solid rgba(16, 26, 52, 0.1);
+}
+
+.portalAmountPaid strong {
+  font-size: 1.3rem;
+}
+
+.portalSecondaryButton {
+  width: 100%;
+  margin-top: 12px;
+}
+
+.portalLoadMoreButton {
+  display: block;
+  width: min(260px, 100%);
+  margin: 24px auto 0;
+}
+
+.portalDetailOverlay {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 18px;
+  background: rgba(8, 8, 8, 0.42);
+  overflow: hidden;
+}
+
+.portalDetailPanel {
+  width: min(640px, 100%);
+  max-height: min(760px, calc(100vh - 36px));
+  overflow: auto;
+  overscroll-behavior: contain;
+  border-radius: 30px;
+  padding: clamp(18px, 4vw, 30px);
+}
+
+.portalDetailClose {
+  float: right;
+}
+
+.portalDetailTitle {
+  clear: both;
+  padding-top: 8px;
+}
+
+.portalDetailTitle h2 {
+  margin-top: 4px;
+  font-size: clamp(2rem, 8vw, 3rem);
+}
+
+.portalDetailTitle span {
+  display: block;
+  margin-top: 8px;
+  color: var(--muted);
+}
+
+.portalItemsTable {
+  margin-top: 22px;
+  border-radius: 20px;
+  overflow: hidden;
+  border: 1px solid rgba(16, 26, 52, 0.08);
+}
+
+.portalItemsHeader,
+.portalItemRow {
+  grid-template-columns: minmax(0, 1fr) 46px minmax(84px, auto);
+  padding: 12px 14px;
+}
+
+.portalItemsHeader {
+  background: rgba(16, 26, 52, 0.05);
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.portalItemRow + .portalItemRow {
+  border-top: 1px solid rgba(16, 26, 52, 0.07);
+}
+
+.portalItemRow div {
+  min-width: 0;
+}
+
+.portalItemRow span,
+.portalItemRow strong:last-child,
+.portalItemsHeader span:nth-child(2),
+.portalItemsHeader span:nth-child(3) {
+  text-align: right;
+}
+
+.portalItemRow div span {
+  display: block;
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 0.92rem;
+  text-align: left;
+}
+
+.portalPaymentPill {
+  margin-top: 18px;
+}
+
 .landingPage {
   overflow-x: hidden;
 }
@@ -122,7 +1137,8 @@ button {
   gap: 42px;
 }
 
-.siteNav button {
+.siteNav button,
+.siteNav a {
   cursor: pointer;
   color: var(--ink);
   text-transform: uppercase;
@@ -131,7 +1147,8 @@ button {
   transition: color 0.2s ease;
 }
 
-.siteNav button:hover {
+.siteNav button:hover,
+.siteNav a:hover {
   color: #000;
 }
 
@@ -1184,6 +2201,7 @@ button {
   }
 
   .siteNav button,
+  .siteNav a,
   .navCtaButton {
     font-size: 0.85rem;
   }
@@ -2905,6 +3923,18 @@ button {
 }
 
 @media (max-width: 960px) {
+  .customerPortalHeader {
+    grid-template-columns: 92px 1fr;
+  }
+
+  .customerPortalHeaderActions {
+    grid-column: 1 / -1;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    justify-items: stretch;
+  }
+
   .digitalScoreHero,
   .digitalScoreCardHeader,
   .digitalScoreFooterActions,
@@ -2928,6 +3958,118 @@ button {
 }
 
 @media (max-width: 640px) {
+  .customerPortalPage {
+    padding: 14px 10px 34px;
+  }
+
+  .portalAuthCard,
+  .customerPortalDashboard {
+    border-radius: 26px;
+  }
+
+  .portalPhoneRow,
+  .customerPortalHeader {
+    grid-template-columns: 1fr;
+  }
+
+  .portalRewardsOverview {
+    padding: 14px;
+  }
+
+  .portalRewardsOverviewTop {
+    grid-template-columns: 1fr;
+    gap: 12px;
+  }
+
+  .portalRewardsAvailable {
+    text-align: left;
+  }
+
+  .portalScratchHeader {
+    margin-bottom: 7px;
+  }
+
+  .portalScratchGrid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .portalScratchRewardCard {
+    width: 100%;
+    padding: 12px;
+  }
+
+  .portalRewardsSummaryGrid {
+    gap: 6px;
+  }
+
+  .portalRewardsSummaryGrid div {
+    padding: 9px 8px;
+  }
+
+  .portalRewardsSummaryGrid span {
+    font-size: 0.66rem;
+    letter-spacing: 0.05em;
+  }
+
+  .portalRewardCompact {
+    grid-template-columns: minmax(0, 1fr) minmax(104px, 0.32fr);
+    gap: 10px;
+  }
+
+  .portalMiniGrid {
+    gap: 6px;
+  }
+
+  .portalMiniGrid div {
+    padding: 9px 8px;
+  }
+
+  .portalMiniGrid span {
+    font-size: 0.66rem;
+    letter-spacing: 0.05em;
+  }
+
+  .portalBillTop {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .portalBillPaid {
+    min-width: 112px;
+    padding: 10px 12px;
+  }
+
+  .customerPortalBrand {
+    width: 96px;
+  }
+
+  .customerPortalHeaderActions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .portalVendorHeader,
+  .portalBillTop {
+    align-items: flex-start;
+  }
+
+  .portalItemsHeader,
+  .portalItemRow {
+    grid-template-columns: minmax(0, 1fr) 42px minmax(72px, auto);
+    padding: 11px 10px;
+    gap: 10px;
+  }
+
+  .portalDetailOverlay {
+    align-items: flex-end;
+    padding: 8px;
+  }
+
+  .portalDetailPanel {
+    max-height: calc(100vh - 16px);
+    border-radius: 24px;
+  }
+
   .digitalScoreShell {
     width: min(100vw - 20px, 100%);
     padding: 20px 0 52px;
@@ -2944,6 +4086,12 @@ button {
   }
 
   .digitalScoreProgressSteps {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 340px) {
+  .portalScratchGrid {
     grid-template-columns: 1fr;
   }
 }

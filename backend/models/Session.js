@@ -15,6 +15,18 @@ const SessionSchema = new mongoose.Schema(
       type: String,
       default: "",
     },
+    sessionType: {
+      type: String,
+      enum: ["STANDARD", "CUSTOMER_PORTAL"],
+      default: "STANDARD",
+      index: true,
+    },
+    authMethod: {
+      type: String,
+      enum: ["OTP", "PASSCODE", "ADMIN_IMPERSONATION", "BYPASS", "UNKNOWN"],
+      default: "UNKNOWN",
+      index: true,
+    },
     token: {
       type: String,
       default: "",

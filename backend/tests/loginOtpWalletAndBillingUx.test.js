@@ -206,6 +206,30 @@ test("customer login OTP request checks vendor OTP balance before MSG91 send", (
   assert.match(source, /Insufficient OTP balance\. Please recharge OTP credits to continue\./);
 });
 
+test("session-status-token returns stored Session expiryTime without recalculating duration", () => {
+  const source = fs.readFileSync(path.join(__dirname, "../routes/customerRoutes.js"), "utf8");
+  const section = source.slice(
+    source.indexOf('router.post("/session-status-token"'),
+    source.indexOf('router.post("/logout"')
+  );
+
+  assert.match(section, /expiryTime: session\.expiryTime/);
+  assert.doesNotMatch(section, /getSessionValidityHours/);
+  assert.doesNotMatch(section, /sessionValidity/);
+});
+
+test("vendor session guard uses backend expiryTime and not stale sessionHour", () => {
+  const source = fs.readFileSync(
+    path.join(__dirname, "../../vendorpreview/app/Login/useSessionGuard.jsx"),
+    "utf8"
+  );
+
+  assert.match(source, /scheduleLogoutAt\(data\?\.expiryTime\)/);
+  assert.doesNotMatch(source, /api\/app-config\/session-validity/);
+  assert.doesNotMatch(source, /localStorage\.getItem\("sessionHour"\)/);
+  assert.doesNotMatch(source, /localStorage\.setItem\("sessionHour"/);
+});
+
 test("billing provider decision resolves ynot_msg91 when global vendor Meta routing is off", () => {
   const decision = resolveBillingWhatsappProvider({
     vendor: {},

@@ -2,6 +2,8 @@ const express = require("express");
 const axios = require("axios");
 const jwt = require("jsonwebtoken");
 const crypto = require("crypto");
+const bcrypt = require("bcrypt");
+const mongoose = require("mongoose");
 const Customer = require("../models/Customer");
 const Session = require("../models/Session");
 const LoginHistory = require("../models/LoginHistory");
@@ -34,6 +36,59 @@ const buildFull = (countryCode, phone) => {
 
 const LOGIN_OTP_ATTEMPT_SCOPE = "customer_login_otp";
 const LOGIN_OTP_WALLET_MESSAGE = "Insufficient OTP balance. Please recharge OTP credits to continue.";
+const VENDOR_PASSCODE_AUTH_MESSAGE = "Invalid mobile number or passcode.";
+const VENDOR_PASSCODE_MAX_FAILED_ATTEMPTS = 5;
+const VENDOR_PASSCODE_ATTEMPT_WINDOW_MS = 15 * 60 * 1000;
+const VENDOR_PASSCODE_COOLDOWN_MS = 15 * 60 * 1000;
+const vendorPasscodeAttempts = new Map();
+
+function normalizeVendorPasscode(value) {
+  return typeof value === "string" ? value.trim() : String(value || "").trim();
+}
+
+function isValidVendorPasscode(value) {
+  return /^\d{4}$/.test(normalizeVendorPasscode(value));
+}
+
+function getRequesterKey(req) {
+  const forwardedFor = String(req.headers?.["x-forwarded-for"] || "")
+    .split(",")[0]
+    .trim();
+  return forwardedFor || req.ip || req.socket?.remoteAddress || "unknown";
+}
+
+function getVendorPasscodeAttemptKey(req, mobile) {
+  return `${String(mobile || "unknown")}:${getRequesterKey(req)}`;
+}
+
+function isVendorPasscodeRateLimited(key, now = Date.now()) {
+  const state = vendorPasscodeAttempts.get(key);
+  if (!state) return false;
+  if (state.blockedUntil && state.blockedUntil > now) return true;
+  if (state.blockedUntil && state.blockedUntil <= now) {
+    vendorPasscodeAttempts.delete(key);
+    return false;
+  }
+  return false;
+}
+
+function recordVendorPasscodeFailure(key, now = Date.now()) {
+  const state = vendorPasscodeAttempts.get(key) || {
+    attempts: [],
+    blockedUntil: 0,
+  };
+  state.attempts = state.attempts.filter((attemptTime) => now - attemptTime < VENDOR_PASSCODE_ATTEMPT_WINDOW_MS);
+  state.attempts.push(now);
+  if (state.attempts.length >= VENDOR_PASSCODE_MAX_FAILED_ATTEMPTS) {
+    state.blockedUntil = now + VENDOR_PASSCODE_COOLDOWN_MS;
+    state.attempts = [];
+  }
+  vendorPasscodeAttempts.set(key, state);
+}
+
+function clearVendorPasscodeFailures(key) {
+  vendorPasscodeAttempts.delete(key);
+}
 
 function createLoginOtpAttemptToken({ vendorId, categoryId, mobile }) {
   const jti = crypto.randomUUID();
@@ -68,6 +123,100 @@ function verifyLoginOtpAttemptToken({ token, vendorId, categoryId, mobile }) {
   }
 
   return decoded;
+}
+
+async function createVendorSessionForCustomer({
+  customer,
+  vendorId,
+  categoryId,
+  deviceInfo,
+}) {
+  const hours = await getSessionValidityHours(4);
+  const now = new Date();
+  const expiryTime = new Date(now.getTime() + hours * 60 * 60 * 1000);
+
+  const sessionFilter = { isActive: true };
+  if (vendorId) sessionFilter.vendorId = String(vendorId);
+  if (categoryId) sessionFilter.categoryId = String(categoryId);
+
+  const activeSessions = await Session.find(sessionFilter);
+  for (const s of activeSessions) {
+    try {
+      const logoutTime = now;
+      await Session.updateOne({ _id: s._id }, { $set: { isActive: false, expiryTime: logoutTime } });
+
+      const existingHist = await LoginHistory.findOne({
+        userId: customer._id,
+        loginTime: s.loginTime,
+        expiryTime: s.expiryTime,
+      });
+
+      if (existingHist) {
+        if (!existingHist.logoutTime) existingHist.logoutTime = logoutTime;
+        existingHist.status = "expired";
+        await existingHist.save();
+      } else {
+        await LoginHistory.create({
+          userId: customer._id,
+          loginTime: s.loginTime,
+          expiryTime: s.expiryTime || logoutTime,
+          logoutTime,
+          deviceInfo: s.deviceInfo || "",
+          status: "expired",
+        });
+      }
+    } catch (sessErr) {
+      console.error("Failed to terminate existing session on vendor passcode login:", sessErr?.message || sessErr);
+    }
+  }
+
+  try {
+    const activeHist = await LoginHistory.find({ userId: customer._id, status: "active" });
+    for (const h of activeHist) {
+      if (!h.logoutTime) h.logoutTime = now;
+      h.status = "expired";
+      await h.save();
+    }
+  } catch (histErr) {
+    console.error("Failed to expire existing LoginHistory on vendor passcode login:", histErr?.message || histErr);
+  }
+
+  const session = await Session.create({
+    userId: customer._id,
+    vendorId: vendorId ? String(vendorId) : "",
+    categoryId: categoryId ? String(categoryId) : "",
+    authMethod: "PASSCODE",
+    loginTime: now,
+    expiryTime,
+    isActive: true,
+    deviceInfo,
+  });
+
+  try {
+    await LoginHistory.create({
+      userId: customer._id,
+      loginTime: now,
+      expiryTime,
+      logoutTime: null,
+      deviceInfo: deviceInfo || "",
+      status: "active",
+    });
+  } catch (lhErr) {
+    console.error("Failed to create LoginHistory after vendor passcode login:", lhErr?.message || lhErr);
+  }
+
+  const payload = {
+    customerId: String(customer._id),
+    vendorId: vendorId ? String(vendorId) : "",
+    categoryId: categoryId ? String(categoryId) : "",
+    sessionId: String(session._id),
+    authMethod: "PASSCODE",
+  };
+  const token = jwt.sign(payload, JWT_SECRET, { expiresIn: `${hours}h` });
+  await Session.updateOne({ _id: session._id }, { $set: { token } });
+  session.token = token;
+
+  return { session, token };
 }
 
 // helper: log duration
@@ -197,6 +346,7 @@ router.post("/bypass-otp", async (req, res) => {
         userId: customer._id,
         vendorId: vendorId ? String(vendorId) : "",
         categoryId: categoryId ? String(categoryId) : "",
+        authMethod: "BYPASS",
         loginTime: now,
         expiryTime,
         isActive: true,
@@ -209,6 +359,7 @@ router.post("/bypass-otp", async (req, res) => {
           vendorId: vendorId ? String(vendorId) : "",
           categoryId: categoryId ? String(categoryId) : "",
           sessionId: String(session._id),
+          authMethod: "BYPASS",
         },
         JWT_SECRET,
         { expiresIn: `${hours}h` }
@@ -340,6 +491,7 @@ router.post("/admin-impersonate", async (req, res) => {
         userId: customerIdForHistory,
         vendorId: vendorId ? String(vendorId) : "",
         categoryId: categoryId ? String(categoryId) : "",
+        authMethod: "ADMIN_IMPERSONATION",
         loginTime: now,
         expiryTime: expiresAt,
         isActive: true,
@@ -351,6 +503,7 @@ router.post("/admin-impersonate", async (req, res) => {
         vendorId: vendorId ? String(vendorId) : "",
         categoryId: categoryId ? String(categoryId) : "",
         sessionId: String(session._id),
+        authMethod: "ADMIN_IMPERSONATION",
       };
       token = jwt.sign(payload, JWT_SECRET, { expiresIn: `${hours}h` });
       if (token) {
@@ -371,6 +524,141 @@ router.post("/admin-impersonate", async (req, res) => {
   } catch (err) {
     console.error("POST /api/customers/admin-impersonate error:", err.message || err);
     res.status(500).json({ message: "Failed to login as admin" });
+  }
+});
+
+/* ---------------- 1c) Set/reset vendor quick-login passcode ---------------- */
+router.post("/vendor-passcode", requireCustomerSession, async (req, res) => {
+  logApi(req, res, "vendor-passcode");
+  try {
+    const customerId = String(req.auth?.customerId || "").trim();
+    const vendorId = String(req.auth?.vendorId || "").trim();
+    const categoryId = String(req.auth?.categoryId || "").trim();
+    const authMethod = String(req.auth?.authMethod || "").trim();
+    const passcode = normalizeVendorPasscode(req.body?.passcode);
+    const confirmPasscode = normalizeVendorPasscode(req.body?.confirmPasscode);
+
+    if (!customerId || !vendorId || !["OTP", "PASSCODE"].includes(authMethod)) {
+      return res.status(403).json({ message: "Vendor owner session required" });
+    }
+
+    if (!mongoose.Types.ObjectId.isValid(vendorId) || (categoryId && !mongoose.Types.ObjectId.isValid(categoryId))) {
+      return res.status(403).json({ message: "Vendor owner session required" });
+    }
+
+    if (!isValidVendorPasscode(passcode)) {
+      return res.status(400).json({ message: "Passcode must be exactly 4 numeric digits" });
+    }
+
+    if (passcode !== confirmPasscode) {
+      return res.status(400).json({ message: "Passcode confirmation does not match" });
+    }
+
+    const vendorQuery = {
+      _id: vendorId,
+      customerId,
+    };
+    if (categoryId) vendorQuery.categoryId = categoryId;
+
+    const dummyVendor = await DummyVendor.findOne(vendorQuery).select("_id").lean();
+    if (!dummyVendor) {
+      return res.status(403).json({ message: "Vendor owner session required" });
+    }
+
+    const passcodeHash = await bcrypt.hash(passcode, 10);
+    await DummyVendor.updateOne(
+      { _id: dummyVendor._id, customerId },
+      {
+        $set: {
+          "vendorLogin.passcodeHash": passcodeHash,
+          "vendorLogin.passcodeUpdatedAt": new Date(),
+        },
+      }
+    );
+
+    return res.json({
+      success: true,
+      message: "Vendor passcode updated",
+    });
+  } catch (err) {
+    console.error("POST /api/customers/vendor-passcode error:", err?.message || err);
+    res.status(500).json({ message: "Failed to update vendor passcode" });
+  }
+});
+
+/* ---------------- 1d) Vendor quick-login passcode authentication ---------------- */
+router.post("/vendor-passcode-login", async (req, res) => {
+  logApi(req, res, "vendor-passcode-login");
+  try {
+    const { countryCode, phone, vendorId, categoryId } = req.body || {};
+    const passcode = normalizeVendorPasscode(req.body?.passcode);
+
+    if (!countryCode || !phone || !vendorId || !isValidVendorPasscode(passcode)) {
+      const mobile = buildFull(countryCode, phone);
+      if (mobile) recordVendorPasscodeFailure(getVendorPasscodeAttemptKey(req, mobile));
+      return res.status(401).json({ message: VENDOR_PASSCODE_AUTH_MESSAGE });
+    }
+
+    const mobile = buildFull(countryCode, phone);
+    const attemptKey = getVendorPasscodeAttemptKey(req, mobile);
+    if (isVendorPasscodeRateLimited(attemptKey)) {
+      return res.status(429).json({ message: "Too many attempts. Please try again later." });
+    }
+
+    if (!mongoose.Types.ObjectId.isValid(vendorId) || (categoryId && !mongoose.Types.ObjectId.isValid(categoryId))) {
+      recordVendorPasscodeFailure(attemptKey);
+      return res.status(401).json({ message: VENDOR_PASSCODE_AUTH_MESSAGE });
+    }
+
+    const [customer, dummyVendor] = await Promise.all([
+      Customer.findOne({ fullNumber: mobile }),
+      DummyVendor.findOne({
+        _id: vendorId,
+        ...(categoryId ? { categoryId } : {}),
+      })
+        .select("_id customerId categoryId businessName vendorLogin.passcodeUpdatedAt +vendorLogin.passcodeHash")
+        .lean(),
+    ]);
+
+    const passcodeHash = dummyVendor?.vendorLogin?.passcodeHash || "";
+    const ownsVendor =
+      customer &&
+      dummyVendor &&
+      dummyVendor.customerId &&
+      String(dummyVendor.customerId) === String(customer._id);
+
+    if (!ownsVendor || !passcodeHash) {
+      recordVendorPasscodeFailure(attemptKey);
+      return res.status(401).json({ message: VENDOR_PASSCODE_AUTH_MESSAGE });
+    }
+
+    const passcodeMatches = await bcrypt.compare(passcode, passcodeHash);
+    if (!passcodeMatches) {
+      recordVendorPasscodeFailure(attemptKey);
+      return res.status(401).json({ message: VENDOR_PASSCODE_AUTH_MESSAGE });
+    }
+
+    clearVendorPasscodeFailures(attemptKey);
+
+    const deviceInfo = req.headers["user-agent"] || "";
+    const { session, token } = await createVendorSessionForCustomer({
+      customer,
+      vendorId: dummyVendor._id,
+      categoryId: categoryId || dummyVendor.categoryId || "",
+      deviceInfo,
+    });
+
+    return res.json({
+      message: "verified",
+      customer,
+      session,
+      token,
+      role: "vendor",
+      displayName: dummyVendor.businessName || "Vendor",
+    });
+  } catch (err) {
+    console.error("POST /api/customers/vendor-passcode-login error:", err?.message || err);
+    res.status(500).json({ message: "Failed to login with vendor passcode" });
   }
 });
 
@@ -644,6 +932,7 @@ router.post("/verify-otp", async (req, res) => {
           userId: customer._id,
           vendorId: vendorId ? String(vendorId) : "",
           categoryId: categoryId ? String(categoryId) : "",
+          authMethod: "OTP",
           loginTime: now,
           expiryTime,
           isActive: true,
@@ -671,6 +960,7 @@ router.post("/verify-otp", async (req, res) => {
             vendorId: vendorId ? String(vendorId) : "",
             categoryId: categoryId ? String(categoryId) : "",
             sessionId: String(session._id),
+            authMethod: "OTP",
           };
           // Align token expiry with session expiry in hours
           const hours = await getSessionValidityHours(4);
@@ -752,6 +1042,7 @@ router.post("/scope-session", requireCustomerSession, async (req, res) => {
       userId: customerId,
       vendorId,
       categoryId,
+      authMethod: req.auth?.authMethod || "UNKNOWN",
       loginTime: now,
       expiryTime,
       isActive: true,
@@ -764,6 +1055,7 @@ router.post("/scope-session", requireCustomerSession, async (req, res) => {
         vendorId,
         categoryId,
         sessionId: String(session._id),
+        authMethod: req.auth?.authMethod || "UNKNOWN",
       },
       JWT_SECRET,
       { expiresIn: `${hours}h` }

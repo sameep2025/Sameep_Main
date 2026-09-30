@@ -23,6 +23,9 @@ const {
   sendRoutedWhatsAppBillingMessage,
 } = require("../services/whatsappBillingRouter");
 const {
+  isSendWhatsAppBillEnabled,
+} = require("../services/vendorBillingPreferences");
+const {
   buildPublicBillPath,
   buildPublicBillUrl,
   createBillAccessToken,
@@ -61,6 +64,32 @@ function normalizeBillingPaymentMode(value) {
   }
 
   return ["ONLINE", "CASH"].includes(value) ? value : null;
+}
+
+function normalizeRedeemPoints(value) {
+  const points = Number(value || 0);
+  if (!Number.isFinite(points) || points <= 0) return 0;
+  return points;
+}
+
+function buildEligibleEarnQuery({ vendorId, customerId, now }) {
+  return {
+    vendorId,
+    customerId,
+    type: "EARN",
+    remainingPoints: { $gt: 0 },
+    $or: [
+      { expiryDate: null },
+      { expiryDate: { $gte: now } },
+    ],
+  };
+}
+
+function sumRemainingPoints(earns = []) {
+  return earns.reduce((sum, earn) => {
+    const remainingPoints = Number(earn?.remainingPoints || 0);
+    return sum + (Number.isFinite(remainingPoints) && remainingPoints > 0 ? remainingPoints : 0);
+  }, 0);
 }
 
 async function buildPublicBillResponse(bill) {
@@ -155,7 +184,17 @@ async function buildPublicBillResponse(bill) {
 async function buildWhatsAppCompletionStatus(billing) {
   if (!billing?.customerId) return null;
 
-  const vendor = await Vendor.findById(billing.vendorId).select("whatsappBusiness").lean();
+  const vendor = await Vendor.findById(billing.vendorId)
+    .select("billingPreferences whatsappBusiness")
+    .lean();
+  if (!isSendWhatsAppBillEnabled(vendor)) {
+    return {
+      provider: "disabled",
+      sendExpected: false,
+      reason: "vendor_disabled",
+    };
+  }
+
   const decision = resolveBillingWhatsappProvider({ vendor });
   if (decision.provider !== "ynot_msg91") return null;
   if (isProviderDecisionPendingMetaReadiness({ vendor, decision })) return null;
@@ -554,6 +593,30 @@ exports.completeBillingSession = async (req, res) => {
       });
     }
 
+    const requestedRedeemPoints = normalizeRedeemPoints(billing.pointsRedeemed);
+    let eligibleEarnsForRedemption = [];
+
+    if (!isWalkIn && requestedRedeemPoints > 0) {
+      const now = new Date();
+
+      eligibleEarnsForRedemption = await LoyaltyLedger.find(
+        buildEligibleEarnQuery({
+          vendorId: billing.vendorId,
+          customerId: billing.customerId,
+          now,
+        })
+      ).sort({ expiryDate: 1, createdAt: 1 });
+
+      const availableRedeemablePoints = sumRemainingPoints(eligibleEarnsForRedemption);
+
+      if (availableRedeemablePoints < requestedRedeemPoints) {
+        return res.status(400).json({
+          success: false,
+          message: "Insufficient reward points available. Please refresh and try again.",
+        });
+      }
+    }
+
     // -------------------------
     // Create Transaction
     // -------------------------
@@ -564,10 +627,10 @@ exports.completeBillingSession = async (req, res) => {
       totalAmount: billing.totalAmount,
       grossAmount: billing.grossAmount,
       discountAmount: billing.discountAmount,
-      redeemedPoints: billing.pointsRedeemed || 0,
-      redeemValue: billing.pointsRedeemed || 0,
+      redeemedPoints: requestedRedeemPoints,
+      redeemValue: requestedRedeemPoints,
       finalPaidAmount:
-        billing.totalAmount - (billing.pointsRedeemed || 0),
+        billing.totalAmount - requestedRedeemPoints,
       paymentMode: normalizedPaymentMode,
       paymentStatus: "OFFLINE_PAID",
       billingSource: "POS_OFFLINE",
@@ -576,23 +639,10 @@ exports.completeBillingSession = async (req, res) => {
     // -------------------------
     // FIFO Redemption
     // -------------------------
-    let redeemLeft = billing.pointsRedeemed || 0;
+    let redeemLeft = requestedRedeemPoints;
 
     if (!isWalkIn && redeemLeft > 0) {
-      const now = new Date();
-
-      const earns = await LoyaltyLedger.find({
-        vendorId: billing.vendorId,
-        customerId: billing.customerId,
-        type: "EARN",
-        remainingPoints: { $gt: 0 },
-        $or: [
-          { expiryDate: null },
-          { expiryDate: { $gte: now } }
-        ],
-      }).sort({ expiryDate: 1, createdAt: 1 });
-
-      for (const earn of earns) {
+      for (const earn of eligibleEarnsForRedemption) {
         if (redeemLeft <= 0) break;
 
         const deduct = Math.min(earn.remainingPoints, redeemLeft);
@@ -608,7 +658,7 @@ exports.completeBillingSession = async (req, res) => {
         vendorId: billing.vendorId,
         customerId: billing.customerId,
         transactionId: transaction._id,
-        points: -(billing.pointsRedeemed || 0),
+        points: -requestedRedeemPoints,
       });
     }
 
@@ -725,6 +775,16 @@ if (!closed) {
           enabled: vendor?.whatsappBusiness?.enabled === true,
           hasPhoneNumberId: Boolean(vendor?.whatsappBusiness?.phoneNumberId),
         });
+
+        if (!isSendWhatsAppBillEnabled(vendor)) {
+          console.log("[WhatsApp Billing Trace]", {
+            stage: "skipped_vendor_preference",
+            vendorId: String(billing.vendorId || ""),
+            billId: String(billing._id || ""),
+            reason: "send_whatsapp_bill_disabled",
+          });
+          return;
+        }
 
         const mobile = customer?.fullNumber || customer?.phone;
 

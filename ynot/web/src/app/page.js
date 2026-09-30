@@ -227,6 +227,7 @@ export default function Home() {
             <button type="button" onClick={() => scrollToSection("contact")}>
               Contact
             </button>
+            <a href="/mybills">My Bills & Rewards</a>
           </nav>
 
           <button
@@ -615,6 +616,7 @@ export default function Home() {
             <a href="/onboarding">Set up business</a>
             <a href="/onboarding">Get started</a>
             <a href="/onboarding">Launch online</a>
+            <a href="/mybills">My Bills & Rewards</a>
             <a href="/privacy-policy">Privacy Policy</a>
           </div>
         </div>

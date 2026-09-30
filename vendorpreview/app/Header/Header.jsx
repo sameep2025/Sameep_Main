@@ -32,6 +32,34 @@ const PAGE_SECTIONS = {
   Contact: "contact",
 };
 
+function getCentralYnotBaseUrl() {
+  const rawBaseUrl = (
+    process.env.NEXT_PUBLIC_VENDOR_PREVIEW_ROOT_URL ||
+    process.env.NEXT_PUBLIC_PREVIEW_BASE_URL ||
+    "http://localhost:4000"
+  )
+    .trim()
+    .replace(/\/$/, "");
+
+  try {
+    const url = new URL(rawBaseUrl);
+
+    if (url.hostname === "localhost" || url.hostname === "127.0.0.1") {
+      url.port = "6001";
+      return url.toString().replace(/\/$/, "");
+    }
+
+    const hostnameParts = url.hostname.split(".");
+    if (hostnameParts.length > 2) {
+      url.hostname = hostnameParts.slice(1).join(".");
+    }
+
+    return url.toString().replace(/\/$/, "");
+  } catch {
+    return "https://ynot.co.in";
+  }
+}
+
 export default function Header() {
   useSessionGuard();
 
@@ -157,6 +185,7 @@ if (vendorId) {
   const enquiryCtaLabel = enquiryConfig?.enabled
     ? getEnquiryTypeLabel(enquiryConfig?.enquiryType)
     : "Contact Us";
+  const customerPortalUrl = `${getCentralYnotBaseUrl()}/mybills`;
 
   // --------------------------------------------------
   // 🔹 UI
@@ -258,6 +287,17 @@ if (vendorId) {
                   </button>
                 </li>
               ) : null}
+
+              <li className="nav-item">
+                <a
+                  className="nav-link"
+                  href={customerPortalUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  My Bills & Rewards
+                </a>
+              </li>
 
               <li className="nav-item header-admin-menu">
                 <button
