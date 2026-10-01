@@ -7,10 +7,11 @@ import { API_BASE_URL } from "../../utils/config";
 const CUSTOMER_PORTAL_TOKEN_KEY = "ynot_customer_portal_token";
 const DEFAULT_COUNTRY_CODE = "91";
 const DEFAULT_BILL_LIMIT = 20;
-const VENDOR_PREVIEW_ROOT_URL = (
+const CONFIGURED_VENDOR_PREVIEW_ROOT_URL = (
   process.env.NEXT_PUBLIC_VENDOR_PREVIEW_ROOT_URL ||
+  process.env.NEXT_PUBLIC_HARISH_PREVIEW_BASE_URL ||
   process.env.NEXT_PUBLIC_PREVIEW_BASE_URL ||
-  "http://localhost:4000"
+  ""
 )
   .trim()
   .replace(/\/$/, "");
@@ -116,10 +117,42 @@ function getEarnActivityDetail(entry) {
   };
 }
 
+function getVendorPreviewRootUrl() {
+  if (CONFIGURED_VENDOR_PREVIEW_ROOT_URL) {
+    return CONFIGURED_VENDOR_PREVIEW_ROOT_URL;
+  }
+
+  if (typeof window === "undefined") {
+    return "";
+  }
+
+  const { hostname, origin } = window.location;
+  const isLocalhost = hostname === "localhost" || hostname === "127.0.0.1";
+
+  if (isLocalhost) {
+    return "http://localhost:4000";
+  }
+
+  return origin.replace(/\/$/, "");
+}
+
 function buildBusinessUrl(subdomain) {
   const normalized = String(subdomain || "").trim().toLowerCase();
   if (!/^[a-z0-9-]+$/.test(normalized)) return "";
-  return VENDOR_PREVIEW_ROOT_URL.replace("://", `://${normalized}.`);
+
+  const rootUrl = getVendorPreviewRootUrl();
+  if (!rootUrl) return "";
+
+  try {
+    const url = new URL(rootUrl);
+    url.hostname = `${normalized}.${url.hostname}`;
+    url.pathname = "";
+    url.search = "";
+    url.hash = "";
+    return url.toString().replace(/\/$/, "");
+  } catch {
+    return "";
+  }
 }
 
 async function portalRequest(path, { method = "GET", token, body } = {}) {
