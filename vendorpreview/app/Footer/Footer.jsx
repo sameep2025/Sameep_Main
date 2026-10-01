@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import { FaPhoneAlt, FaMapMarkerAlt } from "react-icons/fa";
 import { useVendor } from "@/app/context/VendorContext";
 import { SOCIAL_ICONS } from "../Icons/SocialIcons";
+import { getYnotBaseUrl } from "../utils/ynotBaseUrl";
 
 const PAGE_SECTIONS = {
   Home: "home",
@@ -23,19 +24,9 @@ function sanitizeWhatsappNumber(value) {
   return digits;
 }
 
-function getPoweredByUrl() {
-  return (
-    process.env.NEXT_PUBLIC_VENDOR_PREVIEW_ROOT_URL ||
-    process.env.NEXT_PUBLIC_PREVIEW_BASE_URL ||
-    "http://localhost:4000"
-  )
-    .trim()
-    .replace(/\/$/, "");
-}
-
 export default function Footer() {
   const { vendorInfo } = useVendor() || {};
-  const poweredByUrl = getPoweredByUrl();
+  const poweredByUrl = getYnotBaseUrl();
 
   const popular = vendorInfo?.popularCategories || [];
   const socialLinks = vendorInfo?.socialLinks || {};
