@@ -548,10 +548,11 @@ button {
 }
 
 .portalScratchRewardCard {
+  position: relative;
   width: min(100%, 240px);
   aspect-ratio: 1 / 1;
   border-radius: 24px;
-  padding: 14px;
+  padding: 12px;
   border: 1px solid rgba(255, 255, 255, 0.78);
   background:
     radial-gradient(circle at top left, rgba(255, 193, 7, 0.32), transparent 38%),
@@ -559,46 +560,14 @@ button {
   box-shadow: 0 18px 46px rgba(16, 26, 52, 0.1);
   display: flex;
   flex-direction: column;
-  justify-content: space-between;
-}
-
-.portalScratchHeader {
-  display: block;
-  margin-bottom: 8px;
-}
-
-.portalScratchHeader h3 {
-  margin-top: 4px;
-  color: var(--ink);
-  font-size: 1rem;
-  line-height: 1.18;
-  display: -webkit-box;
+  justify-content: stretch;
   overflow: hidden;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
 }
 
-.portalScratchCount {
-  flex: 0 0 auto;
-  border-radius: 999px;
-  padding: 7px 10px;
-  background: rgba(111, 73, 0, 0.1);
-  color: #6f4900;
-  font-size: 0.75rem;
-  font-weight: 950;
-}
-
-.portalScratchIntro {
-  margin-bottom: 4px;
-  color: var(--ink);
-  font-size: 1rem;
-  font-weight: 900;
-}
-
-.portalScratchHint {
-  margin-bottom: 12px;
-  color: var(--muted);
-  font-size: 0.9rem;
+.portalScratchRewardCard.is-revealed {
+  background:
+    radial-gradient(circle at 50% 4%, rgba(255, 220, 111, 0.72), transparent 38%),
+    linear-gradient(145deg, #fffdf7 0%, #fff4cb 100%);
 }
 
 .portalScratchCanvasWrap {
@@ -606,7 +575,7 @@ button {
   flex: 1;
   min-height: 0;
   overflow: hidden;
-  border-radius: 18px;
+  border-radius: 20px;
   border: 1px solid rgba(111, 73, 0, 0.14);
   background: #fff8dc;
 }
@@ -616,33 +585,61 @@ button {
   width: 100%;
   height: 100%;
   max-width: 100%;
-  border-radius: 18px;
+  border-radius: 20px;
   cursor: crosshair;
   touch-action: none;
   user-select: none;
 }
 
 .portalScratchFallback {
-  width: 100%;
-  min-height: 30px;
-  margin-top: 6px;
+  position: absolute;
+  left: 18px;
+  right: 18px;
+  bottom: 16px;
+  width: auto;
+  min-height: 28px;
+  margin: 0;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.18);
+  color: rgba(255, 255, 255, 0.94);
+  font-size: 0.76rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.portalScratchRevealing {
+  position: absolute;
+  inset: 12px;
+  display: grid;
+  place-items: center;
+  border-radius: 20px;
+  background: rgba(16, 26, 52, 0.32);
+  color: #fff;
   font-size: 0.82rem;
+  font-weight: 950;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
 }
 
 .portalScratchError {
-  margin-top: 6px;
+  position: absolute;
+  left: 18px;
+  right: 18px;
+  bottom: 16px;
+  margin: 0;
   border-radius: 14px;
-  padding: 8px 10px;
+  padding: 7px 9px;
   border: 1px solid rgba(159, 29, 22, 0.18);
-  background: #fff1f1;
+  background: rgba(255, 241, 241, 0.96);
   color: #9f1d16;
   font-size: 0.78rem;
   font-weight: 800;
+  text-align: center;
 }
 
 .portalScratchError button {
   min-height: 30px;
-  margin-top: 6px;
+  margin-top: 5px;
   border-radius: 999px;
   padding: 0 12px;
   background: #9f1d16;
@@ -658,60 +655,47 @@ button {
   flex-direction: column;
   justify-content: center;
   min-height: 0;
-  padding: 4px 0 0;
+  padding: 8px 10px;
   text-align: center;
-}
-
-.portalScratchResult span {
-  color: var(--muted);
-  font-size: 0.82rem;
-  font-weight: 850;
 }
 
 .portalScratchResult strong {
   display: block;
-  margin: 2px 0 0;
+  margin: 0;
   color: var(--ink);
-  font-size: clamp(2.25rem, 7vw, 3.15rem);
-  line-height: 0.95;
+  font-size: clamp(2.6rem, 7vw, 4rem);
+  line-height: 0.9;
+  letter-spacing: -0.06em;
 }
 
 .portalScratchResult em {
   color: rgba(16, 26, 52, 0.68);
-  font-size: 0.7rem;
+  font-size: 0.72rem;
   font-style: normal;
   font-weight: 950;
   letter-spacing: 0.08em;
   text-transform: uppercase;
 }
 
-.portalScratchResult p {
+.portalScratchVendorName {
+  display: -webkit-box;
+  max-width: 100%;
+  margin: 14px auto 0;
+  overflow: hidden;
   color: var(--muted);
-  font-size: 0.82rem;
-  font-weight: 800;
-  line-height: 1.25;
-}
-
-.portalScratchBalance {
-  margin: 8px auto 0;
-  border-radius: 14px;
-  padding: 8px 10px;
-  background: rgba(22, 101, 52, 0.08);
-  color: #166534;
-  font-size: 0.78rem;
-  font-weight: 850;
-}
-
-.portalScratchBalance strong {
-  display: inline;
-  margin: 0;
-  color: inherit;
-  font-size: inherit;
-  line-height: inherit;
+  font-size: clamp(0.82rem, 2.7vw, 0.96rem);
+  font-weight: 900;
+  line-height: 1.18;
+  text-align: center;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
 }
 
 .portalScratchExpiry {
-  margin-top: 7px;
+  margin-top: 8px;
+  color: rgba(16, 26, 52, 0.56);
+  font-size: 0.76rem;
+  font-weight: 800;
 }
 
 .portalRewardsSectionHeading {

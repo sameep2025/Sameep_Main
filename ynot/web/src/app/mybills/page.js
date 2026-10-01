@@ -428,13 +428,13 @@ function ScratchCanvas({ disabled = false, onReveal }) {
     ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
     ctx.globalCompositeOperation = "source-over";
     const gradient = ctx.createLinearGradient(0, 0, width, height);
-    gradient.addColorStop(0, "#f9d86b");
-    gradient.addColorStop(0.5, "#d6a02f");
-    gradient.addColorStop(1, "#7a4b07");
+    gradient.addColorStop(0, "#fff2b8");
+    gradient.addColorStop(0.48, "#e2b545");
+    gradient.addColorStop(1, "#8a5a0a");
     ctx.fillStyle = gradient;
     ctx.fillRect(0, 0, width, height);
 
-    ctx.fillStyle = "rgba(255, 255, 255, 0.16)";
+    ctx.fillStyle = "rgba(255, 255, 255, 0.14)";
     for (let x = -width; x < width * 2; x += 34) {
       ctx.beginPath();
       ctx.moveTo(x, 0);
@@ -445,16 +445,24 @@ function ScratchCanvas({ disabled = false, onReveal }) {
       ctx.fill();
     }
 
+    ctx.fillStyle = "rgba(255, 255, 255, 0.22)";
+    ctx.beginPath();
+    ctx.arc(width / 2, height / 2 - 24, Math.max(width * 0.12, 18), 0, Math.PI * 2);
+    ctx.fill();
+
     ctx.fillStyle = "#fffdf5";
-    ctx.font = "900 16px system-ui, -apple-system, BlinkMacSystemFont, sans-serif";
+    ctx.font = "900 28px system-ui, -apple-system, BlinkMacSystemFont, sans-serif";
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
-    ctx.fillText("SCRATCH", width / 2, height / 2 - 12);
-    ctx.fillText("TO REVEAL", width / 2, height / 2 + 10);
+    ctx.fillText("?", width / 2, height / 2 - 24);
+
+    ctx.font = "900 15px system-ui, -apple-system, BlinkMacSystemFont, sans-serif";
+    ctx.fillText("SCRATCH", width / 2, height / 2 + 14);
+    ctx.fillText("TO REVEAL", width / 2, height / 2 + 36);
 
     ctx.font = "700 12px system-ui, -apple-system, BlinkMacSystemFont, sans-serif";
     ctx.fillStyle = "rgba(255, 255, 255, 0.86)";
-    ctx.fillText("or tap", width / 2, height / 2 + 34);
+    ctx.fillText("Swipe over the card", width / 2, height - 20);
   }, []);
 
   useEffect(() => {
@@ -480,12 +488,12 @@ function ScratchCanvas({ disabled = false, onReveal }) {
     ctx.fill();
   }, [disabled]);
 
-  const maybeReveal = useCallback(() => {
+  const maybeReveal = useCallback(({ force = false } = {}) => {
     const canvas = canvasRef.current;
     if (!canvas || disabled || revealedRef.current) return;
 
     const now = Date.now();
-    if (now - lastCheckRef.current < 180) return;
+    if (!force && now - lastCheckRef.current < 180) return;
     lastCheckRef.current = now;
 
     const ctx = canvas.getContext("2d", { willReadFrequently: true });
@@ -532,7 +540,7 @@ function ScratchCanvas({ disabled = false, onReveal }) {
         onPointerUp={(event) => {
           drawingRef.current = false;
           event.currentTarget.releasePointerCapture?.(event.pointerId);
-          maybeReveal();
+          maybeReveal({ force: true });
         }}
         onPointerCancel={() => {
           drawingRef.current = false;
@@ -557,45 +565,40 @@ function NewRewardScratchCard({
   const expiryText = revealedReward?.expiryDate ? formatDate(revealedReward.expiryDate) : "";
 
   return (
-    <section className="portalScratchRewardCard" aria-label="New reward">
-      <div className="portalScratchHeader">
-        <div>
-          <p className="portalSectionKicker">New Reward</p>
-          <h3>{vendorName}</h3>
-        </div>
-      </div>
-
+    <section
+      className={`portalScratchRewardCard${revealedReward ? " is-revealed" : ""}${
+        revealing ? " is-revealing" : ""
+      }`}
+      aria-label={revealedReward ? `Revealed reward from ${vendorName}` : "Scratch to reveal reward"}
+    >
       {revealedReward ? (
         <div className="portalScratchResult">
-          <span>You earned</span>
           <strong>{toSafeNumber(revealedReward.points).toLocaleString("en-IN")}</strong>
           <em>Points</em>
-          <p>{vendorName}</p>
-          <div className="portalScratchBalance">
-            Available:{" "}
-            <strong>{toSafeNumber(revealedReward.availablePoints).toLocaleString("en-IN")} points</strong>
-          </div>
+          <p className="portalScratchVendorName" title={vendorName}>{vendorName}</p>
           {expiryText ? <p className="portalScratchExpiry">Expires {expiryText}</p> : null}
         </div>
       ) : (
         <>
           <ScratchCanvas disabled={revealing} onReveal={onReveal} />
+          {revealing ? <div className="portalScratchRevealing">Revealing...</div> : null}
           {revealError ? (
             <div className="portalScratchError">
-              <p>{revealError}</p>
+              <p>Reveal failed</p>
               <button type="button" onClick={onReveal} disabled={revealing}>
                 Try Again
               </button>
             </div>
           ) : null}
-          <button
-            className="portalTextButton portalScratchFallback"
-            type="button"
-            onClick={onReveal}
-            disabled={revealing}
-          >
-            {revealing ? "Revealing..." : "Scratch to Reveal"}
-          </button>
+          {!revealError && !revealing ? (
+            <button
+              className="portalTextButton portalScratchFallback"
+              type="button"
+              onClick={onReveal}
+            >
+              Tap to reveal
+            </button>
+          ) : null}
         </>
       )}
     </section>
@@ -658,6 +661,7 @@ function RewardsTab({ token, onAuthExpired }) {
   const [revealingRewardIds, setRevealingRewardIds] = useState({});
   const [revealErrors, setRevealErrors] = useState({});
   const revealedRewardsRef = useRef({});
+  const revealingRewardIdsRef = useRef({});
 
   const overallRewards = useMemo(
     () =>
@@ -774,9 +778,20 @@ function RewardsTab({ token, onAuthExpired }) {
 
   const revealReward = useCallback(async (reward) => {
     const rewardId = getRewardId(reward);
-    if (!rewardId || revealingRewardIds[rewardId] || revealedRewardsById[rewardId]) return;
+    if (
+      !rewardId ||
+      revealingRewardIdsRef.current[rewardId] ||
+      revealingRewardIds[rewardId] ||
+      revealedRewardsById[rewardId]
+    ) {
+      return;
+    }
 
     try {
+      revealingRewardIdsRef.current = {
+        ...revealingRewardIdsRef.current,
+        [rewardId]: true,
+      };
       setRevealingRewardIds((current) => ({ ...current, [rewardId]: true }));
       setRevealErrors((current) => ({ ...current, [rewardId]: "" }));
       const payload = await portalRequest(
@@ -811,6 +826,9 @@ function RewardsTab({ token, onAuthExpired }) {
         [rewardId]: "Couldn't reveal your reward. Tap to try again.",
       }));
     } finally {
+      const nextInFlight = { ...revealingRewardIdsRef.current };
+      delete nextInFlight[rewardId];
+      revealingRewardIdsRef.current = nextInFlight;
       setRevealingRewardIds((current) => {
         const next = { ...current };
         delete next[rewardId];
