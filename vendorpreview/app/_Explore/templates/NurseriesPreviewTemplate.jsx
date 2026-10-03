@@ -6,6 +6,7 @@ import "./NurseriesPreviewTemplate.css";
 import ContactSection from "../../Contact/Contact";
 import { ENQUIRY_OPEN_EVENT } from "../../utils/enquiryFlow";
 import { openAdminDashboard, openAdminMenu } from "../../utils/adminQuickActions";
+import { getYnotBaseUrl } from "../../utils/ynotBaseUrl";
 
 function formatCurrency(value) {
   const amount = Number(value || 0);
@@ -931,6 +932,7 @@ export default function NurseriesPreviewTemplate({
     vendorInfo?.phone,
     ...(Array.isArray(vendorInfo?.secondaryPhones) ? vendorInfo.secondaryPhones : []),
   ].filter(Boolean);
+  const customerPortalUrl = `${getYnotBaseUrl()}/mybills`;
 
   const locationLat = vendorInfo?.location?.lat;
   const locationLng = vendorInfo?.location?.lng;
@@ -1071,17 +1073,20 @@ export default function NurseriesPreviewTemplate({
           </div>
         </div>
 
-        {navItems.length > 0 ? (
+        {navItems.length > 0 || customerPortalUrl ? (
           <nav className="nursery-nav" aria-label="Primary">
             {navItems.map((item) => (
               <a key={`${item.label}-${item.href}`} href={item.href} onClick={(event) => handleNavClick(event, item)}>
                 {item.label}
               </a>
             ))}
+            <a href={customerPortalUrl} target="_blank" rel="noopener noreferrer">
+              My Bills & Rewards
+            </a>
           </nav>
         ) : null}
 
-        {mobileMenuOpen && navItems.length > 0 ? (
+        {mobileMenuOpen && (navItems.length > 0 || customerPortalUrl) ? (
           <div className="nursery-mobile-menu">
             {navItems.map((item) => (
               <a
@@ -1095,6 +1100,14 @@ export default function NurseriesPreviewTemplate({
                 {item.label}
               </a>
             ))}
+            <a
+              href={customerPortalUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              onClick={() => setMobileMenuOpen(false)}
+            >
+              My Bills & Rewards
+            </a>
             {hasVendorSession ? (
               <button
                 type="button"

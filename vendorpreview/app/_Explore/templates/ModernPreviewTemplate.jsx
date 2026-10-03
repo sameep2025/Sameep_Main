@@ -1569,6 +1569,7 @@ export default function ModernPreviewTemplate({
     ...(Array.isArray(vendorInfo?.secondaryPhones) ? vendorInfo.secondaryPhones : []),
   ].filter(Boolean);
   const poweredByUrl = getPoweredByUrl();
+  const customerPortalUrl = `${poweredByUrl}/mybills`;
   const vendorId = vendorInfo?._id || vendorInfo?.vendorId || vendorInfo?.vendor?._id || "";
   const rootCategoryId =
     vendorInfo?.categoryId ||
@@ -1942,6 +1943,9 @@ export default function ModernPreviewTemplate({
               {item.label}
             </a>
           ))}
+          <a href={customerPortalUrl} target="_blank" rel="noopener noreferrer">
+            My Bills & Rewards
+          </a>
         </nav>
 
         <div className="modern-admin-menu">
@@ -2022,6 +2026,14 @@ export default function ModernPreviewTemplate({
                 {item.label}
               </a>
             ))}
+            <a
+              href={customerPortalUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              onClick={() => setMobileMenuOpen(false)}
+            >
+              My Bills & Rewards
+            </a>
           </nav>
           <button
             type="button"

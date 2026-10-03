@@ -536,6 +536,7 @@ export default function CatalogPreviewTemplate({
 
   const offerCards = useMemo(() => getOfferCards(orderedCategories), [orderedCategories]);
   const poweredByUrl = getPoweredByUrl();
+  const customerPortalUrl = `${poweredByUrl}/mybills`;
   const mapsLink = useMemo(() => {
     const googleMapsUrl = vendorInfo?.googlePlace?.mapsUrl;
     if (!googleMapsUrl) return "#";
@@ -597,6 +598,9 @@ export default function CatalogPreviewTemplate({
               {item.label}
             </a>
           ))}
+          <a href={customerPortalUrl} target="_blank" rel="noopener noreferrer">
+            My Bills & Rewards
+          </a>
         </nav>
 
         <div className="catalog-admin-menu">
@@ -665,6 +669,14 @@ export default function CatalogPreviewTemplate({
               {item.label}
             </a>
           ))}
+          <a
+            href={customerPortalUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            onClick={() => setMobileMenuOpen(false)}
+          >
+            My Bills & Rewards
+          </a>
           <div className="catalog-mobile-admin-menu">
             <button
               type="button"

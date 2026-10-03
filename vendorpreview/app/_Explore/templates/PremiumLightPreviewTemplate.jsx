@@ -518,6 +518,7 @@ export default function PremiumLightPreviewTemplate({
   const [showAdminMenu, setShowAdminMenu] = useState(false);
   const trustSummary = vendorInfo?.trustSummary || vendorInfo?.trust || {};
   const poweredByUrl = getPoweredByUrl();
+  const customerPortalUrl = `${poweredByUrl}/mybills`;
   const businessName = vendorInfo?.businessName || category?.name || "Business";
   const heroImage = mergedHeroImages?.[0] || "";
   const logoUrl = typeof vendorInfo?.logoUrl === "string" ? vendorInfo.logoUrl.trim() : "";
@@ -668,6 +669,9 @@ export default function PremiumLightPreviewTemplate({
               {item.label}
             </a>
           ))}
+          <a href={customerPortalUrl} target="_blank" rel="noopener noreferrer">
+            My Bills & Rewards
+          </a>
         </nav>
 
         <div className="premium-light-admin-menu">
@@ -733,6 +737,14 @@ export default function PremiumLightPreviewTemplate({
               {item.label}
             </a>
           ))}
+          <a
+            href={customerPortalUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            onClick={() => setMobileMenuOpen(false)}
+          >
+            My Bills & Rewards
+          </a>
           <div className="premium-light-mobile-admin-menu">
             <button
               type="button"

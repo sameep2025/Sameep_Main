@@ -97,6 +97,7 @@
 }
 
 .ecommerce-nav button,
+.ecommerce-nav a,
 .ecommerce-section-pills button,
 .ecommerce-secondary-button,
 .ecommerce-primary-button,
@@ -110,12 +111,14 @@
 }
 
 .ecommerce-nav button,
+.ecommerce-nav a,
 .ecommerce-section-pills button,
 .ecommerce-secondary-button,
 .ecommerce-add-button {
   background: #ffffff;
   color: #1d2939;
   border: 1px solid #d8d8d8;
+  text-decoration: none;
 }
 
 .ecommerce-add-button {
@@ -184,6 +187,7 @@
 }
 
 .ecommerce-nav button:hover,
+.ecommerce-nav a:hover,
 .ecommerce-section-pills button:hover,
 .ecommerce-secondary-button:hover,
 .ecommerce-primary-button:hover,

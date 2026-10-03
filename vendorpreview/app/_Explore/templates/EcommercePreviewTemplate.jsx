@@ -483,6 +483,7 @@ export default function EcommercePreviewTemplate({
     return mapped;
   }, [phoneNumbers, vendorInfo]);
   const poweredByUrl = getPoweredByUrl();
+  const customerPortalUrl = `${poweredByUrl}/mybills`;
   const vendorId =
     vendorInfo?.vendorId ||
     vendorInfo?._id ||
@@ -713,6 +714,9 @@ export default function EcommercePreviewTemplate({
           <button type="button" onClick={() => scrollToElementById("ecommerce-catalog")}>Catalog</button>
           <button type="button" onClick={() => scrollToElementById("ecommerce-summary")}>Summary</button>
           <button type="button" onClick={() => scrollToElementById("ecommerce-contact")}>Contact</button>
+          <a href={customerPortalUrl} target="_blank" rel="noopener noreferrer">
+            My Bills & Rewards
+          </a>
           {typeof onOpenAdmin === "function" ? (
             <div className="ecommerce-admin-menu">
               <button
