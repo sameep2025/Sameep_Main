@@ -78,6 +78,24 @@ function getSocialLabel(key) {
   }
 }
 
+function prettifyLabel(key) {
+  const normalized = String(key || "")
+    .replace(/([a-z])([A-Z])/g, "$1 $2")
+    .replace(/_/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  if (normalized.toLowerCase() === "experience years") {
+    return "Years Experience";
+  }
+
+  return normalized;
+}
+
+function formatTrustStatValue(value) {
+  return String(value ?? "").trim();
+}
+
 function getPoweredByUrl() {
   return (
     process.env.NEXT_PUBLIC_VENDOR_PREVIEW_ROOT_URL ||
@@ -426,6 +444,16 @@ export default function EcommercePreviewTemplate({
   const locationLng = Number(vendorInfo?.location?.lng);
   const hasEmbeddedMap = Number.isFinite(locationLat) && Number.isFinite(locationLng);
   const mapsHref = useMemo(() => getMapsHref(vendorInfo, heroTagline), [heroTagline, vendorInfo]);
+  const trustSummary = vendorInfo?.trustSummary || vendorInfo?.trust || {};
+  const statEntries = Object.entries(trustSummary)
+    .filter(([key, value]) => {
+      if (value === null || value === undefined || value === "") return false;
+      if (Array.isArray(value)) return false;
+      if (/google\s*rating/i.test(String(key))) return false;
+      return true;
+    })
+    .slice(0, 3);
+  const hasHeroStats = statEntries.length > 0 || typeof vendorInfo?.googlePlace?.rating === "number";
   const socialEntries = useMemo(() => {
     const socialLinks = vendorInfo?.socialLinks || {};
 
@@ -717,6 +745,32 @@ export default function EcommercePreviewTemplate({
               vendorInfo?.location?.address ||
               "Browse products, adjust quantities and share the order with the business."}
           </p>
+          {hasHeroStats ? (
+            <div className="ecommerce-hero-stats">
+              {statEntries.map(([key, value]) => (
+                <div key={key} className="ecommerce-hero-stat-card">
+                  <strong>{formatTrustStatValue(value)}</strong>
+                  <span>{prettifyLabel(key)}</span>
+                </div>
+              ))}
+              {typeof vendorInfo?.googlePlace?.rating === "number" ? (
+                <a
+                  className="ecommerce-hero-stat-card ecommerce-hero-stat-link"
+                  href={mapsHref}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  <strong>{vendorInfo.googlePlace.rating}*</strong>
+                  <span>
+                    Google Rating
+                    {vendorInfo?.googlePlace?.userRatingsTotal
+                      ? ` (${vendorInfo.googlePlace.userRatingsTotal})`
+                      : ""}
+                  </span>
+                </a>
+              ) : null}
+            </div>
+          ) : null}
           <div className="ecommerce-hero-actions">
             <button type="button" className="ecommerce-primary-button" onClick={() => scrollToElementById("ecommerce-catalog")}>
               View Catalog
