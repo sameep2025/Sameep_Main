@@ -2082,9 +2082,6 @@ export default function ModernPreviewTemplate({
 
       <section className="modern-hero">
         <div className="modern-hero-copy">
-          <div className="modern-eyebrow">
-            {(category?.name || "Preview").toUpperCase()}
-          </div>
           <h1>{heroTagline}</h1>
           <div className="modern-hero-description">
             {displayHeroCopy?.lead ? <p className="modern-hero-lead">{displayHeroCopy.lead}</p> : null}

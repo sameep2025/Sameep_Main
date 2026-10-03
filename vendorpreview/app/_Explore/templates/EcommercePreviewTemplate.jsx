@@ -677,7 +677,6 @@ export default function EcommercePreviewTemplate({
           )}
           <div>
             <div className="ecommerce-brand-name">{vendorInfo?.businessName || "Product Catalog"}</div>
-            <div className="ecommerce-brand-subtitle">{category?.name || "Browse and place your order"}</div>
           </div>
         </div>
 
@@ -712,7 +711,6 @@ export default function EcommercePreviewTemplate({
 
       <section id="ecommerce-home" className="ecommerce-hero">
         <div className="ecommerce-hero-copy">
-          <p className="ecommerce-kicker">{category?.name || "Ecommerce"}</p>
           <h1>{heroTagline || vendorInfo?.businessName || "Build your order"}</h1>
           <p>
             {heroDescription ||

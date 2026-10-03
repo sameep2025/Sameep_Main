@@ -703,7 +703,6 @@ export default function CatalogPreviewTemplate({
 
       <section className="catalog-hero">
         <div className="catalog-hero-copy">
-          <span className="catalog-kicker">{(category?.name || "Preview").toUpperCase()}</span>
           <h1>{heroTagline || vendorInfo?.businessName || "Browse services"}</h1>
           <p>{introSummary}</p>
 
