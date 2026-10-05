@@ -73,6 +73,18 @@ function safeClone(value) {
   }
 }
 
+function getPrimaryVendorMobile(vendorInfo) {
+  const rawPhone = vendorInfo?.phone || vendorInfo?.vendor?.phone || "";
+  const digits = String(rawPhone || "").replace(/\D/g, "");
+
+  if (digits.length === 10) return digits;
+  if (digits.length > 10 && digits.endsWith(digits.slice(-10))) {
+    return digits.slice(-10);
+  }
+
+  return "";
+}
+
 function getSafeDeviceId() {
   if (typeof globalThis !== "undefined") {
     const randomUuid = globalThis.crypto?.randomUUID;
@@ -1227,6 +1239,7 @@ function ExploreContent({ onReady, onOpenServices }) {
   const [serviceLoading, setServiceLoading] = useState(false);
 
   const [showVendorLogin, setShowVendorLogin] = useState(false);
+  const previousShowVendorLoginRef = useRef(false);
   const [vendorMobile, setVendorMobile] = useState("");
   const [vendorOtp, setVendorOtp] = useState("");
   const [vendorOtpAttemptToken, setVendorOtpAttemptToken] = useState("");
@@ -1985,6 +1998,17 @@ function ExploreContent({ onReady, onOpenServices }) {
   const { vendorInfo, setVendorInfo } = useVendor();
 
   const [countryCode, setCountryCode] = useState("91");
+
+  useEffect(() => {
+    const wasOpen = previousShowVendorLoginRef.current;
+    previousShowVendorLoginRef.current = showVendorLogin;
+
+    if (!showVendorLogin || wasOpen || loginAsAdmin || showAdminPasscode) {
+      return;
+    }
+
+    setVendorMobile(getPrimaryVendorMobile(vendorInfo));
+  }, [showVendorLogin, loginAsAdmin, showAdminPasscode, vendorInfo]);
 
   const [verifyingPasscode, setVerifyingPasscode] = useState(false);
 
