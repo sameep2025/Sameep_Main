@@ -15,6 +15,7 @@ const FACEBOOK_SDK_SRC = "https://connect.facebook.net/en_US/sdk.js";
 const IS_DEVELOPMENT = process.env.NODE_ENV !== "production";
 const SIGNUP_MODE_STANDARD = "standard";
 const SIGNUP_MODE_COEXISTENCE_TEST = "coexistence_test";
+const SIGNUP_MODE_WABA_ONLY_DIAGNOSTIC = "waba_only_diagnostic";
 
 function logMetaDiagnostic(message, details = {}) {
   if (!IS_DEVELOPMENT) return;
@@ -124,6 +125,27 @@ function logMetaEmbeddedSignupDiagnostic({ metaConfig, loginOptions }) {
   });
 }
 
+function isWabaOnlyDiagnosticAllowed() {
+  if (typeof window === "undefined") return false;
+  const hostname = window.location.hostname.toLowerCase();
+  return (
+    hostname === "localhost" ||
+    hostname === "127.0.0.1" ||
+    hostname === "sameep.app" ||
+    hostname.endsWith(".sameep.app")
+  );
+}
+
+function buildSignupMetadata(payload) {
+  const session = extractEmbeddedSignupSessionInfo(payload);
+  return {
+    event: String(payload?.event || ""),
+    businessId: session.businessId || "",
+    wabaId: session.wabaId || "",
+    phoneNumberIdPresent: Boolean(session.phoneNumberId),
+  };
+}
+
 function WhatsappConnectContent() {
   const searchParams = useSearchParams();
   const connectToken = searchParams.get("connectToken") || "";
@@ -136,6 +158,12 @@ function WhatsappConnectContent() {
   const [authCode, setAuthCode] = useState("");
   const [sessionInfo, setSessionInfo] = useState(null);
   const [successMessage, setSuccessMessage] = useState("");
+  const [wabaOnlyMetadata, setWabaOnlyMetadata] = useState(null);
+  const [showWabaOnlyDiagnostic, setShowWabaOnlyDiagnostic] = useState(false);
+
+  useEffect(() => {
+    setShowWabaOnlyDiagnostic(isWabaOnlyDiagnosticAllowed());
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -216,6 +244,21 @@ function WhatsappConnectContent() {
         event: payload.event,
         hasData: Boolean(payload.data),
       });
+
+      if (activeSignupModeRef.current === SIGNUP_MODE_WABA_ONLY_DIAGNOSTIC) {
+        const metadata = buildSignupMetadata(payload);
+        setWabaOnlyMetadata(metadata);
+        setStatus(
+          metadata.wabaId || metadata.businessId
+            ? "WABA-Only Metadata Received"
+            : "WABA-Only Test Event"
+        );
+        setError("");
+        setSuccessMessage(
+          "WABA-only diagnostic event received. No backend call was made and no YNOT WhatsApp settings were saved."
+        );
+        return;
+      }
 
       if (
         activeSignupModeRef.current === SIGNUP_MODE_COEXISTENCE_TEST &&
@@ -340,15 +383,40 @@ function WhatsappConnectContent() {
       completionStartedRef.current = false;
       setAuthCode("");
       setSessionInfo(null);
+      setWabaOnlyMetadata(null);
       setSuccessMessage("");
       setStatus("Connecting");
       setError("");
+
+      if (signupMode === SIGNUP_MODE_WABA_ONLY_DIAGNOSTIC) {
+        const proceed = window.confirm(
+          "TEST diagnostic only: Meta may create a real WABA if you proceed through signup. YNOT will not save the result or connect any phone number. Continue?"
+        );
+        if (!proceed) {
+          activeSignupModeRef.current = SIGNUP_MODE_STANDARD;
+          setStatus("Ready");
+          return;
+        }
+      }
+
       const fb = await loadFacebookSdk({
         appId: metaConfig.appId,
         graphApiVersion: metaConfig.graphApiVersion,
       });
       const loginOptions =
-        signupMode === SIGNUP_MODE_COEXISTENCE_TEST
+        signupMode === SIGNUP_MODE_WABA_ONLY_DIAGNOSTIC
+          ? {
+              config_id: metaConfig.embeddedSignupConfigId,
+              response_type: "code",
+              override_default_response_type: true,
+              extras: {
+                version: "v4",
+                setup: {
+                  skip_phone_registration: true,
+                },
+              },
+            }
+          : signupMode === SIGNUP_MODE_COEXISTENCE_TEST
           ? {
               config_id: metaConfig.embeddedSignupConfigId,
               response_type: "code",
@@ -383,6 +451,15 @@ function WhatsappConnectContent() {
             setError("");
             setSuccessMessage(
               "Coexistence signup was opened in Meta. This diagnostic flow will not connect to the YNOT backend or save WhatsApp settings. If you complete or close the Meta popup, no YNOT account state will be changed."
+            );
+            return;
+          }
+
+          if (signupMode === SIGNUP_MODE_WABA_ONLY_DIAGNOSTIC) {
+            setStatus("WABA-Only Test Started");
+            setError("");
+            setSuccessMessage(
+              "WABA-only signup diagnostic was opened in Meta. This unverified test will not connect to the YNOT backend or save WhatsApp settings."
             );
             return;
           }
@@ -450,6 +527,43 @@ function WhatsappConnectContent() {
         >
           Connect Existing WhatsApp Business Number
         </button>
+
+        {showWabaOnlyDiagnostic ? (
+          <div className="whatsapp-connect-diagnostic-panel">
+            <p className="whatsapp-connect-warning">
+              TEST diagnostic only. The unverified skip-phone-registration parameter may create a
+              real WABA in Meta if you proceed. Do not enter or register a phone number.
+            </p>
+            <button
+              type="button"
+              className="whatsapp-connect-button whatsapp-connect-button-diagnostic"
+              disabled={status === "Connecting" || status === "Verifying" || status === "Connected"}
+              onClick={() => startMetaSignup(SIGNUP_MODE_WABA_ONLY_DIAGNOSTIC)}
+            >
+              TEST — WABA-Only Signup
+            </button>
+            {wabaOnlyMetadata ? (
+              <div className="whatsapp-connect-metadata" aria-live="polite">
+                <div>
+                  <span>Event</span>
+                  <strong>{wabaOnlyMetadata.event || "Not provided"}</strong>
+                </div>
+                <div>
+                  <span>Business ID</span>
+                  <strong>{wabaOnlyMetadata.businessId || "Not provided"}</strong>
+                </div>
+                <div>
+                  <span>WABA ID</span>
+                  <strong>{wabaOnlyMetadata.wabaId || "Not provided"}</strong>
+                </div>
+                <div>
+                  <span>Phone Number ID</span>
+                  <strong>{wabaOnlyMetadata.phoneNumberIdPresent ? "Present" : "Not present"}</strong>
+                </div>
+              </div>
+            ) : null}
+          </div>
+        ) : null}
 
         <p className="whatsapp-connect-footnote">
           YNOT will continue using the current WhatsApp billing setup until your Meta connection

@@ -127,6 +127,14 @@
   box-shadow: 0 18px 40px rgba(16, 26, 52, 0.12);
 }
 
+.whatsapp-connect-button-diagnostic {
+  margin: 10px 0 0;
+  border: 1px solid rgba(185, 28, 28, 0.16);
+  background: #fff7ed;
+  color: #9a3412;
+  box-shadow: none;
+}
+
 .whatsapp-connect-button:disabled {
   cursor: not-allowed;
   opacity: 0.64;
@@ -134,6 +142,52 @@
 
 .whatsapp-connect-footnote {
   font-size: 14px;
+}
+
+.whatsapp-connect-diagnostic-panel {
+  margin: 0 auto 20px;
+  max-width: 560px;
+  padding: 14px;
+  border: 1px dashed rgba(154, 52, 18, 0.36);
+  border-radius: 18px;
+  background: rgba(255, 247, 237, 0.78);
+}
+
+.whatsapp-connect-warning {
+  margin: 0;
+  color: #9a3412;
+  font-size: 13px;
+  font-weight: 800;
+  line-height: 1.45;
+}
+
+.whatsapp-connect-metadata {
+  display: grid;
+  gap: 8px;
+  margin-top: 14px;
+  text-align: left;
+}
+
+.whatsapp-connect-metadata div {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 9px 10px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.82);
+}
+
+.whatsapp-connect-metadata span {
+  color: #667085;
+  font-size: 12px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.whatsapp-connect-metadata strong {
+  color: #101a34;
+  font-size: 13px;
+  overflow-wrap: anywhere;
 }
 
 @media (max-width: 640px) {
@@ -144,5 +198,9 @@
 
   .whatsapp-connect-button-secondary {
     margin-left: 0;
+  }
+
+  .whatsapp-connect-metadata div {
+    display: grid;
   }
 }
