@@ -354,7 +354,7 @@ function WhatsappConnectContent() {
               response_type: "code",
               override_default_response_type: true,
               extras: {
-                version: "v4",
+                setup: {},
                 featureType: "whatsapp_business_app_onboarding",
               },
             }
