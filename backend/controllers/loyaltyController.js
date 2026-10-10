@@ -1,5 +1,8 @@
 const LoyaltyLedger = require("../models/LoyaltyLedger");
 const VendorLoyaltyRule = require("../models/VendorLoyaltyRule");
+const {
+  summarizeRewardLedgerRowsForVendor,
+} = require("../services/loyaltyService");
 
 
 // ✅ Create or Update Vendor Loyalty Rule
@@ -62,42 +65,21 @@ exports.getWallet = async (req, res) => {
   try {
     const { customerId, vendorId } = req.query;
 
-    const now = new Date();
-    const sevenDays = new Date();
-    sevenDays.setDate(now.getDate() + 7);
-
     const earns = await LoyaltyLedger.find({
       customerId,
       vendorId,
-      type: "EARN",
-      remainingPoints: { $gt: 0 },
     });
-
-    let availablePoints = 0;
-    let expiredPoints = 0;
-    let expiringSoon = 0;
-
-    earns.forEach((e) => {
-      const expiry = e.expiryDate;
-
-      if (!expiry || expiry >= now) {
-        availablePoints += e.remainingPoints || 0;
-      }
-
-      if (expiry && expiry < now) {
-        expiredPoints += e.remainingPoints || 0;
-      }
-
-      if (expiry && expiry >= now && expiry <= sevenDays) {
-        expiringSoon += e.remainingPoints || 0;
-      }
+    const summary = summarizeRewardLedgerRowsForVendor({
+      ledgerRows: earns,
+      vendorId,
+      now: new Date(),
     });
 
     res.status(200).json({
       success: true,
-      availablePoints,
-      expiredPoints,
-      expiringSoon,
+      availablePoints: summary.availablePoints,
+      expiredPoints: summary.totalExpiredPoints,
+      expiringSoon: summary.expiringSoonPoints,
       entries: earns,
     });
   } catch (err) {

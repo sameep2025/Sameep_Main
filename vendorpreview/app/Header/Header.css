@@ -249,15 +249,17 @@
 }
 
 .logout-icon-btn {
-  width: 46px;
-  height: 46px;
+  min-height: 46px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  border-radius: 50%;
+  gap: 8px;
+  border-radius: 999px;
   border: 1.5px solid var(--classic-border);
   background: rgba(255, 255, 255, 0.04);
   color: var(--classic-header-logout-color);
+  padding: 0 14px;
+  font-weight: 700;
   box-shadow: 0 0 12px var(--classic-border-soft);
   transition: 0.25s ease;
 }
@@ -416,8 +418,7 @@
   }
 
   .logout-icon-btn {
-    width: 42px;
-    height: 42px;
+    min-height: 42px;
     margin-top: 8px;
   }
 

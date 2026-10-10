@@ -179,9 +179,14 @@ test("existing billing controller uses guarded WhatsApp billing router", () => {
     path.join(__dirname, "../controllers/billingController.js"),
     "utf8"
   );
+  const billingWhatsappSenderSource = fs.readFileSync(
+    path.join(__dirname, "../services/billingWhatsappSender.js"),
+    "utf8"
+  );
 
-  assert.match(billingControllerSource, /sendRoutedWhatsAppBillingMessage/);
-  assert.match(billingControllerSource, /isVendorMetaBillRoutingEnabled/);
+  assert.match(billingControllerSource, /sendCompletedBillWhatsApp/);
+  assert.match(billingWhatsappSenderSource, /sendRoutedWhatsAppBillingMessage/);
+  assert.match(billingWhatsappSenderSource, /isVendorMetaBillRoutingEnabled/);
 });
 
 test("BILL_STANDARD payload builder uses exact template name", () => {

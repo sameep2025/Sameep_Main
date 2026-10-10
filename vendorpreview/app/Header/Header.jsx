@@ -289,7 +289,7 @@ if (vendorId) {
                         openAdminMenu();
                       }}
                     >
-                      Menu
+                      Billing
                     </button>
                     <button
                       type="button"
@@ -324,6 +324,7 @@ if (vendorId) {
                     title="Logout"
                   >
                     <LuLogOut />
+                    <span>Logout</span>
                   </button>
                 </li>
               )}

@@ -2,20 +2,20 @@ const mongoose = require("mongoose");
 const LoyaltyLedger = require("../models/LoyaltyLedger");
 const CustomerRewardReveal = require("../models/CustomerRewardReveal");
 const Vendor = require("../models/DummyVendor");
+const {
+  summarizeRewardLedgerRowsByVendor,
+} = require("../services/loyaltyService");
 
 const EXPIRING_SOON_DAYS = 7;
 const RECENT_ACTIVITY_LIMIT_PER_VENDOR = 10;
+const DEFAULT_ACTIVITY_PAGE_LIMIT = 10;
+const MAX_ACTIVITY_PAGE_LIMIT = 50;
 const SCRATCH_REVEAL_LAUNCH_ENV = "SCRATCH_REVEAL_LAUNCHED_AT";
+const REWARD_ACTIVITY_TYPES = ["EARN", "REDEEM", "EARN_REVERSAL", "REDEEM_REVERSAL"];
 
 function toNumber(value, fallback = 0) {
   const number = Number(value);
   return Number.isFinite(number) ? number : fallback;
-}
-
-function toDateOrNull(value) {
-  if (!value) return null;
-  const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? null : date;
 }
 
 function toObjectIdOrNull(value) {
@@ -31,19 +31,6 @@ function getScratchRevealLaunchDate(env = process.env) {
   if (Number.isNaN(launchDate.getTime())) return null;
 
   return launchDate;
-}
-
-function makeEmptyVendorRewardGroup(vendorId) {
-  return {
-    vendorId,
-    availablePoints: 0,
-    totalEarnedPoints: 0,
-    totalRedeemedPoints: 0,
-    totalExpiredPoints: 0,
-    expiringSoonPoints: 0,
-    expiryBatchMap: new Map(),
-    recentActivity: [],
-  };
 }
 
 function buildSafeVendorDisplay(vendor) {
@@ -67,21 +54,67 @@ function buildRewardEventVendorDisplay(vendor) {
 }
 
 function buildRewardActivityEntry(row) {
-  const type = row.type === "REDEEM" ? "REDEEM" : "EARN";
+  const type = ["REDEEM", "EARN_REVERSAL", "REDEEM_REVERSAL"].includes(row.type)
+    ? row.type
+    : "EARN";
   const rawPoints = toNumber(row.points);
+  const isRedeemLike = type === "REDEEM";
   const entry = {
     type,
-    points: type === "REDEEM" ? Math.abs(rawPoints) : Math.max(rawPoints, 0),
-    signedPoints: type === "REDEEM" ? -Math.abs(rawPoints) : Math.max(rawPoints, 0),
+    points: Math.abs(rawPoints),
+    signedPoints: isRedeemLike ? -Math.abs(rawPoints) : rawPoints,
     createdAt: row.createdAt || null,
     expiryDate: type === "EARN" ? row.expiryDate || null : null,
   };
+
+  if (row._id) {
+    entry.activityId = String(row._id);
+  }
 
   if (type === "EARN") {
     entry.remainingPoints = Math.max(toNumber(row.remainingPoints), 0);
   }
 
   return entry;
+}
+
+function parseActivityLimit(value) {
+  const parsed = Number.parseInt(String(value || ""), 10);
+  if (!Number.isFinite(parsed) || parsed <= 0) return DEFAULT_ACTIVITY_PAGE_LIMIT;
+  return Math.min(parsed, MAX_ACTIVITY_PAGE_LIMIT);
+}
+
+function encodeRewardActivityCursor(row) {
+  const rowId = row?._id || row?.activityId;
+  if (!row?.createdAt || !rowId) return null;
+  return Buffer.from(
+    JSON.stringify({
+      createdAt: new Date(row.createdAt).toISOString(),
+      id: String(rowId),
+    })
+  ).toString("base64url");
+}
+
+function decodeRewardActivityCursor(cursor) {
+  const rawCursor = String(cursor || "").trim();
+  if (!rawCursor) return null;
+
+  try {
+    const decoded = JSON.parse(Buffer.from(rawCursor, "base64url").toString("utf8"));
+    const createdAt = new Date(decoded?.createdAt);
+    const id = String(decoded?.id || "");
+
+    if (Number.isNaN(createdAt.getTime()) || !mongoose.Types.ObjectId.isValid(id)) {
+      return { error: true };
+    }
+
+    return {
+      createdAt,
+      id: new mongoose.Types.ObjectId(id),
+    };
+  } catch {
+    return { error: true };
+  }
 }
 
 function buildCompletedEarnPipeline({ customerId, launchDate, rewardId = null } = {}) {
@@ -153,62 +186,33 @@ function buildRewardRevealResponse(row, { vendor = null, revealedAt = null, avai
 }
 
 function buildCustomerRewardSummary({ ledgerRows = [], vendorMap = new Map(), now = new Date() }) {
-  const groups = new Map();
-  const soonDate = new Date(now.getTime() + EXPIRING_SOON_DAYS * 24 * 60 * 60 * 1000);
+  const rewardSummaries = summarizeRewardLedgerRowsByVendor({
+    ledgerRows,
+    now,
+    expiringSoonDays: EXPIRING_SOON_DAYS,
+  });
+  const recentActivityByVendor = new Map();
+  const recentActivityCountsByVendor = new Map();
 
   ledgerRows.forEach((row) => {
     const vendorId = String(row.vendorId || "");
     if (!vendorId) return;
 
-    if (!groups.has(vendorId)) {
-      groups.set(vendorId, makeEmptyVendorRewardGroup(vendorId));
+    if (!recentActivityByVendor.has(vendorId)) {
+      recentActivityByVendor.set(vendorId, []);
+      recentActivityCountsByVendor.set(vendorId, 0);
     }
 
-    const group = groups.get(vendorId);
-    const type = row.type;
-    const points = toNumber(row.points);
+    const activityCount = recentActivityCountsByVendor.get(vendorId) || 0;
+    recentActivityCountsByVendor.set(vendorId, activityCount + 1);
 
-    if (type === "EARN") {
-      const earnedPoints = Math.max(points, 0);
-      const remainingPoints = Math.max(toNumber(row.remainingPoints), 0);
-      const expiryDate = toDateOrNull(row.expiryDate);
-
-      group.totalEarnedPoints += earnedPoints;
-
-      if (remainingPoints > 0) {
-        if (!expiryDate || expiryDate >= now) {
-          group.availablePoints += remainingPoints;
-        }
-
-        if (expiryDate && expiryDate < now) {
-          group.totalExpiredPoints += remainingPoints;
-        }
-
-        if (expiryDate && expiryDate > now && expiryDate <= soonDate) {
-          group.expiringSoonPoints += remainingPoints;
-          const key = expiryDate.toISOString();
-          const current = group.expiryBatchMap.get(key) || {
-            points: 0,
-            expiryDate: key,
-          };
-          current.points += remainingPoints;
-          group.expiryBatchMap.set(key, current);
-        }
-      }
-    } else if (type === "REDEEM") {
-      group.totalRedeemedPoints += Math.abs(points);
-    }
-
-    if (group.recentActivity.length < RECENT_ACTIVITY_LIMIT_PER_VENDOR) {
-      group.recentActivity.push(buildRewardActivityEntry(row));
+    const recentActivity = recentActivityByVendor.get(vendorId);
+    if (recentActivity.length < RECENT_ACTIVITY_LIMIT_PER_VENDOR) {
+      recentActivity.push(buildRewardActivityEntry(row));
     }
   });
 
-  const vendors = Array.from(groups.entries()).map(([vendorId, group]) => {
-    const expiryBatches = Array.from(group.expiryBatchMap.values()).sort(
-      (a, b) => new Date(a.expiryDate).getTime() - new Date(b.expiryDate).getTime()
-    );
-
+  const vendors = Array.from(rewardSummaries.entries()).map(([vendorId, group]) => {
     return {
       vendor: buildSafeVendorDisplay(vendorMap.get(vendorId)),
       availablePoints: group.availablePoints,
@@ -216,8 +220,14 @@ function buildCustomerRewardSummary({ ledgerRows = [], vendorMap = new Map(), no
       totalRedeemedPoints: group.totalRedeemedPoints,
       totalExpiredPoints: group.totalExpiredPoints,
       expiringSoonPoints: group.expiringSoonPoints,
-      expiryBatches,
-      recentActivity: group.recentActivity,
+      expiryBatches: group.expiryBatches,
+      recentActivity: recentActivityByVendor.get(vendorId) || [],
+      recentActivityHasMore:
+        (recentActivityCountsByVendor.get(vendorId) || 0) > RECENT_ACTIVITY_LIMIT_PER_VENDOR,
+      recentActivityNextCursor: encodeRewardActivityCursor(
+        (recentActivityByVendor.get(vendorId) || [])[RECENT_ACTIVITY_LIMIT_PER_VENDOR - 1]
+      ),
+      activityVendorId: vendorId,
     };
   });
 
@@ -257,6 +267,7 @@ async function buildUnrevealedRewards({ customerId, vendorMap = new Map(), launc
   const reveals = await CustomerRewardReveal.find({
     customerId: customerObjectId,
     rewardLedgerId: { $in: rewardIds },
+    invalidatedAt: null,
   })
     .select("rewardLedgerId")
     .lean();
@@ -281,7 +292,7 @@ async function getRewards(req, res) {
     }
 
     const ledgerRows = await LoyaltyLedger.find({ customerId })
-      .sort({ createdAt: -1 })
+      .sort({ createdAt: -1, _id: -1 })
       .lean();
 
     if (!ledgerRows.length) {
@@ -422,15 +433,90 @@ async function revealReward(req, res) {
   }
 }
 
+async function getRewardActivity(req, res) {
+  try {
+    const customerId = req.auth?.customerId;
+    const vendorId = req.params?.vendorId;
+
+    if (!customerId) {
+      return res.status(401).json({
+        success: false,
+        message: "Customer portal session invalid or expired",
+      });
+    }
+
+    if (!mongoose.Types.ObjectId.isValid(vendorId)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid vendor",
+      });
+    }
+
+    const limit = parseActivityLimit(req.query?.limit);
+    const cursor = decodeRewardActivityCursor(req.query?.cursor);
+    if (cursor?.error) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid activity cursor",
+      });
+    }
+
+    const query = {
+      customerId,
+      vendorId: new mongoose.Types.ObjectId(vendorId),
+      type: { $in: REWARD_ACTIVITY_TYPES },
+    };
+
+    if (cursor) {
+      query.$or = [
+        { createdAt: { $lt: cursor.createdAt } },
+        {
+          createdAt: cursor.createdAt,
+          _id: { $lt: cursor.id },
+        },
+      ];
+    }
+
+    const rows = await LoyaltyLedger.find(query)
+      .sort({ createdAt: -1, _id: -1 })
+      .limit(limit + 1)
+      .lean();
+
+    const pageRows = rows.slice(0, limit);
+    const hasMore = rows.length > limit;
+
+    return res.json({
+      success: true,
+      data: {
+        items: pageRows.map(buildRewardActivityEntry),
+        hasMore,
+        nextCursor: hasMore ? encodeRewardActivityCursor(pageRows[pageRows.length - 1]) : null,
+      },
+    });
+  } catch (err) {
+    console.error("customer portal reward activity error:", err?.message || err);
+    return res.status(500).json({
+      success: false,
+      message: "Unable to load reward activity right now.",
+    });
+  }
+}
+
 module.exports = {
   EXPIRING_SOON_DAYS,
   RECENT_ACTIVITY_LIMIT_PER_VENDOR,
+  DEFAULT_ACTIVITY_PAGE_LIMIT,
+  MAX_ACTIVITY_PAGE_LIMIT,
+  REWARD_ACTIVITY_TYPES,
   SCRATCH_REVEAL_LAUNCH_ENV,
   buildCompletedEarnPipeline,
   buildCustomerRewardSummary,
   buildUnrevealedRewards,
   calculateAvailablePointsForCustomerVendor,
+  decodeRewardActivityCursor,
+  encodeRewardActivityCursor,
   getScratchRevealLaunchDate,
+  getRewardActivity,
   getRewards,
   revealReward,
 };

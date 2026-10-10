@@ -462,47 +462,52 @@ test("billing controller preserves asynchronous post-bill send boundary", () => 
     path.join(__dirname, "../controllers/billingController.js"),
     "utf8"
   );
-
-  assert.match(billingControllerSource, /setImmediate\(async \(\) =>/);
-  assert.match(billingControllerSource, /sendRoutedWhatsAppBillingMessage/);
-});
-
-test("billing controller deducts WhatsApp wallet only after accepted MSG91 send", () => {
-  const billingControllerSource = fs.readFileSync(
-    path.join(__dirname, "../controllers/billingController.js"),
+  const billingWhatsappSenderSource = fs.readFileSync(
+    path.join(__dirname, "../services/billingWhatsappSender.js"),
     "utf8"
   );
 
-  assert.match(billingControllerSource, /sendResult\?\.status === "accepted"/);
-  assert.match(billingControllerSource, /sendResult\?\.provider === "ynot_msg91"/);
-  assert.match(billingControllerSource, /deductWhatsApp\(billing\.vendorId, `billing:\$\{billing\._id\}`\)/);
+  assert.match(billingControllerSource, /setImmediate\(async \(\) =>/);
+  assert.match(billingControllerSource, /sendCompletedBillWhatsApp/);
+  assert.match(billingWhatsappSenderSource, /sendRoutedWhatsAppBillingMessage/);
+});
+
+test("billing controller deducts WhatsApp wallet only after accepted MSG91 send", () => {
+  const billingWhatsappSenderSource = fs.readFileSync(
+    path.join(__dirname, "../services/billingWhatsappSender.js"),
+    "utf8"
+  );
+
+  assert.match(billingWhatsappSenderSource, /sendResult\?\.status === "accepted"/);
+  assert.match(billingWhatsappSenderSource, /sendResult\?\.provider === "ynot_msg91"/);
+  assert.match(billingWhatsappSenderSource, /deductWhatsApp\(billing\.vendorId, `\$\{referencePrefix\}:\$\{billing\._id\}`\)/);
 });
 
 test("billing controller does not deduct YNOT WhatsApp balance for accepted vendor_meta sends", () => {
-  const billingControllerSource = fs.readFileSync(
-    path.join(__dirname, "../controllers/billingController.js"),
+  const billingWhatsappSenderSource = fs.readFileSync(
+    path.join(__dirname, "../services/billingWhatsappSender.js"),
     "utf8"
   );
 
   assert.doesNotMatch(
-    billingControllerSource,
+    billingWhatsappSenderSource,
     /sendResult\?\.provider === "vendor_meta"[\s\S]{0,120}deductWhatsApp/
   );
   assert.match(
-    billingControllerSource,
+    billingWhatsappSenderSource,
     /sendResult\?\.status === "accepted" && sendResult\?\.provider === "ynot_msg91"/
   );
 });
 
 test("billing controller continues using existing billLink URL generation", () => {
-  const billingControllerSource = fs.readFileSync(
-    path.join(__dirname, "../controllers/billingController.js"),
+  const billingWhatsappSenderSource = fs.readFileSync(
+    path.join(__dirname, "../services/billingWhatsappSender.js"),
     "utf8"
   );
 
-  assert.match(billingControllerSource, /buildPublicBillUrl/);
-  assert.match(billingControllerSource, /buildPublicBillPath/);
-  assert.doesNotMatch(billingControllerSource, /sameep\.app\/bill\/example|ynot-dev\.co\.in|ynot\.co\.in/);
+  assert.match(billingWhatsappSenderSource, /buildPublicBillUrl/);
+  assert.match(billingWhatsappSenderSource, /buildPublicBillPath/);
+  assert.doesNotMatch(billingWhatsappSenderSource, /sameep\.app\/bill\/example|ynot-dev\.co\.in|ynot\.co\.in/);
 });
 
 test("vendor Meta bill sender uses centralized recipient normalizer and template payload builder", () => {

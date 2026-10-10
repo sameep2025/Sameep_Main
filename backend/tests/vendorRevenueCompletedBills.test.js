@@ -857,10 +857,11 @@ async function withMockedCompletionFlow(billing, fn, options = {}) {
 
   BillingSession.findById = async () => billing;
   BillingSession.findOneAndUpdate = async (_query, update) => {
-    state.closeUpdate = update;
-    billing.status = update.status;
-    billing.paymentMode = update.paymentMode;
-    return { ...billing, ...update, customerId: options.closedCustomerId ?? null };
+    const appliedUpdate = update.$set || update;
+    state.closeUpdate = appliedUpdate;
+    Object.assign(billing, appliedUpdate);
+    if (options.closeReturnsNull) return null;
+    return { ...billing, ...appliedUpdate, customerId: options.closedCustomerId ?? null };
   };
   Transaction.create = async (payload) => {
     state.transactionPayload = payload;
@@ -933,11 +934,77 @@ test("billing completion defaults missing paymentMode to ONLINE and stores it", 
     assert.equal(res.statusCode, 200);
     assert.equal(state.transactionPayload.paymentMode, "ONLINE");
     assert.equal(state.closeUpdate.paymentMode, "ONLINE");
+    assert.equal(state.closeUpdate.status, "COMPLETED");
+    assert.ok(state.closeUpdate.completedAt instanceof Date);
     assert.equal(billing.paymentMode, "ONLINE");
+    assert.equal(billing.status, "COMPLETED");
+    assert.ok(billing.completedAt instanceof Date);
     assert.equal(state.transactionPayload.totalAmount, 800);
     assert.equal(state.transactionPayload.grossAmount, 1000);
     assert.equal(state.transactionPayload.discountAmount, 200);
     assert.equal(state.transactionPayload.finalPaidAmount, 800);
+    assert.equal(state.transactionPayload.status, "COMPLETED");
+  });
+});
+
+test("billing completion snapshots the normalized customer phone for completed customer bills", async () => {
+  const billing = buildCompletionBilling({
+    customerId: new mongoose.Types.ObjectId(CUSTOMER_ID),
+    billingMode: "CUSTOMER",
+  });
+
+  await withMockedCompletionFlow(billing, async (state) => {
+    const res = buildCompletionResponse();
+    await billingController.completeBillingSession(
+      { body: { billingId: COMPLETED_BILL_ID, paymentMode: "ONLINE" } },
+      res
+    );
+
+    assert.equal(res.statusCode, 200);
+    assert.equal(state.closeUpdate.customerPhoneSnapshot, "919381520396");
+    assert.equal(billing.customerPhoneSnapshot, "919381520396");
+    assert.equal(state.transactionPayload.customerId, billing.customerId);
+  });
+});
+
+test("billing completion won by another request creates no duplicate side effects", async () => {
+  const billing = buildCompletionBilling();
+
+  await withMockedCompletionFlow(
+    billing,
+    async (state) => {
+      const res = buildCompletionResponse();
+      await billingController.completeBillingSession(
+        { body: { billingId: COMPLETED_BILL_ID, paymentMode: "ONLINE" } },
+        res
+      );
+
+      assert.equal(res.statusCode, 400);
+      assert.equal(res.payload.success, false);
+      assert.match(res.payload.message, /Billing already completed or locked/);
+      assert.equal(state.transactionPayload, null);
+      assert.equal(state.ledgerCreates.length, 0);
+    },
+    { closeReturnsNull: true }
+  );
+});
+
+test("billing completion rejects already completed bill before side effects", async () => {
+  const billing = buildCompletionBilling({ status: "COMPLETED" });
+
+  await withMockedCompletionFlow(billing, async (state) => {
+    const res = buildCompletionResponse();
+    await billingController.completeBillingSession(
+      { body: { billingId: COMPLETED_BILL_ID, paymentMode: "ONLINE" } },
+      res
+    );
+
+    assert.equal(res.statusCode, 400);
+    assert.equal(res.payload.success, false);
+    assert.match(res.payload.message, /Invalid billing session/);
+    assert.equal(state.transactionPayload, null);
+    assert.equal(state.closeUpdate, null);
+    assert.equal(state.ledgerCreates.length, 0);
   });
 });
 
@@ -959,9 +1026,9 @@ test("billing completion accepts ONLINE paymentMode without changing financials"
   });
 });
 
-test("billing completion accepts CASH with redeemed points financial snapshot unchanged", async () => {
+test("billing completion ignores stale redeemed points for walk-in bills", async () => {
   const billing = buildCompletionBilling({
-    pointsRedeemed: 300,
+    pointsRedeemed: 50,
   });
 
   await withMockedCompletionFlow(billing, async (state) => {
@@ -975,13 +1042,19 @@ test("billing completion accepts CASH with redeemed points financial snapshot un
     assert.equal(state.transactionPayload.paymentMode, "CASH");
     assert.equal(state.closeUpdate.paymentMode, "CASH");
     assert.equal(billing.paymentMode, "CASH");
+    assert.equal(state.closeUpdate.pointsRedeemed, 0);
+    assert.equal(billing.pointsRedeemed, 0);
     assert.equal(state.transactionPayload.totalAmount, 800);
     assert.equal(state.transactionPayload.grossAmount, 1000);
     assert.equal(state.transactionPayload.discountAmount, 200);
-    assert.equal(state.transactionPayload.redeemedPoints, 300);
-    assert.equal(state.transactionPayload.redeemValue, 300);
-    assert.equal(state.transactionPayload.finalPaidAmount, 500);
+    assert.equal(state.transactionPayload.redeemedPoints, 0);
+    assert.equal(state.transactionPayload.redeemValue, 0);
+    assert.equal(state.transactionPayload.finalPaidAmount, 800);
+    assert.equal(res.payload.transaction.redeemedPoints, 0);
+    assert.equal(res.payload.transaction.redeemValue, 0);
+    assert.equal(res.payload.transaction.finalPaidAmount, 800);
     assert.equal(state.ledgerCreates.length, 0);
+    assert.equal(state.loyaltyFindCalls, 0);
   });
 });
 
@@ -1309,14 +1382,191 @@ test("billing completion rejects invalid paymentMode", async () => {
 
 test("billing and transaction paymentMode schemas remain backward compatible", () => {
   assert.equal(new BillingSession({ vendorId: VENDOR_ID }).validateSync(), undefined);
+  assert.equal(
+    new BillingSession({
+      vendorId: VENDOR_ID,
+      customerPhoneSnapshot: "919381520396",
+    }).validateSync(),
+    undefined
+  );
   assert.equal(new BillingSession({ vendorId: VENDOR_ID, paymentMode: "ONLINE" }).validateSync(), undefined);
   assert.equal(new BillingSession({ vendorId: VENDOR_ID, paymentMode: "CASH" }).validateSync(), undefined);
+  assert.equal(new BillingSession({ vendorId: VENDOR_ID, status: "SUPERSEDED" }).validateSync(), undefined);
+  assert.equal(
+    new BillingSession({
+      vendorId: VENDOR_ID,
+      status: "COMPLETED",
+      completedAt: new Date(),
+      cancelledAt: new Date(),
+      cancellationReason: "Customer requested correction",
+      supersededAt: new Date(),
+      supersededByBillingSessionId: COMPLETED_BILL_ID,
+      originalBillingSessionId: COMPLETED_BILL_ID,
+      replacementBillingSessionId: OUT_OF_RANGE_BILL_ID,
+    }).validateSync(),
+    undefined
+  );
 
   for (const paymentMode of ["CASH", "UPI", "CARD", "ONLINE"]) {
     const transaction = new Transaction({
       vendorId: VENDOR_ID,
       paymentMode,
+      status: "COMPLETED",
     });
     assert.equal(transaction.validateSync(), undefined);
   }
+
+  assert.equal(
+    new Transaction({
+      vendorId: VENDOR_ID,
+      status: "SUPERSEDED",
+      billingSessionId: COMPLETED_BILL_ID,
+      originalTransactionId: new mongoose.Types.ObjectId(),
+      replacementTransactionId: new mongoose.Types.ObjectId(),
+      supersededAt: new Date(),
+    }).validateSync(),
+    undefined
+  );
+});
+
+test("vendor historical bill detail returns persisted bill data without side effects", async () => {
+  const originals = {
+    billingFindById: BillingSession.findById,
+    billingCreate: BillingSession.create,
+    transactionFindOne: Transaction.findOne,
+    transactionCreate: Transaction.create,
+    loyaltyCreate: LoyaltyLedger.create,
+    customerFindById: Customer.findById,
+    vendorFindById: Vendor.findById,
+  };
+  const state = {
+    billingCreates: 0,
+    transactionCreates: 0,
+    ledgerCreates: 0,
+  };
+  const bill = {
+    _id: new mongoose.Types.ObjectId(COMPLETED_BILL_ID),
+    vendorId: new mongoose.Types.ObjectId(VENDOR_ID),
+    customerId: new mongoose.Types.ObjectId(CUSTOMER_ID),
+    status: "COMPLETED",
+    billingMode: "LOYALTY",
+    customerPhoneSnapshot: "",
+    totalAmount: 900,
+    grossAmount: 1000,
+    discountAmount: 100,
+    pointsEarned: 45,
+    pointsRedeemed: 50,
+    paymentMode: "CASH",
+    createdAt: new Date("2026-09-29T10:00:00.000Z"),
+    cartItems: [
+      {
+        name: "Hair Spa",
+        qty: 1,
+        price: 900,
+        total: 900,
+        resourceName: "Sameep",
+      },
+    ],
+  };
+
+  BillingSession.findById = () => ({
+    lean: async () => bill,
+  });
+  BillingSession.create = async () => {
+    state.billingCreates += 1;
+    throw new Error("must not create billing session");
+  };
+  Transaction.findOne = () => ({
+    lean: async () => ({
+      billingSessionId: bill._id,
+      redeemValue: 50,
+      finalPaidAmount: 850,
+      paymentMode: "CASH",
+    }),
+  });
+  Transaction.create = async () => {
+    state.transactionCreates += 1;
+    throw new Error("must not create transaction");
+  };
+  LoyaltyLedger.create = async () => {
+    state.ledgerCreates += 1;
+    throw new Error("must not create ledger");
+  };
+  Customer.findById = () => ({
+    lean: async () => ({
+      _id: new mongoose.Types.ObjectId(CUSTOMER_ID),
+      fullNumber: "919999999999",
+      phone: "9999999999",
+    }),
+  });
+  Vendor.findById = () => ({
+    lean: async () => ({
+      _id: new mongoose.Types.ObjectId(VENDOR_ID),
+      businessName: "Test Salon",
+      phone: "918888888888",
+      location: { address: "Test Address" },
+    }),
+  });
+
+  try {
+    const res = buildCompletionResponse();
+    await billingController.getVendorHistoricalBillDetails(
+      {
+        params: { billingSessionId: COMPLETED_BILL_ID },
+        vendorWriteAuth: { vendorId: VENDOR_ID },
+      },
+      res
+    );
+
+    assert.equal(res.statusCode, 200);
+    assert.equal(res.payload.success, true);
+    assert.equal(res.payload.data.customer.label, "+919999999999");
+    assert.equal(res.payload.data.vendor.businessName, "Test Salon");
+    assert.equal(res.payload.data.items[0].name, "Hair Spa");
+    assert.equal(res.payload.data.totals.billValue, 1000);
+    assert.equal(res.payload.data.totals.discountAmount, 100);
+    assert.equal(res.payload.data.totals.rewardsRedeemed, 50);
+    assert.equal(res.payload.data.totals.netCollected, 850);
+    assert.equal(state.billingCreates, 0);
+    assert.equal(state.transactionCreates, 0);
+    assert.equal(state.ledgerCreates, 0);
+  } finally {
+    BillingSession.findById = originals.billingFindById;
+    BillingSession.create = originals.billingCreate;
+    Transaction.findOne = originals.transactionFindOne;
+    Transaction.create = originals.transactionCreate;
+    LoyaltyLedger.create = originals.loyaltyCreate;
+    Customer.findById = originals.customerFindById;
+    Vendor.findById = originals.vendorFindById;
+  }
+});
+
+test("bill-management routes are vendor-authenticated and resend does not call completion", () => {
+  const routeSource = fs.readFileSync(
+    path.join(__dirname, "../routes/billingRoutes.js"),
+    "utf8"
+  );
+  const controllerSource = fs.readFileSync(
+    path.join(__dirname, "../controllers/billingController.js"),
+    "utf8"
+  );
+  const helperSource = fs.readFileSync(
+    path.join(__dirname, "../services/billingWhatsappSender.js"),
+    "utf8"
+  );
+
+  assert.match(routeSource, /\/:billingSessionId\/vendor-detail/);
+  assert.match(routeSource, /\/:billingSessionId\/resend-whatsapp/);
+  assert.match(routeSource, /requireVendorAccessFromExistingAuth\(resolveBillVendorId\)/);
+  assert.match(controllerSource, /sendCompletedBillWhatsApp/);
+  assert.match(controllerSource, /referencePrefix:\s*"billing-resend"/);
+  assert.doesNotMatch(
+    controllerSource.slice(
+      controllerSource.indexOf("exports.resendHistoricalBillWhatsapp"),
+      controllerSource.indexOf("// 🔐 Request OTP")
+    ),
+    /completeBillingSession|Transaction\.create|LoyaltyLedger\.create|BillingSession\.create/
+  );
+  assert.match(helperSource, /customerPhoneSnapshot/);
+  assert.match(helperSource, /deductWhatsApp\(billing\.vendorId,\s*`\$\{referencePrefix\}:\$\{billing\._id\}`\)/);
 });

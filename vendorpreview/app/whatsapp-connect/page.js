@@ -13,6 +13,8 @@ import "./whatsapp-connect.css";
 
 const FACEBOOK_SDK_SRC = "https://connect.facebook.net/en_US/sdk.js";
 const IS_DEVELOPMENT = process.env.NODE_ENV !== "production";
+const SIGNUP_MODE_STANDARD = "standard";
+const SIGNUP_MODE_COEXISTENCE_TEST = "coexistence_test";
 
 function logMetaDiagnostic(message, details = {}) {
   if (!IS_DEVELOPMENT) return;
@@ -126,6 +128,7 @@ function WhatsappConnectContent() {
   const searchParams = useSearchParams();
   const connectToken = searchParams.get("connectToken") || "";
   const completionStartedRef = useRef(false);
+  const activeSignupModeRef = useRef(SIGNUP_MODE_STANDARD);
   const [status, setStatus] = useState("Preparing");
   const [error, setError] = useState("");
   const [metaConfig, setMetaConfig] = useState(null);
@@ -214,6 +217,19 @@ function WhatsappConnectContent() {
         hasData: Boolean(payload.data),
       });
 
+      if (
+        activeSignupModeRef.current === SIGNUP_MODE_COEXISTENCE_TEST &&
+        (payload.event === "FINISH" ||
+          payload.event === "FINISH_WHATSAPP_BUSINESS_APP_ONBOARDING")
+      ) {
+        setStatus("Test Completed");
+        setError("");
+        setSuccessMessage(
+          "Coexistence signup test completed in Meta. This test flow is not connected to the YNOT backend yet, so no WhatsApp account changes were saved in YNOT."
+        );
+        return;
+      }
+
       if (payload.event === "FINISH") {
         const nextSessionInfo = extractEmbeddedSignupSessionInfo(payload);
         setSessionInfo(nextSessionInfo);
@@ -225,6 +241,15 @@ function WhatsappConnectContent() {
       }
 
       if (payload.event === "CANCEL" || payload.event === "ERROR") {
+        if (activeSignupModeRef.current === SIGNUP_MODE_COEXISTENCE_TEST) {
+          setStatus("Test Closed");
+          setError("");
+          setSuccessMessage(
+            "Coexistence signup was closed in Meta. This test flow is not connected to the YNOT backend, so no WhatsApp settings were saved or changed."
+          );
+          return;
+        }
+
         setStatus("Error");
         setError("WhatsApp Business setup was not completed. Please try again when you are ready.");
       }
@@ -303,7 +328,7 @@ function WhatsappConnectContent() {
     completeConnection();
   }, [authCode, connectToken, returnUrl, sessionInfo]);
 
-  const startMetaSignup = async () => {
+  const startMetaSignup = async (signupMode = SIGNUP_MODE_STANDARD) => {
     if (!metaConfig?.isEmbeddedSignupConfigured) {
       setError("Meta Embedded Signup is not configured for this environment.");
       setStatus("Error");
@@ -311,18 +336,34 @@ function WhatsappConnectContent() {
     }
 
     try {
+      activeSignupModeRef.current = signupMode;
+      completionStartedRef.current = false;
+      setAuthCode("");
+      setSessionInfo(null);
+      setSuccessMessage("");
       setStatus("Connecting");
       setError("");
       const fb = await loadFacebookSdk({
         appId: metaConfig.appId,
         graphApiVersion: metaConfig.graphApiVersion,
       });
-      const loginOptions = {
-        config_id: metaConfig.embeddedSignupConfigId,
-        response_type: "code",
-        override_default_response_type: true,
-        extras: { version: "v4" },
-      };
+      const loginOptions =
+        signupMode === SIGNUP_MODE_COEXISTENCE_TEST
+          ? {
+              config_id: metaConfig.embeddedSignupConfigId,
+              response_type: "code",
+              override_default_response_type: true,
+              extras: {
+                version: "v4",
+                featureType: "whatsapp_business_app_onboarding",
+              },
+            }
+          : {
+              config_id: metaConfig.embeddedSignupConfigId,
+              response_type: "code",
+              override_default_response_type: true,
+              extras: { version: "v4" },
+            };
 
       logMetaEmbeddedSignupDiagnostic({ metaConfig, loginOptions });
 
@@ -331,9 +372,19 @@ function WhatsappConnectContent() {
           const code = response?.authResponse?.code || "";
           logMetaDiagnostic("FB.login callback", {
             callbackReceived: Boolean(response),
-            authorizationCodeReceived: Boolean(code),
+            authorizationCodeReceived: signupMode === SIGNUP_MODE_STANDARD && Boolean(code),
+            signupMode,
             status: response?.status || "",
           });
+
+          if (signupMode === SIGNUP_MODE_COEXISTENCE_TEST) {
+            setStatus("Test Started");
+            setError("");
+            setSuccessMessage(
+              "Coexistence signup was opened in Meta. This diagnostic flow will not connect to the YNOT backend or save WhatsApp settings. If you complete or close the Meta popup, no YNOT account state will be changed."
+            );
+            return;
+          }
 
           if (!code) {
             setStatus("Error");
@@ -383,11 +434,20 @@ function WhatsappConnectContent() {
           type="button"
           className="whatsapp-connect-button"
           disabled={status === "Connecting" || status === "Verifying" || status === "Connected"}
-          onClick={startMetaSignup}
+          onClick={() => startMetaSignup(SIGNUP_MODE_STANDARD)}
         >
           {status === "Connecting" || status === "Verifying"
             ? "Working..."
-            : "Connect with WhatsApp"}
+            : "Connect New WhatsApp Number"}
+        </button>
+
+        <button
+          type="button"
+          className="whatsapp-connect-button whatsapp-connect-button-secondary"
+          disabled={status === "Connecting" || status === "Verifying" || status === "Connected"}
+          onClick={() => startMetaSignup(SIGNUP_MODE_COEXISTENCE_TEST)}
+        >
+          Connect Existing WhatsApp Business Number
         </button>
 
         <p className="whatsapp-connect-footnote">

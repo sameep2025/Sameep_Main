@@ -46,6 +46,12 @@ const BillingSessionSchema = new mongoose.Schema(
       default: null,
     },
 
+    customerPhoneSnapshot: {
+      type: String,
+      trim: true,
+      default: "",
+    },
+
     billingMode: {
       type: String,
       enum: ["LOYALTY", "WALK_IN"],
@@ -94,8 +100,86 @@ const BillingSessionSchema = new mongoose.Schema(
 
     status: {
       type: String,
-      enum: ["ACTIVE", "COMPLETED", "CANCELLED"],
+      enum: ["ACTIVE", "COMPLETED", "CANCELLED", "SUPERSEDED"],
       default: "ACTIVE",
+    },
+
+    completedAt: {
+      type: Date,
+      default: null,
+    },
+
+    cancelledAt: {
+      type: Date,
+      default: null,
+    },
+
+    cancelledBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      default: null,
+    },
+
+    cancellationReason: {
+      type: String,
+      trim: true,
+      default: "",
+    },
+
+    cancellationNote: {
+      type: String,
+      trim: true,
+      default: "",
+    },
+
+    cancellationOtpPhoneSnapshot: {
+      type: String,
+      trim: true,
+      default: "",
+    },
+
+    cancellationOtpVerifiedAt: {
+      type: Date,
+      default: null,
+    },
+
+    cancellationAuthorizationMethod: {
+      type: String,
+      enum: ["OTP", "VENDOR_CONFIRM"],
+      default: undefined,
+    },
+
+    cancellationIdempotencyKey: {
+      type: String,
+      trim: true,
+      default: "",
+    },
+
+    supersededAt: {
+      type: Date,
+      default: null,
+    },
+
+    supersededBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      default: null,
+    },
+
+    supersededByBillingSessionId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "BillingSession",
+      default: null,
+    },
+
+    originalBillingSessionId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "BillingSession",
+      default: null,
+    },
+
+    replacementBillingSessionId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "BillingSession",
+      default: null,
     },
 
     publicAccessCode: {

@@ -11,6 +11,7 @@ router.post("/auth/verify-otp", customerPortalAuthController.verifyOtp);
 router.get("/me", requireCustomerPortalSession, customerPortalAuthController.me);
 router.post("/logout", requireCustomerPortalSession, customerPortalAuthController.logout);
 router.get("/rewards", requireCustomerPortalSession, customerPortalRewardsController.getRewards);
+router.get("/rewards/:vendorId/activity", requireCustomerPortalSession, customerPortalRewardsController.getRewardActivity);
 router.post("/rewards/:rewardId/reveal", requireCustomerPortalSession, customerPortalRewardsController.revealReward);
 router.get("/bills", requireCustomerPortalSession, customerPortalBillsController.getBills);
 router.get("/bills/:billIdentifier", requireCustomerPortalSession, customerPortalBillsController.getBillDetail);

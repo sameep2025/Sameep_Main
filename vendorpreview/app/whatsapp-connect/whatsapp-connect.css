@@ -119,6 +119,14 @@
   box-shadow: 0 18px 40px rgba(37, 211, 102, 0.22);
 }
 
+.whatsapp-connect-button-secondary {
+  margin-left: 12px;
+  border: 1px solid rgba(16, 26, 52, 0.12);
+  background: #101a34;
+  color: #fff8dd;
+  box-shadow: 0 18px 40px rgba(16, 26, 52, 0.12);
+}
+
 .whatsapp-connect-button:disabled {
   cursor: not-allowed;
   opacity: 0.64;
@@ -126,4 +134,15 @@
 
 .whatsapp-connect-footnote {
   font-size: 14px;
+}
+
+@media (max-width: 640px) {
+  .whatsapp-connect-button {
+    width: 100%;
+    margin: 8px 0 12px;
+  }
+
+  .whatsapp-connect-button-secondary {
+    margin-left: 0;
+  }
 }

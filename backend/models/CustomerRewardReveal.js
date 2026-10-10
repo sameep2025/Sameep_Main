@@ -25,6 +25,20 @@ const CustomerRewardRevealSchema = new mongoose.Schema(
       required: true,
       default: Date.now,
     },
+    invalidatedAt: {
+      type: Date,
+      default: null,
+    },
+    invalidatedReason: {
+      type: String,
+      trim: true,
+      default: "",
+    },
+    invalidatedByBillingSessionId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "BillingSession",
+      default: null,
+    },
   },
   { timestamps: true }
 );

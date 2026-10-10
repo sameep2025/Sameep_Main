@@ -513,6 +513,8 @@ export default function PremiumLightPreviewTemplate({
   onAddToCart,
   onIncreaseQty,
   onDecreaseQty,
+  hasVendorSession = false,
+  onLogout,
 }) {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [showAdminMenu, setShowAdminMenu] = useState(false);
@@ -691,7 +693,7 @@ export default function PremiumLightPreviewTemplate({
                   openAdminMenu();
                 }}
               >
-                Menu
+                Billing
               </button>
               <button
                 type="button"
@@ -702,6 +704,17 @@ export default function PremiumLightPreviewTemplate({
               >
                 Dashboard
               </button>
+              {hasVendorSession ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowAdminMenu(false);
+                    onLogout?.();
+                  }}
+                >
+                  Logout
+                </button>
+              ) : null}
             </div>
           ) : null}
         </div>
@@ -763,7 +776,7 @@ export default function PremiumLightPreviewTemplate({
                     openAdminMenu();
                   }}
                 >
-                  Menu
+                  Billing
                 </button>
                 <button
                   type="button"
@@ -775,6 +788,18 @@ export default function PremiumLightPreviewTemplate({
                 >
                   Dashboard
                 </button>
+                {hasVendorSession ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowAdminMenu(false);
+                      setMobileMenuOpen(false);
+                      onLogout?.();
+                    }}
+                  >
+                    Logout
+                  </button>
+                ) : null}
               </div>
             ) : null}
           </div>

@@ -177,7 +177,7 @@ test("normal, discount, rewards, and discount-plus-rewards bills reconcile corre
   });
 });
 
-test("authenticated customer with no completed bills returns empty history", withMockedBillModels(async () => {
+test("authenticated customer with no visible historical bills returns empty history", withMockedBillModels(async () => {
   const state = {};
   installBillRows([], state);
   installTransactions([], state);
@@ -192,7 +192,7 @@ test("authenticated customer with no completed bills returns empty history", wit
   assert.equal(res.statusCode, 200);
   assert.deepEqual(state.billQuery, {
     customerId: "692900000000000000000001",
-    status: "COMPLETED",
+    status: { $in: ["COMPLETED", "CANCELLED"] },
   });
   assert.deepEqual(state.billSort, { createdAt: -1, _id: -1 });
   assert.equal(state.billLimit, 21);
@@ -295,7 +295,7 @@ test("bill list returns newest-first page with batched transaction and vendor en
   assert.equal(res.statusCode, 200);
   assert.deepEqual(state.billQuery, {
     customerId: "692900000000000000000001",
-    status: "COMPLETED",
+    status: { $in: ["COMPLETED", "CANCELLED"] },
   });
   assert.deepEqual(state.transactionQuery, { billingSessionId: { $in: [billId] } });
   assert.deepEqual(state.vendorQuery, { _id: { $in: [String(vendorId)] } });
@@ -303,6 +303,12 @@ test("bill list returns newest-first page with batched transaction and vendor en
   assert.deepEqual(res.payload.data.bills[0], {
     billId: String(billId),
     date: new Date("2026-09-28T08:00:00.000Z"),
+    status: "COMPLETED",
+    cancellation: {
+      reason: "",
+      note: "",
+      cancelledAt: null,
+    },
     vendor: {
       businessName: "Reelook Beauty Saloon",
       subdomain: "reelook",
@@ -373,7 +379,7 @@ test("bill list pagination returns next cursor and applies cursor filter", withM
   );
 
   assert.equal(res2.statusCode, 200);
-  assert.equal(secondState.billQuery.status, "COMPLETED");
+  assert.deepEqual(secondState.billQuery.status, { $in: ["COMPLETED", "CANCELLED"] });
   assert.equal(secondState.billQuery.customerId, "692900000000000000000001");
   assert.ok(secondState.billQuery.$or);
 }));
@@ -411,7 +417,7 @@ test("limit is capped at max page size", withMockedBillModels(async () => {
   assert.equal(res.payload.data.pagination.limit, billsController.MAX_BILL_LIMIT);
 }));
 
-test("bill detail enforces authenticated ownership and completed status", withMockedBillModels(async () => {
+test("bill detail enforces authenticated ownership and historical bill status", withMockedBillModels(async () => {
   const state = {};
   const billId = oid("692900000000000000000051");
   BillingSession.findOne = (query) => {
@@ -435,7 +441,7 @@ test("bill detail enforces authenticated ownership and completed status", withMo
   assert.deepEqual(state.detailQuery, {
     _id: String(billId),
     customerId: "692900000000000000000001",
-    status: "COMPLETED",
+    status: { $in: ["COMPLETED", "CANCELLED"] },
   });
 }));
 
@@ -497,6 +503,12 @@ test("bill detail returns customer-safe completed bill data", withMockedBillMode
   assert.deepEqual(res.payload.data.bill, {
     billId: String(billId),
     date: new Date("2026-09-28T08:00:00.000Z"),
+    status: "COMPLETED",
+    cancellation: {
+      reason: "",
+      note: "",
+      cancelledAt: null,
+    },
     vendor: {
       businessName: "Mona Makeover",
       subdomain: "monamakeovers",

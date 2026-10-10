@@ -730,6 +730,7 @@ module.exports = {
   getPhoneNumberReadinessWithSystemUserToken,
   getTemplateStatus,
   getWhatsAppBusinessAccount,
+  readGraphAssetWithSystemUserToken,
   registerPhoneNumber,
   registerMetaPhoneNumber,
   registerPhoneNumberWithSystemUserToken,

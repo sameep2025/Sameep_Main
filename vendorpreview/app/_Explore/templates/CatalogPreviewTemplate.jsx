@@ -396,6 +396,8 @@ export default function CatalogPreviewTemplate({
   onAddToCart,
   onIncreaseQty,
   onDecreaseQty,
+  hasVendorSession = false,
+  onLogout,
 }) {
   const [serviceModeLabel, setServiceModeLabel] = useState("Service Type");
   const [activeSectionName, setActiveSectionName] = useState("");
@@ -620,7 +622,7 @@ export default function CatalogPreviewTemplate({
                   openAdminMenu();
                 }}
               >
-                Menu
+                Billing
               </button>
               <button
                 type="button"
@@ -631,6 +633,17 @@ export default function CatalogPreviewTemplate({
               >
                 Dashboard
               </button>
+              {hasVendorSession ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowAdminMenu(false);
+                    onLogout?.();
+                  }}
+                >
+                  Logout
+                </button>
+              ) : null}
             </div>
           ) : null}
         </div>
@@ -695,7 +708,7 @@ export default function CatalogPreviewTemplate({
                     openAdminMenu();
                   }}
                 >
-                  Menu
+                  Billing
                 </button>
                 <button
                   type="button"
@@ -707,6 +720,18 @@ export default function CatalogPreviewTemplate({
                 >
                   Dashboard
                 </button>
+                {hasVendorSession ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowAdminMenu(false);
+                      setMobileMenuOpen(false);
+                      onLogout?.();
+                    }}
+                  >
+                    Logout
+                  </button>
+                ) : null}
               </div>
             ) : null}
           </div>

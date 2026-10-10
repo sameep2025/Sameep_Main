@@ -132,6 +132,164 @@
   color: #e6c37a;
 }
 
+.customer-analytics-panel {
+  background: linear-gradient(180deg, #11100d, #090806);
+}
+
+.customer-analytics-header {
+  margin-bottom: 14px;
+}
+
+.customer-analytics-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 10px;
+}
+
+.customer-analytics-stat-card {
+  padding: 12px;
+  border-radius: 16px;
+}
+
+.customer-analytics-stat-card .revenue-panel-stat-value {
+  margin-top: 6px;
+  font-size: 19px;
+}
+
+.customer-analytics-tile-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 16px;
+}
+
+.customer-analytics-tile {
+  min-height: 68px;
+  padding: 12px;
+  border: 1px solid rgba(230, 195, 122, 0.22);
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.035);
+  color: #f5f2ea;
+  cursor: pointer;
+  text-align: left;
+  transition: border-color 0.18s ease, background 0.18s ease, transform 0.18s ease;
+}
+
+.customer-analytics-tile span {
+  display: block;
+  color: #f5d97a;
+  font-size: 14px;
+  font-weight: 850;
+  line-height: 1.2;
+}
+
+.customer-analytics-tile small {
+  display: block;
+  margin-top: 5px;
+  color: rgba(245, 242, 234, 0.58);
+  font-size: 11px;
+  line-height: 1.25;
+}
+
+.customer-analytics-tile.active {
+  border-color: rgba(245, 217, 122, 0.72);
+  background: rgba(230, 195, 122, 0.14);
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.22);
+}
+
+.customer-analytics-tile:focus-visible {
+  outline: 2px solid #f5d97a;
+  outline-offset: 2px;
+}
+
+.customer-analytics-active-section {
+  margin-top: 16px;
+  padding: 14px;
+  border: 1px solid rgba(230, 195, 122, 0.16);
+  border-radius: 18px;
+  background: rgba(0, 0, 0, 0.22);
+}
+
+.customer-analytics-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.customer-analytics-section-title {
+  color: #f5d97a;
+  font-size: 17px;
+  font-weight: 850;
+}
+
+.customer-analytics-section-subtitle {
+  margin-top: 3px;
+  color: rgba(245, 242, 234, 0.62);
+  font-size: 12px;
+}
+
+.customer-analytics-section-body {
+  display: grid;
+  gap: 10px;
+}
+
+.customer-analytics-filter {
+  flex: 0 0 auto;
+  width: min(44vw, 180px);
+  padding: 10px 12px;
+  border-radius: 12px;
+}
+
+.customer-analytics-rows {
+  display: grid;
+  gap: 8px;
+}
+
+.customer-analytics-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-height: 62px;
+  padding: 11px 12px;
+  border: 1px solid rgba(230, 195, 122, 0.13);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.035);
+}
+
+.customer-analytics-row-main {
+  min-width: 0;
+}
+
+.customer-analytics-row-title {
+  color: #f5f2ea;
+  font-size: 14px;
+  font-weight: 800;
+  overflow-wrap: anywhere;
+}
+
+.customer-analytics-row-meta {
+  margin-top: 4px;
+  color: rgba(245, 242, 234, 0.62);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.customer-analytics-row-meta.warning {
+  color: #fca5a5;
+}
+
+.customer-analytics-row-value {
+  flex: 0 0 auto;
+  color: #e6c37a;
+  font-size: 14px;
+  font-weight: 900;
+  text-align: right;
+  white-space: nowrap;
+}
+
 .revenue-snapshot-trigger-row {
   display: flex;
   justify-content: flex-end;
@@ -475,6 +633,13 @@
   gap: 10px;
 }
 
+.revenue-panel-bill-menu {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
 .revenue-panel-expand-btn {
   padding: 8px 12px;
   border-radius: 999px;
@@ -484,6 +649,63 @@
   cursor: pointer;
   font-weight: 700;
   font-size: 12px;
+}
+
+.revenue-panel-expand-btn.danger,
+.revenue-panel-button.danger {
+  border-color: rgba(255, 107, 107, 0.42);
+  background: rgba(255, 107, 107, 0.12);
+  color: #ffd1d1;
+}
+
+.revenue-panel-action-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.58;
+}
+
+.revenue-panel-action-note {
+  align-self: center;
+  color: rgba(245, 242, 234, 0.58);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.revenue-panel-status-badge {
+  display: inline-flex;
+  width: fit-content;
+  margin-top: 8px;
+  padding: 4px 9px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+}
+
+.revenue-panel-status-badge.cancelled {
+  border: 1px solid rgba(255, 107, 107, 0.35);
+  background: rgba(255, 107, 107, 0.1);
+  color: #ffb4b4;
+}
+
+.revenue-panel-action-message,
+.revenue-panel-action-error {
+  margin-top: 12px;
+  padding: 10px 12px;
+  border-radius: 14px;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.revenue-panel-action-message {
+  border: 1px solid rgba(77, 214, 145, 0.25);
+  background: rgba(77, 214, 145, 0.08);
+  color: #9af0bf;
+}
+
+.revenue-panel-action-error {
+  border: 1px solid rgba(255, 107, 107, 0.25);
+  background: rgba(255, 107, 107, 0.08);
+  color: #ffb4b4;
 }
 
 .revenue-panel-items-list {
@@ -566,6 +788,19 @@
   color: rgba(245, 242, 234, 0.45);
 }
 
+.revenue-panel-form-label {
+  display: grid;
+  gap: 8px;
+  margin-top: 16px;
+  color: rgba(245, 242, 234, 0.78);
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.revenue-panel-form-label textarea.revenue-panel-input {
+  resize: vertical;
+}
+
 .revenue-panel-input-phone {
   border-radius: 0 14px 14px 0;
 }
@@ -583,6 +818,110 @@
 .revenue-panel-button:disabled {
   opacity: 0.6;
   cursor: not-allowed;
+}
+
+.revenue-panel-button.secondary {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.revenue-panel-bill-modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 10020;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 18px;
+  background: rgba(0, 0, 0, 0.74);
+}
+
+.revenue-panel-bill-modal {
+  width: min(100%, 620px);
+  max-height: min(88vh, 760px);
+  overflow-y: auto;
+  padding: 20px;
+  border: 1px solid rgba(230, 195, 122, 0.26);
+  border-radius: 22px;
+  background: linear-gradient(180deg, #15120d, #070707);
+  color: #f5f2ea;
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.55);
+}
+
+.revenue-panel-cancel-modal {
+  width: min(100%, 520px);
+}
+
+.revenue-panel-bill-modal-header,
+.revenue-panel-modal-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.revenue-panel-modal-close {
+  width: 38px;
+  height: 38px;
+  border: 1px solid rgba(230, 195, 122, 0.28);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.04);
+  color: #f5f2ea;
+  cursor: pointer;
+  font-size: 24px;
+  line-height: 1;
+}
+
+.revenue-panel-bill-detail-grid,
+.revenue-panel-bill-totals {
+  display: grid;
+  gap: 10px;
+  margin-top: 16px;
+}
+
+.revenue-panel-bill-detail-grid {
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+}
+
+.revenue-panel-bill-detail-grid > div,
+.revenue-panel-bill-totals > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid rgba(230, 195, 122, 0.14);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.revenue-panel-bill-detail-grid span,
+.revenue-panel-bill-totals span {
+  color: rgba(245, 242, 234, 0.66);
+}
+
+.revenue-panel-bill-total-net {
+  color: #f5d97a;
+  font-size: 16px;
+}
+
+.revenue-panel-cancelled-note {
+  margin-top: 14px;
+  padding: 10px 12px;
+  border: 1px solid rgba(255, 107, 107, 0.24);
+  border-radius: 14px;
+  background: rgba(255, 107, 107, 0.08);
+  color: #ffb4b4;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.revenue-panel-modal-items {
+  margin-top: 16px;
+}
+
+.revenue-panel-modal-actions {
+  justify-content: flex-end;
+  margin-top: 18px;
 }
 
 .revenue-panel-customer-grid {
@@ -676,11 +1015,114 @@
     font-size: 22px;
   }
 
+  .customer-analytics-panel {
+    padding: 14px;
+    border-radius: 18px;
+  }
+
+  .customer-analytics-header {
+    margin-bottom: 12px;
+  }
+
+  .customer-analytics-header .revenue-panel-subtitle {
+    font-size: 12px;
+  }
+
+  .customer-analytics-summary-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+  }
+
+  .customer-analytics-stat-card {
+    padding: 10px;
+    border-radius: 14px;
+  }
+
+  .customer-analytics-stat-card .revenue-panel-stat-label {
+    font-size: 11px;
+  }
+
+  .customer-analytics-stat-card .revenue-panel-stat-value {
+    font-size: 16px;
+  }
+
+  .customer-analytics-tile-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+    margin-top: 12px;
+  }
+
+  .customer-analytics-tile {
+    min-height: 62px;
+    padding: 10px;
+  }
+
+  .customer-analytics-tile span {
+    font-size: 13px;
+  }
+
+  .customer-analytics-active-section {
+    margin-top: 12px;
+    padding: 12px;
+    border-radius: 16px;
+  }
+
+  .customer-analytics-section-head {
+    align-items: flex-start;
+    gap: 10px;
+  }
+
+  .customer-analytics-section-title {
+    font-size: 15px;
+  }
+
+  .customer-analytics-filter {
+    width: 132px;
+    min-height: 42px;
+    padding: 9px 10px;
+    font-size: 12px;
+  }
+
+  .customer-analytics-row {
+    min-height: 58px;
+    padding: 10px;
+    align-items: flex-start;
+  }
+
+  .customer-analytics-row-title,
+  .customer-analytics-row-value {
+    font-size: 13px;
+  }
+
+  .customer-analytics-row-meta {
+    font-size: 11px;
+  }
+
   .revenue-panel-bill-actions {
     width: 100%;
-    flex-direction: row;
-    justify-content: space-between;
-    align-items: center;
+    align-items: flex-start;
+  }
+
+  .revenue-panel-bill-menu {
+    width: 100%;
+    justify-content: flex-start;
+  }
+
+  .revenue-panel-bill-modal-overlay {
+    padding: 10px;
+  }
+
+  .revenue-panel-bill-modal {
+    max-height: 90vh;
+    padding: 16px;
+  }
+
+  .revenue-panel-modal-actions {
+    justify-content: stretch;
+  }
+
+  .revenue-panel-modal-actions .revenue-panel-button {
+    flex: 1 1 100%;
   }
 
   .revenue-snapshot-trigger-row {

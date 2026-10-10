@@ -1057,6 +1057,28 @@ button {
   margin-top: 18px;
 }
 
+.portalCancelledPill {
+  display: inline-flex;
+  width: fit-content;
+  margin-top: 8px;
+  border-radius: 999px;
+  background: #fee2e2;
+  color: #9f1d16;
+  padding: 7px 11px;
+  font-size: 0.74rem;
+  font-weight: 950;
+  letter-spacing: 0.08em;
+}
+
+.portalCancelledNotice {
+  margin-top: 14px;
+  border-radius: 16px;
+  background: #fff1f1;
+  color: #9f1d16;
+  padding: 12px 14px;
+  font-weight: 850;
+}
+
 .landingPage {
   overflow-x: hidden;
 }

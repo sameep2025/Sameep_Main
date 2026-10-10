@@ -56,11 +56,70 @@ const TransactionSchema = new mongoose.Schema(
       type: String,
       default: "POS_OFFLINE",
     },
+
+    status: {
+      type: String,
+      enum: ["COMPLETED", "CANCELLED", "SUPERSEDED"],
+      default: "COMPLETED",
+    },
+
+    cancelledAt: {
+      type: Date,
+      default: null,
+    },
+
+    cancelledBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      default: null,
+    },
+
+    cancellationReason: {
+      type: String,
+      trim: true,
+      default: "",
+    },
+
+    cancellationNote: {
+      type: String,
+      trim: true,
+      default: "",
+    },
+
+    cancellationAuthorizationMethod: {
+      type: String,
+      enum: ["OTP", "VENDOR_CONFIRM"],
+      default: undefined,
+    },
+
+    supersededAt: {
+      type: Date,
+      default: null,
+    },
+
+    originalTransactionId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Transaction",
+      default: null,
+    },
+
+    replacementTransactionId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Transaction",
+      default: null,
+    },
   },
   { timestamps: true }
 );
 
 TransactionSchema.index({ vendorId: 1, createdAt: -1 });
-TransactionSchema.index({ billingSessionId: 1 });
+TransactionSchema.index(
+  { billingSessionId: 1 },
+  {
+    unique: true,
+    partialFilterExpression: {
+      billingSessionId: { $exists: true, $type: "objectId" },
+    },
+  }
+);
 
 module.exports = mongoose.model("Transaction", TransactionSchema);

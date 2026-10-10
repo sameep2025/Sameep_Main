@@ -417,6 +417,8 @@ export default function EcommercePreviewTemplate({
   onToggleAdminMenu,
   onOpenAdminMenu,
   onOpenAdminDashboard,
+  hasVendorSession = false,
+  onLogout,
 }) {
   const [showCartDetails, setShowCartDetails] = useState(false);
   const [showCheckoutForm, setShowCheckoutForm] = useState(false);
@@ -729,11 +731,22 @@ export default function EcommercePreviewTemplate({
               {showAdminMenu ? (
                 <div className="ecommerce-admin-dropdown">
                   <button type="button" onClick={onOpenAdminMenu}>
-                    Menu
+                    Billing
                   </button>
                   <button type="button" onClick={onOpenAdminDashboard}>
                     Dashboard
                   </button>
+                  {hasVendorSession ? (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        onToggleAdminMenu?.();
+                        onLogout?.();
+                      }}
+                    >
+                      Logout
+                    </button>
+                  ) : null}
                 </div>
               ) : null}
             </div>

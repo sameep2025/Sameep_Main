@@ -159,6 +159,12 @@ function buildBillListItem(bill, { transaction = null, vendor = null } = {}) {
   return {
     billId: String(bill._id),
     date: bill.createdAt || null,
+    status: bill.status || "COMPLETED",
+    cancellation: {
+      reason: bill.cancellationReason || "",
+      note: bill.cancellationNote || "",
+      cancelledAt: bill.cancelledAt || null,
+    },
     vendor: buildSafeVendorDisplay(vendor),
     billValue: financials.billValue,
     discountAmount: financials.discountAmount,
@@ -176,6 +182,12 @@ function buildBillDetail(bill, { transaction = null, vendor = null } = {}) {
   return {
     billId: String(bill._id),
     date: bill.createdAt || null,
+    status: bill.status || "COMPLETED",
+    cancellation: {
+      reason: bill.cancellationReason || "",
+      note: bill.cancellationNote || "",
+      cancelledAt: bill.cancelledAt || null,
+    },
     vendor: buildSafeVendorDetail(vendor),
     customer: {
       type: bill.customerId ? "CUSTOMER" : "WALK_IN",
@@ -219,7 +231,7 @@ async function getBills(req, res) {
     const limit = parseLimit(req.query?.limit);
     const query = {
       customerId,
-      status: "COMPLETED",
+      status: { $in: ["COMPLETED", "CANCELLED"] },
     };
 
     if (req.query?.cursor && !applyCursorFilter(query, req.query.cursor)) {
@@ -290,7 +302,7 @@ async function getBillDetail(req, res) {
     const bill = await BillingSession.findOne({
       _id: billIdentifier,
       customerId,
-      status: "COMPLETED",
+      status: { $in: ["COMPLETED", "CANCELLED"] },
     }).lean();
 
     if (!bill) {

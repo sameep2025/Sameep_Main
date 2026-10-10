@@ -1965,7 +1965,7 @@ export default function ModernPreviewTemplate({
                   openAdminMenu();
                 }}
               >
-                Menu
+                Billing
               </button>
               <button
                 type="button"
@@ -2064,7 +2064,7 @@ export default function ModernPreviewTemplate({
                     openAdminMenu();
                   }}
                 >
-                  Menu
+                  Billing
                 </button>
                 <button
                   type="button"

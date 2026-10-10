@@ -96,6 +96,66 @@ function installLedgerRows(rows, state = {}) {
   };
 }
 
+function installActivityLedgerRows(rows, state = {}) {
+  LoyaltyLedger.find = (query) => {
+    state.activityQuery = query;
+    let sortSpec = null;
+    let limitCount = rows.length;
+
+    const queryApi = {
+      sort(nextSortSpec) {
+        sortSpec = nextSortSpec;
+        state.activitySort = nextSortSpec;
+        return this;
+      },
+      limit(nextLimit) {
+        limitCount = nextLimit;
+        state.activityLimit = nextLimit;
+        return this;
+      },
+      lean: async () => {
+        let result = rows.filter((row) => {
+          const typeMatches =
+            !query.type?.$in || query.type.$in.includes(row.type);
+          const customerMatches = String(row.customerId || "") === String(query.customerId || "");
+          const vendorMatches = String(row.vendorId || "") === String(query.vendorId || "");
+
+          if (!typeMatches || !customerMatches || !vendorMatches) return false;
+
+          if (!query.$or) return true;
+
+          return query.$or.some((condition) => {
+            if (condition.createdAt?.$lt) {
+              return new Date(row.createdAt) < condition.createdAt.$lt;
+            }
+
+            if (condition.createdAt && condition._id?.$lt) {
+              return (
+                new Date(row.createdAt).getTime() === new Date(condition.createdAt).getTime() &&
+                String(row._id) < String(condition._id.$lt)
+              );
+            }
+
+            return false;
+          });
+        });
+
+        if (sortSpec?.createdAt === -1 && sortSpec?._id === -1) {
+          result = result.sort((a, b) => {
+            const dateDelta = new Date(b.createdAt) - new Date(a.createdAt);
+            if (dateDelta !== 0) return dateDelta;
+            return String(b._id).localeCompare(String(a._id));
+          });
+        }
+
+        return result.slice(0, limitCount);
+      },
+    };
+
+    return queryApi;
+  };
+}
+
 function installEligibleEarnRows(rows, state = {}) {
   LoyaltyLedger.aggregate = async (pipeline) => {
     state.aggregatePipeline = pipeline;
@@ -508,8 +568,273 @@ test("portal rewards route requires customer portal session middleware", () => {
   );
 
   assert.match(routeSource, /router\.get\("\/rewards", requireCustomerPortalSession, customerPortalRewardsController\.getRewards\)/);
+  assert.match(routeSource, /router\.get\("\/rewards\/:vendorId\/activity", requireCustomerPortalSession, customerPortalRewardsController\.getRewardActivity\)/);
   assert.match(routeSource, /router\.post\("\/rewards\/:rewardId\/reveal", requireCustomerPortalSession, customerPortalRewardsController\.revealReward\)/);
 });
+
+test("reward activity endpoint returns first 10 newest records with cursor metadata", withMockedRewardModels(async () => {
+  const state = {};
+  const rows = Array.from({ length: 12 }, (_, index) => ({
+    _id: `692403a24d4d3a1b6a7f1${String(index).padStart(3, "0")}`,
+    customerId: CUSTOMER_A_ID,
+    vendorId: VENDOR_A_ID,
+    type: "EARN",
+    points: index + 1,
+    remainingPoints: index + 1,
+    createdAt: new Date(Date.UTC(2026, 8, 30, 12, index)).toISOString(),
+  }));
+  installActivityLedgerRows(rows, state);
+
+  const res = mockRes();
+  await rewardsController.getRewardActivity(
+    mockReq({
+      auth: { customerId: CUSTOMER_A_ID },
+      params: { vendorId: VENDOR_A_ID },
+      query: { limit: "10" },
+    }),
+    res
+  );
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.payload.data.items.length, 10);
+  assert.deepEqual(
+    res.payload.data.items.map((row) => row.activityId),
+    rows.slice().reverse().slice(0, 10).map((row) => row._id)
+  );
+  assert.equal(res.payload.data.hasMore, true);
+  assert.ok(res.payload.data.nextCursor);
+  assert.deepEqual(state.activitySort, { createdAt: -1, _id: -1 });
+  assert.equal(state.activityLimit, 11);
+  assert.equal(String(state.activityQuery.customerId), CUSTOMER_A_ID);
+  assert.equal(String(state.activityQuery.vendorId), VENDOR_A_ID);
+}));
+
+test("reward activity cursor returns next page without duplicates and end sets hasMore false", withMockedRewardModels(async () => {
+  const state = {};
+  const rows = Array.from({ length: 12 }, (_, index) => ({
+    _id: `692403a24d4d3a1b6a7f2${String(index).padStart(3, "0")}`,
+    customerId: CUSTOMER_A_ID,
+    vendorId: VENDOR_A_ID,
+    type: "EARN",
+    points: index + 1,
+    remainingPoints: index + 1,
+    createdAt: new Date(Date.UTC(2026, 8, 30, 12, index)).toISOString(),
+  }));
+  installActivityLedgerRows(rows, state);
+
+  const firstRes = mockRes();
+  await rewardsController.getRewardActivity(
+    mockReq({ auth: { customerId: CUSTOMER_A_ID }, params: { vendorId: VENDOR_A_ID } }),
+    firstRes
+  );
+
+  const secondRes = mockRes();
+  await rewardsController.getRewardActivity(
+    mockReq({
+      auth: { customerId: CUSTOMER_A_ID },
+      params: { vendorId: VENDOR_A_ID },
+      query: { cursor: firstRes.payload.data.nextCursor },
+    }),
+    secondRes
+  );
+
+  const firstIds = firstRes.payload.data.items.map((row) => row.activityId);
+  const secondIds = secondRes.payload.data.items.map((row) => row.activityId);
+  assert.equal(secondRes.statusCode, 200);
+  assert.equal(secondIds.length, 2);
+  assert.equal(secondRes.payload.data.hasMore, false);
+  assert.equal(secondRes.payload.data.nextCursor, null);
+  assert.deepEqual(firstIds.filter((id) => secondIds.includes(id)), []);
+}));
+
+test("reward activity uses _id tie-breaker for equal createdAt timestamps", withMockedRewardModels(async () => {
+  const state = {};
+  const sharedDate = "2026-09-30T12:00:00.000Z";
+  installActivityLedgerRows([
+    {
+      _id: "692403a24d4d3a1b6a7f0301",
+      customerId: CUSTOMER_A_ID,
+      vendorId: VENDOR_A_ID,
+      type: "EARN",
+      points: 1,
+      remainingPoints: 1,
+      createdAt: sharedDate,
+    },
+    {
+      _id: "692403a24d4d3a1b6a7f0303",
+      customerId: CUSTOMER_A_ID,
+      vendorId: VENDOR_A_ID,
+      type: "REDEEM",
+      points: -3,
+      createdAt: sharedDate,
+    },
+    {
+      _id: "692403a24d4d3a1b6a7f0302",
+      customerId: CUSTOMER_A_ID,
+      vendorId: VENDOR_A_ID,
+      type: "EARN",
+      points: 2,
+      remainingPoints: 2,
+      createdAt: sharedDate,
+    },
+  ], state);
+
+  const res = mockRes();
+  await rewardsController.getRewardActivity(
+    mockReq({
+      auth: { customerId: CUSTOMER_A_ID },
+      params: { vendorId: VENDOR_A_ID },
+      query: { limit: "2" },
+    }),
+    res
+  );
+
+  assert.deepEqual(
+    res.payload.data.items.map((row) => row.activityId),
+    ["692403a24d4d3a1b6a7f0303", "692403a24d4d3a1b6a7f0302"]
+  );
+
+  const secondRes = mockRes();
+  await rewardsController.getRewardActivity(
+    mockReq({
+      auth: { customerId: CUSTOMER_A_ID },
+      params: { vendorId: VENDOR_A_ID },
+      query: { cursor: res.payload.data.nextCursor, limit: "2" },
+    }),
+    secondRes
+  );
+
+  assert.deepEqual(
+    secondRes.payload.data.items.map((row) => row.activityId),
+    ["692403a24d4d3a1b6a7f0301"]
+  );
+}));
+
+test("reward activity endpoint rejects invalid vendor IDs and malformed cursors", withMockedRewardModels(async () => {
+  installActivityLedgerRows([]);
+
+  const invalidVendorRes = mockRes();
+  await rewardsController.getRewardActivity(
+    mockReq({ auth: { customerId: CUSTOMER_A_ID }, params: { vendorId: "bad-vendor" } }),
+    invalidVendorRes
+  );
+
+  assert.equal(invalidVendorRes.statusCode, 400);
+
+  const invalidCursorRes = mockRes();
+  await rewardsController.getRewardActivity(
+    mockReq({
+      auth: { customerId: CUSTOMER_A_ID },
+      params: { vendorId: VENDOR_A_ID },
+      query: { cursor: "not-a-valid-cursor" },
+    }),
+    invalidCursorRes
+  );
+
+  assert.equal(invalidCursorRes.statusCode, 400);
+}));
+
+test("reward activity endpoint is scoped to authenticated customer and requested vendor", withMockedRewardModels(async () => {
+  installActivityLedgerRows([
+    {
+      _id: "692403a24d4d3a1b6a7f0401",
+      customerId: CUSTOMER_A_ID,
+      vendorId: VENDOR_A_ID,
+      type: "EARN",
+      points: 10,
+      remainingPoints: 10,
+      createdAt: "2026-09-30T12:00:00.000Z",
+    },
+    {
+      _id: "692403a24d4d3a1b6a7f0402",
+      customerId: CUSTOMER_B_ID,
+      vendorId: VENDOR_A_ID,
+      type: "EARN",
+      points: 20,
+      remainingPoints: 20,
+      createdAt: "2026-09-30T13:00:00.000Z",
+    },
+    {
+      _id: "692403a24d4d3a1b6a7f0403",
+      customerId: CUSTOMER_A_ID,
+      vendorId: VENDOR_B_ID,
+      type: "EARN",
+      points: 30,
+      remainingPoints: 30,
+      createdAt: "2026-09-30T14:00:00.000Z",
+    },
+  ]);
+
+  const res = mockRes();
+  await rewardsController.getRewardActivity(
+    mockReq({
+      auth: { customerId: CUSTOMER_A_ID },
+      params: { vendorId: VENDOR_A_ID },
+      query: { customerId: CUSTOMER_B_ID },
+    }),
+    res
+  );
+
+  assert.deepEqual(
+    res.payload.data.items.map((row) => row.activityId),
+    ["692403a24d4d3a1b6a7f0401"]
+  );
+}));
+
+test("reward activity endpoint maps earn, redeem, and reversal activity types", withMockedRewardModels(async () => {
+  installActivityLedgerRows([
+    {
+      _id: "692403a24d4d3a1b6a7f0501",
+      customerId: CUSTOMER_A_ID,
+      vendorId: VENDOR_A_ID,
+      type: "EARN",
+      points: 40,
+      remainingPoints: 25,
+      expiryDate: "2026-11-01T00:00:00.000Z",
+      createdAt: "2026-09-30T15:00:00.000Z",
+    },
+    {
+      _id: "692403a24d4d3a1b6a7f0502",
+      customerId: CUSTOMER_A_ID,
+      vendorId: VENDOR_A_ID,
+      type: "REDEEM",
+      points: -15,
+      createdAt: "2026-09-30T14:00:00.000Z",
+    },
+    {
+      _id: "692403a24d4d3a1b6a7f0503",
+      customerId: CUSTOMER_A_ID,
+      vendorId: VENDOR_A_ID,
+      type: "EARN_REVERSAL",
+      points: -40,
+      createdAt: "2026-09-30T13:00:00.000Z",
+    },
+    {
+      _id: "692403a24d4d3a1b6a7f0504",
+      customerId: CUSTOMER_A_ID,
+      vendorId: VENDOR_A_ID,
+      type: "REDEEM_REVERSAL",
+      points: 15,
+      createdAt: "2026-09-30T12:00:00.000Z",
+    },
+  ]);
+
+  const res = mockRes();
+  await rewardsController.getRewardActivity(
+    mockReq({ auth: { customerId: CUSTOMER_A_ID }, params: { vendorId: VENDOR_A_ID } }),
+    res
+  );
+
+  assert.deepEqual(
+    res.payload.data.items.map((row) => row.type),
+    ["EARN", "REDEEM", "EARN_REVERSAL", "REDEEM_REVERSAL"]
+  );
+  assert.deepEqual(
+    res.payload.data.items.map((row) => row.signedPoints),
+    [40, -15, -40, 15]
+  );
+  assert.equal(res.payload.data.items[0].remainingPoints, 25);
+}));
 
 test("no token is rejected by portal middleware for rewards", async () => {
   const res = mockRes();

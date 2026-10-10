@@ -1037,7 +1037,7 @@ export default function NurseriesPreviewTemplate({
                       openAdminMenu();
                     }}
                   >
-                    Menu
+                    Billing
                   </button>
                   <button
                     type="button"
@@ -1138,7 +1138,7 @@ export default function NurseriesPreviewTemplate({
                       openAdminMenu();
                     }}
                   >
-                    Menu
+                    Billing
                   </button>
                   <button
                     type="button"

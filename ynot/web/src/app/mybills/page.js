@@ -7,6 +7,7 @@ import { API_BASE_URL } from "../../utils/config";
 const CUSTOMER_PORTAL_TOKEN_KEY = "ynot_customer_portal_token";
 const DEFAULT_COUNTRY_CODE = "91";
 const DEFAULT_BILL_LIMIT = 20;
+const DEFAULT_REWARD_ACTIVITY_LIMIT = 10;
 const CONFIGURED_VENDOR_PREVIEW_ROOT_URL = (
   process.env.NEXT_PUBLIC_VENDOR_PREVIEW_ROOT_URL ||
   process.env.NEXT_PUBLIC_HARISH_PREVIEW_BASE_URL ||
@@ -73,6 +74,15 @@ function getRewardId(reward) {
   return String(reward?.rewardId || "").trim();
 }
 
+function getRewardActivityKey(entry, index = 0) {
+  return String(entry?.activityId || "").trim() || [
+    entry?.createdAt || "activity",
+    entry?.type || "reward",
+    entry?.signedPoints ?? entry?.points ?? "",
+    index,
+  ].join("-");
+}
+
 function getEarnActivityDetail(entry) {
   if (entry?.type !== "EARN") return null;
 
@@ -115,6 +125,13 @@ function getEarnActivityDetail(entry) {
       : `Expires on ${formattedExpiry}`,
     isExpired: false,
   };
+}
+
+function getRewardActivityLabel(entry) {
+  if (entry?.type === "REDEEM") return "Redeemed";
+  if (entry?.type === "EARN_REVERSAL") return "Earn Reversed";
+  if (entry?.type === "REDEEM_REVERSAL") return "Redeem Restored";
+  return "Earned";
 }
 
 function getVendorPreviewRootUrl() {
@@ -401,8 +418,14 @@ function PortalHeader({ customer, onLogout, loggingOut }) {
   );
 }
 
-function RewardActivity({ activity = [] }) {
-  if (!activity.length) return null;
+function RewardActivity({
+  activity = [],
+  hasMore = false,
+  loadingMore = false,
+  error = "",
+  onLoadMore,
+}) {
+  if (!activity.length && !hasMore) return null;
 
   return (
     <div className="portalActivity">
@@ -411,11 +434,11 @@ function RewardActivity({ activity = [] }) {
         const activityDetail = getEarnActivityDetail(entry);
 
         return (
-          <div className="portalActivityRow" key={`${entry.createdAt || "activity"}-${index}`}>
+          <div className="portalActivityRow" key={getRewardActivityKey(entry, index)}>
             <span className="portalActivityText">
               <span className={entry.signedPoints >= 0 ? "portalPositive" : "portalNegative"}>
                 {entry.signedPoints >= 0 ? "+" : ""}
-                {entry.signedPoints} {entry.type === "REDEEM" ? "Redeemed" : "Earned"}
+                {entry.signedPoints} {getRewardActivityLabel(entry)}
               </span>
               {activityDetail?.text ? (
                 <span
@@ -431,6 +454,26 @@ function RewardActivity({ activity = [] }) {
           </div>
         );
       })}
+      {error ? (
+        <div className="portalActivityError">
+          <span>{error}</span>
+          {onLoadMore ? (
+            <button type="button" className="portalTextButton" onClick={onLoadMore}>
+              Retry
+            </button>
+          ) : null}
+        </div>
+      ) : null}
+      {hasMore ? (
+        <button
+          type="button"
+          className="portalTextButton portalActivityLoadMore"
+          onClick={onLoadMore}
+          disabled={loadingMore || !onLoadMore}
+        >
+          {loadingMore ? "Loading..." : "Load More"}
+        </button>
+      ) : null}
     </div>
   );
 }
@@ -693,8 +736,10 @@ function RewardsTab({ token, onAuthExpired }) {
   const [revealedRewardsById, setRevealedRewardsById] = useState({});
   const [revealingRewardIds, setRevealingRewardIds] = useState({});
   const [revealErrors, setRevealErrors] = useState({});
+  const [activityHistoryByVendor, setActivityHistoryByVendor] = useState({});
   const revealedRewardsRef = useRef({});
   const revealingRewardIdsRef = useRef({});
+  const activityRequestsRef = useRef({});
 
   const overallRewards = useMemo(
     () =>
@@ -787,7 +832,22 @@ function RewardsTab({ token, onAuthExpired }) {
       const nextUnrevealedRewards = Array.isArray(payload?.data?.unrevealedRewards)
         ? payload.data.unrevealedRewards
         : [];
-      setVendors(Array.isArray(payload?.data?.vendors) ? payload.data.vendors : []);
+      const nextVendors = Array.isArray(payload?.data?.vendors) ? payload.data.vendors : [];
+      setVendors(nextVendors);
+      setActivityHistoryByVendor(
+        nextVendors.reduce((state, vendorReward) => {
+          const activityVendorId = String(vendorReward?.activityVendorId || "").trim();
+          if (!activityVendorId) return state;
+          state[activityVendorId] = {
+            items: Array.isArray(vendorReward.recentActivity) ? vendorReward.recentActivity : [],
+            hasMore: Boolean(vendorReward.recentActivityHasMore),
+            nextCursor: vendorReward.recentActivityNextCursor || "",
+            loading: false,
+            error: "",
+          };
+          return state;
+        }, {})
+      );
       setUnrevealedRewards(nextUnrevealedRewards);
       mergeScratchRewards(nextUnrevealedRewards);
     } catch (err) {
@@ -870,6 +930,90 @@ function RewardsTab({ token, onAuthExpired }) {
     }
   }, [loadRewards, onAuthExpired, revealedRewardsById, revealingRewardIds, token]);
 
+  const loadMoreRewardActivity = useCallback(async (vendorReward) => {
+    const activityVendorId = String(vendorReward?.activityVendorId || "").trim();
+    if (!activityVendorId || activityRequestsRef.current[activityVendorId]) return;
+
+    const currentState = activityHistoryByVendor[activityVendorId] || {
+      items: Array.isArray(vendorReward?.recentActivity) ? vendorReward.recentActivity : [],
+      hasMore: Boolean(vendorReward?.recentActivityHasMore),
+      nextCursor: vendorReward?.recentActivityNextCursor || "",
+      loading: false,
+      error: "",
+    };
+
+    if (!currentState.hasMore || !currentState.nextCursor) return;
+
+    try {
+      activityRequestsRef.current = {
+        ...activityRequestsRef.current,
+        [activityVendorId]: true,
+      };
+      setActivityHistoryByVendor((current) => ({
+        ...current,
+        [activityVendorId]: {
+          ...currentState,
+          ...(current[activityVendorId] || {}),
+          loading: true,
+          error: "",
+        },
+      }));
+
+      const params = new URLSearchParams({
+        limit: String(DEFAULT_REWARD_ACTIVITY_LIMIT),
+        cursor: currentState.nextCursor,
+      });
+      const payload = await portalRequest(
+        `/api/customer-portal/rewards/${encodeURIComponent(activityVendorId)}/activity?${params.toString()}`,
+        { token }
+      );
+      const nextItems = Array.isArray(payload?.data?.items) ? payload.data.items : [];
+
+      setActivityHistoryByVendor((current) => {
+        const previousState = current[activityVendorId] || currentState;
+        const seen = new Set(
+          (previousState.items || []).map((entry, index) => getRewardActivityKey(entry, index))
+        );
+        const mergedItems = [...(previousState.items || [])];
+
+        nextItems.forEach((entry, index) => {
+          const key = getRewardActivityKey(entry, index);
+          if (seen.has(key)) return;
+          seen.add(key);
+          mergedItems.push(entry);
+        });
+
+        return {
+          ...current,
+          [activityVendorId]: {
+            items: mergedItems,
+            hasMore: Boolean(payload?.data?.hasMore),
+            nextCursor: payload?.data?.nextCursor || "",
+            loading: false,
+            error: "",
+          },
+        };
+      });
+    } catch (err) {
+      if ([401, 403].includes(err.status)) {
+        onAuthExpired();
+        return;
+      }
+      setActivityHistoryByVendor((current) => ({
+        ...current,
+        [activityVendorId]: {
+          ...(current[activityVendorId] || currentState),
+          loading: false,
+          error: "Unable to load more activity.",
+        },
+      }));
+    } finally {
+      const nextRequests = { ...activityRequestsRef.current };
+      delete nextRequests[activityVendorId];
+      activityRequestsRef.current = nextRequests;
+    }
+  }, [activityHistoryByVendor, onAuthExpired, token]);
+
   if (loading) return <div className="portalStateCard">Loading rewards...</div>;
 
   if (error) {
@@ -925,6 +1069,14 @@ function RewardsTab({ token, onAuthExpired }) {
           const isExpanded = expandedVendorKey === vendorKey;
           const businessUrl = buildBusinessUrl(vendorReward.vendor?.subdomain);
           const expiringSoonPoints = Number(vendorReward.expiringSoonPoints || 0);
+          const activityVendorId = String(vendorReward.activityVendorId || "").trim();
+          const activityState = activityHistoryByVendor[activityVendorId] || {
+            items: vendorReward.recentActivity || [],
+            hasMore: Boolean(vendorReward.recentActivityHasMore),
+            nextCursor: vendorReward.recentActivityNextCursor || "",
+            loading: false,
+            error: "",
+          };
 
           return (
             <article className="portalRewardCard" key={vendorKey}>
@@ -986,7 +1138,13 @@ function RewardsTab({ token, onAuthExpired }) {
                     </div>
                   ) : null}
 
-                  <RewardActivity activity={vendorReward.recentActivity || []} />
+                  <RewardActivity
+                    activity={activityState.items || []}
+                    hasMore={Boolean(activityState.hasMore)}
+                    loadingMore={Boolean(activityState.loading)}
+                    error={activityState.error || ""}
+                    onLoadMore={() => loadMoreRewardActivity(vendorReward)}
+                  />
                 </div>
               ) : null}
 
@@ -1073,6 +1231,9 @@ function BillDetailPanel({ bill, loading, error, onClose }) {
               <p>Bill detail</p>
               <h2>{bill.vendor?.businessName || "Business"}</h2>
               <span>{formatDateTime(bill.date)}</span>
+              {bill.status === "CANCELLED" ? (
+                <strong className="portalCancelledPill">CANCELLED</strong>
+              ) : null}
             </div>
 
             <div className="portalItemsTable">
@@ -1102,6 +1263,15 @@ function BillDetailPanel({ bill, loading, error, onClose }) {
 
             {bill.paymentMode ? (
               <p className="portalPaymentPill">{bill.paymentMode}</p>
+            ) : null}
+            {bill.status === "CANCELLED" ? (
+              <p className="portalCancelledNotice">
+                This bill was cancelled
+                {bill.cancellation?.cancelledAt
+                  ? ` on ${formatDateTime(bill.cancellation.cancelledAt)}`
+                  : ""}
+                .
+              </p>
             ) : null}
           </>
         ) : null}
@@ -1200,6 +1370,9 @@ function BillsTab({ token, onAuthExpired }) {
               <div>
                 <h3>{bill.vendor?.businessName || "Business"}</h3>
                 <p>{formatDate(bill.date)}</p>
+                {bill.status === "CANCELLED" ? (
+                  <span className="portalCancelledPill">CANCELLED</span>
+                ) : null}
               </div>
               <div className="portalBillPaid">
                 <span>Amount Paid</span>

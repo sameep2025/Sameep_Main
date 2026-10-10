@@ -1,7 +1,11 @@
 const mongoose = require("mongoose");
 const Customer = require("../models/Customer");
 const BillingSession = require("../models/BillingSession");
+const Transaction = require("../models/Transaction");
 const LoyaltyLedger = require("../models/LoyaltyLedger");
+const {
+  summarizeRewardLedgerRowsForVendor,
+} = require("../services/loyaltyService");
 
 exports.getVendorCustomer = async (req, res) => {
   try {
@@ -37,7 +41,7 @@ exports.getVendorCustomer = async (req, res) => {
     const billQuery = {
       vendorId: new mongoose.Types.ObjectId(vendorId),
       customerId: customer._id,
-      status: "COMPLETED",
+      status: { $in: ["COMPLETED", "CANCELLED"] },
     };
     if (rangeStart) {
       billQuery.createdAt = { $gte: rangeStart };
@@ -47,8 +51,19 @@ exports.getVendorCustomer = async (req, res) => {
       .sort({ createdAt: -1 })
       .lean();
 
-    const transactionIds = billsRaw
-      .map((b) => b.transactionId)
+    const billIds = billsRaw.map((b) => b._id).filter(Boolean);
+    const transactions = billIds.length
+      ? await Transaction.find({ billingSessionId: { $in: billIds } })
+          .select("_id billingSessionId finalPaidAmount redeemValue paymentMode status createdAt")
+          .lean()
+      : [];
+    const transactionMap = new Map(
+      transactions
+        .filter((transaction) => transaction.billingSessionId)
+        .map((transaction) => [String(transaction.billingSessionId), transaction])
+    );
+    const transactionIds = transactions
+      .map((transaction) => transaction._id)
       .filter(Boolean)
       .map((id) => String(id));
 
@@ -72,8 +87,9 @@ exports.getVendorCustomer = async (req, res) => {
       const items = bill.items || bill.cartItems || [];
       const earned = bill.pointsEarned || 0;
       const redeemed = bill.pointsRedeemed || 0;
-      const ledger = bill.transactionId
-        ? ledgerMap.get(String(bill.transactionId))
+      const transaction = transactionMap.get(String(bill._id || ""));
+      const ledger = transaction?._id
+        ? ledgerMap.get(String(transaction._id))
         : null;
       const now = new Date();
       let daysLeft = null;
@@ -82,17 +98,32 @@ exports.getVendorCustomer = async (req, res) => {
         daysLeft = Math.ceil(diff / (1000 * 60 * 60 * 24));
       }
 
+      const effectiveCompletedAt = bill.completedAt || transaction?.createdAt || bill.createdAt || null;
+      const cancellationDeadline = effectiveCompletedAt
+        ? new Date(new Date(effectiveCompletedAt).getTime() + 7 * 24 * 60 * 60 * 1000)
+        : null;
+
       return {
         billId: bill._id,
-        total: bill.total || bill.totalAmount || 0,
+        total: bill.total || transaction?.finalPaidAmount || bill.totalAmount || 0,
         earned,
-        redeemed,
+        redeemed: transaction?.redeemValue ?? redeemed,
         createdAt: bill.createdAt,
         transactionDate: bill.createdAt,
         pointsEarned: ledger?.points ?? earned,
-	        expiryDate: ledger?.expiryDate || null,
-	        daysLeft,
-	        phone: bill.phone || bill.customerPhone || customer.phone || customer.fullNumber || "Walk-in",
+        expiryDate: ledger?.expiryDate || null,
+        daysLeft,
+        phone: bill.customerPhoneSnapshot || bill.phone || bill.customerPhone || customer.fullNumber || customer.phone || "Walk-in",
+        status: bill.status,
+        cancellationReason: bill.cancellationReason || "",
+        cancellationNote: bill.cancellationNote || "",
+        cancelledAt: bill.cancelledAt || null,
+        canCancel:
+          bill.status === "COMPLETED" &&
+          cancellationDeadline &&
+          new Date() <= cancellationDeadline,
+        cancellationDeadline,
+        paymentMode: bill.paymentMode || transaction?.paymentMode || "",
         items: items.map((i) => ({
           itemId: i.itemId ? String(i.itemId) : "",
           name: i.name,
@@ -105,103 +136,35 @@ exports.getVendorCustomer = async (req, res) => {
       };
     });
 
-    const totalSpend = billsRaw.reduce(
+    const completedBillsRaw = billsRaw.filter((bill) => bill.status === "COMPLETED");
+    const totalSpend = completedBillsRaw.reduce(
       (sum, b) => sum + (b.totalAmount || 0),
       0
     );
-    const totalVisits = billsRaw.length;
+    const totalVisits = completedBillsRaw.length;
     const avgBill = totalVisits ? Math.round(totalSpend / totalVisits) : 0;
-    const lastVisit = billsRaw[0]?.createdAt || null;
+    const lastVisit = completedBillsRaw[0]?.createdAt || null;
 
     const now = new Date();
-    const soonDate = new Date();
-    soonDate.setDate(soonDate.getDate() + 7);
 
-    const loyaltyAgg = await LoyaltyLedger.aggregate([
-      {
-        $match: {
-          vendorId: new mongoose.Types.ObjectId(vendorId),
-          customerId: customer._id,
-        },
-      },
-      {
-        $group: {
-          _id: null,
-          earned: {
-            $sum: {
-              $cond: [{ $eq: ["$type", "EARN"] }, "$points", 0],
-            },
-          },
-          redeemed: {
-            $sum: {
-              $cond: [
-                { $eq: ["$type", "REDEEM"] },
-                { $abs: "$points" },
-                0,
-              ],
-            },
-          },
-          balance: {
-            $sum: {
-              $cond: [{ $eq: ["$type", "EARN"] }, "$remainingPoints", 0],
-            },
-          },
-          availablePoints: {
-            $sum: {
-              $cond: [
-                {
-                  $and: [
-                    { $eq: ["$type", "EARN"] },
-                    { $gt: ["$remainingPoints", 0] },
-                    {
-                      $or: [
-                        { $eq: ["$expiryDate", null] },
-                        { $gte: ["$expiryDate", now] },
-                      ],
-                    },
-                  ],
-                },
-                "$remainingPoints",
-                0,
-              ],
-            },
-          },
-          expiredPoints: {
-            $sum: {
-              $cond: [
-                {
-                  $and: [
-                    { $eq: ["$type", "EARN"] },
-                    { $gt: ["$remainingPoints", 0] },
-                    { $lt: ["$expiryDate", now] },
-                  ],
-                },
-                "$remainingPoints",
-                0,
-              ],
-            },
-          },
-          expiringSoonPoints: {
-            $sum: {
-              $cond: [
-                {
-                  $and: [
-                    { $eq: ["$type", "EARN"] },
-                    { $gt: ["$remainingPoints", 0] },
-                    { $gte: ["$expiryDate", now] },
-                    { $lte: ["$expiryDate", soonDate] },
-                  ],
-                },
-                "$remainingPoints",
-                0,
-              ],
-            },
-          },
-        },
-      },
-    ]);
+    const loyaltyRows = await LoyaltyLedger.find({
+      vendorId: new mongoose.Types.ObjectId(vendorId),
+      customerId: customer._id,
+    }).lean();
 
-    const loyaltyRow = loyaltyAgg?.[0] || {};
+    const rewardSummary = summarizeRewardLedgerRowsForVendor({
+      ledgerRows: loyaltyRows,
+      vendorId,
+      now,
+    });
+    const loyaltyRow = {
+      earned: rewardSummary.totalEarnedPoints,
+      redeemed: rewardSummary.totalRedeemedPoints,
+      balance: rewardSummary.redeemableBalance,
+      availablePoints: rewardSummary.availablePoints,
+      expiredPoints: rewardSummary.totalExpiredPoints,
+      expiringSoonPoints: rewardSummary.expiringSoonPoints,
+    };
 
     const expiringPoints = await LoyaltyLedger.aggregate([
       {
