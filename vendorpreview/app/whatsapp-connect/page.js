@@ -411,8 +411,9 @@ function WhatsappConnectContent() {
               override_default_response_type: true,
               extras: {
                 version: "v4",
+                sessionInfoVersion: "3",
                 setup: {
-                  skip_phone_registration: true,
+                  featureType: "waba_onboarding_only",
                 },
               },
             }
@@ -531,8 +532,9 @@ function WhatsappConnectContent() {
         {showWabaOnlyDiagnostic ? (
           <div className="whatsapp-connect-diagnostic-panel">
             <p className="whatsapp-connect-warning">
-              TEST diagnostic only. The unverified skip-phone-registration parameter may create a
-              real WABA in Meta if you proceed. Do not enter or register a phone number.
+              TEST diagnostic only. The unverified waba_onboarding_only Meta Support parameter
+              may create a real WABA in Meta if you proceed. Do not enter or register a phone
+              number.
             </p>
             <button
               type="button"
