@@ -84,7 +84,9 @@ export default function OffersRewardsPopup({
   const [dismissed, setDismissed] = useState(false);
   const [reduceMotion, setReduceMotion] = useState(false);
   const [previewImage, setPreviewImage] = useState(null);
+  const [activeOfferIndex, setActiveOfferIndex] = useState(0);
   const closeButtonRef = useRef(null);
+  const offersTrackRef = useRef(null);
   const previousFocusRef = useRef(null);
   const closedForVisitRef = useRef(false);
   const autoOpenedVendorRef = useRef("");
@@ -115,7 +117,15 @@ export default function OffersRewardsPopup({
     setDismissed(false);
     setOpen(false);
     setHighlights(null);
+    setActiveOfferIndex(0);
   }, [vendorId]);
+
+  useEffect(() => {
+    setActiveOfferIndex(0);
+    if (offersTrackRef.current) {
+      offersTrackRef.current.scrollLeft = 0;
+    }
+  }, [offers.length]);
 
   useEffect(() => {
     if (!vendorId || !enabled || typeof window === "undefined") return;
@@ -209,6 +219,55 @@ export default function OffersRewardsPopup({
     setOpen(true);
   };
 
+  const scrollToOffer = (index) => {
+    const track = offersTrackRef.current;
+    if (!track || offers.length === 0) return;
+
+    const nextIndex = Math.min(Math.max(index, 0), offers.length - 1);
+    const target = track.children[nextIndex];
+
+    if (target?.scrollIntoView) {
+      target.scrollIntoView({
+        behavior: reduceMotion ? "auto" : "smooth",
+        block: "nearest",
+        inline: "start",
+      });
+    }
+
+    setActiveOfferIndex(nextIndex);
+  };
+
+  const handleOffersScroll = () => {
+    const track = offersTrackRef.current;
+    if (!track || offers.length <= 1) return;
+
+    const trackLeft = track.getBoundingClientRect().left;
+    let nearestIndex = 0;
+    let nearestDistance = Infinity;
+
+    Array.from(track.children).forEach((child, index) => {
+      const distance = Math.abs(child.getBoundingClientRect().left - trackLeft);
+      if (distance < nearestDistance) {
+        nearestDistance = distance;
+        nearestIndex = index;
+      }
+    });
+
+    setActiveOfferIndex(nearestIndex);
+  };
+
+  const handleOffersKeyDown = (event) => {
+    if (offers.length <= 1) return;
+
+    if (event.key === "ArrowRight") {
+      event.preventDefault();
+      scrollToOffer(activeOfferIndex + 1);
+    } else if (event.key === "ArrowLeft") {
+      event.preventDefault();
+      scrollToOffer(activeOfferIndex - 1);
+    }
+  };
+
   const themeClass = useMemo(() => {
     const normalized = normalizeText(templateKey).toLowerCase();
     return normalized ? `offers-rewards-popup--${normalized.replace(/[^a-z0-9_-]/g, "")}` : "";
@@ -244,8 +303,20 @@ export default function OffersRewardsPopup({
 
             {offers.length > 0 ? (
               <div className="offers-rewards-popup__section">
-                <h3>Current Offers</h3>
-                <div className="offers-rewards-popup__offers" aria-label="Current offers">
+                <div className="offers-rewards-popup__offers-heading">
+                  <h3>Current Offers</h3>
+                  {offers.length > 1 ? (
+                    <span>{activeOfferIndex + 1} of {offers.length} Offers</span>
+                  ) : null}
+                </div>
+                <div
+                  ref={offersTrackRef}
+                  className="offers-rewards-popup__offers"
+                  aria-label="Current offers"
+                  tabIndex={offers.length > 1 ? 0 : undefined}
+                  onScroll={handleOffersScroll}
+                  onKeyDown={handleOffersKeyDown}
+                >
                   {offers.map((offer) => {
                     const label = isDistinctLabel(offer.sourceLabel, offer) ? offer.sourceLabel : "";
                     const priceText = getOfferPriceText(offer);
@@ -279,6 +350,41 @@ export default function OffersRewardsPopup({
                     );
                   })}
                 </div>
+                {offers.length > 1 ? (
+                  <div className="offers-rewards-popup__carousel-controls">
+                    <button
+                      type="button"
+                      onClick={() => scrollToOffer(activeOfferIndex - 1)}
+                      disabled={activeOfferIndex === 0}
+                      aria-label="Show previous offer"
+                    >
+                      ‹
+                    </button>
+                    <div className="offers-rewards-popup__dots" aria-label="Offer pagination">
+                      {offers.map((offer, index) => (
+                        <button
+                          key={`offer-dot-${offer.id || index}`}
+                          type="button"
+                          className={index === activeOfferIndex ? "is-active" : ""}
+                          onClick={() => scrollToOffer(index)}
+                          aria-label={`Show offer ${index + 1} of ${offers.length}`}
+                          aria-current={index === activeOfferIndex ? "true" : undefined}
+                        />
+                      ))}
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => scrollToOffer(activeOfferIndex + 1)}
+                      disabled={activeOfferIndex === offers.length - 1}
+                      aria-label="Show next offer"
+                    >
+                      ›
+                    </button>
+                  </div>
+                ) : null}
+                {offers.length > 1 ? (
+                  <p className="offers-rewards-popup__swipe-hint">Swipe to see more offers</p>
+                ) : null}
               </div>
             ) : null}
 
