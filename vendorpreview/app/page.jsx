@@ -11,6 +11,7 @@ import About from "./About/About";
 import Contact from "./Contact/Contact";
 import Load from "./Load/Load";
 import Portal from "./Portal/Portal";
+import OffersRewardsPopup from "./components/OffersRewardsPopup";
 import ScrollToTop from "./components/ScrollToTop";
 import {
   buildVendorPreviewPageViewPayload,
@@ -185,9 +186,15 @@ if (!sessionAllowed) {
 {!isImmersiveTemplate ? <Contact /> : null}
 
 
-<ScrollToTop />
-        {/* GLOBAL PORTAL */}
-        <Portal />
+	<ScrollToTop />
+  <OffersRewardsPopup
+    vendorId={vendorInfo?.vendorId || vendorInfo?._id || vendorInfo?.vendor?._id || ""}
+    businessName={vendorInfo?.businessName || ""}
+    templateKey={effectiveTemplateKey}
+    enabled={!loading}
+  />
+	        {/* GLOBAL PORTAL */}
+	        <Portal />
       </div>
     </div>
   );

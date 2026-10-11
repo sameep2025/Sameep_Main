@@ -357,6 +357,22 @@ function defaultVariantForm() {
   };
 }
 
+function normalizeOfferDateInput(value) {
+  if (!value) return "";
+  const text = String(value || "").trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(text)) return text;
+  const parsed = new Date(text);
+  return Number.isNaN(parsed.getTime()) ? "" : parsed.toISOString().slice(0, 10);
+}
+
+function validateOfferDateRange(startDate, endDate) {
+  if (startDate && endDate && endDate < startDate) {
+    window.alert("Offer End Date cannot be earlier than Offer Start Date");
+    return false;
+  }
+  return true;
+}
+
 function defaultCustomForm(customType = "package") {
   return {
     id: null,
@@ -367,6 +383,8 @@ function defaultCustomForm(customType = "package") {
     packagesIncludes: "",
     terms: "",
     offerText: "",
+    offerStartDate: "",
+    offerEndDate: "",
     price: "",
     variants: [defaultVariantForm()],
   };
@@ -424,6 +442,8 @@ export default function PackagesPortal({ onClose, onLoaded, onPricingUpdated }) 
   const [addNodeTerms, setAddNodeTerms] = useState("");
   const [addNodePackagesIncludes, setAddNodePackagesIncludes] = useState("");
   const [addNodeOfferText, setAddNodeOfferText] = useState("");
+  const [addNodeOfferStartDate, setAddNodeOfferStartDate] = useState("");
+  const [addNodeOfferEndDate, setAddNodeOfferEndDate] = useState("");
   const [addNodeImageUrl, setAddNodeImageUrl] = useState("");
   const [addNodeItemCode, setAddNodeItemCode] = useState("");
   const [addNodeUnitLabel, setAddNodeUnitLabel] = useState("");
@@ -439,6 +459,8 @@ export default function PackagesPortal({ onClose, onLoaded, onPricingUpdated }) 
 
   const [pendingServiceId, setPendingServiceId] = useState(null);
   const [modalOfferText, setModalOfferText] = useState("");
+  const [modalOfferStartDate, setModalOfferStartDate] = useState("");
+  const [modalOfferEndDate, setModalOfferEndDate] = useState("");
   const [activationOfferText, setActivationOfferText] = useState("");
 
   const [showActivateModal, setShowActivateModal] = useState(false);
@@ -1112,6 +1134,8 @@ async function updateService(service, status) {
       packagesIncludes: node.packagesIncludes || "",
       terms: node.terms || "",
       offerText: node.offerText || "",
+      offerStartDate: normalizeOfferDateInput(node.offerStartDate),
+      offerEndDate: normalizeOfferDateInput(node.offerEndDate),
       price: hasChildren ? "" : String(node.price ?? ""),
       variants: hasChildren
         ? childVariants
@@ -1342,6 +1366,8 @@ async function updateService(service, status) {
     setAddNodeTerms("");
     setAddNodePackagesIncludes("");
     setAddNodeOfferText("");
+    setAddNodeOfferStartDate("");
+    setAddNodeOfferEndDate("");
     setAddNodeImageUrl("");
     setAddNodeItemCode("");
     setAddNodeUnitLabel("");
@@ -1411,6 +1437,14 @@ async function updateService(service, status) {
     try {
       setAddingNode(true);
       const addTypeConfig = getSelfManagedTypeConfig(addNodeCustomType);
+      if (
+        addNodeType === "service" &&
+        addTypeConfig.customType === "offer" &&
+        !validateOfferDateRange(addNodeOfferStartDate, addNodeOfferEndDate)
+      ) {
+        setAddingNode(false);
+        return;
+      }
       await createSelfManagedNode({
         parentNodeId: showingRoot ? null : currentNode?._id || null,
         nodeType: addNodeType,
@@ -1439,6 +1473,14 @@ async function updateService(service, status) {
         offerText:
           addNodeType === "service" && addTypeConfig.customType === "offer"
             ? addNodeOfferText.trim()
+            : "",
+        offerStartDate:
+          addNodeType === "service" && addTypeConfig.customType === "offer"
+            ? addNodeOfferStartDate
+            : "",
+        offerEndDate:
+          addNodeType === "service" && addTypeConfig.customType === "offer"
+            ? addNodeOfferEndDate
             : "",
         itemCode:
           addNodeType === "service" && addTypeConfig.customType === "service_item"
@@ -1601,6 +1643,13 @@ async function updateService(service, status) {
       return;
     }
 
+    if (
+      effectiveType === "offer" &&
+      !validateOfferDateRange(customForm.offerStartDate, customForm.offerEndDate)
+    ) {
+      return;
+    }
+
     if (typeConfig.supportsVariants && customForm.packageType === "nested") {
       const validVariants = customForm.variants.filter(
         variant =>
@@ -1627,6 +1676,8 @@ async function updateService(service, status) {
             packagesIncludes: typeConfig.supportsPackagesIncludes ? customForm.packagesIncludes : "",
             terms: typeConfig.supportsTerms ? customForm.terms : "",
             offerText: effectiveType === "offer" ? trimmedOfferText : "",
+            offerStartDate: effectiveType === "offer" ? customForm.offerStartDate : "",
+            offerEndDate: effectiveType === "offer" ? customForm.offerEndDate : "",
             price:
               typeConfig.supportsPrice && customForm.price !== ""
                 ? Number(customForm.price)
@@ -1650,6 +1701,8 @@ async function updateService(service, status) {
             packagesIncludes: typeConfig.supportsPackagesIncludes ? customForm.packagesIncludes : "",
             terms: typeConfig.supportsTerms ? customForm.terms : "",
             offerText: effectiveType === "offer" ? trimmedOfferText : "",
+            offerStartDate: effectiveType === "offer" ? customForm.offerStartDate : "",
+            offerEndDate: effectiveType === "offer" ? customForm.offerEndDate : "",
             price:
               typeConfig.supportsPrice && customForm.price !== ""
                 ? Number(customForm.price)
@@ -2027,6 +2080,8 @@ async function updateService(service, status) {
                               : (service.rawImageUrl || "")
                           );
                           setModalOfferText(service.offerText || "");
+                          setModalOfferStartDate(normalizeOfferDateInput(service.offerStartDate));
+                          setModalOfferEndDate(normalizeOfferDateInput(service.offerEndDate));
                           setModalItemCode(service.itemCode || "");
                           setModalUnitLabel(service.unitLabel || "");
                           setModalMinQty(String(service.minQty || 1));
@@ -2084,6 +2139,8 @@ async function updateService(service, status) {
                               : (service.rawImageUrl || "")
                           );
                           setModalOfferText(service.offerText || "");
+                          setModalOfferStartDate(normalizeOfferDateInput(service.offerStartDate));
+                          setModalOfferEndDate(normalizeOfferDateInput(service.offerEndDate));
                           setModalItemCode(service.itemCode || "");
                           setModalUnitLabel(service.unitLabel || "");
                           setModalMinQty(String(service.minQty || 1));
@@ -2343,6 +2400,27 @@ async function updateService(service, status) {
                       onChange={e => setModalOfferText(e.target.value)}
                       rows={4}
                     />
+                    <div className="commerce-field-grid">
+                      <div>
+                        <label className="modal-label">Offer Start Date</label>
+                        <input
+                          type="date"
+                          className="price-input"
+                          value={modalOfferStartDate}
+                          onChange={e => setModalOfferStartDate(e.target.value)}
+                        />
+                      </div>
+                      <div>
+                        <label className="modal-label">Offer End Date</label>
+                        <input
+                          type="date"
+                          className="price-input"
+                          value={modalOfferEndDate}
+                          min={modalOfferStartDate || undefined}
+                          onChange={e => setModalOfferEndDate(e.target.value)}
+                        />
+                      </div>
+                    </div>
                   </>
                 ) : null}
               </>
@@ -2430,6 +2508,13 @@ async function updateService(service, status) {
                   allTerms.length > 0 ? selectedTerms.join(", ") : modalTerms.trim();
                 const nextPrice =
                   String(modalPrice || "").trim() === "" ? null : Number(modalPrice);
+                if (
+                  isSelfManagedVendor &&
+                  selfManagedEditTypeConfig.customType === "offer" &&
+                  !validateOfferDateRange(modalOfferStartDate, modalOfferEndDate)
+                ) {
+                  return;
+                }
                 editingService.price = nextPrice;
                 editingService.mrp =
                   selfManagedEditTypeConfig.customType === "service_item"
@@ -2455,6 +2540,12 @@ async function updateService(service, status) {
                 editingService.offerText = isSelfManagedVendor
                   ? (selfManagedEditTypeConfig.customType === "offer" ? modalOfferText.trim() : "")
                   : modalOfferText;
+                editingService.offerStartDate = isSelfManagedVendor && selfManagedEditTypeConfig.customType === "offer"
+                  ? modalOfferStartDate
+                  : "";
+                editingService.offerEndDate = isSelfManagedVendor && selfManagedEditTypeConfig.customType === "offer"
+                  ? modalOfferEndDate
+                  : "";
                 editingService.customType = isSelfManagedVendor ? modalCustomType : editingService.customType;
                 editingService.itemCode = selfManagedEditTypeConfig.customType === "service_item" ? modalItemCode.trim() : "";
                 editingService.unitLabel = selfManagedEditTypeConfig.customType === "service_item" ? modalUnitLabel.trim() : "";
@@ -2482,6 +2573,8 @@ async function updateService(service, status) {
                     offerText: selfManagedEditTypeConfig.customType === "offer"
                       ? modalOfferText.trim()
                       : "",
+                    offerStartDate: selfManagedEditTypeConfig.customType === "offer" ? modalOfferStartDate : "",
+                    offerEndDate: selfManagedEditTypeConfig.customType === "offer" ? modalOfferEndDate : "",
                     itemCode: selfManagedEditTypeConfig.customType === "service_item" ? modalItemCode.trim() : "",
                     unitLabel: selfManagedEditTypeConfig.customType === "service_item" ? modalUnitLabel.trim() : "",
                     minQty: selfManagedEditTypeConfig.customType === "service_item" ? modalMinQty : 1,
@@ -2509,6 +2602,8 @@ async function updateService(service, status) {
                       offerText: selfManagedEditTypeConfig.customType === "offer"
                         ? modalOfferText.trim()
                         : "",
+                      offerStartDate: selfManagedEditTypeConfig.customType === "offer" ? modalOfferStartDate : "",
+                      offerEndDate: selfManagedEditTypeConfig.customType === "offer" ? modalOfferEndDate : "",
                       itemCode: selfManagedEditTypeConfig.customType === "service_item" ? modalItemCode.trim() : "",
                       unitLabel: selfManagedEditTypeConfig.customType === "service_item" ? modalUnitLabel.trim() : "",
                       minQty: selfManagedEditTypeConfig.customType === "service_item" ? Number(modalMinQty || 1) : 1,
@@ -2537,6 +2632,8 @@ async function updateService(service, status) {
                       offerText: selfManagedEditTypeConfig.customType === "offer"
                         ? modalOfferText.trim()
                         : "",
+                      offerStartDate: selfManagedEditTypeConfig.customType === "offer" ? modalOfferStartDate : "",
+                      offerEndDate: selfManagedEditTypeConfig.customType === "offer" ? modalOfferEndDate : "",
                       itemCode: selfManagedEditTypeConfig.customType === "service_item" ? modalItemCode.trim() : "",
                       unitLabel: selfManagedEditTypeConfig.customType === "service_item" ? modalUnitLabel.trim() : "",
                       minQty: selfManagedEditTypeConfig.customType === "service_item" ? Number(modalMinQty || 1) : 1,
@@ -2995,6 +3092,27 @@ async function updateService(service, status) {
                       placeholder="Describe the offer"
                       rows={4}
                     />
+                    <div className="commerce-field-grid">
+                      <div>
+                        <label className="modal-label">Offer Start Date</label>
+                        <input
+                          type="date"
+                          className="price-input"
+                          value={addNodeOfferStartDate}
+                          onChange={e => setAddNodeOfferStartDate(e.target.value)}
+                        />
+                      </div>
+                      <div>
+                        <label className="modal-label">Offer End Date</label>
+                        <input
+                          type="date"
+                          className="price-input"
+                          value={addNodeOfferEndDate}
+                          min={addNodeOfferStartDate || undefined}
+                          onChange={e => setAddNodeOfferEndDate(e.target.value)}
+                        />
+                      </div>
+                    </div>
                   </>
                 ) : null}
               </>
@@ -3122,6 +3240,27 @@ async function updateService(service, status) {
                   value={customForm.offerText}
                   onChange={e => updateCustomForm("offerText", e.target.value)}
                 />
+                <div className="commerce-field-grid">
+                  <div>
+                    <label className="modal-label">Offer Start Date</label>
+                    <input
+                      type="date"
+                      className="price-input"
+                      value={customForm.offerStartDate}
+                      onChange={e => updateCustomForm("offerStartDate", e.target.value)}
+                    />
+                  </div>
+                  <div>
+                    <label className="modal-label">Offer End Date</label>
+                    <input
+                      type="date"
+                      className="price-input"
+                      value={customForm.offerEndDate}
+                      min={customForm.offerStartDate || undefined}
+                      onChange={e => updateCustomForm("offerEndDate", e.target.value)}
+                    />
+                  </div>
+                </div>
               </>
             ) : null}
 

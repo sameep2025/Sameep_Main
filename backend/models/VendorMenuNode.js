@@ -81,6 +81,16 @@ const VendorMenuNodeSchema = new mongoose.Schema(
       default: "",
     },
 
+    offerStartDate: {
+      type: Date,
+      default: null,
+    },
+
+    offerEndDate: {
+      type: Date,
+      default: null,
+    },
+
     customType: {
       type: String,
       enum: ["", "service_item", "package", "offer"],

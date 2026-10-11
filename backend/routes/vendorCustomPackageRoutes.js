@@ -13,6 +13,12 @@ const {
   requireVendorBodyWriteAccess,
   requireVendorWriteAccess,
 } = require('../utils/vendorWriteAuth');
+const {
+  applyOfferDateFields,
+  isOfferCurrentlyValid,
+  offerDateToYmd,
+  validateOfferDateRange,
+} = require('../utils/offerValidity');
 
 const router = express.Router();
 
@@ -23,6 +29,38 @@ function toObjectId(value, fieldName) {
     throw error;
   }
   return new mongoose.Types.ObjectId(value);
+}
+
+function isOffersLabel(value) {
+  return String(value || '').trim().toLowerCase() === 'offers';
+}
+
+function isOfferNode(node) {
+  return normalizeCustomType(node?.customType) === 'offer' ||
+    isOffersLabel(node?.name) ||
+    (Array.isArray(node?.pathLabels) && node.pathLabels.some(isOffersLabel));
+}
+
+function filterPublicOfferNodes(nodes = []) {
+  return nodes
+    .filter((node) => !isOfferNode(node) || isOfferCurrentlyValid(node))
+    .map((node) => ({
+      ...node,
+      children: Array.isArray(node.children) ? filterPublicOfferNodes(node.children) : node.children,
+    }));
+}
+
+function serializeCustomPackageDates(node) {
+  if (!node || typeof node !== 'object') return node;
+  const next = {
+    ...node,
+    offerStartDate: offerDateToYmd(node.offerStartDate),
+    offerEndDate: offerDateToYmd(node.offerEndDate),
+  };
+  if (Array.isArray(next.children)) {
+    next.children = next.children.map(serializeCustomPackageDates);
+  }
+  return next;
 }
 
 router.get('/', async (req, res) => {
@@ -42,10 +80,13 @@ router.get('/', async (req, res) => {
       includeDeleted: includeDeleted === 'true',
     };
 
-    const data =
+    const rawData =
       format === 'flat'
         ? await listVendorCustomPackageNodes(params)
         : await buildVendorCustomPackageTree(params);
+    const publicMode = req.query.mode === 'user' || req.query.public === 'true';
+    const filteredData = publicMode ? filterPublicOfferNodes(rawData) : rawData;
+    const data = filteredData.map(serializeCustomPackageDates);
 
     return res.json({
       success: true,
@@ -357,6 +398,8 @@ router.put('/:id', requireVendorBodyWriteAccess(), async (req, res) => {
       'freeText',
       'enableFreeText',
       'offerText',
+      'offerStartDate',
+      'offerEndDate',
       'inventoryLabelName',
       'parentSelectorLabel',
       'pricingStatus',
@@ -375,6 +418,9 @@ router.put('/:id', requireVendorBodyWriteAccess(), async (req, res) => {
         node[field] = updates[field];
       }
     });
+
+    applyOfferDateFields(node, updates);
+    validateOfferDateRange(node.offerStartDate, node.offerEndDate);
 
     const effectiveCustomType = normalizeCustomType(node.customType);
     node.customType = node.customType == null ? '' : String(node.customType || '').trim().toLowerCase();

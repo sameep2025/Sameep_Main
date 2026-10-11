@@ -72,10 +72,10 @@ export const resolveVendorRequestContext = cache(async function resolveVendorReq
     const pricingSource = String(vendorContext?.pricingSource || "").trim().toLowerCase();
     const pricingApi =
       pricingSource === "self_managed"
-        ? `${base}/api/vendor-menu/${vendorId}/tree`
-        : `${base}/api/vendor-price-nodes/tree?vendorId=${vendorId}&rootCategoryId=${categoryId}`;
+        ? `${base}/api/vendor-menu/${vendorId}/tree?mode=user`
+        : `${base}/api/vendor-price-nodes/tree?vendorId=${vendorId}&rootCategoryId=${categoryId}&mode=user`;
     const categoryApi = `${base}/api/categories/tree?rootCategoryId=${categoryId}`;
-    const customPackagesApi = `${base}/api/vendor-custom-packages?vendorId=${vendorId}&rootCategoryId=${categoryId}`;
+    const customPackagesApi = `${base}/api/vendor-custom-packages?vendorId=${vendorId}&rootCategoryId=${categoryId}&mode=user`;
 
     const [pricingContext, categoryTreeData, customPackagesContext] = await Promise.all([
       fetchJson(pricingApi),

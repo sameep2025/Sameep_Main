@@ -52,6 +52,8 @@ function BillView({ data, error }) {
   const billDate = data?.createdAt ? formatDate(data.createdAt) : "";
   const showCustomerName = customerName && customerName.toLowerCase() !== "customer";
   const poweredByUrl = getPoweredByUrl();
+  const discountAmount = Number(totals.discountAmount || 0);
+  const rewardsRedeemed = Number(totals.rewardsRedeemed || 0);
 
   return (
     <main style={styles.page}>
@@ -91,9 +93,25 @@ function BillView({ data, error }) {
           <>
             <div style={styles.summaryGrid}>
               <div style={styles.summaryItem}>
-                <span style={styles.summaryLabel}>Bill Amount</span>
-                <strong style={styles.summaryValue}>{formatCurrency(totals.billAmount)}</strong>
+                <span style={styles.summaryLabel}>Subtotal</span>
+                <strong style={styles.summaryValue}>{formatCurrency(totals.grossAmount)}</strong>
               </div>
+              {discountAmount > 0 ? (
+                <div style={styles.summaryItem}>
+                  <span style={styles.summaryLabel}>Discount</span>
+                  <strong style={styles.summaryValue}>-{formatCurrency(discountAmount)}</strong>
+                </div>
+              ) : null}
+              <div style={styles.summaryItem}>
+                <span style={styles.summaryLabel}>Bill Amount</span>
+                <strong style={styles.summaryValue}>{formatCurrency(totals.netBillValue)}</strong>
+              </div>
+              {rewardsRedeemed > 0 ? (
+                <div style={styles.summaryItem}>
+                  <span style={styles.summaryLabel}>Rewards Redeemed</span>
+                  <strong style={styles.summaryValue}>-{formatCurrency(rewardsRedeemed)}</strong>
+                </div>
+              ) : null}
               <div style={styles.summaryItem}>
                 <span style={styles.summaryLabel}>Final Paid</span>
                 <strong style={styles.summaryValue}>{formatCurrency(totals.finalPaid)}</strong>

@@ -748,10 +748,12 @@ async function cancelCompletedBillAtomically({
 }
 
 async function buildPublicBillResponse(bill) {
-  const [customer, vendor] = await Promise.all([
+  const [customer, vendor, transaction] = await Promise.all([
     bill.customerId ? Customer.findById(bill.customerId).lean() : null,
     Vendor.findById(bill.vendorId).lean(),
+    Transaction.findOne({ billingSessionId: bill._id }).lean(),
   ]);
+  const financials = buildHistoricalBillFinancials(bill, transaction);
   const previewRoot =
     process.env.VENDOR_PREVIEW_ROOT_URL ||
     process.env.NEXT_PUBLIC_VENDOR_PREVIEW_ROOT_URL ||
@@ -828,9 +830,13 @@ async function buildPublicBillResponse(bill) {
     })),
     totals: {
       billAmount: Number(bill.totalAmount || 0),
+      grossAmount: financials.grossAmount,
+      discountAmount: financials.discountAmount,
+      netBillValue: financials.netBillValue,
+      rewardsRedeemed: financials.rewardsRedeemed,
       pointsEarned: Number(bill.pointsEarned || 0),
       pointsRedeemed: Number(bill.pointsRedeemed || 0),
-      finalPaid: Number(bill.totalAmount || 0) - Number(bill.pointsRedeemed || 0),
+      finalPaid: financials.netCollected,
       balance: Number(balance || 0),
     },
   };

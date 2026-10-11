@@ -2556,15 +2556,17 @@ function ExploreContent({ onReady, onOpenServices }) {
         const isSelfManagedVendor = vendorInfo?.pricingSource === "self_managed";
         const PRICING_API =
           isSelfManagedVendor
-            ? `${API_BASE_URL}/api/vendor-menu/${vendorId}/tree`
+            ? `${API_BASE_URL}/api/vendor-menu/${vendorId}/tree?mode=user`
             : `${API_BASE_URL}/api/vendor-price-nodes/tree` +
               `?vendorId=${vendorId}` +
-              `&rootCategoryId=${rootCategoryId}`;
+              `&rootCategoryId=${rootCategoryId}` +
+              `&mode=user`;
 
         const customPackagesApi =
           `${API_BASE_URL}/api/vendor-custom-packages` +
           `?vendorId=${vendorId}` +
-          `&rootCategoryId=${rootCategoryId}`;
+          `&rootCategoryId=${rootCategoryId}` +
+          `&mode=user`;
 
         const [pricingRes, categoryRes, customPackagesRes] = await Promise.all([
           fetch(PRICING_API, { cache: "no-store" }),
@@ -2654,7 +2656,7 @@ function ExploreContent({ onReady, onOpenServices }) {
         setMenuTree(activeMenuTree);
 
         const converted = convertFromTree(
-          mergedPricingTree,
+          activeMenuTree,
           imageMap,
           nameMap,
           freeTextMap,
@@ -4266,6 +4268,7 @@ function ExploreContent({ onReady, onOpenServices }) {
         <EcommercePreviewTemplate
           vendorInfo={vendorInfo}
           category={previewCategory}
+          orderedCategories={orderedCategories}
           menuTree={menuTree}
           mergedHeroImages={mergedHeroImages}
           heroTagline={heroTagline}

@@ -6,6 +6,12 @@ const XLSX = require("xlsx");
 const DummyVendor = require("../models/DummyVendor");
 const VendorMenuNode = require("../models/VendorMenuNode");
 const { requireVendorParamWriteAccess } = require("../utils/vendorWriteAuth");
+const {
+  applyOfferDateFields,
+  isOfferCurrentlyValid,
+  offerDateToYmd,
+  validateOfferDateRange,
+} = require("../utils/offerValidity");
 
 const router = express.Router();
 
@@ -84,6 +90,20 @@ function flattenTree(nodes = [], result = []) {
   return result;
 }
 
+function isOffersLabel(value) {
+  return normalizeText(value).toLowerCase() === "offers";
+}
+
+function isOfferNode(node) {
+  return normalizeCustomType(node?.customType) === "offer" ||
+    isOffersLabel(node?.name) ||
+    (Array.isArray(node?.pathNames) && node.pathNames.some(isOffersLabel));
+}
+
+function filterPublicOfferNodes(nodes = []) {
+  return nodes.filter((node) => !isOfferNode(node) || isOfferCurrentlyValid(node));
+}
+
 function buildTree(nodes = []) {
   const map = {};
   const roots = [];
@@ -103,6 +123,8 @@ function buildTree(nodes = []) {
       terms: node.terms || "",
       packagesIncludes: node.packagesIncludes || "",
       offerText: node.offerText || "",
+      offerStartDate: offerDateToYmd(node.offerStartDate),
+      offerEndDate: offerDateToYmd(node.offerEndDate),
       customType: normalizeCustomType(node.customType),
       inventoryLabelName: node.inventoryLabelName || "",
       itemCode: node.itemCode || "",
@@ -387,6 +409,8 @@ function serializeNode(node) {
     uploadBatchId: node.uploadBatchId,
     datasetStatus: node.datasetStatus,
     pathNames: node.pathNames || [],
+    offerStartDate: offerDateToYmd(node.offerStartDate),
+    offerEndDate: offerDateToYmd(node.offerEndDate),
   };
 }
 
@@ -435,10 +459,11 @@ router.get("/:vendorId/tree", async (req, res) => {
       .sort({ level: 1, sequence: 1, createdAt: 1 })
       .lean();
 
-    return res.json(buildTree(nodes));
+    const publicMode = req.query.mode === "user" || req.query.public === "true";
+    return res.json(buildTree(publicMode ? filterPublicOfferNodes(nodes) : nodes));
   } catch (error) {
     console.error("GET /vendor-menu/:vendorId/tree error:", error);
-    return res.status(error.statusCode || 500).json({
+    return res.status(error.statusCode || error.status || 500).json({
       message: error.message || "Failed to load vendor menu tree",
     });
   }
@@ -473,6 +498,8 @@ router.get("/:vendorId/flat", async (req, res) => {
         terms: node.terms,
         packagesIncludes: node.packagesIncludes,
         offerText: node.offerText,
+        offerStartDate: offerDateToYmd(node.offerStartDate),
+        offerEndDate: offerDateToYmd(node.offerEndDate),
         customType: normalizeCustomType(node.customType),
         inventoryLabelName: node.inventoryLabelName,
         itemCode: node.itemCode || "",
@@ -494,7 +521,7 @@ router.get("/:vendorId/flat", async (req, res) => {
     );
   } catch (error) {
     console.error("GET /vendor-menu/:vendorId/flat error:", error);
-    return res.status(error.statusCode || 500).json({
+    return res.status(error.statusCode || error.status || 500).json({
       message: error.message || "Failed to load vendor menu flat data",
     });
   }
@@ -744,6 +771,7 @@ router.post("/:vendorId/nodes", requireVendorParamWriteAccess(), async (req, res
       datasetStatus,
       pathNames: [...(parentNode?.pathNames || []), name],
     }, customType, isLeaf);
+    applyOfferDateFields(createPayload, req.body || {});
 
     const newNode = await VendorMenuNode.create(createPayload);
 
@@ -835,6 +863,14 @@ router.patch("/:vendorId/nodes/:nodeId", requireVendorParamWriteAccess(), async 
       updates.offerText = req.body.offerText;
     }
 
+    if (Object.prototype.hasOwnProperty.call(req.body || {}, "offerStartDate")) {
+      updates.offerStartDate = undefined;
+    }
+
+    if (Object.prototype.hasOwnProperty.call(req.body || {}, "offerEndDate")) {
+      updates.offerEndDate = undefined;
+    }
+
     if (typeof req.body?.customType === "string") {
       updates.customType = normalizeCustomType(req.body.customType);
     }
@@ -874,6 +910,12 @@ router.patch("/:vendorId/nodes/:nodeId", requireVendorParamWriteAccess(), async 
     if (Object.keys(updates).length === 0) {
       return res.status(400).json({ message: "No valid fields provided for update" });
     }
+
+    applyOfferDateFields(updates, req.body || {});
+    validateOfferDateRange(
+      Object.prototype.hasOwnProperty.call(updates, "offerStartDate") ? updates.offerStartDate : node.offerStartDate,
+      Object.prototype.hasOwnProperty.call(updates, "offerEndDate") ? updates.offerEndDate : node.offerEndDate
+    );
 
     if (updates.name && normalizeText(updates.name) !== normalizeText(node.name)) {
       await ensureUniqueSiblingName({

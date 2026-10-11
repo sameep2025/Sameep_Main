@@ -290,14 +290,29 @@
 
 .ecommerce-hero-media {
   overflow: hidden;
+  align-self: start;
+  height: clamp(324px, 32vw, 460px);
   min-height: 324px;
+  display: grid;
+  place-items: center;
+  background:
+    radial-gradient(circle at 18% 20%, rgba(223, 47, 35, 0.08), transparent 32%),
+    linear-gradient(135deg, #fff8f6 0%, #ffffff 52%, #f8fafc 100%);
 }
 
 .ecommerce-hero-media img {
   width: 100%;
   height: 100%;
-  object-fit: cover;
   display: block;
+}
+
+.ecommerce-hero-image--cover {
+  object-fit: cover;
+}
+
+.ecommerce-hero-image--contain {
+  object-fit: contain;
+  padding: 14px;
 }
 
 .ecommerce-hero-placeholder {
@@ -307,6 +322,115 @@
   place-items: center;
   color: #98a2b3;
   font-size: 24px;
+  font-weight: 700;
+}
+
+.ecommerce-offers {
+  background: #ffffff;
+  border: 1px solid #ececec;
+  border-radius: 28px;
+  padding: 24px;
+  overflow: hidden;
+}
+
+.ecommerce-offers-header {
+  margin-bottom: 18px;
+}
+
+.ecommerce-offers-header h2 {
+  margin: 0;
+  font-size: clamp(28px, 4vw, 44px);
+  line-height: 1;
+}
+
+.ecommerce-offers-track {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(350px, 480px));
+  gap: 16px;
+  align-items: stretch;
+}
+
+.ecommerce-offer-card {
+  display: grid;
+  grid-template-columns: 150px minmax(0, 1fr);
+  min-height: 190px;
+  border: 1px solid #f0d4d0;
+  border-radius: 22px;
+  overflow: hidden;
+  background: linear-gradient(135deg, #fff8f6 0%, #ffffff 56%);
+}
+
+.ecommerce-offer-card--no-image {
+  grid-template-columns: 1fr;
+}
+
+.ecommerce-offer-image {
+  min-height: 190px;
+  display: grid;
+  place-items: center;
+  background: #fff2ef;
+}
+
+.ecommerce-offer-image img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  display: block;
+}
+
+.ecommerce-offer-body {
+  min-width: 0;
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.ecommerce-offer-source {
+  align-self: flex-start;
+  border-radius: 999px;
+  background: #ffe7e3;
+  color: #b42318;
+  padding: 5px 9px;
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.ecommerce-offer-body h3 {
+  margin: 0;
+  color: #1d2939;
+  font-size: 23px;
+  line-height: 1.15;
+}
+
+.ecommerce-offer-body p {
+  margin: 0;
+  color: #475467;
+  font-size: 14px;
+  line-height: 1.45;
+}
+
+.ecommerce-offer-price {
+  color: #df2f23;
+  font-size: 18px;
+  line-height: 1;
+}
+
+.ecommerce-offer-terms {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: auto;
+}
+
+.ecommerce-offer-terms span {
+  border: 1px solid #f0d4d0;
+  border-radius: 999px;
+  color: #667085;
+  padding: 5px 8px;
+  font-size: 12px;
   font-weight: 700;
 }
 
@@ -989,7 +1113,7 @@
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   gap: 24px;
-  align-items: end;
+  align-items: flex-end;
   margin-top: 24px;
 }
 
@@ -1360,8 +1484,40 @@
     padding: 28px 22px;
   }
 
+  .ecommerce-hero-media {
+    height: clamp(240px, 68vw, 340px);
+    min-height: 240px;
+  }
+
+  .ecommerce-hero-image--contain {
+    padding: 10px;
+  }
+
   .ecommerce-hero-copy p {
     font-size: 16px;
+  }
+
+  .ecommerce-offers {
+    padding: 18px;
+    border-radius: 22px;
+  }
+
+  .ecommerce-offers-header {
+    margin-bottom: 14px;
+  }
+
+  .ecommerce-offers-track {
+    grid-template-columns: 1fr;
+  }
+
+  .ecommerce-offer-card {
+    grid-template-columns: 1fr;
+    min-height: 0;
+  }
+
+  .ecommerce-offer-image {
+    min-height: 180px;
+    height: 180px;
   }
 
   .ecommerce-catalog-heading h2 {
@@ -1438,7 +1594,7 @@
     display: grid;
     grid-template-columns: minmax(0, 1fr) auto;
     gap: 12px;
-    align-items: end;
+    align-items: flex-end;
   }
 
   .ecommerce-variant-dropdown {
@@ -1490,14 +1646,14 @@
     display: grid;
     grid-template-columns: minmax(0, 1fr) auto;
     gap: 12px;
-    align-items: end;
+    align-items: flex-end;
   }
 
   .ecommerce-mobile-compact-main {
     display: flex;
     flex-wrap: wrap;
     gap: 8px 18px;
-    align-items: end;
+    align-items: flex-end;
     min-width: 0;
   }
 

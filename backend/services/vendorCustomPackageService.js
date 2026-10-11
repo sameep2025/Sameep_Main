@@ -4,6 +4,7 @@ const DummyCategory = require('../models/dummyCategory');
 const DummySubcategory = require('../models/dummySubcategory');
 const DummyVendor = require('../models/DummyVendor');
 const VendorCustomPackage = require('../models/VendorCustomPackage');
+const { applyOfferDateFields } = require('../utils/offerValidity');
 
 function normalizeCustomType(value) {
   const normalized = String(value || '').trim().toLowerCase();
@@ -241,6 +242,8 @@ async function prepareVendorCustomPackageCreatePayload(input) {
     freeText: input.freeText || '',
     enableFreeText: Boolean(input.enableFreeText),
     offerText: input.offerText || '',
+    offerStartDate: null,
+    offerEndDate: null,
     inventoryLabelName: input.inventoryLabelName || '',
     parentSelectorLabel: input.parentSelectorLabel || '',
     price: isLeaf && input.price != null ? Number(input.price) : null,
@@ -254,6 +257,8 @@ async function prepareVendorCustomPackageCreatePayload(input) {
     ancestorNodeTypes: parentContext.ancestorNodeTypes,
     pathLabels: parentContext.pathLabels,
   };
+
+  applyOfferDateFields(payload, input);
 
   if (customType === 'offer') {
     payload.price = null;

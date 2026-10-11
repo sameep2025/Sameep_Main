@@ -188,6 +188,120 @@ function getTermsSummary(terms) {
   return splitTextList(terms).slice(0, 2).join(" • ");
 }
 
+function getCardImage(card) {
+  if (card?.img) return card.img;
+
+  if (Array.isArray(card?.options)) {
+    for (const option of card.options) {
+      if (option?.imageUrl) return option.imageUrl;
+
+      if (Array.isArray(option?.subOptions)) {
+        for (const subOption of option.subOptions) {
+          if (subOption?.imageUrl) return subOption.imageUrl;
+        }
+      }
+    }
+  }
+
+  return "";
+}
+
+function isOffersLabel(value) {
+  return String(value || "").trim().toLowerCase() === "offers";
+}
+
+function isOfferLikeCard(card, sectionName) {
+  if (!card) return false;
+  if (isOffersLabel(sectionName)) return true;
+  if (isOffersLabel(card.title)) return true;
+
+  const hasOptionOffers =
+    Array.isArray(card.options) &&
+    card.options.some((option) => {
+      const ownOffer = typeof option?.offerText === "string" && option.offerText.trim();
+      const nestedOffer =
+        Array.isArray(option?.subOptions) &&
+        option.subOptions.some((subOption) => {
+          const subOffer = typeof subOption?.offerText === "string" && subOption.offerText.trim();
+          const deepOffer =
+            Array.isArray(subOption?.subSubOptions) &&
+            subOption.subSubOptions.some(
+              (leaf) => typeof leaf?.offerText === "string" && leaf.offerText.trim()
+            );
+          return subOffer || deepOffer;
+        });
+      return ownOffer || nestedOffer;
+    });
+
+  return hasOptionOffers && isOffersLabel(card.title);
+}
+
+function flattenOfferCards(cards, sectionName) {
+  return (cards || []).flatMap((card, cardIndex) => {
+    if (!isOfferLikeCard(card, sectionName)) return [];
+
+    const sourceLabel = !isOffersLabel(sectionName)
+      ? sectionName
+      : !isOffersLabel(card?.title)
+        ? card.title
+        : "";
+
+    const normalizedCard = {
+      ...card,
+      id: card?.id || `offer-${cardIndex}`,
+      title: card?.title || `Offer ${cardIndex + 1}`,
+      sourceLabel,
+    };
+
+    if (Array.isArray(card?.options) && card.options.length > 0) {
+      return card.options
+        .map((option, optionIndex) => ({
+          id: `${normalizedCard.id}-option-${optionIndex}`,
+          title: option?.label || normalizedCard.title,
+          offerText: option?.offerText || normalizedCard.offerText || "",
+          terms: option?.terms || normalizedCard.terms || [],
+          img: option?.imageUrl || normalizedCard.img || "",
+          price: Number(option?.price || 0) || Number(normalizedCard.base || 0) || 0,
+          sourceLabel: normalizedCard.sourceLabel,
+        }))
+        .filter((offer) => {
+          const hasText = typeof offer.offerText === "string" && offer.offerText.trim();
+          const hasTerms = splitTextList(offer.terms).length > 0;
+          return offer.title || hasText || hasTerms;
+        });
+    }
+
+    const hasText =
+      typeof normalizedCard.offerText === "string" && normalizedCard.offerText.trim();
+    const hasTerms = splitTextList(normalizedCard.terms).length > 0;
+
+    return normalizedCard.title || hasText || hasTerms ? [normalizedCard] : [];
+  });
+}
+
+function getOfferCards(orderedCategories) {
+  return (orderedCategories || []).flatMap((section) =>
+    flattenOfferCards(section?.cards, section?.sectionName)
+  );
+}
+
+function normalizeComparableText(value) {
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "");
+}
+
+function isDistinctOfferLabel(label, offer) {
+  const normalizedLabel = normalizeComparableText(label);
+  if (!normalizedLabel) return false;
+
+  return ![offer?.title, offer?.offerText]
+    .map(normalizeComparableText)
+    .filter(Boolean)
+    .includes(normalizedLabel);
+}
+
 function collectLeafItems(
   nodes,
   pathNames = [],
@@ -402,6 +516,7 @@ function getSelectedVariant(groupItem, selectedVariantKey, cartItems) {
 export default function EcommercePreviewTemplate({
   vendorInfo,
   category,
+  orderedCategories,
   menuTree,
   mergedHeroImages,
   heroTagline,
@@ -428,12 +543,17 @@ export default function EcommercePreviewTemplate({
   const [selectedVariantKeys, setSelectedVariantKeys] = useState({});
   const [openVariantDropdownId, setOpenVariantDropdownId] = useState("");
   const [heroImageIndex, setHeroImageIndex] = useState(0);
+  const [heroFitByImage, setHeroFitByImage] = useState({});
   const [paymentConfig, setPaymentConfig] = useState({
     paymentEnabled: false,
     provider: "",
     keyId: "",
   });
-  const sections = useMemo(() => buildSections(menuTree), [menuTree]);
+  const offerCards = useMemo(() => getOfferCards(orderedCategories), [orderedCategories]);
+  const sections = useMemo(
+    () => buildSections(menuTree).filter((section) => !isOffersLabel(section?.title)),
+    [menuTree]
+  );
   const phoneNumbers = useMemo(() => normalizePhones(vendorInfo), [vendorInfo]);
   const businessHours = useMemo(() => {
     const hours = vendorInfo?.businessHours || vendorInfo?.hours || [];
@@ -519,6 +639,28 @@ export default function EcommercePreviewTemplate({
   }, [heroImageList]);
 
   const heroImage = heroImageList[heroImageList.length ? heroImageIndex % heroImageList.length : 0] || "";
+  const heroFitMode = heroFitByImage[heroImage] || "contain";
+
+  const handleHeroImageLoad = (event) => {
+    const image = event.currentTarget;
+    const src = image.currentSrc || image.src || heroImage;
+    const imageRatio = image.naturalWidth && image.naturalHeight
+      ? image.naturalWidth / image.naturalHeight
+      : 0;
+    const frame = image.parentElement;
+    const frameRatio = frame?.clientWidth && frame?.clientHeight
+      ? frame.clientWidth / frame.clientHeight
+      : 0;
+
+    if (!src || !imageRatio || !frameRatio) return;
+
+    const ratioDifference = imageRatio / frameRatio;
+    const nextFit = ratioDifference >= 0.72 && ratioDifference <= 1.38 ? "cover" : "contain";
+
+    setHeroFitByImage((current) => (
+      current[src] === nextFit ? current : { ...current, [src]: nextFit }
+    ));
+  };
 
   const cartMrpTotal = useMemo(
     () =>
@@ -715,7 +857,6 @@ export default function EcommercePreviewTemplate({
           <button type="button" onClick={() => scrollToElementById("ecommerce-home")}>Home</button>
           <button type="button" onClick={() => scrollToElementById("ecommerce-catalog")}>Catalog</button>
           <button type="button" onClick={() => scrollToElementById("ecommerce-summary")}>Summary</button>
-          <button type="button" onClick={() => scrollToElementById("ecommerce-contact")}>Contact</button>
           <a href={customerPortalUrl} target="_blank" rel="noopener noreferrer">
             My Bills & Rewards
           </a>
@@ -802,12 +943,64 @@ export default function EcommercePreviewTemplate({
 
         <div className="ecommerce-hero-media">
           {heroImage ? (
-            <img src={heroImage} alt={heroTagline || vendorInfo?.businessName || "Catalog preview"} />
+            <img
+              src={heroImage}
+              alt={heroTagline || vendorInfo?.businessName || "Catalog preview"}
+              className={`ecommerce-hero-image ecommerce-hero-image--${heroFitMode}`}
+              onLoad={handleHeroImageLoad}
+            />
           ) : (
             <div className="ecommerce-hero-placeholder">Catalog Preview</div>
           )}
         </div>
       </section>
+
+      {offerCards.length > 0 ? (
+        <section className="ecommerce-offers" id="ecommerce-offers">
+          <div className="ecommerce-offers-header">
+            <h2>Current Offers</h2>
+          </div>
+
+          <div className="ecommerce-offers-track">
+            {offerCards.map((offer) => {
+              const offerTerms = splitTextList(offer.terms);
+              const offerImage = getCardImage(offer);
+              const offerPrice = Number(offer.price || offer.base || 0) || 0;
+              const offerSourceLabel = isDistinctOfferLabel(offer.sourceLabel, offer)
+                ? offer.sourceLabel
+                : "";
+
+              return (
+                <article key={offer.id} className={`ecommerce-offer-card${offerImage ? "" : " ecommerce-offer-card--no-image"}`}>
+                  {offerImage ? (
+                    <div className="ecommerce-offer-image">
+                      <img src={offerImage} alt={offer.title} />
+                    </div>
+                  ) : null}
+
+                  <div className="ecommerce-offer-body">
+                    {offerSourceLabel ? (
+                      <span className="ecommerce-offer-source">{offerSourceLabel}</span>
+                    ) : null}
+                    <h3>{offer.title}</h3>
+                    {offer.offerText ? <p>{offer.offerText}</p> : null}
+                    {offerPrice > 0 ? (
+                      <strong className="ecommerce-offer-price">{formatDisplayCurrency(offerPrice)}</strong>
+                    ) : null}
+                    {offerTerms.length > 0 ? (
+                      <div className="ecommerce-offer-terms">
+                        {offerTerms.map((term, index) => (
+                          <span key={`${offer.id}-term-${index}`}>{term}</span>
+                        ))}
+                      </div>
+                    ) : null}
+                  </div>
+                </article>
+              );
+            })}
+          </div>
+        </section>
+      ) : null}
 
       <section id="ecommerce-catalog" className="ecommerce-catalog">
         <div className="ecommerce-catalog-heading">

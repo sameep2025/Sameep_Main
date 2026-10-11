@@ -1163,6 +1163,7 @@ export default function ModernPreviewTemplate({
   const [activeCardId, setActiveCardId] = useState("");
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [galleryStartIndex, setGalleryStartIndex] = useState(0);
+  const [heroFitByImage, setHeroFitByImage] = useState({});
   const [hasVendorSession, setHasVendorSession] = useState(false);
   const [showAdminMenu, setShowAdminMenu] = useState(false);
   const [selectedInquiryInterest, setSelectedInquiryInterest] = useState("");
@@ -1471,7 +1472,34 @@ export default function ModernPreviewTemplate({
   }, [galleryStartIndex, rotatingGalleryImages]);
 
   const heroImage = rotatingGalleryWindow[0] || "";
+  const heroFitMode = heroFitByImage[heroImage] || "cover";
   const storyImages = rotatingGalleryWindow.slice(1);
+
+  const handleHeroImageLoad = (event) => {
+    const img = event.currentTarget;
+    const rawSrc = img.getAttribute("src") || "";
+    const src = img.currentSrc || img.src || rawSrc;
+    if ((!src && !rawSrc) || heroFitByImage[src] || heroFitByImage[rawSrc]) return;
+
+    const naturalRatio = img.naturalWidth && img.naturalHeight
+      ? img.naturalWidth / img.naturalHeight
+      : 1;
+    const frameRatio = img.clientWidth && img.clientHeight
+      ? img.clientWidth / img.clientHeight
+      : 0.78;
+    const ratioDelta = Math.abs(naturalRatio - frameRatio) / Math.max(frameRatio, 0.01);
+    const shouldContain = naturalRatio < 0.62 || naturalRatio > 1.55 || ratioDelta > 0.38;
+
+    setHeroFitByImage((prev) => {
+      if (prev[src] || prev[rawSrc]) return prev;
+      const fitMode = shouldContain ? "contain" : "cover";
+      return {
+        ...prev,
+        ...(src ? { [src]: fitMode } : {}),
+        ...(rawSrc ? { [rawSrc]: fitMode } : {}),
+      };
+    });
+  };
 
   const offerCards = useMemo(() => getOfferCards(orderedCategories), [orderedCategories]);
   const vendorWhyUs =
@@ -2175,7 +2203,14 @@ export default function ModernPreviewTemplate({
         </div>
 
         <div className="modern-hero-visual">
-          {heroImage ? <img src={heroImage} alt={heroTagline} /> : null}
+          {heroImage ? (
+            <img
+              className={`modern-hero-image modern-hero-image--${heroFitMode}`}
+              src={heroImage}
+              alt={heroTagline}
+              onLoad={handleHeroImageLoad}
+            />
+          ) : null}
           <div className="modern-hero-note">
             <div className="modern-hero-note-kicker">Quick Highlights</div>
             <div className="modern-hero-note-title">{vendorInfo?.businessName || "Business"}</div>

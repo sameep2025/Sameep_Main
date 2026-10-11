@@ -57,6 +57,7 @@ const vendorBillingPreferencesRoutes = require("./routes/vendorBillingPreference
 const vendorWhatsappBusinessRoutes = require("./routes/vendorWhatsappBusinessRoutes");
 const metaWhatsappWebhookRoutes = require("./routes/metaWhatsappWebhookRoutes");
 const customerPortalRoutes = require("./routes/customerPortalRoutes");
+const publicVendorHighlightsRoutes = require("./routes/publicVendorHighlightsRoutes");
 
 const vendorPriceNodeRoutes = require(
   path.resolve(__dirname, "routes", "vendorPriceNodeRoutes")
@@ -169,6 +170,7 @@ app.use("/api/dummy-combos", dummyComboRoutes);
 app.use("/api/vendor-combo-pricing", vendorComboPricingRoutes);
 app.use("/api/customers", customerRoutes);
 app.use("/api/customer-portal", customerPortalRoutes);
+app.use("/api/public-vendors", publicVendorHighlightsRoutes);
 app.use("/api/vendorPricing", vendorPricingRoutes);
 app.use("/api/models", modelRoutes);
 app.use("/api/dummy-categories", dummyCategoryRoutes);

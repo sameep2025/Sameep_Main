@@ -88,6 +88,14 @@ const VendorPriceNodeSchema = new mongoose.Schema(
       type: String,
       default: ""
     },
+    offerStartDate: {
+      type: Date,
+      default: null
+    },
+    offerEndDate: {
+      type: Date,
+      default: null
+    },
     // --------------------
     // Visibility flags
     // --------------------

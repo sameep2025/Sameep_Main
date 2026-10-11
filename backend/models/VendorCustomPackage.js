@@ -47,6 +47,8 @@ const VendorCustomPackageSchema = new mongoose.Schema(
     freeText: { type: String, default: '' },
     enableFreeText: { type: Boolean, default: false },
     offerText: { type: String, default: '' },
+    offerStartDate: { type: Date, default: null },
+    offerEndDate: { type: Date, default: null },
     inventoryLabelName: { type: String, default: '' },
     parentSelectorLabel: { type: String, default: '' },
 

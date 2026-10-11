@@ -2,6 +2,12 @@ const express = require("express");
 const mongoose = require("mongoose");
 const axios = require("axios");
 const { validateVendorWriteRequest } = require("../utils/vendorWriteAuth");
+const {
+  applyOfferDateFields,
+  isOfferCurrentlyValid,
+  offerDateToYmd,
+  validateOfferDateRange,
+} = require("../utils/offerValidity");
 
 const router = express.Router();
 
@@ -77,6 +83,33 @@ function getPricingStatus(node, activeLeafCategoryIds = []) {
   )
     ? "Active"
     : "Inactive";
+}
+
+function isOffersLabel(value) {
+  return String(value || "").trim().toLowerCase() === "offers";
+}
+
+function isOfferNode(node, nodesById = {}) {
+  if (isOffersLabel(node?.name)) return true;
+  if (String(node?.offerText || "").trim() && isOffersLabel(node?.name)) return true;
+
+  let current = node;
+  const seen = new Set();
+  while (current?.parentVendorPriceNodeId && !seen.has(String(current._id))) {
+    seen.add(String(current._id));
+    current = nodesById[String(current.parentVendorPriceNodeId)];
+    if (isOffersLabel(current?.name)) return true;
+  }
+
+  return false;
+}
+
+function filterPublicOfferNodes(nodes = []) {
+  const nodesById = {};
+  nodes.forEach((node) => {
+    nodesById[String(node._id)] = node;
+  });
+  return nodes.filter((node) => !isOfferNode(node, nodesById) || isOfferCurrentlyValid(node));
 }
 
 /* =========================================================
@@ -461,15 +494,22 @@ router.get("/tree", async (req, res) => {
       vendorId,
       rootCategoryId,
     }).lean();
+    const publicMode = req.query.mode === "user" || req.query.public === "true";
+    const visibleNodes = publicMode ? filterPublicOfferNodes(nodes) : nodes;
 
     const map = {};
-    nodes.forEach((n) => {
-      map[n._id] = { ...n, children: [] };
+    visibleNodes.forEach((n) => {
+      map[n._id] = {
+        ...n,
+        offerStartDate: offerDateToYmd(n.offerStartDate),
+        offerEndDate: offerDateToYmd(n.offerEndDate),
+        children: [],
+      };
     });
 
     const tree = [];
 
-    nodes.forEach((n) => {
+    visibleNodes.forEach((n) => {
       if (n.parentVendorPriceNodeId) {
         map[n.parentVendorPriceNodeId]?.children.push(
           map[n._id]
@@ -582,6 +622,8 @@ router.put("/update", async (req, res) => {
       price,
       terms,
       offerText,
+      offerStartDate,
+      offerEndDate,
       imageUrl,
       pricingStatus,
       visibleToUser,
@@ -620,6 +662,8 @@ router.put("/update", async (req, res) => {
     if (price !== undefined) record.price = price;
     if (terms !== undefined) record.terms = terms;
     if (offerText !== undefined) record.offerText = offerText;
+    applyOfferDateFields(record, { offerStartDate, offerEndDate });
+    validateOfferDateRange(record.offerStartDate, record.offerEndDate);
     if (imageUrl !== undefined) record.imageUrl = typeof imageUrl === "string" ? imageUrl.trim() : imageUrl;
     if (pricingStatus !== undefined)
       record.pricingStatus = pricingStatus;
