@@ -6,6 +6,7 @@ const {
   activateWhatsappBusinessBilling,
   checkWhatsappTemplateStatus,
   deactivateWhatsappBusinessBilling,
+  diagnoseMetaCoexistenceSignup,
   disconnectWhatsappBusiness,
   completeMetaWhatsappConnection,
   createMetaConnectSession,
@@ -168,6 +169,12 @@ router.post(
   "/meta/complete",
   requireVendorOrWhatsappConnectAccess,
   completeMetaWhatsappConnection
+);
+
+router.post(
+  "/meta/coexistence-diagnostic",
+  requireVendorOrWhatsappConnectAccess,
+  diagnoseMetaCoexistenceSignup
 );
 
 router.post(

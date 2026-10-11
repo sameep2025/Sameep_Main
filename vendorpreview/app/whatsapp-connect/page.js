@@ -146,10 +146,21 @@ function buildSignupMetadata(payload) {
   };
 }
 
+function buildCoexistenceMetadata(payload) {
+  const session = extractEmbeddedSignupSessionInfo(payload);
+  return {
+    event: String(payload?.event || ""),
+    businessId: session.businessId || "",
+    wabaId: session.wabaId || "",
+    phoneNumberId: session.phoneNumberId || "",
+  };
+}
+
 function WhatsappConnectContent() {
   const searchParams = useSearchParams();
   const connectToken = searchParams.get("connectToken") || "";
   const completionStartedRef = useRef(false);
+  const coexistenceDiagnosticStartedRef = useRef(false);
   const activeSignupModeRef = useRef(SIGNUP_MODE_STANDARD);
   const [status, setStatus] = useState("Preparing");
   const [error, setError] = useState("");
@@ -158,6 +169,11 @@ function WhatsappConnectContent() {
   const [authCode, setAuthCode] = useState("");
   const [sessionInfo, setSessionInfo] = useState(null);
   const [successMessage, setSuccessMessage] = useState("");
+  const [coexistenceAuthCode, setCoexistenceAuthCode] = useState("");
+  const [coexistenceMetadata, setCoexistenceMetadata] = useState(null);
+  const [coexistenceDiagnostic, setCoexistenceDiagnostic] = useState(null);
+  const [coexistenceDiagnosticError, setCoexistenceDiagnosticError] = useState("");
+  const [coexistenceDiagnosticLoading, setCoexistenceDiagnosticLoading] = useState(false);
   const [wabaOnlyMetadata, setWabaOnlyMetadata] = useState(null);
   const [showWabaOnlyDiagnostic, setShowWabaOnlyDiagnostic] = useState(false);
 
@@ -265,10 +281,14 @@ function WhatsappConnectContent() {
         (payload.event === "FINISH" ||
           payload.event === "FINISH_WHATSAPP_BUSINESS_APP_ONBOARDING")
       ) {
-        setStatus("Test Completed");
+        const metadata = buildCoexistenceMetadata(payload);
+        setCoexistenceMetadata(metadata);
+        setStatus(metadata.phoneNumberId ? "Test Completed" : "Waiting for phone number details");
         setError("");
         setSuccessMessage(
-          "Coexistence signup test completed in Meta. This test flow is not connected to the YNOT backend yet, so no WhatsApp account changes were saved in YNOT."
+          metadata.phoneNumberId
+            ? "Coexistence signup test completed in Meta. YNOT will run a TEST-only read diagnostic if the server-side diagnostic flag is enabled. No WhatsApp settings will be saved."
+            : "Coexistence signup test returned WABA metadata without a phone number ID. No backend diagnostic will run and no WhatsApp settings were saved."
         );
         return;
       }
@@ -371,6 +391,71 @@ function WhatsappConnectContent() {
     completeConnection();
   }, [authCode, connectToken, returnUrl, sessionInfo]);
 
+  useEffect(() => {
+    async function runCoexistenceDiagnostic() {
+      if (coexistenceDiagnosticStartedRef.current) return;
+      if (!coexistenceAuthCode || !coexistenceMetadata?.wabaId) return;
+
+      if (!coexistenceMetadata.phoneNumberId) {
+        setCoexistenceDiagnosticError(
+          "Meta did not return a phone number ID, so the TEST backend diagnostic was not run."
+        );
+        return;
+      }
+
+      try {
+        coexistenceDiagnosticStartedRef.current = true;
+        setCoexistenceDiagnosticLoading(true);
+        setCoexistenceDiagnosticError("");
+        setCoexistenceDiagnostic(null);
+        setStatus("Verifying");
+
+        const res = await fetch(
+          `${API_BASE_URL}/api/vendor/whatsapp-business/meta/coexistence-diagnostic`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              connectToken,
+              code: coexistenceAuthCode,
+              wabaId: coexistenceMetadata.wabaId,
+              phoneNumberId: coexistenceMetadata.phoneNumberId,
+              event: coexistenceMetadata.event,
+              signupData: {
+                business_id: coexistenceMetadata.businessId,
+                waba_id: coexistenceMetadata.wabaId,
+                phone_number_id: coexistenceMetadata.phoneNumberId,
+              },
+            }),
+          }
+        );
+        const payload = await readApiResponse(
+          res,
+          "Unable to run the TEST coexistence diagnostic"
+        );
+
+        setCoexistenceDiagnostic(payload.data || null);
+        setStatus("Test Verified");
+        setSuccessMessage(
+          "TEST-only coexistence diagnostic completed. No WhatsApp settings were saved and no phone registration was attempted."
+        );
+      } catch (err) {
+        console.error("Coexistence diagnostic failed", {
+          message: err?.message || "Unable to run coexistence diagnostic",
+        });
+        setStatus("Test Completed");
+        setCoexistenceDiagnosticError(
+          err?.message ||
+            "The TEST backend diagnostic is unavailable or could not validate the coexistence session."
+        );
+      } finally {
+        setCoexistenceDiagnosticLoading(false);
+      }
+    }
+
+    runCoexistenceDiagnostic();
+  }, [coexistenceAuthCode, coexistenceMetadata, connectToken]);
+
   const startMetaSignup = async (signupMode = SIGNUP_MODE_STANDARD) => {
     if (!metaConfig?.isEmbeddedSignupConfigured) {
       setError("Meta Embedded Signup is not configured for this environment.");
@@ -381,8 +466,14 @@ function WhatsappConnectContent() {
     try {
       activeSignupModeRef.current = signupMode;
       completionStartedRef.current = false;
+      coexistenceDiagnosticStartedRef.current = false;
       setAuthCode("");
       setSessionInfo(null);
+      setCoexistenceAuthCode("");
+      setCoexistenceMetadata(null);
+      setCoexistenceDiagnostic(null);
+      setCoexistenceDiagnosticError("");
+      setCoexistenceDiagnosticLoading(false);
       setWabaOnlyMetadata(null);
       setSuccessMessage("");
       setStatus("Connecting");
@@ -448,6 +539,9 @@ function WhatsappConnectContent() {
           });
 
           if (signupMode === SIGNUP_MODE_COEXISTENCE_TEST) {
+            if (code) {
+              setCoexistenceAuthCode(code);
+            }
             setStatus("Test Started");
             setError("");
             setSuccessMessage(
@@ -528,6 +622,78 @@ function WhatsappConnectContent() {
         >
           Connect Existing WhatsApp Business Number
         </button>
+
+        {coexistenceMetadata ||
+        coexistenceDiagnostic ||
+        coexistenceDiagnosticError ||
+        coexistenceDiagnosticLoading ? (
+          <div className="whatsapp-connect-diagnostic-panel whatsapp-connect-coexistence-panel">
+            <p className="whatsapp-connect-warning">
+              TEST coexistence diagnostic only. YNOT will not save WhatsApp settings, activate
+              routing, or register this phone number.
+            </p>
+            <div className="whatsapp-connect-metadata" aria-live="polite">
+              <div>
+                <span>Event</span>
+                <strong>{coexistenceMetadata?.event || "Not provided"}</strong>
+              </div>
+              <div>
+                <span>WABA ID</span>
+                <strong>{coexistenceMetadata?.wabaId || "Not provided"}</strong>
+              </div>
+              <div>
+                <span>Phone Number ID</span>
+                <strong>{coexistenceMetadata?.phoneNumberId || "Not provided"}</strong>
+              </div>
+              <div>
+                <span>Verification</span>
+                <strong>
+                  {coexistenceDiagnosticLoading
+                    ? "Checking..."
+                    : coexistenceDiagnostic?.verification?.wabaMatched &&
+                      coexistenceDiagnostic?.verification?.phoneNumberMatched
+                    ? "WABA and phone matched"
+                    : coexistenceDiagnosticError
+                    ? "Not verified"
+                    : "Pending"}
+                </strong>
+              </div>
+              {coexistenceDiagnostic ? (
+                <>
+                  <div>
+                    <span>Platform Type</span>
+                    <strong>{coexistenceDiagnostic.phone?.platformType || "Not provided"}</strong>
+                  </div>
+                  <div>
+                    <span>Phone Status</span>
+                    <strong>{coexistenceDiagnostic.phone?.status || "Not provided"}</strong>
+                  </div>
+                  <div>
+                    <span>Code Verification</span>
+                    <strong>
+                      {coexistenceDiagnostic.phone?.codeVerificationStatus || "Not provided"}
+                    </strong>
+                  </div>
+                  <div>
+                    <span>On Business App</span>
+                    <strong>
+                      {coexistenceDiagnostic.isOnBizApp?.supported
+                        ? coexistenceDiagnostic.isOnBizApp.value
+                          ? "Yes"
+                          : "No"
+                        : "Unsupported by API"}
+                    </strong>
+                  </div>
+                </>
+              ) : null}
+            </div>
+            {coexistenceDiagnosticError ? (
+              <p className="whatsapp-connect-diagnostic-error">
+                {coexistenceDiagnosticError}
+              </p>
+            ) : null}
+          </div>
+        ) : null}
 
         {showWabaOnlyDiagnostic ? (
           <div className="whatsapp-connect-diagnostic-panel">

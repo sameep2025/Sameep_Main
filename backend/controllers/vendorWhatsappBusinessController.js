@@ -22,10 +22,12 @@ const {
   buildMetaTemplatePayload,
   createTemplate,
   exchangeEmbeddedSignupCode,
+  getPhoneNumberStatus,
   getPhoneNumberReadinessWithSystemUserToken,
   getPhoneNumberStatusWithSystemUserToken,
   getTemplateStatus,
   findTemplateByName,
+  readGraphAssetWithSystemUserToken,
   registerPhoneNumberWithSystemUserToken,
   runMetaConfigurationDiagnostics,
   runMetaPhoneReadinessComparisonDiagnostics,
@@ -561,6 +563,45 @@ function sendVendorNotFound(res) {
 function isDevelopmentDiagnosticsAllowed() {
   const env = String(process.env.NODE_ENV || "development").toLowerCase();
   return env !== "production";
+}
+
+function isCoexistenceDiagnosticEnabled() {
+  return (
+    String(process.env.META_COEXISTENCE_DIAGNOSTIC_ENABLED || "")
+      .trim()
+      .toLowerCase() === "true"
+  );
+}
+
+function sanitizeCoexistencePhoneStatus(phoneStatus) {
+  return {
+    id: String(phoneStatus?.id || ""),
+    displayPhoneNumber: String(phoneStatus?.display_phone_number || ""),
+    platformType: String(phoneStatus?.platform_type || ""),
+    status: String(phoneStatus?.status || ""),
+    codeVerificationStatus: String(phoneStatus?.code_verification_status || ""),
+    accountMode: String(phoneStatus?.account_mode || ""),
+    isPinEnabled:
+      typeof phoneStatus?.is_pin_enabled === "boolean" ? phoneStatus.is_pin_enabled : null,
+    healthStatus: phoneStatus?.health_status || null,
+    lastOnboardedTime: phoneStatus?.last_onboarded_time || null,
+  };
+}
+
+function sanitizeIsOnBizAppResult(result) {
+  if (result?.accessible) {
+    return {
+      supported: Object.prototype.hasOwnProperty.call(result.data || {}, "is_on_biz_app"),
+      value:
+        typeof result.data?.is_on_biz_app === "boolean" ? result.data.is_on_biz_app : null,
+    };
+  }
+
+  return {
+    supported: false,
+    value: null,
+    meta: result?.meta || null,
+  };
 }
 
 async function getWhatsappBusinessConfig(req, res) {
@@ -1614,6 +1655,133 @@ async function completeMetaWhatsappConnection(req, res) {
   }
 }
 
+async function diagnoseMetaCoexistenceSignup(req, res) {
+  try {
+    if (!isCoexistenceDiagnosticEnabled()) {
+      return res.status(404).json({
+        success: false,
+        message: "Not found",
+      });
+    }
+
+    const record = await findVendorRecord(getAuthorizedVendorId(req));
+    if (!record) return sendVendorNotFound(res);
+
+    const signupData = req.body?.signupData || {};
+    const code = String(req.body?.code || req.body?.authCode || "").trim();
+    const requestedWabaId = String(req.body?.wabaId || "").trim();
+    const requestedPhoneNumberId = String(req.body?.phoneNumberId || "").trim();
+    const signupWabaId = getMetaSignupValue(signupData, [
+      "waba_id",
+      "wabaId",
+      "whatsapp_business_account_id",
+      "whatsappBusinessAccountId",
+    ]);
+    const signupPhoneNumberId = getMetaSignupValue(signupData, [
+      "phone_number_id",
+      "phoneNumberId",
+      "phoneID",
+    ]);
+    const eventType = String(req.body?.event || signupData?.event || "").trim();
+
+    if (!code || !requestedWabaId || !requestedPhoneNumberId) {
+      return res.status(400).json({
+        success: false,
+        message: "Meta authorization code, WABA ID, and Phone Number ID are required",
+        code: "meta_coexistence_payload_invalid",
+      });
+    }
+
+    if (
+      (signupWabaId && signupWabaId !== requestedWabaId) ||
+      (signupPhoneNumberId && signupPhoneNumberId !== requestedPhoneNumberId)
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: "Meta signup session details do not match the requested diagnostic IDs",
+        code: "meta_coexistence_session_mismatch",
+      });
+    }
+
+    const tokenResult = await exchangeEmbeddedSignupCode(code);
+    const accessToken = String(tokenResult?.access_token || "").trim();
+
+    if (!accessToken) {
+      return res.status(400).json({
+        success: false,
+        message: "Meta authorization did not return a usable access token",
+        code: "meta_coexistence_token_missing",
+      });
+    }
+
+    const validation = await validateConnection({
+      accessToken,
+      wabaId: requestedWabaId,
+      phoneNumberId: requestedPhoneNumberId,
+    });
+
+    const validatedWabaId = String(validation.account?.id || "");
+    const validatedPhoneNumberId = String(validation.selectedPhone?.id || "");
+
+    if (
+      !validation.isValid ||
+      validatedWabaId !== requestedWabaId ||
+      validatedPhoneNumberId !== requestedPhoneNumberId
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: "Meta coexistence signup details could not be validated",
+        code: "meta_coexistence_validation_failed",
+      });
+    }
+
+    const phoneStatus = await getPhoneNumberStatus({
+      phoneNumberId: requestedPhoneNumberId,
+      accessToken,
+    });
+    const isOnBizAppResult = await readGraphAssetWithSystemUserToken({
+      path: requestedPhoneNumberId,
+      fields: "is_on_biz_app",
+      accessToken,
+    });
+
+    return res.json({
+      success: true,
+      data: {
+        mode: "business_app_coexistence_diagnostic",
+        event: eventType,
+        verification: {
+          wabaMatched: validatedWabaId === requestedWabaId,
+          phoneNumberMatched: validatedPhoneNumberId === requestedPhoneNumberId,
+        },
+        waba: {
+          id: String(validation.account?.id || ""),
+          name: String(validation.account?.name || ""),
+        },
+        phone: sanitizeCoexistencePhoneStatus(phoneStatus),
+        isOnBizApp: sanitizeIsOnBizAppResult(isOnBizAppResult),
+        persisted: false,
+        registrationCalled: false,
+      },
+      message: "Coexistence diagnostic completed without saving WhatsApp settings",
+    });
+  } catch (error) {
+    console.error("[Meta Coexistence Diagnostic Error]", {
+      code: error.code || "",
+      metaCode: error.metaError?.code || "",
+      metaSubcode: error.metaError?.subcode || "",
+      message: error.message || "Meta coexistence diagnostic failed",
+    });
+
+    return res.status(error.code === "meta_not_configured" ? 503 : 400).json({
+      success: false,
+      message: "Unable to complete the coexistence diagnostic",
+      code: error.code || "meta_coexistence_diagnostic_failed",
+      meta: error.metaError || null,
+    });
+  }
+}
+
 async function disconnectWhatsappBusiness(req, res) {
   try {
     const record = await findVendorRecord(getAuthorizedVendorId(req));
@@ -1643,6 +1811,7 @@ module.exports = {
   activateWhatsappBusinessBilling,
   checkWhatsappTemplateStatus,
   deactivateWhatsappBusinessBilling,
+  diagnoseMetaCoexistenceSignup,
   disconnectWhatsappBusiness,
   completeMetaWhatsappConnection,
   createMetaConnectSession,
