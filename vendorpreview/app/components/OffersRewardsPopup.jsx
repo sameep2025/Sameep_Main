@@ -311,7 +311,9 @@ export default function OffersRewardsPopup({
                 </div>
                 <div
                   ref={offersTrackRef}
-                  className="offers-rewards-popup__offers"
+                  className={`offers-rewards-popup__offers${
+                    offers.length === 1 ? " offers-rewards-popup__offers--single" : ""
+                  }`}
                   aria-label="Current offers"
                   tabIndex={offers.length > 1 ? 0 : undefined}
                   onScroll={handleOffersScroll}

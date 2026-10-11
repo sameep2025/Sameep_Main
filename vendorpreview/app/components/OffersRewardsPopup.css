@@ -522,9 +522,7 @@
   }
 
   .offers-rewards-popup__offers {
-    grid-auto-flow: column;
-    grid-auto-columns: minmax(0, 88%);
-    grid-template-columns: none;
+    display: flex;
     gap: 12px;
     overflow-x: auto;
     overflow-y: hidden;
@@ -536,14 +534,26 @@
     scrollbar-width: none;
   }
 
+  .offers-rewards-popup__offers--single {
+    padding-right: 0;
+  }
+
   .offers-rewards-popup__offers::-webkit-scrollbar {
     display: none;
   }
 
   .offers-rewards-popup__offer-card {
-    width: auto;
+    flex: 0 0 88%;
+    width: 88%;
+    max-width: 88%;
     scroll-snap-align: start;
     scroll-snap-stop: always;
+  }
+
+  .offers-rewards-popup__offers--single .offers-rewards-popup__offer-card {
+    flex-basis: 100%;
+    width: 100%;
+    max-width: 100%;
   }
 
   .offers-rewards-popup__offer-image {
