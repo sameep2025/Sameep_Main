@@ -522,6 +522,7 @@ function WhatsappConnectContent() {
               extras: {
                 version: "v4",
                 sessionInfoVersion: "3",
+                setup: {},
                 featureType: "whatsapp_business_app_onboarding",
               },
             }
