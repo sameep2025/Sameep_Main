@@ -83,6 +83,7 @@ export default function OffersRewardsPopup({
   const [open, setOpen] = useState(false);
   const [dismissed, setDismissed] = useState(false);
   const [reduceMotion, setReduceMotion] = useState(false);
+  const [previewImage, setPreviewImage] = useState(null);
   const closeButtonRef = useRef(null);
   const previousFocusRef = useRef(null);
   const closedForVisitRef = useRef(false);
@@ -163,13 +164,17 @@ export default function OffersRewardsPopup({
     const handleKeyDown = (event) => {
       if (event.key === "Escape") {
         event.preventDefault();
+        if (previewImage) {
+          setPreviewImage(null);
+          return;
+        }
         handleClose();
       }
     };
 
     document.addEventListener("keydown", handleKeyDown);
     return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [open]);
+  }, [open, previewImage]);
 
   useEffect(() => {
     if (!open || typeof window === "undefined" || typeof document === "undefined") {
@@ -192,6 +197,7 @@ export default function OffersRewardsPopup({
   }, [open]);
 
   const handleClose = () => {
+    setPreviewImage(null);
     closedForVisitRef.current = true;
     setDismissed(true);
     setOpen(false);
@@ -252,7 +258,15 @@ export default function OffersRewardsPopup({
                       >
                         {offer.imageUrl ? (
                           <div className="offers-rewards-popup__offer-image">
-                            <img src={offer.imageUrl} alt={offer.title} loading="lazy" />
+                            <button
+                              type="button"
+                              className="offers-rewards-popup__image-button"
+                              onClick={() => setPreviewImage({ src: offer.imageUrl, alt: offer.title })}
+                              aria-label={`View full image for ${offer.title}`}
+                            >
+                              <img src={offer.imageUrl} alt={offer.title} loading="lazy" />
+                              <span>Tap to view full image</span>
+                            </button>
                           </div>
                         ) : null}
                         <div className="offers-rewards-popup__offer-copy">
@@ -292,6 +306,31 @@ export default function OffersRewardsPopup({
               Explore Products & Services
             </button>
           </section>
+
+          {previewImage ? (
+            <div
+              className="offers-rewards-popup__image-preview"
+              role="dialog"
+              aria-modal="true"
+              aria-label="Full promotional image preview"
+            >
+              <div
+                className="offers-rewards-popup__image-preview-backdrop"
+                onClick={() => setPreviewImage(null)}
+              />
+              <div className="offers-rewards-popup__image-preview-panel">
+                <button
+                  type="button"
+                  className="offers-rewards-popup__image-preview-close"
+                  onClick={() => setPreviewImage(null)}
+                  aria-label="Close full image preview"
+                >
+                  ×
+                </button>
+                <img src={previewImage.src} alt={previewImage.alt} />
+              </div>
+            </div>
+          ) : null}
         </div>
       ) : null}
 
