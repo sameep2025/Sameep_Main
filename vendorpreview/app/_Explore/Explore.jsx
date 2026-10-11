@@ -150,18 +150,31 @@ function buildNameMapFromTree(nodes) {
 }
 
 
+function isOffersLabel(value) {
+  return String(value || "").trim().toLowerCase() === "offers";
+}
+
+function isOfferClassifiedNode(node, pathLabels = []) {
+  const customType = String(node?.customType || "").trim().toLowerCase();
+  if (customType === "offer") return true;
+  if (isOffersLabel(node?.name)) return true;
+  return pathLabels.some(isOffersLabel);
+}
+
 function buildImageMapFromTree(nodes) {
   const map = {};
 
-  function walk(node, inheritedImage = null) {
-    const currentImage = node.imageUrl || inheritedImage;
+  function walk(node, inheritedImage = null, pathLabels = []) {
+    const currentPath = [...pathLabels, node?.name].filter(Boolean);
+    const isOfferNode = isOfferClassifiedNode(node, pathLabels);
+    const currentImage = isOfferNode ? inheritedImage : node.imageUrl || inheritedImage;
 
-    if (node.id && currentImage) {
+    if (node.id && currentImage && !isOfferNode) {
       map[node.id] = currentImage;
     }
 
     node.children?.forEach(child =>
-      walk(child, currentImage)
+      walk(child, currentImage, currentPath)
     );
   }
 
@@ -198,6 +211,7 @@ function cloneCustomPackageNode(node) {
     packagesIncludes: node.packagesIncludes || "",
     terms: node.terms || "",
     offerText: node.offerText || "",
+    customType: node.customType || "",
     pricingStatus: node.pricingStatus || "Active",
     isLeaf: node.isLeaf !== false,
     price: node.isLeaf === false ? null : Number(node.price) || 0,
@@ -2372,8 +2386,10 @@ function ExploreContent({ onReady, onOpenServices }) {
   function extractSelfManagedHeroImages(pricingTree) {
     const images = [];
 
-    function walk(nodes, inheritedActive = false) {
+    function walk(nodes, inheritedActive = false, pathLabels = []) {
       (nodes || []).forEach((node) => {
+        const currentPath = [...pathLabels, node?.name].filter(Boolean);
+        const isOfferNode = isOfferClassifiedNode(node, pathLabels);
         const isActive =
           String(node?.pricingStatus || "Active").trim().toLowerCase() !== "inactive";
         const hasActiveDescendant = (node?.children || []).some((child) => {
@@ -2384,12 +2400,12 @@ function ExploreContent({ onReady, onOpenServices }) {
         });
         const shouldUseNodeImage = isActive || inheritedActive || hasActiveDescendant;
 
-        if (shouldUseNodeImage && node?.imageUrl) {
+        if (shouldUseNodeImage && !isOfferNode && node?.imageUrl) {
           images.push(node.imageUrl);
         }
 
         if (node?.children?.length) {
-          walk(node.children, isActive || inheritedActive);
+          walk(node.children, isActive || inheritedActive, currentPath);
         }
       });
     }
@@ -2426,12 +2442,15 @@ function ExploreContent({ onReady, onOpenServices }) {
     collectActive(pricingTree || []);
 
     // 👉 Walk category tree & pick only active images
-    function walk(nodes) {
+    function walk(nodes, pathLabels = []) {
       nodes.forEach(n => {
-        if (activeIds.has(n.id) && n.imageUrl) {
+        const currentPath = [...pathLabels, n?.name].filter(Boolean);
+        const isOfferNode = isOfferClassifiedNode(n, pathLabels);
+
+        if (activeIds.has(n.id) && !isOfferNode && n.imageUrl) {
           images.push(n.imageUrl);
         }
-        if (n.children?.length) walk(n.children);
+        if (n.children?.length) walk(n.children, currentPath);
       });
     }
 

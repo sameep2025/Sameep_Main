@@ -210,6 +210,13 @@ function isOffersLabel(value) {
   return String(value || "").trim().toLowerCase() === "offers";
 }
 
+function isOfferClassifiedNode(node, pathNames = []) {
+  const customType = String(node?.customType || "").trim().toLowerCase();
+  if (customType === "offer") return true;
+  if (isOffersLabel(node?.name)) return true;
+  return pathNames.some(isOffersLabel);
+}
+
 function isOfferLikeCard(card, sectionName) {
   if (!card) return false;
   if (isOffersLabel(sectionName)) return true;
@@ -331,6 +338,8 @@ function collectLeafItems(
 
   (Array.isArray(nodes) ? nodes : []).forEach((node, index) => {
     if (!node) return;
+
+    if (isOfferClassifiedNode(node, pathNames)) return;
 
     const currentPath = [...pathNames, node.name].filter(Boolean);
     const hasChildren = Array.isArray(node.children) && node.children.length > 0;
