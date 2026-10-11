@@ -136,6 +136,12 @@ function isWabaOnlyDiagnosticAllowed() {
   );
 }
 
+function isSameepTestEnvironment() {
+  if (typeof window === "undefined") return false;
+  const hostname = window.location.hostname.toLowerCase();
+  return hostname === "sameep.app" || hostname.endsWith(".sameep.app");
+}
+
 function buildSignupMetadata(payload) {
   const session = extractEmbeddedSignupSessionInfo(payload);
   return {
@@ -527,6 +533,15 @@ function WhatsappConnectContent() {
             };
 
       logMetaEmbeddedSignupDiagnostic({ metaConfig, loginOptions });
+      if (signupMode === SIGNUP_MODE_COEXISTENCE_TEST && isSameepTestEnvironment()) {
+        console.info("[YNOT COEXISTENCE LOGIN CONFIG]", {
+          signupMode,
+          activeSignupMode: activeSignupModeRef.current,
+          config_id: loginOptions.config_id,
+          extras: loginOptions.extras,
+          response_type: loginOptions.response_type,
+        });
+      }
 
       fb.login(
         (response) => {
