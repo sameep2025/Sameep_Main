@@ -77,6 +77,7 @@ export default function OffersRewardsPopup({
   businessName,
   templateKey = "classic",
   enabled = true,
+  suppressAutoOpen = false,
 }) {
   const [highlights, setHighlights] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -149,6 +150,11 @@ export default function OffersRewardsPopup({
           !closedForVisitRef.current &&
           autoOpenedVendorRef.current !== vendorId
         ) {
+          if (suppressAutoOpen) {
+            setDismissed(true);
+            return;
+          }
+
           autoOpenedVendorRef.current = vendorId;
           previousFocusRef.current = document.activeElement;
           setOpen(true);
@@ -164,7 +170,7 @@ export default function OffersRewardsPopup({
     return () => {
       cancelled = true;
     };
-  }, [enabled, vendorId]);
+  }, [enabled, suppressAutoOpen, vendorId]);
 
   useEffect(() => {
     if (!open) return undefined;

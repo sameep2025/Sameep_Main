@@ -43,6 +43,13 @@ export default function Home() {
     if (typeof window === "undefined") return false;
     return Boolean(localStorage.getItem("authToken"));
   });
+  const [popupAuthCheckComplete, setPopupAuthCheckComplete] = useState(false);
+  const [suppressPopupAutoOpen, setSuppressPopupAutoOpen] = useState(false);
+  const currentVendorId =
+    vendorInfo?.vendorId ||
+    vendorInfo?._id ||
+    vendorInfo?.vendor?._id ||
+    "";
 
   useEffect(() => {
     let cancelled = false;
@@ -138,6 +145,72 @@ useEffect(() => {
   };
 }, []);
 
+useEffect(() => {
+  const vendorId = currentVendorId;
+
+  if (!vendorId || typeof window === "undefined") {
+    setSuppressPopupAutoOpen(false);
+    setPopupAuthCheckComplete(true);
+    return undefined;
+  }
+
+  let cancelled = false;
+
+  const verifyCurrentVendorSession = async () => {
+    setPopupAuthCheckComplete(false);
+
+    try {
+      const currentVendorId = String(vendorId);
+      const sessionVendorId = localStorage.getItem("vendorSessionVendorId");
+      const vendorToken = localStorage.getItem(`vendorToken:${currentVendorId}`);
+
+      if (!vendorToken || (sessionVendorId && sessionVendorId !== currentVendorId)) {
+        if (!cancelled) {
+          setSuppressPopupAutoOpen(false);
+          setPopupAuthCheckComplete(true);
+        }
+        return;
+      }
+
+      const response = await fetch(`${API_BASE_URL}/api/customers/session-status-token`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ token: vendorToken }),
+      });
+      const data = await response.json().catch(() => ({}));
+
+      if (!cancelled) {
+        setSuppressPopupAutoOpen(response.ok && data?.status === "active");
+        setPopupAuthCheckComplete(true);
+      }
+    } catch {
+      if (!cancelled) {
+        setSuppressPopupAutoOpen(false);
+        setPopupAuthCheckComplete(true);
+      }
+    }
+  };
+
+  verifyCurrentVendorSession();
+
+  const handleAuthChange = () => {
+    verifyCurrentVendorSession();
+  };
+
+  window.addEventListener("storage", handleAuthChange);
+  window.addEventListener("auth-changed", handleAuthChange);
+  window.addEventListener("session-expired", handleAuthChange);
+  window.addEventListener("focus", handleAuthChange);
+
+  return () => {
+    cancelled = true;
+    window.removeEventListener("storage", handleAuthChange);
+    window.removeEventListener("auth-changed", handleAuthChange);
+    window.removeEventListener("session-expired", handleAuthChange);
+    window.removeEventListener("focus", handleAuthChange);
+  };
+}, [currentVendorId]);
+
 useRuntimeTeluguPreviewTranslation({
   enabled: String(vendorInfo?.languagePreference || "").trim().toLowerCase() === "te",
   rootRef: previewRootRef,
@@ -145,17 +218,13 @@ useRuntimeTeluguPreviewTranslation({
 });
 
 useEffect(() => {
-  const vendorId =
-    vendorInfo?.vendorId ||
-    vendorInfo?._id ||
-    vendorInfo?.vendor?._id ||
-    "";
+  const vendorId = currentVendorId;
   if (!vendorId) return;
   if (!shouldTrackVendorPageViewOnce(vendorId)) return;
 
   const payload = buildVendorPreviewPageViewPayload(vendorId);
   trackVendorPreviewPageView(API_BASE_URL, payload);
-}, [vendorInfo]);
+}, [currentVendorId]);
 if (checkingSession) {
   return <Load />; // reuse your loader
 }
@@ -188,10 +257,11 @@ if (!sessionAllowed) {
 
 	<ScrollToTop />
   <OffersRewardsPopup
-    vendorId={vendorInfo?.vendorId || vendorInfo?._id || vendorInfo?.vendor?._id || ""}
+    vendorId={currentVendorId}
     businessName={vendorInfo?.businessName || ""}
     templateKey={effectiveTemplateKey}
-    enabled={!loading}
+    enabled={!loading && popupAuthCheckComplete}
+    suppressAutoOpen={suppressPopupAutoOpen}
   />
 	        {/* GLOBAL PORTAL */}
 	        <Portal />
