@@ -151,6 +151,24 @@
   border-radius: 16px;
 }
 
+.customer-analytics-stat-button {
+  width: 100%;
+  appearance: none;
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+  color: inherit;
+  transition: border-color 0.16s ease, background 0.16s ease, transform 0.16s ease;
+}
+
+.customer-analytics-stat-button:hover,
+.customer-analytics-stat-button:focus-visible,
+.customer-analytics-stat-button.active {
+  border-color: rgba(230, 195, 122, 0.46);
+  background: rgba(230, 195, 122, 0.08);
+  outline: none;
+}
+
 .customer-analytics-stat-card .revenue-panel-stat-value {
   margin-top: 6px;
   font-size: 19px;
@@ -288,6 +306,27 @@
   font-weight: 900;
   text-align: right;
   white-space: nowrap;
+}
+
+.customer-analytics-history-btn {
+  display: block;
+  margin-top: 8px;
+  margin-left: auto;
+  padding: 7px 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(230, 195, 122, 0.28);
+  background: rgba(230, 195, 122, 0.09);
+  color: #f8de8a;
+  font-size: 12px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.customer-analytics-history-btn:hover,
+.customer-analytics-history-btn:focus-visible {
+  border-color: rgba(230, 195, 122, 0.55);
+  background: rgba(230, 195, 122, 0.16);
+  outline: none;
 }
 
 .revenue-snapshot-trigger-row {
@@ -581,10 +620,29 @@
   border-radius: 16px;
   border: 1px solid rgba(230, 195, 122, 0.14);
   background: rgba(255, 255, 255, 0.03);
+  color: #f5f2ea;
+  text-align: left;
+  transition: border-color 0.16s ease, background 0.16s ease, transform 0.16s ease;
+}
+
+button.revenue-panel-list-item {
+  width: 100%;
+  cursor: pointer;
+  appearance: none;
+  font: inherit;
+}
+
+button.revenue-panel-list-item:hover,
+button.revenue-panel-list-item:focus-visible {
+  border-color: rgba(230, 195, 122, 0.42);
+  background: rgba(230, 195, 122, 0.08);
+  outline: none;
 }
 
 .revenue-panel-list-main {
+  color: #f8f1dc;
   font-weight: 700;
+  overflow-wrap: anywhere;
 }
 
 .revenue-panel-list-sub {
@@ -897,6 +955,32 @@
 .revenue-panel-bill-detail-grid span,
 .revenue-panel-bill-totals span {
   color: rgba(245, 242, 234, 0.66);
+}
+
+.revenue-panel-discount-summary {
+  display: grid;
+  gap: 8px;
+  flex: 1;
+  min-width: 0;
+}
+
+.revenue-panel-discount-breakdown {
+  display: grid;
+  gap: 5px;
+  padding-top: 8px;
+  border-top: 1px solid rgba(230, 195, 122, 0.12);
+  font-size: 12px;
+}
+
+.revenue-panel-discount-breakdown > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.revenue-panel-discount-breakdown strong {
+  color: rgba(245, 217, 122, 0.9);
+  white-space: nowrap;
 }
 
 .revenue-panel-bill-total-net {

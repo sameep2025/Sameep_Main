@@ -232,11 +232,42 @@ export function printReceiptSnapshot(receiptSnapshot) {
   totals.className = "totals";
   root.appendChild(totals);
   addRow("Bill Value", formatReceiptCurrency(receiptSnapshot.grossAmount), "total-row", totals);
-  if (Number(receiptSnapshot.discountAmount || 0) > 0) {
+  const membershipDiscountAmount = Number(receiptSnapshot.membershipDiscountAmount || 0);
+  const additionalManualDiscountAmount = Number(receiptSnapshot.additionalManualDiscountAmount || 0);
+  const showSplitDiscounts = membershipDiscountAmount > 0;
+  if (showSplitDiscounts && membershipDiscountAmount > 0) {
+    const membershipLabel = receiptSnapshot.membershipPlanName
+      ? `Membership Discount - ${receiptSnapshot.membershipPlanName}`
+      : "Membership Discount";
+    addRow(
+      membershipLabel,
+      `-${formatReceiptCurrency(membershipDiscountAmount)}`,
+      "total-row",
+      totals
+    );
+  }
+  if (showSplitDiscounts && additionalManualDiscountAmount > 0) {
+    const additionalDiscountLabel = Number(receiptSnapshot.manualDiscountPercent || 0) > 0
+      ? `Additional Discount (${Number(receiptSnapshot.manualDiscountPercent)}%)`
+      : "Additional Discount";
+    addRow(
+      additionalDiscountLabel,
+      `-${formatReceiptCurrency(additionalManualDiscountAmount)}`,
+      "total-row",
+      totals
+    );
+  }
+  if (!showSplitDiscounts && Number(receiptSnapshot.discountAmount || 0) > 0) {
     addRow("Discount", `-${formatReceiptCurrency(receiptSnapshot.discountAmount)}`, "total-row", totals);
+  }
+  if (showSplitDiscounts && Number(receiptSnapshot.discountAmount || 0) > 0) {
+    addRow("Total Savings", formatReceiptCurrency(receiptSnapshot.discountAmount), "total-row", totals);
   }
   if (Number(receiptSnapshot.rewardsRedeemed || 0) > 0) {
     addRow("Rewards Redeemed", `-${formatReceiptCurrency(receiptSnapshot.rewardsRedeemed)}`, "total-row", totals);
+  }
+  if (Number(receiptSnapshot.pointsEarned || 0) > 0) {
+    addRow("Loyalty Points Earned", String(Number(receiptSnapshot.pointsEarned || 0)), "total-row", totals);
   }
   addRow("NET COLLECTED", formatReceiptCurrency(receiptSnapshot.netCollected), "total-row net", totals);
   addRow(

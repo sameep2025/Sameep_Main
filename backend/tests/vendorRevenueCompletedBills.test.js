@@ -6,9 +6,11 @@ const mongoose = require("mongoose");
 
 const BillingSession = require("../models/BillingSession");
 const Customer = require("../models/Customer");
+const CustomerMembership = require("../models/CustomerMembership");
 const LoyaltyLedger = require("../models/LoyaltyLedger");
 const Transaction = require("../models/Transaction");
 const Vendor = require("../models/DummyVendor");
+const VendorCustomerProfile = require("../models/VendorCustomerProfile");
 const VendorLoyaltyRule = require("../models/VendorLoyaltyRule");
 const billingController = require("../controllers/billingController");
 const vendorDashboardController = require("../controllers/vendorDashboardController");
@@ -33,6 +35,7 @@ function buildBill({
   customerId = CUSTOMER_ID,
   whatsappStatus = "skipped",
   paymentMode,
+  ...extraFields
 }) {
   return {
     _id: new mongoose.Types.ObjectId(id),
@@ -45,9 +48,10 @@ function buildBill({
     pointsEarned,
     pointsRedeemed,
     ...(paymentMode !== undefined ? { paymentMode } : {}),
+    ...extraFields,
     createdAt: new Date(createdAt),
     whatsappStatus,
-    cartItems: [
+    cartItems: extraFields.cartItems || [
       {
         name: "Premium / Luxury",
         qty: 1,
@@ -130,6 +134,24 @@ const sampleTransactions = [
   },
 ];
 
+function mockCustomerFind(rows = [{ _id: new mongoose.Types.ObjectId(CUSTOMER_ID), phone: "6309719521", fullNumber: "916309719521" }]) {
+  Customer.find = () => ({
+    select() {
+      return this;
+    },
+    lean: async () => rows,
+  });
+}
+
+function mockVendorCustomerProfileFind(rows = []) {
+  VendorCustomerProfile.find = () => ({
+    select() {
+      return this;
+    },
+    lean: async () => rows,
+  });
+}
+
 function dateMatches(value, range = {}) {
   const date = new Date(value);
   if (range.$gte && date < range.$gte) return false;
@@ -189,8 +211,10 @@ function withMockedBillingSessionFind(fn) {
   return async () => {
     const originals = {
       find: BillingSession.find,
+      customerFind: Customer.find,
       customerFindById: Customer.findById,
       transactionFind: Transaction.find,
+      vendorCustomerProfileFind: VendorCustomerProfile.find,
     };
     const state = {
       queries: [],
@@ -203,11 +227,31 @@ function withMockedBillingSessionFind(fn) {
       return buildFindResult(query, state);
     };
 
+    Customer.find = () => ({
+      select() {
+        return this;
+      },
+      lean: async () => [
+        {
+          _id: new mongoose.Types.ObjectId(CUSTOMER_ID),
+          phone: "6309719521",
+          fullNumber: "916309719521",
+        },
+      ],
+    });
     Customer.findById = () => ({
       lean: async () => ({
+        _id: new mongoose.Types.ObjectId(CUSTOMER_ID),
         phone: "6309719521",
         fullNumber: "916309719521",
       }),
+    });
+
+    VendorCustomerProfile.find = () => ({
+      select() {
+        return this;
+      },
+      lean: async () => [],
     });
 
     Transaction.find = (query) => {
@@ -225,8 +269,10 @@ function withMockedBillingSessionFind(fn) {
       await fn(state);
     } finally {
       BillingSession.find = originals.find;
+      Customer.find = originals.customerFind;
       Customer.findById = originals.customerFindById;
       Transaction.find = originals.transactionFind;
+      VendorCustomerProfile.find = originals.vendorCustomerProfileFind;
     }
   };
 }
@@ -264,6 +310,249 @@ test(
 );
 
 test(
+  "vendor revenue bill labels prefer snapshot, then vendor profile, then phone",
+  withMockedBillingSessionFind(async () => {
+    const completedBill = sampleBills.find((bill) => String(bill._id) === COMPLETED_BILL_ID);
+    const originalSnapshot = completedBill.customerNameSnapshot;
+    let profileQuery = null;
+
+    try {
+      completedBill.customerNameSnapshot = "";
+      VendorCustomerProfile.find = (query) => {
+        profileQuery = query;
+        return {
+          select() {
+            return this;
+          },
+          lean: async () => [
+            {
+              customerId: new mongoose.Types.ObjectId(CUSTOMER_ID),
+              displayName: "Vendor Profile Name",
+            },
+          ],
+        };
+      };
+      let res = await callController(vendorDashboardController.getBillsDrilldown);
+      assert.equal(String(profileQuery.vendorId), VENDOR_ID);
+      assert.equal(res.payload.data[0].customerName, "Vendor Profile Name");
+      assert.equal(res.payload.data[0].customerLabel, "Vendor Profile Name (6309719521)");
+
+      completedBill.customerNameSnapshot = "Snapshot Name";
+      res = await callController(vendorDashboardController.getBillsDrilldown);
+      assert.equal(res.payload.data[0].customerName, "Snapshot Name");
+      assert.equal(res.payload.data[0].customerLabel, "Snapshot Name (6309719521)");
+
+      completedBill.customerNameSnapshot = "";
+      mockVendorCustomerProfileFind([]);
+      res = await callController(vendorDashboardController.getBillsDrilldown);
+      assert.equal(res.payload.data[0].customerName, "");
+      assert.equal(res.payload.data[0].customerLabel, "6309719521");
+    } finally {
+      completedBill.customerNameSnapshot = originalSnapshot;
+    }
+  })
+);
+
+test("vendor revenue drilldown exposes persisted membership discount breakdown", async () => {
+  const originals = {
+    find: BillingSession.find,
+    customerFind: Customer.find,
+    transactionFind: Transaction.find,
+    vendorCustomerProfileFind: VendorCustomerProfile.find,
+  };
+  const billId = new mongoose.Types.ObjectId("6abdc888dac53725ac8225c4");
+  const membershipSnapshot = {
+    planName: "Silver Plan",
+    discountPercentage: 10,
+    membershipPlanId: new mongoose.Types.ObjectId(),
+    customerMembershipId: new mongoose.Types.ObjectId(),
+  };
+
+  BillingSession.find = () => ({
+    sort() {
+      return this;
+    },
+    limit() {
+      return this;
+    },
+    lean: async () => [
+      {
+        _id: billId,
+        vendorId: new mongoose.Types.ObjectId(VENDOR_ID),
+        customerId: new mongoose.Types.ObjectId(CUSTOMER_ID),
+        status: "COMPLETED",
+        totalAmount: 988,
+        grossAmount: 1100,
+        discountAmount: 112,
+        membershipDiscountAmount: 60,
+        additionalManualDiscountAmount: 52,
+        manualDiscountMode: "percent",
+        manualDiscountPercent: 5,
+        membershipBillingSnapshot: membershipSnapshot,
+        pointsEarned: 49,
+        pointsRedeemed: 0,
+        paymentMode: "CASH",
+        createdAt: new Date("2026-10-13T05:00:00.000Z"),
+        cartItems: [
+          {
+            name: "Hair Spa",
+            qty: 1,
+            price: 600,
+            total: 600,
+            finalLineAmount: 540,
+            membershipDiscountAmount: 60,
+            manualDiscountAmount: 0,
+            membershipDiscountApplied: true,
+          },
+          {
+            name: "Hair Cut",
+            qty: 1,
+            price: 500,
+            total: 500,
+            finalLineAmount: 448,
+            membershipDiscountAmount: 0,
+            manualDiscountAmount: 52,
+            membershipDiscountApplied: false,
+          },
+        ],
+      },
+    ],
+  });
+    mockCustomerFind();
+    Customer.findById = () => ({
+      lean: async () => ({
+        _id: new mongoose.Types.ObjectId(CUSTOMER_ID),
+        phone: "6309719521",
+        fullNumber: "916309719521",
+      }),
+    });
+  mockVendorCustomerProfileFind();
+  Transaction.find = () => ({
+    lean: async () => [
+      {
+        billingSessionId: billId,
+        totalAmount: 988,
+        grossAmount: 1100,
+        discountAmount: 112,
+        membershipDiscountAmount: 60,
+        additionalManualDiscountAmount: 52,
+        membershipBillingSnapshot: membershipSnapshot,
+        redeemedPoints: 0,
+        redeemValue: 0,
+        finalPaidAmount: 988,
+      },
+    ],
+  });
+
+  try {
+    const res = await callController(vendorDashboardController.getBillsDrilldown);
+    const bill = res.payload.data[0];
+
+    assert.equal(res.statusCode, 200);
+    assert.equal(bill.grossAmount, 1100);
+    assert.equal(bill.discountAmount, 112);
+    assert.equal(bill.membershipDiscountAmount, 60);
+    assert.equal(bill.additionalManualDiscountAmount, 52);
+    assert.equal(bill.totalSavings, 112);
+    assert.equal(bill.manualDiscountPercent, 5);
+    assert.equal(bill.membership.planName, "Silver Plan");
+    assert.equal(bill.membership.discountPercentage, 10);
+    assert.equal(bill.netCollected, 988);
+  } finally {
+      BillingSession.find = originals.find;
+      Customer.find = originals.customerFind;
+      Customer.findById = originals.customerFindById;
+      Transaction.find = originals.transactionFind;
+      VendorCustomerProfile.find = originals.vendorCustomerProfileFind;
+    }
+});
+
+test("vendor revenue drilldown derives membership breakdown from item allocations", async () => {
+  const originals = {
+    find: BillingSession.find,
+    customerFind: Customer.find,
+    transactionFind: Transaction.find,
+    vendorCustomerProfileFind: VendorCustomerProfile.find,
+  };
+  const billId = new mongoose.Types.ObjectId("6abdc888dac53725ac8225c5");
+  const membershipSnapshot = {
+    planName: "Silver Plan",
+    discountPercentage: 10,
+  };
+
+  BillingSession.find = () => ({
+    sort() {
+      return this;
+    },
+    limit() {
+      return this;
+    },
+    lean: async () => [
+      {
+        _id: billId,
+        vendorId: new mongoose.Types.ObjectId(VENDOR_ID),
+        customerId: new mongoose.Types.ObjectId(CUSTOMER_ID),
+        status: "COMPLETED",
+        totalAmount: 988,
+        grossAmount: 1100,
+        discountAmount: 112,
+        manualDiscountMode: "percent",
+        manualDiscountPercent: 5,
+        membershipBillingSnapshot: membershipSnapshot,
+        pointsEarned: 49,
+        pointsRedeemed: 0,
+        createdAt: new Date("2026-10-13T05:00:00.000Z"),
+        cartItems: [
+          {
+            name: "Hair Spa",
+            qty: 1,
+            price: 600,
+            total: 600,
+            membershipDiscountAmount: 60,
+            manualDiscountAmount: 27,
+          },
+          {
+            name: "Hair Cut",
+            qty: 1,
+            price: 500,
+            total: 500,
+            membershipDiscountAmount: 0,
+            manualDiscountAmount: 25,
+          },
+        ],
+      },
+    ],
+  });
+  mockCustomerFind([{ _id: new mongoose.Types.ObjectId(CUSTOMER_ID), phone: "6309719521" }]);
+  mockVendorCustomerProfileFind();
+  Transaction.find = () => ({
+    lean: async () => [
+      {
+        billingSessionId: billId,
+        redeemValue: 0,
+        finalPaidAmount: 988,
+      },
+    ],
+  });
+
+  try {
+    const res = await callController(vendorDashboardController.getBillsDrilldown);
+    const bill = res.payload.data[0];
+
+    assert.equal(res.statusCode, 200);
+    assert.equal(bill.membershipDiscountAmount, 60);
+    assert.equal(bill.additionalManualDiscountAmount, 52);
+    assert.equal(bill.totalSavings, 112);
+    assert.equal(bill.membership.planName, "Silver Plan");
+  } finally {
+    BillingSession.find = originals.find;
+    Customer.find = originals.customerFind;
+    Transaction.find = originals.transactionFind;
+    VendorCustomerProfile.find = originals.vendorCustomerProfileFind;
+  }
+});
+
+test(
   "vendor revenue drilldown preserves date filtering with COMPLETED status",
   withMockedBillingSessionFind(async (state) => {
     const res = await callController(vendorDashboardController.getBillsDrilldown, {
@@ -282,6 +571,9 @@ test(
     assert.equal(res.payload.data[0].netBillValue, 1500);
     assert.equal(res.payload.data[0].rewardsRedeemedValue, 0);
     assert.equal(res.payload.data[0].netCollected, 1500);
+    assert.equal(res.payload.data[0].membershipDiscountAmount, 0);
+    assert.equal(res.payload.data[0].additionalManualDiscountAmount, 0);
+    assert.equal(res.payload.data[0].membership, null);
     assert.equal(res.payload.data[0].financialSnapshotAvailable, false);
     assert.equal(res.payload.data[0].transactionMissing, false);
     assert.equal(res.payload.data[0].paymentMode, null);
@@ -554,7 +846,7 @@ test("billing cart update stores valid financial snapshot", async () => {
       cartItems: [
         {
           name: "Professional Hair Styling",
-          price: 800,
+          price: 1000,
           qty: 1,
         },
       ],
@@ -633,7 +925,7 @@ test("billing cart update stores no-discount financial snapshot", async () => {
   assert.equal(updatePayload.discountAmount, 0);
 });
 
-test("billing cart update accepts proportional discount rounding tolerance", async () => {
+test("billing cart update stores manual discount percent metadata", async () => {
   const originalFindByIdAndUpdate = BillingSession.findByIdAndUpdate;
   let updatePayload = null;
 
@@ -646,16 +938,18 @@ test("billing cart update accepts proportional discount rounding tolerance", asy
     body: {
       billingId: COMPLETED_BILL_ID,
       grossAmount: 100,
-      discountAmount: 33,
+      discountAmount: 5,
+      manualDiscountMode: "percent",
+      manualDiscountPercent: 5,
       cartItems: [
         {
           name: "Service A",
-          price: 34,
+          price: 50,
           qty: 1,
         },
         {
           name: "Service B",
-          price: 34,
+          price: 50,
           qty: 1,
         },
       ],
@@ -681,9 +975,11 @@ test("billing cart update accepts proportional discount rounding tolerance", asy
   }
 
   assert.equal(res.statusCode, 200);
-  assert.equal(updatePayload.totalAmount, 68);
+  assert.equal(updatePayload.totalAmount, 95);
   assert.equal(updatePayload.grossAmount, 100);
-  assert.equal(updatePayload.discountAmount, 33);
+  assert.equal(updatePayload.discountAmount, 5);
+  assert.equal(updatePayload.manualDiscountMode, "percent");
+  assert.equal(updatePayload.manualDiscountPercent, 5);
 });
 
 test("billing cart update rejects inconsistent financial snapshot", async () => {
@@ -726,6 +1022,10 @@ test("vendor revenue period summary and chart aggregations require COMPLETED sta
     "utf8"
   );
 
+  const itemNetRevenueSection = source.slice(
+    source.indexOf("function getCartItemNetRevenueExpression"),
+    source.indexOf("function getFinancialAccumulatorStage")
+  );
   const summarySection = source.slice(
     source.indexOf("exports.getDashboardSummary"),
     source.indexOf("exports.getFinancialYearMonthly")
@@ -739,6 +1039,10 @@ test("vendor revenue period summary and chart aggregations require COMPLETED sta
     source.indexOf("exports.getBillsDrilldown")
   );
   const stylistSection = source.slice(source.indexOf("exports.getStylistPerformance"));
+  const topServicesSection = source.slice(
+    source.indexOf("exports.getTopServices"),
+    source.indexOf("exports.getDailyTrend")
+  );
 
   assert.match(summarySection, /status:\s*"COMPLETED"/);
   assert.match(summarySection, /todayBillValue/);
@@ -747,6 +1051,126 @@ test("vendor revenue period summary and chart aggregations require COMPLETED sta
   assert.match(monthlySection, /billValue/);
   assert.match(dailyTrendSection, /status:\s*"COMPLETED"/);
   assert.match(stylistSection, /status:\s*"COMPLETED"/);
+  assert.match(itemNetRevenueSection, /cartItems\.finalLineAmount/);
+  assert.match(itemNetRevenueSection, /cartItems\.membershipDiscountAmount/);
+  assert.match(itemNetRevenueSection, /cartItems\.manualDiscountAmount/);
+  assert.match(topServicesSection, /getCartItemNetRevenueExpression\(\)/);
+  assert.match(stylistSection, /BillingSession\.find/);
+  assert.match(stylistSection, /CustomerMembership\.find/);
+  assert.match(stylistSection, /buildReportItemBreakdown/);
+});
+
+test("stylist performance uses persisted net item revenue with allocation fallback", async () => {
+  const originals = {
+    billingFind: BillingSession.find,
+    membershipFind: CustomerMembership.find,
+  };
+  const membershipId = new mongoose.Types.ObjectId("6acdc56ed47dc604dcd13384");
+  const relaxItemId = new mongoose.Types.ObjectId("69e7342c717a6defb0c40947");
+  const omegaItemId = new mongoose.Types.ObjectId("69e7342c717a6defb0c4094a");
+
+  BillingSession.find = (query) => {
+    assert.equal(query.status, "COMPLETED");
+    assert.ok(query.createdAt.$gte instanceof Date);
+    return {
+      select() {
+        return this;
+      },
+      lean: async () => [
+        {
+          _id: new mongoose.Types.ObjectId("6aceeba96be139f321d43cb1"),
+          vendorId: new mongoose.Types.ObjectId(VENDOR_ID),
+          status: "COMPLETED",
+          totalAmount: 988,
+          grossAmount: 1100,
+          discountAmount: 112,
+          membershipDiscountAmount: 60,
+          additionalManualDiscountAmount: 52,
+          manualDiscountMode: "percent",
+          manualDiscountPercent: 5,
+          membershipBillingSnapshot: {
+            customerMembershipId: membershipId,
+            planName: "Silver Plan",
+            discountPercentage: 10,
+            minimumBillAmount: 500,
+            allowAdditionalDiscountOnMembershipItems: true,
+            allowRewardsOnMembershipItems: true,
+          },
+          cartItems: [
+            {
+              itemId: relaxItemId,
+              name: "Relax",
+              price: 600,
+              qty: 1,
+              total: 600,
+              resourceId: new mongoose.Types.ObjectId("652000000000000000000011"),
+              resourceName: "Ravi",
+            },
+            {
+              itemId: omegaItemId,
+              name: "Hair Fall Treat (Omega)",
+              price: 500,
+              qty: 1,
+              total: 500,
+              resourceId: new mongoose.Types.ObjectId("652000000000000000000012"),
+              resourceName: "Veena",
+            },
+          ],
+        },
+      ],
+    };
+  };
+  CustomerMembership.find = () => ({
+    lean: async () => [
+      {
+        _id: membershipId,
+        serviceEligibilityOverride: {
+          eligibleMenuItemIds: [relaxItemId],
+        },
+        benefitRulesOverride: {
+          allowAdditionalDiscountOnMembershipItems: true,
+          allowRewardsOnMembershipItems: true,
+        },
+        planSnapshot: {
+          eligibleMenuItemIds: [relaxItemId],
+          discountPercentage: 10,
+          minimumBillAmount: 500,
+        },
+      },
+    ],
+  });
+
+  const req = {
+    query: {
+      vendorId: VENDOR_ID,
+      range: "today",
+    },
+  };
+  const res = {
+    statusCode: 200,
+    payload: null,
+    status(code) {
+      this.statusCode = code;
+      return this;
+    },
+    json(payload) {
+      this.payload = payload;
+      return this;
+    },
+  };
+
+  try {
+    await vendorDashboardController.getStylistPerformance(req, res);
+  } finally {
+    BillingSession.find = originals.billingFind;
+    CustomerMembership.find = originals.membershipFind;
+  }
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.payload[0].stylist, "Ravi");
+  assert.equal(res.payload[0].revenue, 513);
+  assert.equal(res.payload[1].stylist, "Veena");
+  assert.equal(res.payload[1].revenue, 475);
 });
 
 test("vendor revenue payment breakdown buckets net collected by BillingSession paymentMode only", () => {
@@ -823,10 +1247,39 @@ function buildMockEarn(remainingPoints, overrides = {}) {
   };
 }
 
+function buildCustomerMembership(overrides = {}) {
+  const membershipId = new mongoose.Types.ObjectId();
+  const planId = new mongoose.Types.ObjectId();
+  return {
+    _id: membershipId,
+    vendorId: new mongoose.Types.ObjectId(VENDOR_ID),
+    customerId: new mongoose.Types.ObjectId(CUSTOMER_ID),
+    membershipPlanId: planId,
+    membershipType: "DISCOUNT",
+    status: "ACTIVE",
+    activatedAt: new Date("2026-10-01T00:00:00.000Z"),
+    expiresAt: new Date("2026-11-01T00:00:00.000Z"),
+    planSnapshot: {
+      planId,
+      name: "Silver Plan",
+      duration: "MONTHLY",
+      sellingPrice: 999,
+      discountPercentage: 10,
+      minimumBillAmount: 500,
+      eligibleMenuItemIds: [new mongoose.Types.ObjectId("652000000000000000000001")],
+      allowAdditionalDiscountOnMembershipItems: true,
+      allowRewardsOnMembershipItems: true,
+      benefitSemanticsVersion: "MEMBERSHIP_ITEM_FLAGS_V1",
+    },
+    ...overrides,
+  };
+}
+
 async function withMockedCompletionFlow(billing, fn, options = {}) {
   const originals = {
     findById: BillingSession.findById,
     findOneAndUpdate: BillingSession.findOneAndUpdate,
+    customerMembershipFind: CustomerMembership.find,
     transactionCreate: Transaction.create,
     loyaltyFind: LoyaltyLedger.find,
     loyaltyCreate: LoyaltyLedger.create,
@@ -856,6 +1309,15 @@ async function withMockedCompletionFlow(billing, fn, options = {}) {
   };
 
   BillingSession.findById = async () => billing;
+  CustomerMembership.find = () => ({
+    sort() {
+      return this;
+    },
+    session() {
+      return this;
+    },
+    lean: async () => options.memberships || [],
+  });
   BillingSession.findOneAndUpdate = async (_query, update) => {
     const appliedUpdate = update.$set || update;
     state.closeUpdate = appliedUpdate;
@@ -911,6 +1373,7 @@ async function withMockedCompletionFlow(billing, fn, options = {}) {
   } finally {
     BillingSession.findById = originals.findById;
     BillingSession.findOneAndUpdate = originals.findOneAndUpdate;
+    CustomerMembership.find = originals.customerMembershipFind;
     Transaction.create = originals.transactionCreate;
     LoyaltyLedger.find = originals.loyaltyFind;
     LoyaltyLedger.create = originals.loyaltyCreate;
@@ -1211,6 +1674,124 @@ test("billing completion with zero-point redemption does not create REDEEM ledge
   });
 });
 
+test("billing completion applies active membership discounts and reward rules authoritatively", async () => {
+  const eligibleId = "652000000000000000000001";
+  const ineligibleId = "652000000000000000000002";
+  const billing = buildCompletionBilling({
+    customerId: new mongoose.Types.ObjectId(CUSTOMER_ID),
+    billingMode: "LOYALTY",
+    grossAmount: 1100,
+    discountAmount: 55,
+    manualDiscountMode: "percent",
+    manualDiscountPercent: 5,
+    totalAmount: 1045,
+    cartItems: [
+      {
+        itemId: new mongoose.Types.ObjectId(eligibleId),
+        name: "Hair Spa Relax",
+        price: 600,
+        qty: 1,
+        total: 600,
+      },
+      {
+        itemId: new mongoose.Types.ObjectId(ineligibleId),
+        name: "Hair Fall Treatment",
+        price: 500,
+        qty: 1,
+        total: 500,
+      },
+    ],
+  });
+  const membership = buildCustomerMembership({
+    planSnapshot: {
+      ...buildCustomerMembership().planSnapshot,
+      eligibleMenuItemIds: [new mongoose.Types.ObjectId(eligibleId)],
+      allowAdditionalDiscountOnMembershipItems: true,
+      allowRewardsOnMembershipItems: true,
+    },
+  });
+
+  await withMockedCompletionFlow(
+    billing,
+    async (state) => {
+      const res = buildCompletionResponse();
+      await billingController.completeBillingSession(
+        { body: { billingId: COMPLETED_BILL_ID, paymentMode: "ONLINE" } },
+        res
+      );
+
+      assert.equal(res.statusCode, 200);
+      assert.equal(state.closeUpdate.totalAmount, 988);
+      assert.equal(state.closeUpdate.grossAmount, 1100);
+      assert.equal(state.closeUpdate.membershipDiscountAmount, 60);
+      assert.equal(state.closeUpdate.additionalManualDiscountAmount, 52);
+      assert.equal(state.closeUpdate.discountAmount, 112);
+      assert.equal(state.closeUpdate.pointsEarned, 49);
+      assert.equal(state.closeUpdate.cartItems[0].membershipDiscountAmount, 60);
+      assert.equal(state.closeUpdate.cartItems[0].manualDiscountAmount, 27);
+      assert.equal(state.closeUpdate.cartItems[1].manualDiscountAmount, 25);
+      assert.equal(state.transactionPayload.totalAmount, 988);
+      assert.equal(state.transactionPayload.finalPaidAmount, 988);
+      assert.equal(state.transactionPayload.discountAmount, 112);
+      assert.equal(state.transactionPayload.membershipDiscountAmount, 60);
+      assert.equal(state.transactionPayload.additionalManualDiscountAmount, 52);
+      assert.equal(state.transactionPayload.membershipBillingSnapshot.planName, "Silver Plan");
+      assert.equal(
+        String(state.transactionPayload.membershipBillingSnapshot.customerMembershipId),
+        String(membership._id)
+      );
+      assert.equal(state.ledgerCreates.length, 1);
+      assert.equal(state.ledgerCreates[0].type, "EARN");
+      assert.equal(state.ledgerCreates[0].points, 49);
+    },
+    {
+      memberships: [membership],
+      loyaltyRule: { earn: { percentPer100: 5 }, expiry: { expiryDays: 30 } },
+    }
+  );
+});
+
+test("billing completion ignores future scheduled and expired memberships", async () => {
+  const billing = buildCompletionBilling({
+    customerId: new mongoose.Types.ObjectId(CUSTOMER_ID),
+    billingMode: "LOYALTY",
+    grossAmount: 600,
+    discountAmount: 0,
+    totalAmount: 600,
+    cartItems: [
+      {
+        itemId: new mongoose.Types.ObjectId("652000000000000000000001"),
+        name: "Hair Cut",
+        price: 600,
+        qty: 1,
+        total: 600,
+      },
+    ],
+  });
+
+  await withMockedCompletionFlow(
+    billing,
+    async (state) => {
+      const res = buildCompletionResponse();
+      await billingController.completeBillingSession(
+        { body: { billingId: COMPLETED_BILL_ID, paymentMode: "ONLINE" } },
+        res
+      );
+
+      assert.equal(res.statusCode, 200);
+      assert.equal(state.transactionPayload.totalAmount, 600);
+      assert.equal(state.transactionPayload.membershipDiscountAmount, 0);
+      assert.equal(state.transactionPayload.membershipBillingSnapshot, undefined);
+      assert.equal(state.ledgerCreates.length, 1);
+      assert.equal(state.ledgerCreates[0].points, 30);
+    },
+    {
+      memberships: [],
+      loyaltyRule: { earn: { percentPer100: 5 }, expiry: { expiryDays: 30 } },
+    }
+  );
+});
+
 test("sendWhatsAppBill false completes bill and reports intentional WhatsApp skip", async () => {
   const billing = buildCompletionBilling({
     customerId: new mongoose.Types.ObjectId(CUSTOMER_ID),
@@ -1454,6 +2035,16 @@ test("vendor historical bill detail returns persisted bill data without side eff
     totalAmount: 900,
     grossAmount: 1000,
     discountAmount: 100,
+    membershipDiscountAmount: 60,
+    additionalManualDiscountAmount: 40,
+    manualDiscountMode: "percent",
+    manualDiscountPercent: 5,
+    membershipBillingSnapshot: {
+      planName: "Silver Plan",
+      discountPercentage: 10,
+      membershipPlanId: new mongoose.Types.ObjectId(),
+      customerMembershipId: new mongoose.Types.ObjectId(),
+    },
     pointsEarned: 45,
     pointsRedeemed: 50,
     paymentMode: "CASH",
@@ -1464,6 +2055,11 @@ test("vendor historical bill detail returns persisted bill data without side eff
         qty: 1,
         price: 900,
         total: 900,
+        finalLineAmount: 800,
+        membershipDiscountAmount: 60,
+        manualDiscountAmount: 40,
+        membershipEligible: true,
+        membershipDiscountApplied: true,
         resourceName: "Sameep",
       },
     ],
@@ -1479,6 +2075,9 @@ test("vendor historical bill detail returns persisted bill data without side eff
   Transaction.findOne = () => ({
     lean: async () => ({
       billingSessionId: bill._id,
+      membershipDiscountAmount: 60,
+      additionalManualDiscountAmount: 40,
+      membershipBillingSnapshot: bill.membershipBillingSnapshot,
       redeemValue: 50,
       finalPaidAmount: 850,
       paymentMode: "CASH",
@@ -1525,8 +2124,16 @@ test("vendor historical bill detail returns persisted bill data without side eff
     assert.equal(res.payload.data.items[0].name, "Hair Spa");
     assert.equal(res.payload.data.totals.billValue, 1000);
     assert.equal(res.payload.data.totals.discountAmount, 100);
+    assert.equal(res.payload.data.totals.membershipDiscountAmount, 60);
+    assert.equal(res.payload.data.totals.additionalManualDiscountAmount, 40);
+    assert.equal(res.payload.data.totals.manualDiscountPercent, 5);
+    assert.equal(res.payload.data.totals.totalSavings, 100);
     assert.equal(res.payload.data.totals.rewardsRedeemed, 50);
     assert.equal(res.payload.data.totals.netCollected, 850);
+    assert.equal(res.payload.data.membership.planName, "Silver Plan");
+    assert.equal(res.payload.data.items[0].membershipDiscountAmount, 60);
+    assert.equal(res.payload.data.items[0].manualDiscountAmount, 40);
+    assert.equal(res.payload.data.items[0].finalLineAmount, 800);
     assert.equal(state.billingCreates, 0);
     assert.equal(state.transactionCreates, 0);
     assert.equal(state.ledgerCreates, 0);

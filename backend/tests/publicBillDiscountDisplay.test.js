@@ -145,6 +145,156 @@ test("public bill totals expose persisted discount fields", async () => {
   });
 });
 
+test("public bill exposes persisted membership and line discount breakdown", async () => {
+  const bill = buildBill({
+    totalAmount: 988,
+    grossAmount: 1100,
+    discountAmount: 112,
+    membershipDiscountAmount: 60,
+    additionalManualDiscountAmount: 52,
+    manualDiscountMode: "percent",
+    manualDiscountPercent: 5,
+    pointsEarned: 49,
+    cartItems: [
+      {
+        itemId: new mongoose.Types.ObjectId(),
+        name: "Relax",
+        qty: 1,
+        price: 600,
+        total: 600,
+        finalLineAmount: 513,
+        membershipEligible: true,
+        membershipDiscountApplied: true,
+        membershipDiscountAmount: 60,
+        manualDiscountEligible: true,
+        manualDiscountAmount: 27,
+        resourceName: "Stylist A",
+        nodePath: ["Services", "Hair"],
+      },
+      {
+        itemId: new mongoose.Types.ObjectId(),
+        name: "Hair Fall Treat (Omega)",
+        qty: 1,
+        price: 500,
+        total: 500,
+        finalLineAmount: 475,
+        membershipEligible: false,
+        membershipDiscountApplied: false,
+        membershipDiscountAmount: 0,
+        manualDiscountEligible: true,
+        manualDiscountAmount: 25,
+        resourceName: "Stylist B",
+      },
+    ],
+    membershipBillingSnapshot: {
+      planName: "Silver Plan",
+      discountPercentage: 10,
+      membershipPlanId: new mongoose.Types.ObjectId(),
+      customerMembershipId: new mongoose.Types.ObjectId(),
+    },
+  });
+  const transaction = buildTransaction({
+    totalAmount: 988,
+    grossAmount: 1100,
+    discountAmount: 112,
+    membershipDiscountAmount: 60,
+    additionalManualDiscountAmount: 52,
+    redeemValue: 0,
+    redeemedPoints: 0,
+    finalPaidAmount: 988,
+    membershipBillingSnapshot: bill.membershipBillingSnapshot,
+  });
+
+  await withMockedPublicBillModels({ bill, transaction }, async () => {
+    const res = mockRes();
+    await billingController.getPublicBillDetails(
+      mockReq({ params: { id: BILL_ID }, query: { token: publicBillToken() } }),
+      res
+    );
+
+    assert.equal(res.statusCode, 200);
+    assert.equal(res.payload.data.totals.grossAmount, 1100);
+    assert.equal(res.payload.data.totals.membershipDiscountAmount, 60);
+    assert.equal(res.payload.data.totals.additionalManualDiscountAmount, 52);
+    assert.equal(res.payload.data.totals.manualDiscountPercent, 5);
+    assert.equal(res.payload.data.totals.totalSavings, 112);
+    assert.equal(res.payload.data.totals.netBillValue, 988);
+    assert.equal(res.payload.data.totals.finalPaid, 988);
+    assert.equal(res.payload.data.totals.pointsEarned, 49);
+    assert.equal(res.payload.data.membership.planName, "Silver Plan");
+    assert.equal(res.payload.data.membership.discountPercentage, 10);
+    assert.equal(res.payload.data.items[0].membershipDiscountAmount, 60);
+    assert.equal(res.payload.data.items[0].manualDiscountAmount, 27);
+    assert.equal(res.payload.data.items[0].finalLineAmount, 513);
+    assert.equal(res.payload.data.items[1].manualDiscountAmount, 25);
+    assert.equal(res.payload.data.items[1].finalLineAmount, 475);
+  });
+});
+
+test("public bill derives membership breakdown from persisted item allocations when top-level fields are absent", async () => {
+  const membershipBillingSnapshot = {
+    planName: "Silver Plan",
+    discountPercentage: 10,
+    membershipPlanId: new mongoose.Types.ObjectId(),
+    customerMembershipId: new mongoose.Types.ObjectId(),
+  };
+  const bill = buildBill({
+    totalAmount: 988,
+    grossAmount: 1100,
+    discountAmount: 112,
+    pointsEarned: 49,
+    manualDiscountMode: "percent",
+    manualDiscountPercent: 5,
+    membershipBillingSnapshot,
+    cartItems: [
+      {
+        name: "Relax",
+        qty: 1,
+        price: 600,
+        total: 600,
+        finalLineAmount: 513,
+        membershipDiscountAmount: 60,
+        manualDiscountAmount: 27,
+      },
+      {
+        name: "Hair Fall Treat (Omega)",
+        qty: 1,
+        price: 500,
+        total: 500,
+        finalLineAmount: 475,
+        membershipDiscountAmount: 0,
+        manualDiscountAmount: 25,
+      },
+    ],
+  });
+  const transaction = buildTransaction({
+    totalAmount: 988,
+    grossAmount: 1100,
+    discountAmount: 112,
+    membershipBillingSnapshot,
+    finalPaidAmount: 988,
+  });
+  delete transaction.membershipDiscountAmount;
+  delete transaction.additionalManualDiscountAmount;
+  delete bill.membershipDiscountAmount;
+  delete bill.additionalManualDiscountAmount;
+
+  await withMockedPublicBillModels({ bill, transaction }, async () => {
+    const res = mockRes();
+    await billingController.getPublicBillDetails(
+      mockReq({ params: { id: BILL_ID }, query: { token: publicBillToken() } }),
+      res
+    );
+
+    assert.equal(res.statusCode, 200);
+    assert.equal(res.payload.data.totals.discountAmount, 112);
+    assert.equal(res.payload.data.totals.membershipDiscountAmount, 60);
+    assert.equal(res.payload.data.totals.additionalManualDiscountAmount, 52);
+    assert.equal(res.payload.data.totals.finalPaid, 988);
+    assert.equal(res.payload.data.membership.planName, "Silver Plan");
+  });
+});
+
 test("public bill without discount keeps zero discount and existing amounts", async () => {
   const bill = buildBill({
     totalAmount: 700,

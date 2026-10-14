@@ -357,6 +357,28 @@ button {
   font-weight: 800;
 }
 
+.customerPortalNameEditor {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.customerPortalNameEditor input {
+  min-width: 160px;
+  max-width: 100%;
+  border: 1px solid rgba(16, 26, 52, 0.12);
+  border-radius: 999px;
+  padding: 12px 14px;
+  font-weight: 800;
+}
+
+.customerPortalNameEditor small {
+  flex-basis: 100%;
+  color: #b91c1c;
+  font-weight: 800;
+}
+
 .customerPortalHeaderActions button,
 .portalDetailClose {
   cursor: pointer;
@@ -946,6 +968,15 @@ button {
   color: var(--ink);
 }
 
+.portalBillBreakdownRow span {
+  color: #6f4900;
+  font-weight: 900;
+}
+
+.portalBillBreakdownRow strong {
+  color: #9f1d16;
+}
+
 .portalAmountPaid {
   margin-top: 4px;
   padding-top: 12px;
@@ -1032,6 +1063,172 @@ button {
 
 .portalItemRow + .portalItemRow {
   border-top: 1px solid rgba(16, 26, 52, 0.07);
+}
+
+.portalMembershipStack {
+  gap: 18px;
+}
+
+.portalMembershipVendor,
+.portalMembershipCard {
+  border-radius: 24px;
+  border: 1px solid rgba(16, 26, 52, 0.08);
+  background: rgba(255, 255, 255, 0.9);
+  box-shadow: 0 18px 45px rgba(16, 26, 52, 0.07);
+}
+
+.portalMembershipVendor {
+  padding: clamp(14px, 3vw, 20px);
+}
+
+.portalMembershipVendorHeader,
+.portalMembershipCardTop {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.portalMembershipVendorHeader {
+  justify-content: flex-start;
+  margin-bottom: 14px;
+}
+
+.portalMembershipVendorHeader img,
+.portalMembershipVendorHeader > span {
+  width: 50px;
+  height: 50px;
+  border-radius: 16px;
+  flex: 0 0 auto;
+  object-fit: cover;
+}
+
+.portalMembershipVendorHeader > span {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: #101a34;
+  color: #f3c14b;
+  font-weight: 950;
+}
+
+.portalMembershipVendorHeader p {
+  color: #875400;
+  font-size: 0.72rem;
+  font-weight: 950;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.portalMembershipVendorHeader h3,
+.portalMembershipCard h4 {
+  margin-top: 3px;
+  color: var(--ink);
+}
+
+.portalMembershipCards {
+  display: grid;
+  gap: 12px;
+}
+
+.portalMembershipCard {
+  padding: clamp(14px, 3vw, 18px);
+  box-shadow: none;
+}
+
+.portalMembershipCardTop {
+  align-items: flex-start;
+}
+
+.portalMembershipCardTop p {
+  margin-top: 5px;
+  color: var(--muted);
+  font-weight: 800;
+}
+
+.portalMembershipStatus {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  padding: 7px 10px;
+  font-size: 0.72rem;
+  font-weight: 950;
+  letter-spacing: 0.07em;
+  white-space: nowrap;
+}
+
+.portalMembershipStatus.active {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.portalMembershipStatus.scheduled {
+  background: #fff8dc;
+  color: #875400;
+}
+
+.portalMembershipStatus.expired {
+  background: #f3f4f6;
+  color: #4b5563;
+}
+
+.portalMembershipFacts,
+.portalMembershipBenefits {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.portalMembershipFacts > div,
+.portalMembershipBenefits > div {
+  border-radius: 16px;
+  background: rgba(16, 26, 52, 0.04);
+  padding: 10px 12px;
+}
+
+.portalMembershipFacts span,
+.portalMembershipBenefits span {
+  display: block;
+  color: rgba(16, 26, 52, 0.62);
+  font-size: 0.72rem;
+  font-weight: 900;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.portalMembershipFacts strong,
+.portalMembershipBenefits strong {
+  display: block;
+  margin-top: 4px;
+  color: var(--ink);
+  line-height: 1.4;
+}
+
+.portalMembershipServices {
+  grid-column: 1 / -1;
+}
+
+.portalMembershipServices ul {
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 7px;
+}
+
+.portalMembershipServices li {
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.72);
+  padding: 8px 10px;
+}
+
+.portalMembershipServices small {
+  display: block;
+  margin-top: 3px;
+  color: var(--muted);
+  font-weight: 700;
+  line-height: 1.35;
 }
 
 .portalItemRow div {
@@ -3982,6 +4179,18 @@ button {
     padding: 14px;
   }
 
+  .portalTabs {
+    width: 100%;
+    display: flex;
+    overflow-x: auto;
+  }
+
+  .portalTabs button {
+    min-width: 0;
+    flex: 1 0 auto;
+    padding: 0 12px;
+  }
+
   .portalRewardsOverviewTop {
     grid-template-columns: 1fr;
     gap: 12px;
@@ -4043,6 +4252,16 @@ button {
   .portalBillPaid {
     min-width: 112px;
     padding: 10px 12px;
+  }
+
+  .portalMembershipVendorHeader,
+  .portalMembershipCardTop {
+    align-items: flex-start;
+  }
+
+  .portalMembershipFacts,
+  .portalMembershipBenefits {
+    grid-template-columns: 1fr;
   }
 
   .customerPortalBrand {

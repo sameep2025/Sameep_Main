@@ -1,5 +1,6 @@
 const BillingSession = require("../models/BillingSession");
 const Customer = require("../models/Customer");
+const VendorCustomerProfile = require("../models/VendorCustomerProfile");
 const mongoose = require("mongoose");
 
 const CUSTOMER_ANALYTICS_LIMIT_DEFAULT = 10;
@@ -121,7 +122,24 @@ function getCustomerGroupStages() {
   ];
 }
 
-function formatCustomerRow(row, now = new Date()) {
+async function getVendorCustomerNameMap(vendorId, customerIds = []) {
+  const ids = Array.from(new Set(customerIds.map((id) => String(id || "")).filter(Boolean)));
+  if (!ids.length) return new Map();
+  if (mongoose.connection.readyState === 0) return new Map();
+
+  const profiles = await VendorCustomerProfile.find({
+    vendorId: new mongoose.Types.ObjectId(vendorId),
+    customerId: { $in: ids },
+  })
+    .select("customerId displayName")
+    .lean();
+
+  return new Map(
+    profiles.map((profile) => [String(profile.customerId), String(profile.displayName || "").trim()])
+  );
+}
+
+function formatCustomerRow(row, now = new Date(), nameMap = new Map()) {
   const lastVisit = row?.lastVisit ? new Date(row.lastVisit) : null;
   const daysSinceLastVisit = lastVisit
     ? Math.max(0, Math.floor((now.getTime() - lastVisit.getTime()) / 86400000))
@@ -130,7 +148,7 @@ function formatCustomerRow(row, now = new Date()) {
   return {
     customerId: row?._id ? String(row._id) : "",
     phone: row?.customer?.fullNumber || row?.customer?.phone || "",
-    name: row?.customer?.name || row?.customer?.fullName || row?.customer?.displayName || "",
+    name: nameMap.get(String(row?._id || "")) || "",
     totalSpend: Number(row?.totalSpend || 0),
     visitCount: Number(row?.visitCount || 0),
     firstVisit: row?.firstVisit || null,
@@ -242,6 +260,9 @@ exports.getCustomerAnalyticsCustomers = async (req, res) => {
       }
       pipeline.push({ $match: { totalSpend: { $gte: threshold } } });
       pipeline.push({ $sort: { totalSpend: -1, lastVisit: -1, _id: 1 } });
+    } else if (segment === "repeat") {
+      pipeline.push({ $match: { visitCount: { $gte: 2 } } });
+      pipeline.push({ $sort: { visitCount: -1, totalSpend: -1, lastVisit: -1, _id: 1 } });
     } else if (segment === "top_spenders") {
       pipeline.push({ $sort: { totalSpend: -1, lastVisit: -1, _id: 1 } });
     } else {
@@ -252,11 +273,15 @@ exports.getCustomerAnalyticsCustomers = async (req, res) => {
 
     const rows = await BillingSession.aggregate(pipeline);
     const pageRows = rows.slice(0, limit);
+    const nameMap = await getVendorCustomerNameMap(
+      vendorId,
+      pageRows.map((row) => row?._id)
+    );
 
     return res.json({
       success: true,
       data: {
-        items: pageRows.map((row) => formatCustomerRow(row, now)),
+        items: pageRows.map((row) => formatCustomerRow(row, now, nameMap)),
         pagination: {
           limit,
           offset,

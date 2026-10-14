@@ -144,6 +144,39 @@ test("inactive and threshold customer filters validate supported options", withM
   assert.equal(invalidSegmentRes.statusCode, 400);
 }));
 
+test("repeat customer drilldown uses same completed customer-linked definition", withMockedAggregate(async () => {
+  let pipelineSeen = null;
+  BillingSession.aggregate = async (pipeline) => {
+    pipelineSeen = pipeline;
+    return [
+      {
+        _id: new mongoose.Types.ObjectId(CUSTOMER_ID),
+        customer: { fullNumber: "919999999999" },
+        totalSpend: 988,
+        visitCount: 2,
+        firstVisit: new Date("2026-10-01T00:00:00.000Z"),
+        lastVisit: new Date("2026-10-13T00:00:00.000Z"),
+      },
+    ];
+  };
+
+  const res = mockRes();
+  await controller.getCustomerAnalyticsCustomers(
+    mockReq({ query: { segment: "repeat", limit: "10" } }),
+    res
+  );
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.payload.data.items.length, 1);
+  assert.equal(res.payload.data.items[0].visitCount, 2);
+  assert.equal(res.payload.data.items[0].totalSpend, 988);
+  assert.ok(pipelineSeen.some((stage) => stage.$match?.customerId?.$ne === null));
+  assert.ok(pipelineSeen.some((stage) => stage.$match?.visitCount?.$gte === 2));
+  assert.deepEqual(pipelineSeen.at(-3), {
+    $sort: { visitCount: -1, totalSpend: -1, lastVisit: -1, _id: 1 },
+  });
+}));
+
 test("item analytics include walk-in compatible completed bill snapshots and stable pagination", withMockedAggregate(async () => {
   let pipelineSeen = null;
   BillingSession.aggregate = async (pipeline) => {

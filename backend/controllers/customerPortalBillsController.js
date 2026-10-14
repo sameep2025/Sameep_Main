@@ -25,6 +25,41 @@ function buildBillFinancials(bill = {}, transaction = null) {
   const hasDiscountAmount = hasStoredNumber(bill.discountAmount);
   const billValue = hasGrossAmount ? toSafeNumber(bill.grossAmount) : netBillValue;
   const discountAmount = hasDiscountAmount ? toSafeNumber(bill.discountAmount) : 0;
+  const items = Array.isArray(bill.cartItems)
+    ? bill.cartItems
+    : Array.isArray(bill.items)
+      ? bill.items
+      : [];
+  const itemMembershipDiscountAmount = items.reduce(
+    (sum, item) => sum + toSafeNumber(item?.membershipDiscountAmount),
+    0
+  );
+  const itemManualDiscountAmount = items.reduce(
+    (sum, item) => sum + toSafeNumber(item?.manualDiscountAmount),
+    0
+  );
+  const membershipSnapshot =
+    transaction?.membershipBillingSnapshot ||
+    bill.membershipBillingSnapshot ||
+    null;
+  const membershipDiscountAmount = hasStoredNumber(transaction?.membershipDiscountAmount)
+    ? toSafeNumber(transaction.membershipDiscountAmount)
+    : hasStoredNumber(bill.membershipDiscountAmount)
+      ? toSafeNumber(bill.membershipDiscountAmount)
+      : itemMembershipDiscountAmount > 0
+        ? toSafeNumber(itemMembershipDiscountAmount)
+        : 0;
+  const additionalManualDiscountAmount = hasStoredNumber(
+    transaction?.additionalManualDiscountAmount
+  )
+    ? toSafeNumber(transaction.additionalManualDiscountAmount)
+    : hasStoredNumber(bill.additionalManualDiscountAmount)
+      ? toSafeNumber(bill.additionalManualDiscountAmount)
+      : itemManualDiscountAmount > 0
+        ? toSafeNumber(itemManualDiscountAmount)
+        : membershipDiscountAmount > 0 && hasDiscountAmount
+          ? Math.max(discountAmount - membershipDiscountAmount, 0)
+          : 0;
   const rewardsRedeemed = transaction
     ? toSafeNumber(transaction.redeemValue)
     : toSafeNumber(bill.pointsRedeemed);
@@ -39,6 +74,25 @@ function buildBillFinancials(bill = {}, transaction = null) {
     netCollected: Math.max(rawCollected, 0),
     grossAmount: hasGrossAmount ? toSafeNumber(bill.grossAmount) : null,
     netBillValue,
+    membershipDiscountAmount,
+    additionalManualDiscountAmount,
+    totalSavings: hasDiscountAmount
+      ? discountAmount
+      : membershipDiscountAmount + additionalManualDiscountAmount,
+    manualDiscountMode: bill.manualDiscountMode || "",
+    manualDiscountPercent: toSafeNumber(bill.manualDiscountPercent),
+    membership: membershipSnapshot
+      ? {
+          planName: membershipSnapshot.planName || "",
+          discountPercentage: toSafeNumber(membershipSnapshot.discountPercentage),
+          customerMembershipId: membershipSnapshot.customerMembershipId
+            ? String(membershipSnapshot.customerMembershipId)
+            : "",
+          membershipPlanId: membershipSnapshot.membershipPlanId
+            ? String(membershipSnapshot.membershipPlanId)
+            : "",
+        }
+      : null,
     financialSnapshotAvailable: hasGrossAmount && hasDiscountAmount,
     transactionMissing: !transaction,
   };
@@ -80,6 +134,12 @@ function buildSafeItem(item = {}) {
     quantity,
     unitPrice,
     itemTotal,
+    finalLineAmount: hasStoredNumber(item.finalLineAmount)
+      ? toSafeNumber(item.finalLineAmount)
+      : itemTotal,
+    membershipDiscountAmount: toSafeNumber(item.membershipDiscountAmount),
+    manualDiscountAmount: toSafeNumber(item.manualDiscountAmount),
+    membershipDiscountApplied: Boolean(item.membershipDiscountApplied),
     ...(staffName ? { staffName } : {}),
   };
 }
@@ -155,8 +215,9 @@ async function getVendorMapForBills(bills = []) {
 function buildBillListItem(bill, { transaction = null, vendor = null } = {}) {
   const financials = buildBillFinancials(bill, transaction);
   const paymentMode = normalizePaymentMode(bill.paymentMode || transaction?.paymentMode);
+  const customerNameSnapshot = String(bill.customerNameSnapshot || "").trim();
 
-  return {
+  const item = {
     billId: String(bill._id),
     date: bill.createdAt || null,
     status: bill.status || "COMPLETED",
@@ -170,14 +231,28 @@ function buildBillListItem(bill, { transaction = null, vendor = null } = {}) {
     discountAmount: financials.discountAmount,
     rewardsRedeemed: financials.rewardsRedeemed,
     netCollected: financials.netCollected,
+    membershipDiscountAmount: financials.membershipDiscountAmount,
+    additionalManualDiscountAmount: financials.additionalManualDiscountAmount,
+    totalSavings: financials.totalSavings,
+    manualDiscountMode: financials.manualDiscountMode,
+    manualDiscountPercent: financials.manualDiscountPercent,
+    membership: financials.membership,
     paymentMode,
     financialSnapshotAvailable: financials.financialSnapshotAvailable,
   };
+  if (customerNameSnapshot) item.customerNameSnapshot = customerNameSnapshot;
+  return item;
 }
 
 function buildBillDetail(bill, { transaction = null, vendor = null } = {}) {
   const financials = buildBillFinancials(bill, transaction);
   const paymentMode = normalizePaymentMode(bill.paymentMode || transaction?.paymentMode);
+
+  const customerNameSnapshot = String(bill.customerNameSnapshot || "").trim();
+  const customer = {
+    type: bill.customerId ? "CUSTOMER" : "WALK_IN",
+  };
+  if (customerNameSnapshot) customer.name = customerNameSnapshot;
 
   return {
     billId: String(bill._id),
@@ -189,9 +264,7 @@ function buildBillDetail(bill, { transaction = null, vendor = null } = {}) {
       cancelledAt: bill.cancelledAt || null,
     },
     vendor: buildSafeVendorDetail(vendor),
-    customer: {
-      type: bill.customerId ? "CUSTOMER" : "WALK_IN",
-    },
+    customer,
     items: (bill.cartItems || bill.items || []).map(buildSafeItem),
     billValue: financials.billValue,
     discountAmount: financials.discountAmount,
@@ -199,6 +272,12 @@ function buildBillDetail(bill, { transaction = null, vendor = null } = {}) {
     netCollected: financials.netCollected,
     grossAmount: financials.grossAmount,
     netBillValue: financials.netBillValue,
+    membershipDiscountAmount: financials.membershipDiscountAmount,
+    additionalManualDiscountAmount: financials.additionalManualDiscountAmount,
+    totalSavings: financials.totalSavings,
+    manualDiscountMode: financials.manualDiscountMode,
+    manualDiscountPercent: financials.manualDiscountPercent,
+    membership: financials.membership,
     paymentMode,
     pointsEarned: toSafeNumber(bill.pointsEarned),
     pointsRedeemed: toSafeNumber(bill.pointsRedeemed),

@@ -9,6 +9,11 @@ const LoyaltyLedger = require("../models/LoyaltyLedger");
 const Customer = require("../models/Customer");
 const CustomerRewardReveal = require("../models/CustomerRewardReveal");
 const Vendor = require("../models/DummyVendor");
+const CustomerMembership = require("../models/CustomerMembership");
+const VendorCustomerProfile = require("../models/VendorCustomerProfile");
+const {
+  calculateMembershipBillingPreview,
+} = require("../utils/membershipBillingCalculator");
 const {
   calculateCustomerBalance,
   calculateRewardBalance,
@@ -28,6 +33,7 @@ const {
 const {
   isSendWhatsAppBillEnabled,
 } = require("../services/vendorBillingPreferences");
+const { normalizeCustomerName } = require("../utils/customerName");
 const {
   sendCompletedBillWhatsApp,
 } = require("../services/billingWhatsappSender");
@@ -84,10 +90,227 @@ function normalizeBillingPaymentMode(value) {
   return ["ONLINE", "CASH"].includes(value) ? value : null;
 }
 
+function normalizeManualDiscountMode(value) {
+  if (value === undefined || value === null || value === "") return null;
+  const mode = String(value).trim().toLowerCase();
+  return ["amount", "percent"].includes(mode) ? mode : null;
+}
+
+function normalizeManualDiscountPercent(value) {
+  const percent = Number(value || 0);
+  if (!Number.isFinite(percent)) return 0;
+  return Math.min(Math.max(percent, 0), 100);
+}
+
 function normalizeRedeemPoints(value) {
   const points = Number(value || 0);
   if (!Number.isFinite(points) || points <= 0) return 0;
   return points;
+}
+
+function roundMoney(value) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return 0;
+  return Math.round(number * 100) / 100;
+}
+
+function resolveMembershipBenefitFlags(membership = {}) {
+  const override = membership?.benefitRulesOverride;
+  if (override?.benefitSemanticsVersion === "MEMBERSHIP_ITEM_FLAGS_V1") {
+    return {
+      allowAdditionalDiscountOnMembershipItems:
+        override.allowAdditionalDiscountOnMembershipItems === true,
+      allowRewardsOnMembershipItems: override.allowRewardsOnMembershipItems === true,
+      benefitSemanticsVersion: "MEMBERSHIP_ITEM_FLAGS_V1",
+      benefitRulesSource: "BENEFIT_RULES_OVERRIDE",
+    };
+  }
+
+  const snapshot = membership?.planSnapshot || {};
+  if (snapshot.benefitSemanticsVersion === "MEMBERSHIP_ITEM_FLAGS_V1") {
+    return {
+      allowAdditionalDiscountOnMembershipItems:
+        snapshot.allowAdditionalDiscountOnMembershipItems === true,
+      allowRewardsOnMembershipItems: snapshot.allowRewardsOnMembershipItems === true,
+      benefitSemanticsVersion: "MEMBERSHIP_ITEM_FLAGS_V1",
+      benefitRulesSource: "PURCHASED_SNAPSHOT",
+    };
+  }
+
+  return {
+    allowAdditionalDiscountOnMembershipItems: false,
+    allowRewardsOnMembershipItems: false,
+    benefitSemanticsVersion: "LEGACY_NON_MEMBERSHIP_FLAGS",
+    benefitRulesSource: "PURCHASED_SNAPSHOT",
+  };
+}
+
+function resolveMembershipEligibleMenuItemIds(membership = {}) {
+  const overrideIds = membership?.serviceEligibilityOverride?.eligibleMenuItemIds;
+  if (Array.isArray(overrideIds)) {
+    return {
+      eligibleMenuItemIds: overrideIds.map((id) => String(id)),
+      eligibilitySource: "SERVICE_ELIGIBILITY_OVERRIDE",
+    };
+  }
+
+  return {
+    eligibleMenuItemIds: (membership?.planSnapshot?.eligibleMenuItemIds || []).map((id) => String(id)),
+    eligibilitySource: "PURCHASED_SNAPSHOT",
+  };
+}
+
+function buildMembershipBillingSnapshot(membership, benefits, eligibilitySource) {
+  if (!membership) return undefined;
+  const snapshot = membership.planSnapshot || {};
+  return {
+    customerMembershipId: membership._id,
+    membershipPlanId: snapshot.planId || membership.membershipPlanId || null,
+    planName: snapshot.name || "",
+    discountPercentage: roundMoney(snapshot.discountPercentage),
+    minimumBillAmount: roundMoney(snapshot.minimumBillAmount),
+    allowAdditionalDiscountOnMembershipItems: benefits.allowAdditionalDiscountOnMembershipItems,
+    allowRewardsOnMembershipItems: benefits.allowRewardsOnMembershipItems,
+    benefitSemanticsVersion: benefits.benefitSemanticsVersion,
+    benefitRulesSource: benefits.benefitRulesSource,
+    eligibilitySource,
+  };
+}
+
+async function findEffectiveCustomerMembership({ vendorId, customerId, now, session }) {
+  if (!vendorId || !customerId) return null;
+  const query = CustomerMembership.find({
+    vendorId,
+    customerId,
+    membershipType: "DISCOUNT",
+    status: { $in: ["ACTIVE", "SCHEDULED"] },
+    activatedAt: { $lte: now },
+    expiresAt: { $gt: now },
+  }).sort({ activatedAt: -1, createdAt: -1, _id: -1 });
+  if (session) query.session(session);
+  const memberships = await query.lean();
+  return memberships[0] || null;
+}
+
+function normalizeBillingItemsForMembership(cartItems = []) {
+  return (Array.isArray(cartItems) ? cartItems : []).map((item) => ({
+    itemId: item?.itemId,
+    id: item?.itemId,
+    name: item?.name,
+    qty: item?.qty,
+    price: item?.price,
+    total: item?.total,
+  }));
+}
+
+function mergeMembershipItemBreakdown(cartItems = [], calculationItems = []) {
+  return (Array.isArray(cartItems) ? cartItems : []).map((item, index) => {
+    const breakdown = calculationItems[index] || {};
+    return {
+      ...item,
+      membershipEligible: breakdown.membershipEligible === true,
+      membershipDiscountApplied: breakdown.membershipDiscountApplied === true,
+      membershipDiscountAmount: roundMoney(breakdown.membershipDiscountAmount),
+      manualDiscountEligible: breakdown.manualDiscountEligible === true,
+      manualDiscountAmount: roundMoney(breakdown.manualDiscountAmount),
+      finalLineAmount: roundMoney(breakdown.finalLineAmount),
+      rewardsEligible: breakdown.rewardsEligible === true,
+    };
+  });
+}
+
+async function calculateAuthoritativeBillingFinancials({ billing, isWalkIn, loyaltyRule, now, session }) {
+  const grossAmount = Number.isFinite(Number(billing.grossAmount))
+    ? roundMoney(billing.grossAmount)
+    : roundMoney(
+        (billing.cartItems || []).reduce((sum, item) => {
+          const lineTotal = item?.total !== undefined
+            ? Number(item.total)
+            : (Number(item?.price || 0) * Number(item?.qty || 0));
+          return sum + (Number.isFinite(lineTotal) ? lineTotal : 0);
+        }, 0)
+      );
+  const currentTotalAmount = roundMoney(billing.totalAmount);
+  const existingManualDiscount = Number.isFinite(Number(billing.discountAmount))
+    ? roundMoney(billing.discountAmount)
+    : Math.max(roundMoney(grossAmount - currentTotalAmount), 0);
+  const manualDiscountMode = normalizeManualDiscountMode(billing.manualDiscountMode);
+  const manualDiscountPercent = normalizeManualDiscountPercent(billing.manualDiscountPercent);
+
+  if (isWalkIn) {
+    return {
+      totalAmount: currentTotalAmount,
+      grossAmount: Number.isFinite(Number(billing.grossAmount)) ? roundMoney(billing.grossAmount) : undefined,
+      discountAmount: Number.isFinite(Number(billing.discountAmount)) ? roundMoney(billing.discountAmount) : undefined,
+      membershipDiscountAmount: 0,
+      additionalManualDiscountAmount: 0,
+      pointsEarned: 0,
+      membership: null,
+      membershipBillingSnapshot: undefined,
+      cartItems: billing.cartItems || [],
+    };
+  }
+
+  const membership = await findEffectiveCustomerMembership({
+    vendorId: billing.vendorId,
+    customerId: billing.customerId,
+    now,
+    session,
+  });
+  if (!membership) {
+    return {
+      totalAmount: currentTotalAmount,
+      grossAmount: Number.isFinite(Number(billing.grossAmount)) ? roundMoney(billing.grossAmount) : undefined,
+      discountAmount: Number.isFinite(Number(billing.discountAmount)) ? roundMoney(billing.discountAmount) : undefined,
+      membershipDiscountAmount: 0,
+      additionalManualDiscountAmount: existingManualDiscount,
+      pointsEarned: null,
+      membership: null,
+      membershipBillingSnapshot: undefined,
+      cartItems: billing.cartItems || [],
+    };
+  }
+
+  const benefits = resolveMembershipBenefitFlags(membership);
+  const { eligibleMenuItemIds, eligibilitySource } = resolveMembershipEligibleMenuItemIds(membership);
+  const calculation = calculateMembershipBillingPreview({
+    items: normalizeBillingItemsForMembership(billing.cartItems || []),
+    membership: {
+      discountPercentage: membership.planSnapshot?.discountPercentage,
+      minimumBillAmount: membership.planSnapshot?.minimumBillAmount,
+      eligibleMenuItemIds,
+      allowAdditionalDiscountOnMembershipItems:
+        benefits.allowAdditionalDiscountOnMembershipItems,
+      allowRewardsOnMembershipItems: benefits.allowRewardsOnMembershipItems,
+    },
+    manualDiscount: {
+      mode: manualDiscountMode === "percent" ? "percent" : "amount",
+      amount: existingManualDiscount,
+      percent: manualDiscountMode === "percent" ? manualDiscountPercent : 0,
+    },
+    loyalty: {
+      percentPer100: loyaltyRule?.earn?.percentPer100 ?? 0,
+    },
+  });
+  const membershipDiscountAmount = roundMoney(calculation.membershipDiscountAmount);
+  const additionalManualDiscountAmount = roundMoney(calculation.additionalManualDiscountAmount);
+  const discountAmount = roundMoney(membershipDiscountAmount + additionalManualDiscountAmount);
+
+  return {
+    totalAmount: roundMoney(calculation.previewPayableAmount),
+    grossAmount: roundMoney(calculation.subtotal),
+    discountAmount,
+    membershipDiscountAmount,
+    additionalManualDiscountAmount,
+    pointsEarned: calculation.estimatedRewardPoints,
+    membership,
+    membershipBillingSnapshot: buildMembershipBillingSnapshot(
+      membership,
+      benefits,
+      eligibilitySource
+    ),
+    cartItems: mergeMembershipItemBreakdown(billing.cartItems || [], calculation.items || []),
+  };
 }
 
 function normalizeCancellationReason(value) {
@@ -488,6 +711,21 @@ async function createTransaction(payload, session) {
   return transaction;
 }
 
+async function getVendorCustomerNameSnapshot({ vendorId, customerId, session }) {
+  if (!vendorId || !customerId) return "";
+  if (!session && mongoose.connection.readyState === 0) return "";
+
+  try {
+    const query = VendorCustomerProfile.findOne({ vendorId, customerId }).select("displayName").lean();
+    if (session) query.session(session);
+    const profile = await query;
+    return normalizeCustomerName(profile?.displayName || "");
+  } catch (err) {
+    console.warn("Unable to snapshot vendor customer name:", err?.message || err);
+    return "";
+  }
+}
+
 async function createLoyaltyLedger(payload, session) {
   if (!session) {
     return LoyaltyLedger.create(payload);
@@ -793,6 +1031,7 @@ async function buildPublicBillResponse(bill) {
   }
 
   const items = Array.isArray(bill.cartItems) ? bill.cartItems : [];
+  const customerNameSnapshot = normalizeCustomerName(bill.customerNameSnapshot || "");
 
   return {
     billId: String(bill._id),
@@ -813,32 +1052,29 @@ async function buildPublicBillResponse(bill) {
     customer: customer
       ? {
           id: String(customer._id),
-          name: customer.name || "Customer",
+          name: customerNameSnapshot || customer.displayName || "Customer",
+          vendorNameSnapshot: customerNameSnapshot,
           phone: customer.phone || customer.fullNumber || "",
         }
       : null,
-    items: items.map((item) => ({
-      itemId: item.itemId ? String(item.itemId) : "",
-      name: item.name || "Item",
-      qty: Number(item.qty || 0),
-      price: Number(item.price || 0),
-      total: Number(item.total || 0),
-      resourceName: item.resourceName || "",
-      hierarchy: Array.isArray(item.nodePath)
-        ? item.nodePath.filter(Boolean).join(" / ")
-        : "",
-    })),
+    items: items.map(buildPublicBillItem),
     totals: {
       billAmount: Number(bill.totalAmount || 0),
       grossAmount: financials.grossAmount,
       discountAmount: financials.discountAmount,
       netBillValue: financials.netBillValue,
+      membershipDiscountAmount: financials.membershipDiscountAmount,
+      additionalManualDiscountAmount: financials.additionalManualDiscountAmount,
+      totalSavings: financials.totalSavings,
+      manualDiscountMode: financials.manualDiscountMode,
+      manualDiscountPercent: financials.manualDiscountPercent,
       rewardsRedeemed: financials.rewardsRedeemed,
       pointsEarned: Number(bill.pointsEarned || 0),
       pointsRedeemed: Number(bill.pointsRedeemed || 0),
       finalPaid: financials.netCollected,
       balance: Number(balance || 0),
     },
+    membership: financials.membership,
   };
 }
 
@@ -855,6 +1091,37 @@ function buildHistoricalBillFinancials(bill = {}, transaction = null) {
   const discountAmount = Number.isFinite(Number(bill.discountAmount))
     ? toSafeNumber(bill.discountAmount)
     : 0;
+  const items = Array.isArray(bill.cartItems) ? bill.cartItems : [];
+  const itemMembershipDiscountAmount = items.reduce(
+    (sum, item) => sum + toSafeNumber(item?.membershipDiscountAmount),
+    0
+  );
+  const itemManualDiscountAmount = items.reduce(
+    (sum, item) => sum + toSafeNumber(item?.manualDiscountAmount),
+    0
+  );
+  const membershipSnapshot =
+    transaction?.membershipBillingSnapshot ||
+    bill.membershipBillingSnapshot ||
+    null;
+  const membershipDiscountAmount = Number.isFinite(Number(transaction?.membershipDiscountAmount))
+    ? toSafeNumber(transaction.membershipDiscountAmount)
+    : Number.isFinite(Number(bill.membershipDiscountAmount))
+      ? toSafeNumber(bill.membershipDiscountAmount)
+      : itemMembershipDiscountAmount > 0
+        ? toSafeNumber(itemMembershipDiscountAmount)
+        : 0;
+  const additionalManualDiscountAmount = Number.isFinite(
+    Number(transaction?.additionalManualDiscountAmount)
+  )
+    ? toSafeNumber(transaction.additionalManualDiscountAmount)
+    : Number.isFinite(Number(bill.additionalManualDiscountAmount))
+      ? toSafeNumber(bill.additionalManualDiscountAmount)
+      : itemManualDiscountAmount > 0
+        ? toSafeNumber(itemManualDiscountAmount)
+      : membershipDiscountAmount > 0
+        ? Math.max(discountAmount - membershipDiscountAmount, 0)
+        : 0;
   const rewardsRedeemed = transaction
     ? toSafeNumber(transaction.redeemValue)
     : toSafeNumber(bill.pointsRedeemed);
@@ -866,9 +1133,48 @@ function buildHistoricalBillFinancials(bill = {}, transaction = null) {
     billValue,
     grossAmount: billValue,
     discountAmount,
+    membershipDiscountAmount,
+    additionalManualDiscountAmount,
+    totalSavings: discountAmount,
+    manualDiscountMode: bill.manualDiscountMode || "",
+    manualDiscountPercent: toSafeNumber(bill.manualDiscountPercent),
     rewardsRedeemed,
     netCollected: Math.max(netCollected, 0),
     netBillValue,
+    membership: membershipSnapshot
+      ? {
+          planName: membershipSnapshot.planName || "",
+          discountPercentage: toSafeNumber(membershipSnapshot.discountPercentage),
+          customerMembershipId: membershipSnapshot.customerMembershipId
+            ? String(membershipSnapshot.customerMembershipId)
+            : "",
+          membershipPlanId: membershipSnapshot.membershipPlanId
+            ? String(membershipSnapshot.membershipPlanId)
+            : "",
+        }
+      : null,
+  };
+}
+
+function buildPublicBillItem(item = {}) {
+  return {
+    itemId: item.itemId ? String(item.itemId) : "",
+    name: item.name || "Item",
+    qty: toSafeNumber(item.qty),
+    price: toSafeNumber(item.price),
+    total: toSafeNumber(item.total),
+    finalLineAmount: Number.isFinite(Number(item.finalLineAmount))
+      ? toSafeNumber(item.finalLineAmount)
+      : toSafeNumber(item.total),
+    membershipEligible: Boolean(item.membershipEligible),
+    membershipDiscountApplied: Boolean(item.membershipDiscountApplied),
+    membershipDiscountAmount: toSafeNumber(item.membershipDiscountAmount),
+    manualDiscountEligible: Boolean(item.manualDiscountEligible),
+    manualDiscountAmount: toSafeNumber(item.manualDiscountAmount),
+    rewardsEligible: item.rewardsEligible !== undefined ? Boolean(item.rewardsEligible) : true,
+    resourceName: item.resourceName || "",
+    hierarchy: Array.isArray(item.nodePath) ? item.nodePath.filter(Boolean).join(" / ") : "",
+    nodePath: Array.isArray(item.nodePath) ? item.nodePath : [],
   };
 }
 
@@ -887,6 +1193,12 @@ async function buildVendorHistoricalBillResponse(bill) {
     customer?.phone ||
     ""
   ).trim();
+  const customerNameSnapshot = normalizeCustomerName(bill.customerNameSnapshot || "");
+  const customerLabel = customerNameSnapshot
+    ? `${customerNameSnapshot}${customerPhone ? ` (+${customerPhone})` : ""}`
+    : customerPhone
+      ? `+${customerPhone}`
+      : "Walk-in";
 
   return {
     billId: String(bill._id),
@@ -913,22 +1225,16 @@ async function buildVendorHistoricalBillResponse(bill) {
     customer: {
       id: bill.customerId ? String(bill.customerId) : "",
       phone: customerPhone,
-      label: customerPhone ? `+${customerPhone}` : "Walk-in",
+      name: customerNameSnapshot,
+      label: customerLabel,
     },
-    items: (bill.cartItems || []).map((item) => ({
-      itemId: item.itemId ? String(item.itemId) : "",
-      name: item.name || "Item",
-      qty: toSafeNumber(item.qty),
-      price: toSafeNumber(item.price),
-      total: toSafeNumber(item.total),
-      resourceName: item.resourceName || "",
-      nodePath: Array.isArray(item.nodePath) ? item.nodePath : [],
-    })),
+    items: (bill.cartItems || []).map(buildPublicBillItem),
     totals: {
       ...financials,
       pointsEarned: toSafeNumber(bill.pointsEarned),
       pointsRedeemed: toSafeNumber(bill.pointsRedeemed),
     },
+    membership: financials.membership,
     paymentMode: ["ONLINE", "CASH"].includes(bill.paymentMode || transaction?.paymentMode)
       ? (bill.paymentMode || transaction?.paymentMode)
       : "",
@@ -971,15 +1277,7 @@ function buildVendorBillListItem({ bill, transaction = null, customerPhone = "" 
     paymentMode: ["ONLINE", "CASH"].includes(bill.paymentMode || transaction?.paymentMode)
       ? (bill.paymentMode || transaction?.paymentMode)
       : "",
-    items: (bill.cartItems || []).map((item) => ({
-      itemId: item.itemId ? String(item.itemId) : "",
-      name: item.name || "Item",
-      qty: toSafeNumber(item.qty),
-      price: toSafeNumber(item.price),
-      total: toSafeNumber(item.total),
-      resourceName: item.resourceName || "",
-      nodePath: Array.isArray(item.nodePath) ? item.nodePath : [],
-    })),
+    items: (bill.cartItems || []).map(buildPublicBillItem),
   };
 }
 
@@ -1046,20 +1344,27 @@ exports.createBillingSession = async (req, res) => {
 // ✅ Update Cart
 exports.updateBillingCart = async (req, res) => {
   try {
-    const { billingId, cartItems, grossAmount, discountAmount } = req.body;
+    const {
+      billingId,
+      cartItems,
+      grossAmount,
+      discountAmount,
+      manualDiscountMode,
+      manualDiscountPercent,
+    } = req.body;
 
-    let totalAmount = 0;
+    let cartSubtotal = 0;
 
     cartItems.forEach((item) => {
       item.total = item.price * item.qty;
-      totalAmount += item.total;
+      cartSubtotal += item.total;
     });
 
     const hasFinancialSnapshot =
       grossAmount !== undefined || discountAmount !== undefined;
     const update = {
       cartItems,
-      totalAmount,
+      totalAmount: cartSubtotal,
     };
 
     if (hasFinancialSnapshot) {
@@ -1078,7 +1383,7 @@ exports.updateBillingCart = async (req, res) => {
 
       if (
         expectedTotal < 0 ||
-        Math.abs(expectedTotal - totalAmount) > tolerance
+        Math.abs(sanitizedGrossAmount - cartSubtotal) > tolerance
       ) {
         return res.status(400).json({
           success: false,
@@ -1086,8 +1391,26 @@ exports.updateBillingCart = async (req, res) => {
         });
       }
 
+      update.totalAmount = Math.max(roundMoney(expectedTotal), 0);
       update.grossAmount = sanitizedGrossAmount;
       update.discountAmount = sanitizedDiscountAmount;
+      const normalizedManualDiscountMode = normalizeManualDiscountMode(manualDiscountMode);
+      const normalizedManualDiscountPercent = normalizeManualDiscountPercent(manualDiscountPercent);
+
+      if (manualDiscountMode !== undefined && manualDiscountMode !== null && manualDiscountMode !== "") {
+        if (!normalizedManualDiscountMode) {
+          return res.status(400).json({
+            success: false,
+            message: "Invalid manual discount mode",
+          });
+        }
+        update.manualDiscountMode = normalizedManualDiscountMode;
+        update.manualDiscountPercent =
+          normalizedManualDiscountMode === "percent" ? normalizedManualDiscountPercent : 0;
+      } else {
+        update.manualDiscountMode = sanitizedDiscountAmount > 0 ? "amount" : null;
+        update.manualDiscountPercent = 0;
+      }
     }
 
     const updated = await BillingSession.findByIdAndUpdate(
@@ -1897,10 +2220,9 @@ exports.completeBillingSession = async (req, res) => {
       const requestedRedeemPoints = normalizeRedeemPoints(billing.pointsRedeemed);
       const effectiveRedeemPoints = isWalkIn ? 0 : requestedRedeemPoints;
       let rewardCreditBucketsForRedemption = [];
+      const now = new Date();
 
       if (effectiveRedeemPoints > 0) {
-        const now = new Date();
-
         const rewardBalance = await calculateRewardBalance({
           vendorId: billing.vendorId,
           customerId: billing.customerId,
@@ -1923,7 +2245,22 @@ exports.completeBillingSession = async (req, res) => {
         });
       }
 
-      const finalPaidAmount = billing.totalAmount - effectiveRedeemPoints;
+      let rule = null;
+      if (!isWalkIn) {
+        rule = await findLoyaltyRule(billing.vendorId, session);
+      }
+
+      const authoritativeFinancials = await calculateAuthoritativeBillingFinancials({
+        billing,
+        isWalkIn,
+        loyaltyRule: rule,
+        now,
+        session,
+      });
+      const finalPaidAmount = Math.max(
+        roundMoney(authoritativeFinancials.totalAmount - effectiveRedeemPoints),
+        0
+      );
       let pointsEarned = Number(billing.pointsEarned || 0);
       let earnExpiryDate = null;
       const customerForSnapshot = isWalkIn
@@ -1934,20 +2271,24 @@ exports.completeBillingSession = async (req, res) => {
         customerForSnapshot?.phone ||
         ""
       ).trim();
+      const customerNameSnapshot = isWalkIn
+        ? ""
+        : await getVendorCustomerNameSnapshot({
+            vendorId: billing.vendorId,
+            customerId: billing.customerId,
+            session,
+          });
 
       // -------------------------
       // Earn Points
       // -------------------------
-      let rule = null;
-      if (!isWalkIn) {
-        rule = await findLoyaltyRule(billing.vendorId, session);
-      }
-
       if (!isWalkIn && rule) {
         const earnPercent = rule?.earn?.percentPer100 ?? 0;
         let calculatedEarnedPoints = 0;
 
-        if (
+        if (authoritativeFinancials.membership) {
+          calculatedEarnedPoints = Number(authoritativeFinancials.pointsEarned || 0);
+        } else if (
           typeof finalPaidAmount === "number" &&
           finalPaidAmount > 0 &&
           typeof earnPercent === "number" &&
@@ -1975,9 +2316,19 @@ exports.completeBillingSession = async (req, res) => {
         status: "COMPLETED",
         completedAt,
         paymentMode: normalizedPaymentMode,
+        totalAmount: authoritativeFinancials.totalAmount,
+        grossAmount: authoritativeFinancials.grossAmount,
+        discountAmount: authoritativeFinancials.discountAmount,
+        membershipDiscountAmount: authoritativeFinancials.membershipDiscountAmount,
+        additionalManualDiscountAmount: authoritativeFinancials.additionalManualDiscountAmount,
+        cartItems: authoritativeFinancials.cartItems,
         pointsEarned: isWalkIn ? 0 : pointsEarned,
         customerPhoneSnapshot: isWalkIn ? "" : customerPhoneSnapshot,
+        customerNameSnapshot: isWalkIn ? "" : customerNameSnapshot,
       };
+      if (authoritativeFinancials.membershipBillingSnapshot) {
+        billingUpdate.membershipBillingSnapshot = authoritativeFinancials.membershipBillingSnapshot;
+      }
 
       if (isWalkIn) {
         billingUpdate.pointsRedeemed = 0;
@@ -1999,8 +2350,18 @@ exports.completeBillingSession = async (req, res) => {
       billing.status = "COMPLETED";
       billing.completedAt = completedAt;
       billing.paymentMode = normalizedPaymentMode;
+      billing.totalAmount = billingUpdate.totalAmount;
+      billing.grossAmount = billingUpdate.grossAmount;
+      billing.discountAmount = billingUpdate.discountAmount;
+      billing.membershipDiscountAmount = billingUpdate.membershipDiscountAmount;
+      billing.additionalManualDiscountAmount = billingUpdate.additionalManualDiscountAmount;
+      billing.cartItems = billingUpdate.cartItems;
+      if (billingUpdate.membershipBillingSnapshot) {
+        billing.membershipBillingSnapshot = billingUpdate.membershipBillingSnapshot;
+      }
       billing.pointsEarned = billingUpdate.pointsEarned;
       billing.customerPhoneSnapshot = billingUpdate.customerPhoneSnapshot;
+      billing.customerNameSnapshot = billingUpdate.customerNameSnapshot;
       if (isWalkIn) {
         billing.pointsRedeemed = 0;
       }
@@ -2011,10 +2372,14 @@ exports.completeBillingSession = async (req, res) => {
       const transaction = await createTransaction({
         vendorId: billing.vendorId,
         customerId: billing.customerId || null,
+        customerNameSnapshot: billing.customerNameSnapshot || "",
         billingSessionId: billing._id,
         totalAmount: billing.totalAmount,
         grossAmount: billing.grossAmount,
         discountAmount: billing.discountAmount,
+        membershipDiscountAmount: billing.membershipDiscountAmount,
+        additionalManualDiscountAmount: billing.additionalManualDiscountAmount,
+        membershipBillingSnapshot: billing.membershipBillingSnapshot,
         redeemedPoints: effectiveRedeemPoints,
         redeemValue: effectiveRedeemPoints,
         finalPaidAmount,

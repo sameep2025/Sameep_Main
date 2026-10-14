@@ -25,6 +25,38 @@ const BillingItemSchema = new mongoose.Schema(
       type: String,
       default: "",
     },
+
+    membershipEligible: {
+      type: Boolean,
+      default: undefined,
+    },
+    membershipDiscountApplied: {
+      type: Boolean,
+      default: undefined,
+    },
+    membershipDiscountAmount: {
+      type: Number,
+      min: 0,
+      default: undefined,
+    },
+    manualDiscountEligible: {
+      type: Boolean,
+      default: undefined,
+    },
+    manualDiscountAmount: {
+      type: Number,
+      min: 0,
+      default: undefined,
+    },
+    finalLineAmount: {
+      type: Number,
+      min: 0,
+      default: undefined,
+    },
+    rewardsEligible: {
+      type: Boolean,
+      default: undefined,
+    },
   },
   { _id: false }
 );
@@ -52,6 +84,13 @@ const BillingSessionSchema = new mongoose.Schema(
       default: "",
     },
 
+    customerNameSnapshot: {
+      type: String,
+      trim: true,
+      maxlength: 100,
+      default: "",
+    },
+
     billingMode: {
       type: String,
       enum: ["LOYALTY", "WALK_IN"],
@@ -75,6 +114,82 @@ const BillingSessionSchema = new mongoose.Schema(
       type: Number,
       min: 0,
       default: undefined,
+    },
+
+    manualDiscountMode: {
+      type: String,
+      enum: ["amount", "percent", null],
+      default: undefined,
+    },
+
+    manualDiscountPercent: {
+      type: Number,
+      min: 0,
+      max: 100,
+      default: undefined,
+    },
+
+    membershipDiscountAmount: {
+      type: Number,
+      min: 0,
+      default: undefined,
+    },
+
+    additionalManualDiscountAmount: {
+      type: Number,
+      min: 0,
+      default: undefined,
+    },
+
+    membershipBillingSnapshot: {
+      customerMembershipId: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "CustomerMembership",
+        default: null,
+      },
+      membershipPlanId: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "MembershipPlan",
+        default: null,
+      },
+      planName: {
+        type: String,
+        trim: true,
+        default: "",
+      },
+      discountPercentage: {
+        type: Number,
+        min: 0,
+        default: undefined,
+      },
+      minimumBillAmount: {
+        type: Number,
+        min: 0,
+        default: undefined,
+      },
+      allowAdditionalDiscountOnMembershipItems: {
+        type: Boolean,
+        default: undefined,
+      },
+      allowRewardsOnMembershipItems: {
+        type: Boolean,
+        default: undefined,
+      },
+      benefitSemanticsVersion: {
+        type: String,
+        trim: true,
+        default: "",
+      },
+      benefitRulesSource: {
+        type: String,
+        trim: true,
+        default: "",
+      },
+      eligibilitySource: {
+        type: String,
+        trim: true,
+        default: "",
+      },
     },
 
     pointsEarned: {

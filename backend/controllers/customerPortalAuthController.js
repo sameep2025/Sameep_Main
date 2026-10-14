@@ -6,6 +6,7 @@ const {
   getCustomerPortalExpiryDate,
   signCustomerPortalToken,
 } = require("../utils/customerPortalAuth");
+const { validateOptionalCustomerName } = require("../utils/customerName");
 
 const MSG91_AUTH = process.env.MSG91_AUTHKEY;
 const MSG91_SENDER = process.env.MSG91_SENDER;
@@ -284,6 +285,7 @@ async function verifyOtp(req, res) {
       expiresAt: expiryTime,
       customer: {
         phone: formatDisplayPhone(customer.fullNumber),
+        displayName: customer.displayName || "",
       },
     });
   } catch (err) {
@@ -310,6 +312,7 @@ async function me(req, res) {
       data: {
         customer: {
           phone: formatDisplayPhone(customer.fullNumber || customer.phone),
+          displayName: customer.displayName || "",
         },
         session: {
           sessionType: CUSTOMER_PORTAL_SESSION_TYPE,
@@ -321,6 +324,47 @@ async function me(req, res) {
     return res.status(500).json({
       success: false,
       message: "Unable to load customer portal profile",
+    });
+  }
+}
+
+async function updateProfile(req, res) {
+  try {
+    const validation = validateOptionalCustomerName(req.body?.displayName, { allowEmpty: true });
+    if (!validation.ok) {
+      return res.status(400).json({
+        success: false,
+        message: validation.message,
+      });
+    }
+
+    const customer = await Customer.findOneAndUpdate(
+      { _id: req.auth.customerId },
+      { $set: { displayName: validation.value } },
+      { new: true }
+    );
+
+    if (!customer) {
+      return res.status(404).json({
+        success: false,
+        message: "Customer not found",
+      });
+    }
+
+    return res.json({
+      success: true,
+      data: {
+        customer: {
+          phone: formatDisplayPhone(customer.fullNumber || customer.phone),
+          displayName: customer.displayName || "",
+        },
+      },
+    });
+  } catch (err) {
+    console.error("customer portal update profile error:", err?.message || err);
+    return res.status(500).json({
+      success: false,
+      message: "Unable to update profile",
     });
   }
 }
@@ -369,5 +413,6 @@ module.exports = {
   me,
   normalizePortalPhone,
   requestOtp,
+  updateProfile,
   verifyOtp,
 };

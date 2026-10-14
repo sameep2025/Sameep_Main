@@ -275,6 +275,43 @@
   padding-top: 14px;
 }
 
+.today-revenue-discount-breakdown {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 14px;
+  padding: 12px 14px;
+  border: 1px solid rgba(230, 195, 122, 0.18);
+  border-radius: 14px;
+  background: rgba(230, 195, 122, 0.07);
+}
+
+.today-revenue-discount-title {
+  color: #e6c37a;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.today-revenue-discount-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  color: rgba(245, 242, 234, 0.78);
+  font-size: 13px;
+}
+
+.today-revenue-discount-row strong {
+  color: #f5d97a;
+  white-space: nowrap;
+}
+
+.today-revenue-discount-total {
+  margin-top: 2px;
+  padding-top: 8px;
+  border-top: 1px solid rgba(230, 195, 122, 0.14);
+  color: #f5f2ea;
+  font-weight: 800;
+}
+
 .today-revenue-items-title {
   margin-bottom: 12px;
   font-size: 14px;
@@ -359,5 +396,9 @@
     flex-direction: row;
     justify-content: space-between;
     align-items: center;
+  }
+
+  .today-revenue-discount-row {
+    align-items: flex-start;
   }
 }

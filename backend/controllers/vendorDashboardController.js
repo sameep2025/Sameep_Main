@@ -1,7 +1,10 @@
 const BillingSession = require("../models/BillingSession");
 const Customer = require("../models/Customer");
+const CustomerMembership = require("../models/CustomerMembership");
 const LoyaltyLedger = require("../models/LoyaltyLedger");
 const Transaction = require("../models/Transaction");
+const VendorCustomerProfile = require("../models/VendorCustomerProfile");
+const { calculateMembershipBillingPreview } = require("../utils/membershipBillingCalculator");
 const mongoose = require("mongoose");
 
 const NO_STYLIST_SELECTED_ID = "NO_STYLIST_SELECTED";
@@ -35,11 +38,115 @@ async function getTransactionsForBills(bills = []) {
   return getTransactionMap(transactions);
 }
 
+async function getCustomerMapForBills(bills = []) {
+  const customerIds = Array.from(
+    new Set(
+      bills
+        .map((bill) => (bill?.customerId ? String(bill.customerId) : ""))
+        .filter(Boolean)
+    )
+  );
+  if (!customerIds.length) return new Map();
+
+  const customers = await Customer.find({ _id: { $in: customerIds } })
+    .select("phone fullNumber")
+    .lean();
+
+  return new Map(customers.map((customer) => [String(customer._id), customer]));
+}
+
+async function getVendorCustomerProfileNameMap(vendorId, bills = []) {
+  const customerIds = Array.from(
+    new Set(
+      bills
+        .filter((bill) => !String(bill?.customerNameSnapshot || "").trim())
+        .map((bill) => (bill?.customerId ? String(bill.customerId) : ""))
+        .filter(Boolean)
+    )
+  );
+  if (!customerIds.length) return new Map();
+
+  const profiles = await VendorCustomerProfile.find({
+    vendorId: new mongoose.Types.ObjectId(vendorId),
+    customerId: { $in: customerIds },
+  })
+    .select("customerId displayName")
+    .lean();
+
+  return new Map(
+    profiles
+      .map((profile) => [
+        String(profile.customerId),
+        String(profile.displayName || "").trim(),
+      ])
+      .filter(([, name]) => Boolean(name))
+  );
+}
+
+function buildCustomerDisplayForBill(bill, customerMap = new Map(), profileNameMap = new Map()) {
+  let phone = "Walk-in";
+  let customerName = String(bill?.customerNameSnapshot || "").trim();
+
+  if (bill?.customerId) {
+    const customer = customerMap.get(String(bill.customerId));
+    if (customer?.phone) {
+      phone = customer.phone;
+    } else if (customer?.fullNumber) {
+      phone = customer.fullNumber;
+    }
+
+    if (!customerName) {
+      customerName = profileNameMap.get(String(bill.customerId)) || "";
+    }
+  }
+
+  return {
+    phone,
+    customerName,
+    customerLabel: customerName ? `${customerName} (${phone})` : phone,
+  };
+}
+
 function buildBillFinancials(bill = {}, transaction = null) {
   const netBillValue = toSafeNumber(bill.totalAmount);
   const hasGrossAmount = hasStoredNumber(bill.grossAmount);
   const hasDiscountAmount = hasStoredNumber(bill.discountAmount);
   const billValue = hasGrossAmount ? toSafeNumber(bill.grossAmount) : netBillValue;
+  const items = Array.isArray(bill.cartItems)
+    ? bill.cartItems
+    : Array.isArray(bill.items)
+      ? bill.items
+      : [];
+  const itemMembershipDiscountAmount = items.reduce(
+    (sum, item) => sum + toSafeNumber(item?.membershipDiscountAmount),
+    0
+  );
+  const itemManualDiscountAmount = items.reduce(
+    (sum, item) => sum + toSafeNumber(item?.manualDiscountAmount),
+    0
+  );
+  const membershipSnapshot =
+    transaction?.membershipBillingSnapshot ||
+    bill.membershipBillingSnapshot ||
+    null;
+  const membershipDiscountAmount = hasStoredNumber(transaction?.membershipDiscountAmount)
+    ? toSafeNumber(transaction.membershipDiscountAmount)
+    : hasStoredNumber(bill.membershipDiscountAmount)
+      ? toSafeNumber(bill.membershipDiscountAmount)
+      : itemMembershipDiscountAmount > 0
+        ? toSafeNumber(itemMembershipDiscountAmount)
+        : 0;
+  const additionalManualDiscountAmount = hasStoredNumber(
+    transaction?.additionalManualDiscountAmount
+  )
+    ? toSafeNumber(transaction.additionalManualDiscountAmount)
+    : hasStoredNumber(bill.additionalManualDiscountAmount)
+      ? toSafeNumber(bill.additionalManualDiscountAmount)
+      : itemManualDiscountAmount > 0
+        ? toSafeNumber(itemManualDiscountAmount)
+        : membershipDiscountAmount > 0 && hasDiscountAmount
+          ? Math.max(toSafeNumber(bill.discountAmount) - membershipDiscountAmount, 0)
+          : 0;
   const fallbackRewardsRedeemed = toSafeNumber(bill.pointsRedeemed);
   const rewardsRedeemedValue = transaction
     ? toSafeNumber(transaction.redeemValue)
@@ -57,6 +164,25 @@ function buildBillFinancials(bill = {}, transaction = null) {
     netCollected: Math.max(rawCollected, 0),
     financialSnapshotAvailable: hasGrossAmount && hasDiscountAmount,
     transactionMissing: !transaction,
+    membershipDiscountAmount,
+    additionalManualDiscountAmount,
+    totalSavings: hasDiscountAmount
+      ? toSafeNumber(bill.discountAmount)
+      : membershipDiscountAmount + additionalManualDiscountAmount,
+    manualDiscountMode: bill.manualDiscountMode || "",
+    manualDiscountPercent: toSafeNumber(bill.manualDiscountPercent),
+    membership: membershipSnapshot
+      ? {
+          planName: membershipSnapshot.planName || "",
+          discountPercentage: toSafeNumber(membershipSnapshot.discountPercentage),
+          customerMembershipId: membershipSnapshot.customerMembershipId
+            ? String(membershipSnapshot.customerMembershipId)
+            : "",
+          membershipPlanId: membershipSnapshot.membershipPlanId
+            ? String(membershipSnapshot.membershipPlanId)
+            : "",
+        }
+      : null,
   };
 }
 
@@ -68,6 +194,145 @@ function getPaymentModeLabel(paymentMode) {
 
 function getNormalizedPaymentMode(paymentMode) {
   return ["ONLINE", "CASH"].includes(paymentMode) ? paymentMode : null;
+}
+
+function getCartItemNetRevenueExpression() {
+  return {
+    $ifNull: [
+      "$cartItems.finalLineAmount",
+      {
+        $max: [
+          {
+            $subtract: [
+              { $ifNull: ["$cartItems.total", 0] },
+              {
+                $add: [
+                  { $ifNull: ["$cartItems.membershipDiscountAmount", 0] },
+                  { $ifNull: ["$cartItems.manualDiscountAmount", 0] },
+                ],
+              },
+            ],
+          },
+          0,
+        ],
+      },
+    ],
+  };
+}
+
+function hasOwnArray(object, field) {
+  return Object.prototype.hasOwnProperty.call(object || {}, field) &&
+    Array.isArray(object[field]);
+}
+
+function getMembershipEligibilityIds(membership = {}) {
+  if (hasOwnArray(membership.serviceEligibilityOverride, "eligibleMenuItemIds")) {
+    return membership.serviceEligibilityOverride.eligibleMenuItemIds;
+  }
+
+  return Array.isArray(membership.planSnapshot?.eligibleMenuItemIds)
+    ? membership.planSnapshot.eligibleMenuItemIds
+    : [];
+}
+
+function getMembershipBenefitFlag(membership = {}, field, fallback) {
+  if (Object.prototype.hasOwnProperty.call(membership.benefitRulesOverride || {}, field)) {
+    return membership.benefitRulesOverride[field] === true;
+  }
+
+  if (Object.prototype.hasOwnProperty.call(membership.planSnapshot || {}, field)) {
+    return membership.planSnapshot[field] === true;
+  }
+
+  return fallback === true;
+}
+
+function buildReportItemBreakdown(bill = {}, membershipMap = new Map()) {
+  const cartItems = Array.isArray(bill.cartItems) ? bill.cartItems : [];
+  const hasPersistedLineAmounts = cartItems.some((item) =>
+    hasStoredNumber(item?.finalLineAmount) ||
+    hasStoredNumber(item?.membershipDiscountAmount) ||
+    hasStoredNumber(item?.manualDiscountAmount)
+  );
+
+  if (hasPersistedLineAmounts) {
+    return cartItems.map((item) => ({
+      item,
+      finalLineAmount: hasStoredNumber(item?.finalLineAmount)
+        ? toSafeNumber(item.finalLineAmount)
+        : Math.max(
+            toSafeNumber(item?.total) -
+              toSafeNumber(item?.membershipDiscountAmount) -
+              toSafeNumber(item?.manualDiscountAmount),
+            0
+          ),
+    }));
+  }
+
+  const membershipId = bill.membershipBillingSnapshot?.customerMembershipId
+    ? String(bill.membershipBillingSnapshot.customerMembershipId)
+    : "";
+  const membership = membershipId ? membershipMap.get(membershipId) : null;
+
+  if (membership && toSafeNumber(bill.membershipDiscountAmount) > 0) {
+    const calculation = calculateMembershipBillingPreview({
+      items: cartItems.map((item) => ({
+        itemId: item?.itemId,
+        id: item?.itemId,
+        name: item?.name,
+        qty: item?.qty,
+        price: item?.price,
+        total: item?.total,
+      })),
+      membership: {
+        discountPercentage: bill.membershipBillingSnapshot?.discountPercentage,
+        minimumBillAmount: bill.membershipBillingSnapshot?.minimumBillAmount,
+        eligibleMenuItemIds: getMembershipEligibilityIds(membership),
+        allowAdditionalDiscountOnMembershipItems: getMembershipBenefitFlag(
+          membership,
+          "allowAdditionalDiscountOnMembershipItems",
+          bill.membershipBillingSnapshot?.allowAdditionalDiscountOnMembershipItems
+        ),
+        allowRewardsOnMembershipItems: getMembershipBenefitFlag(
+          membership,
+          "allowRewardsOnMembershipItems",
+          bill.membershipBillingSnapshot?.allowRewardsOnMembershipItems
+        ),
+      },
+      manualDiscount: {
+        mode: bill.manualDiscountMode === "percent" ? "percent" : "amount",
+        amount: toSafeNumber(bill.additionalManualDiscountAmount),
+        percent: bill.manualDiscountMode === "percent"
+          ? toSafeNumber(bill.manualDiscountPercent)
+          : 0,
+      },
+      loyalty: {
+        percentPer100: 0,
+      },
+    });
+
+    return cartItems.map((item, index) => ({
+      item,
+      finalLineAmount: hasStoredNumber(calculation.items?.[index]?.finalLineAmount)
+        ? toSafeNumber(calculation.items[index].finalLineAmount)
+        : toSafeNumber(item?.total),
+    }));
+  }
+
+  return cartItems.map((item) => ({
+    item,
+    finalLineAmount: toSafeNumber(item?.total),
+  }));
+}
+
+function getStylistRowKey(item = {}) {
+  const resourceId = item.resourceId ? String(item.resourceId) : "";
+  return resourceId || NO_STYLIST_SELECTED_ID;
+}
+
+function getStylistRowLabel(item = {}) {
+  const resourceName = String(item.resourceName || "").trim();
+  return resourceName || NO_STYLIST_SELECTED_LABEL;
 }
 
 function getFinancialAccumulatorStage() {
@@ -411,7 +676,9 @@ exports.getTopServices = async (req, res) => {
         $group: {
           _id: "$cartItems.name",
           totalQty: { $sum: "$cartItems.qty" },
-          revenue: { $sum: "$cartItems.total" },
+          revenue: {
+            $sum: getCartItemNetRevenueExpression(),
+          },
         },
       },
       { $sort: { revenue: -1 } },
@@ -483,45 +750,46 @@ exports.getBillsDrilldown = async (req, res) => {
       .sort({ createdAt: -1 })
       .limit(Number(limit))
       .lean();
-    const transactionMap = await getTransactionsForBills(bills);
+    const [transactionMap, customerMap, profileNameMap] = await Promise.all([
+      getTransactionsForBills(bills),
+      getCustomerMapForBills(bills),
+      getVendorCustomerProfileNameMap(vendorId, bills),
+    ]);
 
-    const formatted = await Promise.all(
-      bills.map(async (bill) => {
-        let phone = "Walk-in";
+    const formatted = bills.map((bill) => {
+      const customerDisplay = buildCustomerDisplayForBill(bill, customerMap, profileNameMap);
+      const transaction = transactionMap.get(String(bill._id)) || null;
+      const financials = buildBillFinancials(bill, transaction);
+      const normalizedPaymentMode = getNormalizedPaymentMode(bill.paymentMode);
 
-        if (bill.customerId) {
-          const customer = await Customer.findById(bill.customerId).lean();
-          if (customer?.phone) {
-            phone = customer.phone;
-          } else if (customer?.fullNumber) {
-            phone = customer.fullNumber;
-          }
-        }
-        const transaction = transactionMap.get(String(bill._id)) || null;
-        const financials = buildBillFinancials(bill, transaction);
-        const normalizedPaymentMode = getNormalizedPaymentMode(bill.paymentMode);
-
-        return {
-          billId: bill._id,
-          total: bill.totalAmount,
-          grossAmount: financials.grossAmount,
-          discountAmount: financials.discountAmount,
-          billValue: financials.billValue,
-          netBillValue: financials.netBillValue,
-          rewardsRedeemedValue: financials.rewardsRedeemedValue,
-          netCollected: financials.netCollected,
-          financialSnapshotAvailable: financials.financialSnapshotAvailable,
-          transactionMissing: financials.transactionMissing,
-          earned: bill.pointsEarned || 0,
-          redeemed: bill.pointsRedeemed || 0,
-          paymentMode: normalizedPaymentMode,
-          paymentModeLabel: getPaymentModeLabel(normalizedPaymentMode),
-          items: bill.items || bill.cartItems || [],
-          createdAt: bill.createdAt,
-          phone,
-        };
-      })
-    );
+      return {
+        billId: bill._id,
+        total: bill.totalAmount,
+        grossAmount: financials.grossAmount,
+        discountAmount: financials.discountAmount,
+        billValue: financials.billValue,
+        netBillValue: financials.netBillValue,
+        rewardsRedeemedValue: financials.rewardsRedeemedValue,
+        netCollected: financials.netCollected,
+        membershipDiscountAmount: financials.membershipDiscountAmount,
+        additionalManualDiscountAmount: financials.additionalManualDiscountAmount,
+        totalSavings: financials.totalSavings,
+        manualDiscountMode: financials.manualDiscountMode,
+        manualDiscountPercent: financials.manualDiscountPercent,
+        membership: financials.membership,
+        financialSnapshotAvailable: financials.financialSnapshotAvailable,
+        transactionMissing: financials.transactionMissing,
+        earned: bill.pointsEarned || 0,
+        redeemed: bill.pointsRedeemed || 0,
+        paymentMode: normalizedPaymentMode,
+        paymentModeLabel: getPaymentModeLabel(normalizedPaymentMode),
+        items: bill.items || bill.cartItems || [],
+        createdAt: bill.createdAt,
+        phone: customerDisplay.phone,
+        customerName: customerDisplay.customerName,
+        customerLabel: customerDisplay.customerLabel,
+      };
+    });
 
     res.json({ success: true, data: formatted });
   } catch (err) {
@@ -613,57 +881,59 @@ exports.getStylistPerformance = async (req, res) => {
       createdAtMatch.$lt = endDate;
     }
 
-    const result = await BillingSession.aggregate([
-      {
-        $match: {
-          vendorId: new mongoose.Types.ObjectId(vendorId),
-          status: "COMPLETED",
-          createdAt: createdAtMatch,
-        },
-      },
-      { $unwind: "$cartItems" },
-      {
-        $group: {
-          _id: {
-            $let: {
-              vars: {
-                resourceId: { $ifNull: ["$cartItems.resourceId", ""] },
-              },
-              in: {
-                $cond: [
-                  { $eq: ["$$resourceId", ""] },
-                  NO_STYLIST_SELECTED_ID,
-                  "$$resourceId",
-                ],
-              },
-            },
-          },
-          stylist: {
-            $first: {
-              $cond: [
-                {
-                  $gt: [
-                    {
-                      $strLenCP: {
-                        $trim: {
-                          input: { $ifNull: ["$cartItems.resourceName", ""] },
-                        },
-                      },
-                    },
-                    0,
-                  ],
-                },
-                "$cartItems.resourceName",
-                NO_STYLIST_SELECTED_LABEL,
-              ],
-            },
-          },
-          revenue: { $sum: "$cartItems.total" },
-          services: { $sum: "$cartItems.qty" },
-        },
-      },
-      { $sort: { revenue: -1 } },
-    ]);
+    const bills = await BillingSession.find({
+      vendorId: new mongoose.Types.ObjectId(vendorId),
+      status: "COMPLETED",
+      createdAt: createdAtMatch,
+    })
+      .select({
+        cartItems: 1,
+        membershipDiscountAmount: 1,
+        additionalManualDiscountAmount: 1,
+        manualDiscountMode: 1,
+        manualDiscountPercent: 1,
+        membershipBillingSnapshot: 1,
+      })
+      .lean();
+
+    const membershipIds = [
+      ...new Set(
+        bills
+          .map((bill) => bill.membershipBillingSnapshot?.customerMembershipId)
+          .filter(Boolean)
+          .map(String)
+      ),
+    ];
+    const memberships = membershipIds.length
+      ? await CustomerMembership.find({ _id: { $in: membershipIds } }).lean()
+      : [];
+    const membershipMap = new Map(memberships.map((membership) => [
+      String(membership._id),
+      membership,
+    ]));
+    const grouped = new Map();
+
+    for (const bill of bills) {
+      for (const { item, finalLineAmount } of buildReportItemBreakdown(bill, membershipMap)) {
+        const key = getStylistRowKey(item);
+        const existing = grouped.get(key) || {
+          _id: key,
+          stylist: getStylistRowLabel(item),
+          revenue: 0,
+          services: 0,
+        };
+        existing.revenue += toSafeNumber(finalLineAmount);
+        existing.services += toSafeNumber(item?.qty);
+        grouped.set(key, existing);
+      }
+    }
+
+    const result = Array.from(grouped.values())
+      .map((row) => ({
+        ...row,
+        revenue: Math.round(row.revenue * 100) / 100,
+      }))
+      .sort((left, right) => right.revenue - left.revenue);
 
     res.json(result);
   } catch (err) {

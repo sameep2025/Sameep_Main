@@ -134,6 +134,49 @@ function getRewardActivityLabel(entry) {
   return "Earned";
 }
 
+function getMembershipStatusLabel(status) {
+  const normalized = String(status || "").trim().toUpperCase();
+  if (normalized === "SCHEDULED") return "SCHEDULED";
+  if (normalized === "EXPIRED") return "EXPIRED";
+  return "ACTIVE";
+}
+
+function getMembershipStatusClass(status) {
+  const normalized = getMembershipStatusLabel(status).toLowerCase();
+  return `portalMembershipStatus ${normalized}`;
+}
+
+function getMembershipManualDiscountText(membership) {
+  return membership?.benefits?.additionalManualDiscountOnMembershipItems
+    ? "Additional discounts can be added on covered services."
+    : "Additional discounts are not combined on covered services.";
+}
+
+function getMembershipRewardsText(membership) {
+  return membership?.benefits?.loyaltyRewardsOnMembershipItems
+    ? "Reward points are earned on covered services."
+    : "Reward points are not earned on covered services.";
+}
+
+function getManualDiscountLabel(bill) {
+  const percent = toSafeNumber(bill?.manualDiscountPercent);
+  if (String(bill?.manualDiscountMode || "").toLowerCase() === "percent" && percent > 0) {
+    return `Additional Manual Discount (${percent}%)`;
+  }
+  return "Additional Manual Discount";
+}
+
+function getMembershipDiscountLabel(bill) {
+  const membership = bill?.membership || {};
+  const planName = String(membership.planName || "").trim();
+  const percent = toSafeNumber(membership.discountPercentage);
+  return `Membership Discount${planName ? ` — ${planName}` : ""}${percent > 0 ? ` (${percent}%)` : ""}`;
+}
+
+function shouldShowSplitDiscounts(bill) {
+  return toSafeNumber(bill?.membershipDiscountAmount) > 0;
+}
+
 function getVendorPreviewRootUrl() {
   if (CONFIGURED_VENDOR_PREVIEW_ROOT_URL) {
     return CONFIGURED_VENDOR_PREVIEW_ROOT_URL;
@@ -397,7 +440,38 @@ function OtpCard({ pendingPhone, onBack, onVerified }) {
   );
 }
 
-function PortalHeader({ customer, onLogout, loggingOut }) {
+function PortalHeader({ customer, token, onCustomerUpdated, onAuthExpired, onLogout, loggingOut }) {
+  const [editing, setEditing] = useState(false);
+  const [draftName, setDraftName] = useState(customer?.displayName || "");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    setDraftName(customer?.displayName || "");
+  }, [customer?.displayName]);
+
+  async function saveProfileName() {
+    try {
+      setSaving(true);
+      setError("");
+      const payload = await portalRequest("/api/customer-portal/me", {
+        method: "PATCH",
+        token,
+        body: { displayName: draftName },
+      });
+      onCustomerUpdated(payload?.data?.customer || null);
+      setEditing(false);
+    } catch (err) {
+      if ([401, 403].includes(err.status)) {
+        onAuthExpired();
+        return;
+      }
+      setError("Unable to save name. Please try again.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
   return (
     <header className="customerPortalHeader">
       <a className="customerPortalBrand" href="/" aria-label="YNOT home">
@@ -405,11 +479,32 @@ function PortalHeader({ customer, onLogout, loggingOut }) {
       </a>
       <div className="customerPortalHeaderText">
         <p>Customer portal</p>
-        <h1>My Bills & Rewards</h1>
+        <h1>{customer?.displayName ? `Hi, ${customer.displayName}` : "My Bills & Rewards"}</h1>
         <span>View your bills and reward points from businesses using YNOT.</span>
       </div>
       <div className="customerPortalHeaderActions">
         {customer?.phone ? <span>{customer.phone}</span> : null}
+        {editing ? (
+          <div className="customerPortalNameEditor">
+            <input
+              value={draftName}
+              onChange={(event) => setDraftName(event.target.value)}
+              placeholder="Your name"
+              maxLength={100}
+            />
+            <button type="button" onClick={saveProfileName} disabled={saving}>
+              {saving ? "Saving..." : "Save"}
+            </button>
+            <button type="button" onClick={() => setEditing(false)} disabled={saving}>
+              Cancel
+            </button>
+            {error ? <small>{error}</small> : null}
+          </div>
+        ) : (
+          <button type="button" onClick={() => setEditing(true)}>
+            {customer?.displayName ? "Edit Name" : "Add Name"}
+          </button>
+        )}
         <button type="button" onClick={onLogout} disabled={loggingOut}>
           {loggingOut ? "Logging out..." : "Logout"}
         </button>
@@ -1163,14 +1258,211 @@ function RewardsTab({ token, onAuthExpired }) {
   );
 }
 
-function BillRows({ bill, showAmountPaid = true }) {
+function MembershipsTab({ token, onAuthExpired }) {
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [vendorGroups, setVendorGroups] = useState([]);
+  const [expandedMembershipIds, setExpandedMembershipIds] = useState({});
+
+  const loadMemberships = useCallback(async () => {
+    try {
+      setLoading(true);
+      setError("");
+      const payload = await portalRequest("/api/customer-portal/memberships", { token });
+      setVendorGroups(Array.isArray(payload?.data?.vendors) ? payload.data.vendors : []);
+    } catch (err) {
+      if ([401, 403].includes(err.status)) {
+        onAuthExpired();
+        return;
+      }
+      setError("Unable to load your memberships. Please try again.");
+    } finally {
+      setLoading(false);
+    }
+  }, [onAuthExpired, token]);
+
+  useEffect(() => {
+    loadMemberships();
+  }, [loadMemberships]);
+
+  function toggleBenefits(membershipId) {
+    setExpandedMembershipIds((current) => ({
+      ...current,
+      [membershipId]: !current[membershipId],
+    }));
+  }
+
+  if (loading) return <div className="portalStateCard">Loading memberships...</div>;
+
+  if (error) {
+    return (
+      <div className="portalStateCard">
+        <p>{error}</p>
+        <button type="button" onClick={loadMemberships}>Try again</button>
+      </div>
+    );
+  }
+
+  if (!vendorGroups.length) {
+    return (
+      <div className="portalStateCard">
+        <h3>No memberships yet.</h3>
+        <p>Ask your favourite YNOT business about available membership plans.</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="portalCardStack portalMembershipStack">
+      {vendorGroups.map((group) => (
+        <section className="portalMembershipVendor" key={group.vendor?.id || group.vendor?.businessName}>
+          <div className="portalMembershipVendorHeader">
+            {group.vendor?.logoUrl ? (
+              <img src={group.vendor.logoUrl} alt="" />
+            ) : (
+              <span>{String(group.vendor?.businessName || "B").slice(0, 1).toUpperCase()}</span>
+            )}
+            <div>
+              <p>Business</p>
+              <h3>{group.vendor?.businessName || "Business"}</h3>
+            </div>
+          </div>
+
+          <div className="portalMembershipCards">
+            {(group.memberships || []).map((membership) => {
+              const statusLabel = getMembershipStatusLabel(membership.status);
+              const isExpanded = Boolean(expandedMembershipIds[membership.id]);
+              const eligibleServices = Array.isArray(membership.benefits?.eligibleServices)
+                ? membership.benefits.eligibleServices
+                : [];
+
+              return (
+                <article className="portalMembershipCard" key={membership.id}>
+                  <div className="portalMembershipCardTop">
+                    <div>
+                      <h4>{membership.planName || "Membership"}</h4>
+                      <p>
+                        {toSafeNumber(membership.discountPercentage)}% discount on selected services
+                      </p>
+                    </div>
+                    <span className={getMembershipStatusClass(statusLabel)}>{statusLabel}</span>
+                  </div>
+
+                  <div className="portalMembershipFacts">
+                    <div>
+                      <span>Minimum Bill</span>
+                      <strong>{formatCurrency(membership.minimumBillAmount)}</strong>
+                    </div>
+                    <div>
+                      <span>Valid Until</span>
+                      <strong>{formatDate(membership.expiresAt) || "Not recorded"}</strong>
+                    </div>
+                    <div>
+                      <span>Starts</span>
+                      <strong>{formatDate(membership.activatedAt) || "Not recorded"}</strong>
+                    </div>
+                    <div>
+                      <span>Purchased</span>
+                      <strong>{formatDate(membership.purchasedAt) || "Not recorded"}</strong>
+                    </div>
+                  </div>
+
+                  <button
+                    className="portalTextButton"
+                    type="button"
+                    onClick={() => toggleBenefits(membership.id)}
+                  >
+                    {isExpanded ? "Hide Benefits" : "View Benefits"}
+                  </button>
+
+                  {isExpanded ? (
+                    <div className="portalMembershipBenefits">
+                      <div>
+                        <span>Discount</span>
+                        <strong>{toSafeNumber(membership.discountPercentage)}% on eligible services</strong>
+                      </div>
+                      <div>
+                        <span>Minimum gross bill</span>
+                        <strong>{formatCurrency(membership.minimumBillAmount)}</strong>
+                      </div>
+                      <div>
+                        <span>Validity</span>
+                        <strong>
+                          {formatDate(membership.activatedAt) || "Not recorded"} to{" "}
+                          {formatDate(membership.expiresAt) || "Not recorded"}
+                        </strong>
+                      </div>
+                      <div>
+                        <span>Extra discount</span>
+                        <strong>{getMembershipManualDiscountText(membership)}</strong>
+                      </div>
+                      <div>
+                        <span>Rewards</span>
+                        <strong>{getMembershipRewardsText(membership)}</strong>
+                      </div>
+                      <div className="portalMembershipServices">
+                        <span>Eligible services</span>
+                        {eligibleServices.length ? (
+                          <ul>
+                            {eligibleServices.slice(0, 12).map((service) => (
+                              <li key={service.id}>
+                                <strong>{service.name}</strong>
+                                {service.path?.length ? (
+                                  <small>{service.path.join(" / ")}</small>
+                                ) : null}
+                              </li>
+                            ))}
+                          </ul>
+                        ) : (
+                          <strong>No services recorded for this membership.</strong>
+                        )}
+                        {eligibleServices.length > 12 ? (
+                          <small>
+                            +{eligibleServices.length - 12} more eligible services
+                          </small>
+                        ) : null}
+                      </div>
+                    </div>
+                  ) : null}
+                </article>
+              );
+            })}
+          </div>
+        </section>
+      ))}
+    </div>
+  );
+}
+
+function BillRows({ bill, showAmountPaid = true, detailed = false }) {
+  const splitDiscounts = detailed && shouldShowSplitDiscounts(bill);
+  const totalSavings = toSafeNumber(bill.totalSavings || bill.discountAmount);
+  const isCancelled = bill.status === "CANCELLED";
+
   return (
     <div className="portalBillRows">
       <div>
         <span>Bill Value</span>
         <strong>{formatCurrency(bill.billValue)}</strong>
       </div>
-      {Number(bill.discountAmount || 0) > 0 ? (
+      {splitDiscounts ? (
+        <>
+          <div className="portalBillBreakdownRow">
+            <span>{getMembershipDiscountLabel(bill)}</span>
+            <strong>-{formatCurrency(bill.membershipDiscountAmount)}</strong>
+          </div>
+          {toSafeNumber(bill.additionalManualDiscountAmount) > 0 ? (
+            <div className="portalBillBreakdownRow">
+              <span>{getManualDiscountLabel(bill)}</span>
+              <strong>-{formatCurrency(bill.additionalManualDiscountAmount)}</strong>
+            </div>
+          ) : null}
+          <div>
+            <span>Total Savings</span>
+            <strong>{formatCurrency(totalSavings)}</strong>
+          </div>
+        </>
+      ) : Number(bill.discountAmount || 0) > 0 ? (
         <div>
           <span>Discount</span>
           <strong>-{formatCurrency(bill.discountAmount)}</strong>
@@ -1184,7 +1476,7 @@ function BillRows({ bill, showAmountPaid = true }) {
       ) : null}
       {showAmountPaid ? (
         <div className="portalAmountPaid">
-          <span>Amount Paid</span>
+          <span>{isCancelled ? "Originally Paid" : "Amount Paid"}</span>
           <strong>{formatCurrency(bill.netCollected)}</strong>
         </div>
       ) : null}
@@ -1230,6 +1522,7 @@ function BillDetailPanel({ bill, loading, error, onClose }) {
             <div className="portalDetailTitle">
               <p>Bill detail</p>
               <h2>{bill.vendor?.businessName || "Business"}</h2>
+              {bill.customer?.name ? <strong>{bill.customer.name}</strong> : null}
               <span>{formatDateTime(bill.date)}</span>
               {bill.status === "CANCELLED" ? (
                 <strong className="portalCancelledPill">CANCELLED</strong>
@@ -1259,7 +1552,7 @@ function BillDetailPanel({ bill, loading, error, onClose }) {
               ))}
             </div>
 
-            <BillRows bill={bill} showAmountPaid={false} />
+            <BillRows bill={bill} detailed />
 
             {bill.paymentMode ? (
               <p className="portalPaymentPill">{bill.paymentMode}</p>
@@ -1369,6 +1662,9 @@ function BillsTab({ token, onAuthExpired }) {
             <div className="portalBillTop">
               <div>
                 <h3>{bill.vendor?.businessName || "Business"}</h3>
+                {bill.customerNameSnapshot ? (
+                  <p>Customer: {bill.customerNameSnapshot}</p>
+                ) : null}
                 <p>{formatDate(bill.date)}</p>
                 {bill.status === "CANCELLED" ? (
                   <span className="portalCancelledPill">CANCELLED</span>
@@ -1509,7 +1805,16 @@ export default function CustomerPortalPage() {
 
     return (
       <section className="customerPortalDashboard">
-        <PortalHeader customer={customer} onLogout={handleLogout} loggingOut={loggingOut} />
+        <PortalHeader
+          customer={customer}
+          token={token}
+          onCustomerUpdated={(nextCustomer) => {
+            if (nextCustomer) setCustomer(nextCustomer);
+          }}
+          onAuthExpired={clearPortalSession}
+          onLogout={handleLogout}
+          loggingOut={loggingOut}
+        />
         <div className="portalTabs" role="tablist" aria-label="Customer portal sections">
           <button
             type="button"
@@ -1525,9 +1830,18 @@ export default function CustomerPortalPage() {
           >
             Rewards
           </button>
+          <button
+            type="button"
+            className={activeTab === "memberships" ? "active" : ""}
+            onClick={() => setActiveTab("memberships")}
+          >
+            Memberships
+          </button>
         </div>
         {activeTab === "rewards" ? (
           <RewardsTab token={token} onAuthExpired={clearPortalSession} />
+        ) : activeTab === "memberships" ? (
+          <MembershipsTab token={token} onAuthExpired={clearPortalSession} />
         ) : (
           <BillsTab token={token} onAuthExpired={clearPortalSession} />
         )}

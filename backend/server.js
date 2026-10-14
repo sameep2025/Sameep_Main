@@ -54,6 +54,8 @@ const adminDigitalScoreRoutes = require("./routes/adminDigitalScoreRoutes");
 const paymentRoutes = require("./routes/paymentRoutes");
 const vendorPaymentConfigRoutes = require("./routes/vendorPaymentConfigRoutes");
 const vendorBillingPreferencesRoutes = require("./routes/vendorBillingPreferencesRoutes");
+const vendorMembershipPlanRoutes = require("./routes/vendorMembershipPlanRoutes");
+const vendorCustomerMembershipRoutes = require("./routes/vendorCustomerMembershipRoutes");
 const vendorWhatsappBusinessRoutes = require("./routes/vendorWhatsappBusinessRoutes");
 const metaWhatsappWebhookRoutes = require("./routes/metaWhatsappWebhookRoutes");
 const customerPortalRoutes = require("./routes/customerPortalRoutes");
@@ -201,6 +203,8 @@ app.use("/api/digital-score", digitalScoreRoutes);
 app.use("/api/payments", paymentRoutes);
 app.use("/api/vendor-payment-config", vendorPaymentConfigRoutes);
 app.use("/api/vendor-billing-preferences", vendorBillingPreferencesRoutes);
+app.use("/api/vendor/membership-plans", vendorMembershipPlanRoutes);
+app.use("/api/vendor/customer-memberships", vendorCustomerMembershipRoutes);
 // Vendor Dashboard APIs
 app.use("/api/vendor/dashboard", require("./routes/vendorDashboardRoutes"));
 app.use("/api/vendor/dashboard", require("./routes/customerAnalyticsRoutes"));

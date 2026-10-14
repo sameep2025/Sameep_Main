@@ -51,6 +51,27 @@ function hasAmount(value) {
   return typeof value === "number" && Number.isFinite(value);
 }
 
+function formatNegativeCurrency(value) {
+  return `-${currencyFmt.format(Math.abs(getNumber(value)))}`;
+}
+
+function getMembershipDiscountLabel(bill) {
+  const planName = String(bill?.membership?.planName || "Membership").trim();
+  const percentage = getNumber(bill?.membership?.discountPercentage);
+  const suffix = percentage > 0 ? ` (${percentage}%)` : "";
+  return `Membership Discount — ${planName}${suffix}`;
+}
+
+function getManualDiscountLabel(bill) {
+  const percentage = getNumber(bill?.manualDiscountPercent);
+  const suffix = percentage > 0 ? ` (${percentage}%)` : "";
+  return `Additional Manual Discount${suffix}`;
+}
+
+function hasMembershipDiscountBreakdown(bill) {
+  return getNumber(bill?.membershipDiscountAmount) > 0;
+}
+
 function getBillFinancials(bill) {
   const billValue = getNumber(bill?.billValue ?? bill?.grossAmount ?? bill?.netBillValue ?? bill?.total);
   const netBillValue = getNumber(bill?.netBillValue ?? bill?.total);
@@ -391,6 +412,11 @@ function TodayRevenue({
                   const billKey = bill.billId || `${bill.phone}-${bill.createdAt}`;
                   const isExpanded = expandedBills[billKey] !== false;
                   const financials = getBillFinancials(bill);
+                  const showDiscountBreakdown = hasMembershipDiscountBreakdown(bill);
+                  const manualDiscountAmount = getNumber(bill.additionalManualDiscountAmount);
+                  const totalDiscountAmount = getNumber(
+                    bill.totalSavings ?? financials.discountAmount ?? 0
+                  );
 
                   return (
                   <div key={billKey} className="today-revenue-bill-card">
@@ -400,7 +426,7 @@ function TodayRevenue({
                           Bill #{String(bill.billId || "").slice(0, 8)}
                         </div>
                         <div className="today-revenue-bill-phone">
-                          {bill.phone || "Walk-in"} • {formatDateTime(bill.createdAt)}
+                          {bill.customerLabel || bill.phone || "Walk-in"} • {formatDateTime(bill.createdAt)}
                         </div>
                         <div className="today-revenue-bill-chip-row">
                           <span className="today-revenue-bill-chip">
@@ -442,6 +468,25 @@ function TodayRevenue({
 
                     {isExpanded && Array.isArray(bill.items) && bill.items.length > 0 ? (
                       <div className="today-revenue-items-section">
+                        {showDiscountBreakdown ? (
+                          <div className="today-revenue-discount-breakdown">
+                            <div className="today-revenue-discount-title">Discount Breakdown</div>
+                            <div className="today-revenue-discount-row">
+                              <span>{getMembershipDiscountLabel(bill)}</span>
+                              <strong>{formatNegativeCurrency(bill.membershipDiscountAmount)}</strong>
+                            </div>
+                            {manualDiscountAmount > 0 ? (
+                              <div className="today-revenue-discount-row">
+                                <span>{getManualDiscountLabel(bill)}</span>
+                                <strong>{formatNegativeCurrency(manualDiscountAmount)}</strong>
+                              </div>
+                            ) : null}
+                            <div className="today-revenue-discount-row today-revenue-discount-total">
+                              <span>Total Discount</span>
+                              <strong>{currencyFmt.format(totalDiscountAmount)}</strong>
+                            </div>
+                          </div>
+                        ) : null}
                         <div className="today-revenue-items-title">Cart Items</div>
                         <div className="today-revenue-items-list">
                           {bill.items.map((item, index) => (

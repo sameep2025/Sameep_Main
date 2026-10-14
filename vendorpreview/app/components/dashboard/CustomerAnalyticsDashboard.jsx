@@ -38,6 +38,20 @@ function formatDate(value) {
   });
 }
 
+function CustomerIdentity({ name, phone }) {
+  const cleanName = String(name || "").trim();
+  const cleanPhone = String(phone || "").trim();
+  if (cleanName) {
+    return (
+      <>
+        <div>{cleanName}</div>
+        {cleanPhone ? <small>{cleanPhone}</small> : null}
+      </>
+    );
+  }
+  return <>{cleanPhone || "Customer"}</>;
+}
+
 function CustomerList({
   subtitle,
   rows,
@@ -48,6 +62,7 @@ function CustomerList({
   onLoadMore,
   emptyText,
   showInactiveDays = false,
+  onViewHistory,
 }) {
   return (
     <div className="customer-analytics-section-body">
@@ -65,7 +80,9 @@ function CustomerList({
             {rows.map((customer) => (
               <div key={`${customer.customerId}-${customer.lastVisit}`} className="customer-analytics-row">
                 <div className="customer-analytics-row-main">
-                  <div className="customer-analytics-row-title">{customer.phone || customer.name || "Customer"}</div>
+                  <div className="customer-analytics-row-title">
+                    <CustomerIdentity name={customer.name} phone={customer.phone} />
+                  </div>
                   <div className="customer-analytics-row-meta">
                     {formatNumber(customer.visitCount)} completed visit{Number(customer.visitCount) === 1 ? "" : "s"}
                     {" · "}
@@ -79,6 +96,15 @@ function CustomerList({
                 </div>
                 <div className="customer-analytics-row-value">
                   {formatCurrency(customer.totalSpend)}
+                  {onViewHistory ? (
+                    <button
+                      type="button"
+                      className="customer-analytics-history-btn"
+                      onClick={() => onViewHistory(customer)}
+                    >
+                      View History
+                    </button>
+                  ) : null}
                 </div>
               </div>
             ))}
@@ -102,7 +128,7 @@ function CustomerList({
   );
 }
 
-export default function CustomerAnalyticsDashboard({ vendorId }) {
+export default function CustomerAnalyticsDashboard({ vendorId, onViewCustomerHistory }) {
   const [activeSection, setActiveSection] = useState("top");
   const [summary, setSummary] = useState(null);
   const [summaryLoading, setSummaryLoading] = useState(true);
@@ -112,6 +138,11 @@ export default function CustomerAnalyticsDashboard({ vendorId }) {
   const [topLoading, setTopLoading] = useState(true);
   const [topLoadingMore, setTopLoadingMore] = useState(false);
   const [topError, setTopError] = useState("");
+
+  const [repeatCustomers, setRepeatCustomers] = useState({ items: [], nextOffset: 0, hasMore: false });
+  const [repeatLoading, setRepeatLoading] = useState(false);
+  const [repeatLoadingMore, setRepeatLoadingMore] = useState(false);
+  const [repeatError, setRepeatError] = useState("");
 
   const [inactiveDays, setInactiveDays] = useState(30);
   const [inactiveCustomers, setInactiveCustomers] = useState({ items: [], nextOffset: 0, hasMore: false });
@@ -219,6 +250,29 @@ export default function CustomerAnalyticsDashboard({ vendorId }) {
       cancelled = true;
     };
   }, [vendorId]);
+
+  useEffect(() => {
+    if (!vendorId || activeSection !== "repeat") return;
+
+    let cancelled = false;
+    async function loadRepeatCustomers() {
+      try {
+        setRepeatLoading(true);
+        setRepeatError("");
+        const nextState = await loadCustomerSegment({ segment: "repeat" });
+        if (!cancelled) setRepeatCustomers(nextState);
+      } catch (error) {
+        if (!cancelled) setRepeatError(error?.message || "Failed to load repeat customers");
+      } finally {
+        if (!cancelled) setRepeatLoading(false);
+      }
+    }
+
+    loadRepeatCustomers();
+    return () => {
+      cancelled = true;
+    };
+  }, [activeSection, vendorId]);
 
   useEffect(() => {
     if (!vendorId) return;
@@ -377,6 +431,26 @@ export default function CustomerAnalyticsDashboard({ vendorId }) {
         setThresholdLoadingMore(false);
       }
     }
+
+    if (kind === "repeat") {
+      try {
+        setRepeatLoadingMore(true);
+        const nextState = await loadCustomerSegment({
+          segment: "repeat",
+          append: true,
+          offset: repeatCustomers.nextOffset || 0,
+        });
+        setRepeatCustomers((current) => ({
+          items: [...current.items, ...(nextState.appendedItems || [])],
+          hasMore: nextState.hasMore,
+          nextOffset: nextState.nextOffset,
+        }));
+      } catch (error) {
+        setRepeatError(error?.message || "Failed to load more repeat customers");
+      } finally {
+        setRepeatLoadingMore(false);
+      }
+    }
   }
 
   async function loadMoreItems() {
@@ -424,10 +498,16 @@ export default function CustomerAnalyticsDashboard({ vendorId }) {
               <div className="revenue-panel-stat-label">Customers</div>
               <div className="revenue-panel-stat-value">{formatNumber(customerLinked.totalCustomers)}</div>
             </div>
-            <div className="revenue-panel-stat-card customer-analytics-stat-card">
+            <button
+              type="button"
+              className={`revenue-panel-stat-card customer-analytics-stat-card customer-analytics-stat-button ${
+                activeSection === "repeat" ? "active" : ""
+              }`}
+              onClick={() => setActiveSection("repeat")}
+            >
               <div className="revenue-panel-stat-label">Repeat Customers</div>
               <div className="revenue-panel-stat-value">{formatNumber(customerLinked.repeatCustomers)}</div>
-            </div>
+            </button>
             <div className="revenue-panel-stat-card customer-analytics-stat-card">
               <div className="revenue-panel-stat-label">Avg. Bill</div>
               <div className="revenue-panel-stat-value">
@@ -477,6 +557,32 @@ export default function CustomerAnalyticsDashboard({ vendorId }) {
             loadingMore={topLoadingMore}
             onLoadMore={() => loadMoreCustomers("top")}
             emptyText="No customer-linked spending data yet."
+          />
+        </div>
+      )}
+
+      {activeSection === "repeat" && (
+        <div className="customer-analytics-active-section">
+          <div className="customer-analytics-section-head">
+            <div>
+              <div className="customer-analytics-section-title">Repeat Customers</div>
+              <div className="customer-analytics-section-subtitle">
+                Customers with two or more completed customer-linked bills.
+              </div>
+            </div>
+          </div>
+          <CustomerList
+            subtitle={`Showing customers counted in the Repeat Customers metric (${formatNumber(
+              customerLinked.repeatCustomers
+            )}).`}
+            rows={repeatCustomers.items}
+            loading={repeatLoading}
+            error={repeatError}
+            hasMore={repeatCustomers.hasMore}
+            loadingMore={repeatLoadingMore}
+            onLoadMore={() => loadMoreCustomers("repeat")}
+            emptyText="No repeat customer activity yet."
+            onViewHistory={onViewCustomerHistory}
           />
         </div>
       )}

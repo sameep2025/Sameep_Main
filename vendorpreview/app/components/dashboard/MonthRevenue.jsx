@@ -399,7 +399,7 @@ export default function MonthRevenue({
                           Bill #{String(bill.billId || "").slice(0, 8)}
                         </div>
                         <div className="revenue-panel-list-sub">
-                          {bill.phone || "Walk-in"} • {formatDateTime(bill.createdAt)}
+                          {bill.customerLabel || bill.phone || "Walk-in"} • {formatDateTime(bill.createdAt)}
                         </div>
                         <div className="revenue-panel-chip-row">
                           <span className="revenue-panel-chip">

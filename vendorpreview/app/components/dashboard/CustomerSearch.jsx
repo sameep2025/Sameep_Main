@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import "./RevenuePanels.css";
 import { printReceiptSnapshot } from "../../utils/receiptPrint";
 
@@ -95,14 +95,24 @@ function buildReceiptSnapshotFromBillDetail(detail) {
     })),
     grossAmount: Number(totals.grossAmount ?? totals.billValue ?? 0),
     discountAmount: Number(totals.discountAmount || 0),
+    membershipDiscountAmount: Number(totals.membershipDiscountAmount || 0),
+    additionalManualDiscountAmount: Number(totals.additionalManualDiscountAmount || 0),
+    manualDiscountPercent: Number(totals.manualDiscountPercent || 0),
+    membershipPlanName: String(detail?.membership?.planName || totals.membership?.planName || ""),
     rewardsRedeemed: Number(totals.rewardsRedeemed || 0),
+    pointsEarned: Number(totals.pointsEarned || 0),
     netCollected: Number(totals.netCollected || 0),
     paymentMode: String(detail?.paymentMode || "ONLINE"),
   };
 }
 
-export default function CustomerSearch({ vendorId }) {
+export default function CustomerSearch({ vendorId, initialCustomer = null }) {
   const [phone, setPhone] = useState("");
+  const [lastSearchType, setLastSearchType] = useState("");
+  const [nameMatches, setNameMatches] = useState([]);
+  const [editingCustomerName, setEditingCustomerName] = useState(false);
+  const [customerNameDraft, setCustomerNameDraft] = useState("");
+  const [savingCustomerName, setSavingCustomerName] = useState(false);
   const [activeView, setActiveView] = useState("");
   const [loading, setLoading] = useState(false);
   const [customerData, setCustomerData] = useState(null);
@@ -139,6 +149,7 @@ export default function CustomerSearch({ vendorId }) {
 
     return {
       overview: [
+        { label: "Name", value: customer.name || "-" },
         { label: "Phone", value: customer.phone ?? "-" },
         { label: "Total Visits", value: customer.totalVisits ?? "-" },
         {
@@ -193,9 +204,14 @@ export default function CustomerSearch({ vendorId }) {
       );
   }, [customerData]);
 
-  const handleSearch = async () => {
-    if (!vendorId || phone.length !== 10) {
+  const handleSearch = async (overrideSearch = "") => {
+    const rawSearch = String(overrideSearch || phone).trim();
+    const digits = rawSearch.replace(/\D/g, "");
+    const isPhoneSearch = digits.length === 10;
+
+    if (!vendorId || (!isPhoneSearch && rawSearch.length < 2)) {
       setCustomerData(null);
+      setNameMatches([]);
       setHasSearched(false);
       setErrorMessage("");
       setActiveView("");
@@ -206,14 +222,22 @@ export default function CustomerSearch({ vendorId }) {
       setActiveView(RESULT_VIEWS.CUSTOMER);
       setLoading(true);
       setHasSearched(true);
+      setLastSearchType(isPhoneSearch ? "phone" : "smart");
       setErrorMessage("");
       setWalkInError("");
       setBillActionMessage("");
       setBillActionError("");
-      const formattedPhone = `91${phone.trim()}`;
+      const query = isPhoneSearch
+        ? `phone=${encodeURIComponent(`91${digits}`)}`
+        : `search=${encodeURIComponent(rawSearch)}`;
       const res = await fetch(
-        `${CUSTOMER_SEARCH_API_BASE_URL}/api/vendor/dashboard/customer?vendorId=${encodeURIComponent(vendorId)}&phone=${encodeURIComponent(formattedPhone)}&range=all`,
-        { cache: "no-store" }
+        `${CUSTOMER_SEARCH_API_BASE_URL}/api/vendor/dashboard/customer?vendorId=${encodeURIComponent(vendorId)}&${query}&range=all`,
+        {
+          cache: "no-store",
+          headers: {
+            ...getVendorAuthHeaders(vendorId),
+          },
+        }
       );
 
       if (!res.ok) {
@@ -222,16 +246,93 @@ export default function CustomerSearch({ vendorId }) {
 
       const json = await res.json();
       const payload = json?.data && typeof json.data === "object" ? json.data : json;
+      if (!isPhoneSearch && Array.isArray(payload?.matches)) {
+        setNameMatches(payload.matches);
+        setCustomerData(null);
+        setExpandedBills({});
+        return;
+      }
+      setNameMatches([]);
       setCustomerData(payload?.customer ? payload : null);
+      setCustomerNameDraft(payload?.customer?.name || "");
       setExpandedBills({});
     } catch (error) {
       console.error("Failed to fetch customer data", error);
       setCustomerData(null);
+      setNameMatches([]);
       setExpandedBills({});
       setErrorMessage("Unable to fetch customer data.");
       setActiveView(RESULT_VIEWS.CUSTOMER);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const selectNameMatch = (match) => {
+    const digits = String(match?.fullNumber || match?.phone || "").replace(/\D/g, "");
+    const localPhone = digits.startsWith("91") && digits.length > 10 ? digits.slice(2) : digits;
+    const nextPhone = localPhone.slice(-10);
+    setPhone(nextPhone);
+    setNameMatches([]);
+    handleSearch(nextPhone);
+  };
+
+  useEffect(() => {
+    const rawPhone = String(initialCustomer?.phone || initialCustomer?.fullNumber || "").replace(/\D/g, "");
+    const localPhone = rawPhone.startsWith("91") && rawPhone.length > 10 ? rawPhone.slice(2) : rawPhone;
+    const nextPhone = localPhone.slice(-10);
+    if (!nextPhone || nextPhone.length !== 10) return;
+
+    setPhone(nextPhone);
+    setNameMatches([]);
+    handleSearch(nextPhone);
+    // Intentionally keyed to the selected customer identity so analytics can open history.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialCustomer?.customerId, initialCustomer?.phone, initialCustomer?.fullNumber, vendorId]);
+
+  const saveCustomerName = async () => {
+    const customerId = customerData?.customer?.id;
+    if (!vendorId || !customerId) return;
+
+    try {
+      setSavingCustomerName(true);
+      setBillActionError("");
+      const res = await fetch(
+        `${CUSTOMER_SEARCH_API_BASE_URL}/api/vendor/dashboard/customer/profile`,
+        {
+          method: "PATCH",
+          headers: {
+            "Content-Type": "application/json",
+            ...getVendorAuthHeaders(vendorId),
+          },
+          body: JSON.stringify({
+            vendorId,
+            customerId,
+            name: customerNameDraft,
+          }),
+        }
+      );
+      const json = await res.json().catch(() => null);
+      if (!res.ok || !json?.success) {
+        throw new Error(json?.message || "Unable to save customer name");
+      }
+      setCustomerData((current) =>
+        current?.customer
+          ? {
+              ...current,
+              customer: {
+                ...current.customer,
+                name: json.data?.name || "",
+              },
+            }
+          : current
+      );
+      setEditingCustomerName(false);
+      setBillActionMessage("Customer name saved.");
+    } catch (error) {
+      setBillActionError(error.message || "Unable to save customer name.");
+    } finally {
+      setSavingCustomerName(false);
     }
   };
 
@@ -584,7 +685,7 @@ export default function CustomerSearch({ vendorId }) {
       <div className="revenue-panel-header">
         <div className="revenue-panel-title">Customer Search</div>
         <div className="revenue-panel-subtitle">
-          Search by mobile number to inspect customer, loyalty, and retention details.
+          Search by mobile number or saved customer name to inspect loyalty and billing history.
         </div>
       </div>
 
@@ -594,19 +695,15 @@ export default function CustomerSearch({ vendorId }) {
           <input
             className="revenue-panel-input revenue-panel-input-phone"
             value={phone}
-            onChange={(event) =>
-              setPhone(event.target.value.replace(/\D/g, "").slice(0, 10))
-            }
-            placeholder="Enter 10-digit mobile number"
-            inputMode="numeric"
-            maxLength={10}
+            onChange={(event) => setPhone(event.target.value.slice(0, 100))}
+            placeholder="Mobile number or name"
           />
         </div>
         <button
           type="button"
           className="revenue-panel-button"
-          onClick={handleSearch}
-          disabled={loading || phone.length !== 10}
+          onClick={() => handleSearch()}
+          disabled={loading || phone.trim().length < 2}
         >
           {loading ? "Searching..." : "Search"}
         </button>
@@ -622,6 +719,30 @@ export default function CustomerSearch({ vendorId }) {
 
       {activeView === RESULT_VIEWS.WALK_IN && walkInError ? (
         <div className="revenue-panel-action-error">{walkInError}</div>
+      ) : null}
+
+      {activeView === RESULT_VIEWS.CUSTOMER && nameMatches.length > 0 ? (
+        <div className="revenue-panel-section">
+          <div className="revenue-panel-section-title">Matching Customers</div>
+          <div className="revenue-panel-list">
+            {nameMatches.map((match) => (
+              <button
+                key={`${match.customerId}-${match.fullNumber || match.phone}`}
+                type="button"
+                className="revenue-panel-list-item"
+                onClick={() => selectNameMatch(match)}
+              >
+                <div className="revenue-panel-bill-content">
+                  <div className="revenue-panel-list-main">{match.name || "Unnamed customer"}</div>
+                  <div className="revenue-panel-list-sub">
+                    {match.fullNumber ? `+${match.fullNumber}` : match.phone || "-"}
+                  </div>
+                </div>
+                <div className="revenue-panel-list-value">View</div>
+              </button>
+            ))}
+          </div>
+        </div>
       ) : null}
 
       {activeView === RESULT_VIEWS.WALK_IN && walkInHasLoaded ? (
@@ -760,7 +881,48 @@ export default function CustomerSearch({ vendorId }) {
       ) : activeView === RESULT_VIEWS.CUSTOMER && customerData ? (
         <>
           <div className="revenue-panel-section">
-            <div className="revenue-panel-section-title">Customer Overview</div>
+            <div className="revenue-panel-section-title">
+              Customer Overview
+              {!editingCustomerName ? (
+                <button
+                  type="button"
+                  className="revenue-panel-expand-btn revenue-panel-action-btn"
+                  onClick={() => {
+                    setCustomerNameDraft(customerData?.customer?.name || "");
+                    setEditingCustomerName(true);
+                  }}
+                >
+                  Edit Name
+                </button>
+              ) : null}
+            </div>
+            {editingCustomerName ? (
+              <div className="revenue-panel-search-row">
+                <input
+                  className="revenue-panel-input"
+                  value={customerNameDraft}
+                  onChange={(event) => setCustomerNameDraft(event.target.value)}
+                  placeholder="Customer name"
+                  maxLength={100}
+                />
+                <button
+                  type="button"
+                  className="revenue-panel-button"
+                  onClick={saveCustomerName}
+                  disabled={savingCustomerName}
+                >
+                  {savingCustomerName ? "Saving..." : "Save"}
+                </button>
+                <button
+                  type="button"
+                  className="revenue-panel-button secondary"
+                  onClick={() => setEditingCustomerName(false)}
+                  disabled={savingCustomerName}
+                >
+                  Cancel
+                </button>
+              </div>
+            ) : null}
             <div className="revenue-panel-customer-grid">
               {sections.overview.map((item) => (
                 <div key={item.label} className="revenue-panel-customer-card">
@@ -930,7 +1092,9 @@ export default function CustomerSearch({ vendorId }) {
         </>
       ) : activeView === RESULT_VIEWS.CUSTOMER && hasSearched && !loading ? (
         <div className="revenue-panel-empty">
-          No customer data found for this phone number.
+          {lastSearchType === "phone"
+            ? "No customer data found for this phone number."
+            : "No matching customers found."}
         </div>
       ) : !activeView ? (
         <div className="revenue-panel-empty">
@@ -1000,9 +1164,24 @@ export default function CustomerSearch({ vendorId }) {
                       Qty {Number(item.qty || 0)}
                       {item.resourceName ? ` • Handled by ${item.resourceName}` : ""}
                     </div>
+                    {Number(item.membershipDiscountAmount || 0) > 0 ? (
+                      <div className="revenue-panel-item-meta">
+                        Membership discount: -{currencyFmt.format(Number(item.membershipDiscountAmount || 0))}
+                      </div>
+                    ) : null}
+                    {Number(item.manualDiscountAmount || 0) > 0 ? (
+                      <div className="revenue-panel-item-meta">
+                        Additional discount: -{currencyFmt.format(Number(item.manualDiscountAmount || 0))}
+                      </div>
+                    ) : null}
                   </div>
                   <div className="revenue-panel-item-value">
                     {currencyFmt.format(Number(item.total || 0))}
+                    {Number(item.finalLineAmount || item.total || 0) < Number(item.total || 0) ? (
+                      <div className="revenue-panel-item-meta">
+                        Net {currencyFmt.format(Number(item.finalLineAmount || 0))}
+                      </div>
+                    ) : null}
                   </div>
                 </div>
               ))}
@@ -1013,7 +1192,41 @@ export default function CustomerSearch({ vendorId }) {
                 <span>Bill Value</span>
                 <strong>{currencyFmt.format(Number(billDetail.totals?.billValue || 0))}</strong>
               </div>
-              {Number(billDetail.totals?.discountAmount || 0) > 0 ? (
+              {Number(billDetail.totals?.membershipDiscountAmount || 0) > 0 &&
+              Number(billDetail.totals?.discountAmount || 0) > 0 ? (
+                <div>
+                  <div className="revenue-panel-discount-summary">
+                    <span>Discount</span>
+                    <div className="revenue-panel-discount-breakdown">
+                      <div>
+                        <span>
+                          Membership Discount
+                          {billDetail.membership?.planName ? ` - ${billDetail.membership.planName}` : ""}
+                        </span>
+                        <strong>
+                          -{currencyFmt.format(Number(billDetail.totals.membershipDiscountAmount || 0))}
+                        </strong>
+                      </div>
+                      {Number(billDetail.totals?.additionalManualDiscountAmount || 0) > 0 ? (
+                        <div>
+                          <span>
+                            Additional Manual Discount
+                            {Number(billDetail.totals?.manualDiscountPercent || 0) > 0
+                              ? ` (${Number(billDetail.totals.manualDiscountPercent)}%)`
+                              : ""}
+                          </span>
+                          <strong>
+                            -{currencyFmt.format(Number(billDetail.totals.additionalManualDiscountAmount || 0))}
+                          </strong>
+                        </div>
+                      ) : null}
+                    </div>
+                  </div>
+                  <strong>-{currencyFmt.format(Number(billDetail.totals.discountAmount || 0))}</strong>
+                </div>
+              ) : null}
+              {Number(billDetail.totals?.membershipDiscountAmount || 0) === 0 &&
+              Number(billDetail.totals?.discountAmount || 0) > 0 ? (
                 <div>
                   <span>Discount</span>
                   <strong>-{currencyFmt.format(Number(billDetail.totals.discountAmount || 0))}</strong>
@@ -1023,6 +1236,12 @@ export default function CustomerSearch({ vendorId }) {
                 <div>
                   <span>Rewards Redeemed</span>
                   <strong>-{currencyFmt.format(Number(billDetail.totals.rewardsRedeemed || 0))}</strong>
+                </div>
+              ) : null}
+              {Number(billDetail.totals?.pointsEarned || 0) > 0 ? (
+                <div>
+                  <span>Loyalty Points Earned</span>
+                  <strong>{Number(billDetail.totals.pointsEarned || 0)}</strong>
                 </div>
               ) : null}
               <div className="revenue-panel-bill-total-net">

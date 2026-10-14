@@ -293,6 +293,57 @@ test("/me derives customer identity from portal auth context, not browser body",
   assert.equal(res.payload.data.customer.phone, "+919381520396");
 }));
 
+test("customer portal profile update uses authenticated customer and normalizes display name", withMockedPortalDependencies(async () => {
+  let updateFilter = null;
+  let updatePayload = null;
+  Customer.findOneAndUpdate = async (filter, payload) => {
+    updateFilter = filter;
+    updatePayload = payload;
+    return {
+      _id: filter._id,
+      fullNumber: "919381520396",
+      displayName: payload.$set.displayName,
+    };
+  };
+
+  const req = mockReq({
+    auth: { customerId: "customer-auth-id" },
+    body: {
+      customerId: "attacker-supplied-id",
+      displayName: "  Niharika   Sharma  ",
+    },
+  });
+  const res = mockRes();
+
+  await controller.updateProfile(req, res);
+
+  assert.equal(res.statusCode, 200);
+  assert.deepEqual(updateFilter, { _id: "customer-auth-id" });
+  assert.deepEqual(updatePayload, { $set: { displayName: "Niharika Sharma" } });
+  assert.equal(res.payload.data.customer.displayName, "Niharika Sharma");
+  assert.equal(res.payload.data.customer.phone, "+919381520396");
+}));
+
+test("customer portal profile update rejects control characters", withMockedPortalDependencies(async () => {
+  let updateCalled = false;
+  Customer.findOneAndUpdate = async () => {
+    updateCalled = true;
+    return null;
+  };
+
+  const res = mockRes();
+  await controller.updateProfile(
+    mockReq({
+      auth: { customerId: "customer-auth-id" },
+      body: { displayName: "Bad\u0007Name" },
+    }),
+    res
+  );
+
+  assert.equal(res.statusCode, 400);
+  assert.equal(updateCalled, false);
+}));
+
 test("logout invalidates only the current CUSTOMER_PORTAL session", withMockedPortalDependencies(async () => {
   const updates = [];
   Session.updateOne = async (query, update) => {

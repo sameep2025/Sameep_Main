@@ -53,7 +53,20 @@ function BillView({ data, error }) {
   const showCustomerName = customerName && customerName.toLowerCase() !== "customer";
   const poweredByUrl = getPoweredByUrl();
   const discountAmount = Number(totals.discountAmount || 0);
+  const membershipDiscountAmount = Number(totals.membershipDiscountAmount || 0);
+  const additionalManualDiscountAmount = Number(totals.additionalManualDiscountAmount || 0);
+  const manualDiscountPercent = Number(totals.manualDiscountPercent || 0);
   const rewardsRedeemed = Number(totals.rewardsRedeemed || 0);
+  const membership = data?.membership || {};
+  const membershipLabel =
+    (membership?.planName || membershipDiscountAmount > 0)
+      ? `Membership Discount${membership?.planName ? ` - ${membership.planName}` : ""}${
+          Number(membership?.discountPercentage || 0) > 0
+            ? ` (${Number(membership.discountPercentage)}%)`
+            : ""
+        }`
+      : "";
+  const showSplitDiscounts = membershipDiscountAmount > 0;
 
   return (
     <main style={styles.page}>
@@ -96,7 +109,28 @@ function BillView({ data, error }) {
                 <span style={styles.summaryLabel}>Subtotal</span>
                 <strong style={styles.summaryValue}>{formatCurrency(totals.grossAmount)}</strong>
               </div>
-              {discountAmount > 0 ? (
+              {showSplitDiscounts && membershipDiscountAmount > 0 ? (
+                <div style={styles.summaryItem}>
+                  <span style={styles.summaryLabel}>Discount</span>
+                  <strong style={styles.summaryValue}>-{formatCurrency(discountAmount)}</strong>
+                  <div style={styles.discountBreakdown}>
+                    <div style={styles.discountBreakdownRow}>
+                      <span>{membershipLabel}</span>
+                      <strong>-{formatCurrency(membershipDiscountAmount)}</strong>
+                    </div>
+                    {additionalManualDiscountAmount > 0 ? (
+                      <div style={styles.discountBreakdownRow}>
+                        <span>
+                          Additional Manual Discount
+                          {manualDiscountPercent > 0 ? ` (${manualDiscountPercent}%)` : ""}
+                        </span>
+                        <strong>-{formatCurrency(additionalManualDiscountAmount)}</strong>
+                      </div>
+                    ) : null}
+                  </div>
+                </div>
+              ) : null}
+              {!showSplitDiscounts && discountAmount > 0 ? (
                 <div style={styles.summaryItem}>
                   <span style={styles.summaryLabel}>Discount</span>
                   <strong style={styles.summaryValue}>-{formatCurrency(discountAmount)}</strong>
@@ -160,8 +194,25 @@ function BillView({ data, error }) {
                       {item.resourceName ? (
                         <p style={styles.itemResource}>Handled by {item.resourceName}</p>
                       ) : null}
+                      {Number(item.membershipDiscountAmount || 0) > 0 ? (
+                        <p style={styles.itemSavings}>
+                          Membership discount: -{formatCurrency(item.membershipDiscountAmount)}
+                        </p>
+                      ) : null}
+                      {Number(item.manualDiscountAmount || 0) > 0 ? (
+                        <p style={styles.itemSavings}>
+                          Additional discount: -{formatCurrency(item.manualDiscountAmount)}
+                        </p>
+                      ) : null}
                     </div>
-                    <strong style={styles.itemTotal}>{formatCurrency(item.total)}</strong>
+                    <div style={styles.itemAmountBlock}>
+                      <strong style={styles.itemTotal}>{formatCurrency(item.total)}</strong>
+                      {Number(item.finalLineAmount || item.total || 0) < Number(item.total || 0) ? (
+                        <span style={styles.itemNetTotal}>
+                          Net {formatCurrency(item.finalLineAmount)}
+                        </span>
+                      ) : null}
+                    </div>
                   </div>
                 ))
               )}
@@ -330,6 +381,21 @@ const styles = {
   summaryValue: {
     fontSize: "22px",
   },
+  discountBreakdown: {
+    display: "grid",
+    gap: "6px",
+    marginTop: "4px",
+    paddingTop: "10px",
+    borderTop: "1px solid rgba(120, 84, 34, 0.14)",
+  },
+  discountBreakdownRow: {
+    display: "flex",
+    justifyContent: "space-between",
+    gap: "12px",
+    color: "#6d5840",
+    fontSize: "13px",
+    lineHeight: 1.35,
+  },
   detailsGrid: {
     display: "grid",
     gridTemplateColumns: "minmax(0, 1fr)",
@@ -433,10 +499,28 @@ const styles = {
     color: "#6d5840",
     fontSize: "14px",
   },
+  itemSavings: {
+    margin: "4px 0 0",
+    color: "#8f5f22",
+    fontSize: "13px",
+    fontWeight: 700,
+  },
+  itemAmountBlock: {
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "flex-end",
+    gap: "4px",
+    whiteSpace: "nowrap",
+  },
   itemTotal: {
     color: "#a06f2d",
     fontSize: "26px",
     whiteSpace: "nowrap",
+  },
+  itemNetTotal: {
+    color: "#6d5840",
+    fontSize: "13px",
+    fontWeight: 700,
   },
   poweredBy: {
     marginTop: "20px",

@@ -3,6 +3,7 @@ const mongoose = require("mongoose");
 const router = express.Router();
 
 const billingController = require("../controllers/billingController");
+const membershipBillingPreviewController = require("../controllers/membershipBillingPreviewController");
 const BillingSession = require("../models/BillingSession");
 const {
   requireVendorAccessFromExistingAuth,
@@ -19,8 +20,17 @@ function resolveVendorQueryId(req) {
   return req.query?.vendorId || "";
 }
 
+function resolveVendorBodyOrQueryId(req) {
+  return req.body?.vendorId || req.query?.vendorId || "";
+}
+
 router.post("/create", billingController.createBillingSession);
 router.post("/update", billingController.updateBillingCart);
+router.post(
+  "/membership-preview",
+  requireVendorAccessFromExistingAuth(resolveVendorBodyOrQueryId),
+  membershipBillingPreviewController.previewMembershipDiscount
+);
 router.get("/public/code/:code", billingController.getPublicBillDetailsByCode);
 router.get("/public/:id", billingController.getPublicBillDetails);
 router.get(

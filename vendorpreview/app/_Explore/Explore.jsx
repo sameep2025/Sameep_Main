@@ -24,6 +24,7 @@ import EnquiriesDashboard from "../components/dashboard/EnquiriesDashboard";
 import WebsiteAnalyticsDashboard from "../components/dashboard/WebsiteAnalyticsDashboard";
 import CustomerAnalyticsDashboard from "../components/dashboard/CustomerAnalyticsDashboard";
 import WhatsappBusinessDashboard from "../components/dashboard/WhatsappBusinessDashboard";
+import MembershipPlansDashboard from "../components/dashboard/MembershipPlansDashboard";
 import { useSearchParams } from "next/navigation";
 import { useSessionGuard } from "../Login/useSessionGuard";
 import ModernPreviewTemplate from "./templates/ModernPreviewTemplate";
@@ -1154,6 +1155,15 @@ function ExploreContent({ onReady, onOpenServices }) {
 
 
   const [customerMobile, setCustomerMobile] = useState("");
+  const [customerSearch, setCustomerSearch] = useState("");
+  const [customerSearchResults, setCustomerSearchResults] = useState([]);
+  const [customerSearchLoading, setCustomerSearchLoading] = useState(false);
+  const [customerSearchError, setCustomerSearchError] = useState("");
+  const [customerSearchOpen, setCustomerSearchOpen] = useState(false);
+  const [customerName, setCustomerName] = useState("");
+  const [loadedCustomerName, setLoadedCustomerName] = useState("");
+  const [customerNameStatus, setCustomerNameStatus] = useState("");
+  const customerMobileLookupRef = useRef("");
   const [availablePoints, setAvailablePoints] = useState(0);
   const [redeemPoints, setRedeemPoints] = useState(0);
   const [earnPoints, setEarnPoints] = useState(0);
@@ -1171,6 +1181,10 @@ function ExploreContent({ onReady, onOpenServices }) {
   const [billType, setBillType] = useState("customer");
   const [billSuccessMessage, setBillSuccessMessage] = useState("");
   const [receiptSnapshot, setReceiptSnapshot] = useState(null);
+  const [membershipPreview, setMembershipPreview] = useState(null);
+  const [membershipPreviewLoading, setMembershipPreviewLoading] = useState(false);
+  const [membershipPreviewError, setMembershipPreviewError] = useState("");
+  const customerSearchRequestRef = useRef(0);
 
 
   const [vendorLoaded, setVendorLoaded] = useState(false);
@@ -1256,6 +1270,7 @@ function ExploreContent({ onReady, onOpenServices }) {
   }, []);
   const vendorIdRef = useRef(null);
   const [activeRevenueTab, setActiveRevenueTab] = useState("today");
+  const [selectedRevenueCustomer, setSelectedRevenueCustomer] = useState(null);
   const [showOptions, setShowOptions] = useState(false);
   const [openServices, setOpenServices] = useState(false);
   const [serviceType, setServiceType] = useState(null);
@@ -1353,27 +1368,331 @@ function ExploreContent({ onReady, onOpenServices }) {
   };
 
   const buildBillingCartItemsSnapshot = () => {
-    const discountFactor =
-      cartTotal > 0 ? (cartTotal - appliedDiscount) / cartTotal : 1;
-
-    return cartItems.map((item) => {
-      const discountedPrice = Math.round((item.price || 0) * discountFactor);
-
-      return {
+    return cartItems.map((item) => ({
         itemId: item.itemId,
         categoryId: item.categoryId,
         name: item.name,
-        price: discountedPrice,
+        price: Number(item.price) || 0,
         qty: Number(item.qty) || 1,
-        total: discountedPrice * (item.qty || 1),
+        total: (Number(item.price) || 0) * (Number(item.qty) || 1),
         resourceId: item.resourceId || null,
         resourceName: item.resourceName || "",
         parentId: item.parentId || null,
         rootCategoryId: item.rootCategoryId || null,
         nodePath: item.nodePath || [],
         categoryPathIds: item.categoryPathIds || [],
-      };
+    }));
+  };
+
+  const buildMembershipPreviewItems = () =>
+    cartItems.map((item) => ({
+      itemId: item.itemId,
+      name: item.name,
+      price: Number(item.price) || 0,
+      qty: Number(item.qty) || 1,
+      total: (Number(item.price) || 0) * (Number(item.qty) || 1),
+      cartKey: item.cartKey || item.itemId || "",
+      categoryId: item.categoryId || null,
+      nodePath: item.nodePath || [],
+      categoryPathIds: item.categoryPathIds || [],
+    }));
+
+  const formatMembershipPreviewAmount = (value) =>
+    `₹${Number(value || 0).toLocaleString("en-IN")}`;
+
+  const hasQualifyingMembershipPreview = () =>
+    Boolean(
+      membershipPreview?.hasEffectiveMembership &&
+      membershipPreview?.preview?.qualifiesForMinimum &&
+      Number(membershipPreview?.preview?.membershipDiscountAmount || 0) > 0
+    );
+
+  const getAuthoritativeCartTotal = () => {
+    if (hasQualifyingMembershipPreview()) {
+      return Math.max(
+        Number(membershipPreview?.preview?.previewPayableAmount ?? finalTotal) -
+          Number(redeemPoints || 0),
+        0
+      );
+    }
+    return finalTotal;
+  };
+
+  const getAuthoritativeEarnPoints = () => {
+    if (hasQualifyingMembershipPreview()) {
+      return Number(membershipPreview?.preview?.estimatedRewardPoints || 0);
+    }
+    return earnPoints;
+  };
+
+  const handleCustomerMobileInputChange = (value) => {
+    setCustomerMobile(value);
+    customerMobileLookupRef.current = value;
+    setCustomerSearchOpen(false);
+    setCustomerSearchResults([]);
+    setCustomerSearchError("");
+    setCustomerName("");
+    setLoadedCustomerName("");
+    setCustomerNameStatus("");
+    setMembershipPreview(null);
+    setMembershipPreviewError("");
+    setMembershipPreviewLoading(false);
+  };
+
+  const fetchVendorCustomerName = async ({ mobile, customerId: resolvedCustomerId }) => {
+    if (!vendorId || !mobile || mobile.length !== 10 || !resolvedCustomerId) return;
+    const vendorToken =
+      typeof window !== "undefined"
+        ? localStorage.getItem(`vendorToken:${vendorId}`)
+        : null;
+    if (!vendorToken) return;
+
+    try {
+      setCustomerNameStatus("Loading saved name...");
+      const res = await fetch(
+        `${API_BASE_URL}/api/vendor/dashboard/customer/profile?vendorId=${encodeURIComponent(vendorId)}&phone=${encodeURIComponent(`91${mobile}`)}`,
+        {
+          cache: "no-store",
+          headers: {
+            Authorization: `Bearer ${vendorToken}`,
+          },
+        }
+      );
+      const json = await res.json().catch(() => null);
+      if (!res.ok || !json?.success) throw new Error(json?.message || "Name lookup failed");
+      if (customerMobileLookupRef.current !== mobile) return;
+      const nextName = String(json?.data?.name || "");
+      setCustomerName(nextName);
+      setLoadedCustomerName(nextName);
+      setCustomerNameStatus(nextName ? "Saved name loaded" : "");
+    } catch (error) {
+      if (customerMobileLookupRef.current === mobile) {
+        setCustomerNameStatus("");
+      }
+    }
+  };
+
+  const saveVendorCustomerNameIfNeeded = async ({ vendorToken }) => {
+    const trimmedName = customerName.trim().replace(/\s+/g, " ");
+    const previousName = loadedCustomerName.trim().replace(/\s+/g, " ");
+    if (!vendorId || !customerId || !trimmedName || trimmedName === previousName) return;
+
+    const res = await fetch(`${API_BASE_URL}/api/vendor/dashboard/customer/profile`, {
+      method: "PATCH",
+      headers: {
+        "Content-Type": "application/json",
+        ...(vendorToken ? { Authorization: `Bearer ${vendorToken}` } : {}),
+      },
+      body: JSON.stringify({
+        vendorId,
+        customerId,
+        name: trimmedName,
+      }),
     });
+    const json = await res.json().catch(() => null);
+    if (!res.ok || !json?.success) {
+      throw new Error(json?.message || "Unable to save customer name");
+    }
+    setLoadedCustomerName(json?.data?.name || trimmedName);
+  };
+
+  const selectBillingCustomerSearchResult = (result) => {
+    const digits = String(result?.fullNumber || result?.phone || "").replace(/\D/g, "");
+    const localPhone = digits.startsWith("91") && digits.length > 10 ? digits.slice(2) : digits;
+    const nextMobile = localPhone.slice(-10);
+    const nextName = String(result?.name || "");
+    if (!nextMobile) return;
+
+    setCustomerSearch(nextName ? `${nextName} ${nextMobile}` : nextMobile);
+    setCustomerSearchOpen(false);
+    setCustomerSearchResults([]);
+    setCustomerMobile(nextMobile);
+    customerMobileLookupRef.current = nextMobile;
+    setCustomerName(nextName);
+    setLoadedCustomerName(nextName);
+    setCustomerNameStatus(nextName ? "Saved name loaded" : "");
+    setCustomerId(result?.customerId || null);
+    setAvailablePoints(0);
+    setRedeemPoints(0);
+    setMembershipPreview(null);
+    setMembershipPreviewError("");
+    setMembershipPreviewLoading(false);
+  };
+
+  const renderBillingCustomerSearch = () => (
+    <div style={{ marginBottom: "10px", position: "relative" }}>
+      <label style={{ color: "#e6c37a", fontSize: "14px" }}>
+        Search Existing Customer
+      </label>
+      <input
+        value={customerSearch}
+        onChange={(e) => {
+          setCustomerSearch(e.target.value);
+          setCustomerSearchOpen(true);
+        }}
+        onFocus={() => {
+          if (customerSearchResults.length || customerSearchLoading || customerSearchError) {
+            setCustomerSearchOpen(true);
+          }
+        }}
+        placeholder="Search by name or mobile"
+        style={{
+          width: "100%",
+          background: "#111",
+          border: "1px solid #444",
+          borderRadius: "8px",
+          color: "#fff",
+          marginTop: "6px",
+          padding: "10px",
+        }}
+      />
+      {customerSearchOpen && (customerSearchLoading || customerSearchError || customerSearchResults.length > 0 || customerSearch.trim().length >= 2) ? (
+        <div
+          style={{
+            position: "absolute",
+            zIndex: 20,
+            left: 0,
+            right: 0,
+            top: "100%",
+            marginTop: "6px",
+            background: "#111",
+            border: "1px solid #4b3a1d",
+            borderRadius: "10px",
+            boxShadow: "0 16px 30px rgba(0,0,0,0.35)",
+            maxHeight: "240px",
+            overflowY: "auto",
+          }}
+        >
+          {customerSearchLoading ? (
+            <div style={{ padding: "10px", color: "#aaa", fontSize: "13px" }}>Searching...</div>
+          ) : customerSearchError ? (
+            <div style={{ padding: "10px", color: "#fca5a5", fontSize: "13px" }}>{customerSearchError}</div>
+          ) : customerSearchResults.length ? (
+            customerSearchResults.map((result) => (
+              <button
+                key={`${result.customerId}-${result.fullNumber || result.phone}`}
+                type="button"
+                onClick={() => selectBillingCustomerSearchResult(result)}
+                style={{
+                  width: "100%",
+                  textAlign: "left",
+                  background: "transparent",
+                  border: "none",
+                  borderBottom: "1px solid #26211a",
+                  color: "#fff",
+                  padding: "10px 12px",
+                  cursor: "pointer",
+                }}
+              >
+                <div style={{ fontWeight: 700 }}>{result.name || result.fullNumber || result.phone || "Customer"}</div>
+                {result.name ? (
+                  <div style={{ color: "#aaa", fontSize: "12px", marginTop: "2px" }}>
+                    {result.fullNumber ? `+${result.fullNumber}` : result.phone || ""}
+                  </div>
+                ) : null}
+              </button>
+            ))
+          ) : (
+            <div style={{ padding: "10px", color: "#aaa", fontSize: "13px" }}>
+              No saved customer found. Enter a new mobile number below.
+            </div>
+          )}
+        </div>
+      ) : null}
+    </div>
+  );
+
+  const renderMembershipPreviewCard = () => {
+    if (membershipPreviewLoading) {
+      return (
+        <div className="membership-billing-preview-card">
+          <div className="membership-billing-preview-head">
+            <strong>Membership</strong>
+            <span className="membership-billing-status">Checking...</span>
+          </div>
+        </div>
+      );
+    }
+    if (membershipPreviewError) {
+      return (
+        <div className="membership-billing-preview-card warning">
+          <div className="membership-billing-preview-head">
+            <strong>Membership</strong>
+            <span className="membership-billing-status">Unavailable</span>
+          </div>
+          <p>{membershipPreviewError}</p>
+        </div>
+      );
+    }
+    if (!membershipPreview?.hasEffectiveMembership) return null;
+
+    const preview = membershipPreview.preview || {};
+    const membership = membershipPreview.membership || {};
+    const discountPercentage = Number(membership.discountPercentage || preview.discountPercentage || 0);
+    const minimumBillAmount = Number(membership.minimumBillAmount || preview.minimumBillAmount || 0);
+    const subtotal = Number(preview.subtotal || 0);
+    const membershipDiscountAmount = Number(preview.membershipDiscountAmount || 0);
+    const additionalManualDiscountAmount = Number(preview.additionalManualDiscountAmount || 0);
+    const estimatedRewardPoints = Number(preview.estimatedRewardPoints || 0);
+    const redeemValue = Math.max(Number(redeemPoints || 0), 0);
+    const previewPayableBeforeRedemption = Number(preview.previewPayableAmount ?? subtotal);
+    const previewFinalPaid = Math.max(previewPayableBeforeRedemption - redeemValue, 0);
+    const qualifiesForMinimum = preview.qualifiesForMinimum === true;
+    const remainingToQualify = Math.max(minimumBillAmount - subtotal, 0);
+    const statusLabel = qualifiesForMinimum ? "Eligible" : "Below minimum";
+    const previewMessage = qualifiesForMinimum
+      ? "This membership discount will be applied when the bill is generated."
+      : `Spend ${formatMembershipPreviewAmount(remainingToQualify)} more to qualify.`;
+
+    return (
+      <div className="membership-billing-preview-card">
+        <div className="membership-billing-preview-head">
+          <strong>{membership.planName || "Membership"}</strong>
+          <span className={`membership-billing-status ${qualifiesForMinimum ? "eligible" : "below"}`}>
+            {statusLabel}
+          </span>
+        </div>
+        <div className="membership-billing-preview-meta">
+          {discountPercentage}% discount · Min bill {formatMembershipPreviewAmount(minimumBillAmount)}
+          {membership.expiresAt ? (
+            <> · Expires {new Date(membership.expiresAt).toLocaleDateString("en-IN")}</>
+          ) : null}
+        </div>
+        <div className="membership-billing-preview-lines">
+          <div>
+            <span>Membership discount</span>
+            <strong>
+              {membershipDiscountAmount > 0 ? "-" : ""}
+              {formatMembershipPreviewAmount(membershipDiscountAmount)}
+            </strong>
+          </div>
+          {additionalManualDiscountAmount > 0 && (
+            <div>
+              <span>Additional discount</span>
+              <strong>-{formatMembershipPreviewAmount(additionalManualDiscountAmount)}</strong>
+            </div>
+          )}
+          {redeemValue > 0 && (
+            <div>
+              <span>Points redeemed</span>
+              <strong>-{formatMembershipPreviewAmount(redeemValue)}</strong>
+            </div>
+          )}
+          <div className="preview-payable">
+            <span>Final payable</span>
+            <strong>{formatMembershipPreviewAmount(previewFinalPaid)}</strong>
+          </div>
+          <div>
+            <span>Estimated loyalty points</span>
+            <strong>{estimatedRewardPoints}</strong>
+          </div>
+        </div>
+        {preview.manualDiscountCapped && (
+          <small>Manual discount preview is capped to eligible item balances.</small>
+        )}
+        <small>{previewMessage}</small>
+      </div>
+    );
   };
 
   const buildReceiptSnapshot = ({ billingSessionId, billingItems, completeData }) => {
@@ -1404,7 +1723,12 @@ function ExploreContent({ onReady, onOpenServices }) {
       })),
       grossAmount: Number(transaction.grossAmount ?? cartTotal ?? 0),
       discountAmount: Number(transaction.discountAmount ?? appliedDiscount ?? 0),
+      membershipDiscountAmount: Number(transaction.membershipDiscountAmount || 0),
+      additionalManualDiscountAmount: Number(transaction.additionalManualDiscountAmount || 0),
+      manualDiscountPercent: discountMode === "percent" ? Number(discountPercent || 0) : 0,
+      membershipPlanName: String(transaction.membershipBillingSnapshot?.planName || ""),
       rewardsRedeemed: Number(redeemedValue || 0),
+      pointsEarned: Number(completeData?.billing?.pointsEarned ?? transaction.pointsEarned ?? getAuthoritativeEarnPoints()),
       netCollected: Number(netCollected || 0),
       paymentMode: String(transaction.paymentMode || paymentMode || "ONLINE"),
     };
@@ -2904,6 +3228,141 @@ function ExploreContent({ onReady, onOpenServices }) {
     return () => clearTimeout(handle);
   }, [customerMobile, vendorId]);
 
+  useEffect(() => {
+    const query = customerSearch.trim();
+    const digitCount = query.replace(/\D/g, "").length;
+    const hasTextSearch = /[^\d\s()+-]/.test(query) && query.length >= 2;
+    const canSearch = Boolean(vendorId && (hasTextSearch || digitCount >= 3));
+
+    if (!canSearch) {
+      customerSearchRequestRef.current += 1;
+      setCustomerSearchResults([]);
+      setCustomerSearchLoading(false);
+      setCustomerSearchError("");
+      return undefined;
+    }
+
+    const vendorToken =
+      typeof window !== "undefined"
+        ? localStorage.getItem(`vendorToken:${vendorId}`)
+        : null;
+    if (!vendorToken) {
+      setCustomerSearchResults([]);
+      setCustomerSearchLoading(false);
+      setCustomerSearchError("");
+      return undefined;
+    }
+
+    const requestId = customerSearchRequestRef.current + 1;
+    customerSearchRequestRef.current = requestId;
+    const controller = new AbortController();
+    const handle = setTimeout(async () => {
+      try {
+        setCustomerSearchLoading(true);
+        setCustomerSearchError("");
+        const params = new URLSearchParams({
+          vendorId,
+          search: query,
+          limit: "10",
+        });
+        const res = await fetch(`${API_BASE_URL}/api/vendor/dashboard/customer?${params.toString()}`, {
+          cache: "no-store",
+          signal: controller.signal,
+          headers: {
+            Authorization: `Bearer ${vendorToken}`,
+          },
+        });
+        const json = await res.json().catch(() => null);
+        if (!res.ok || !json?.success) {
+          throw new Error(json?.message || "Customer search failed");
+        }
+        if (customerSearchRequestRef.current !== requestId) return;
+        setCustomerSearchResults(Array.isArray(json?.data?.matches) ? json.data.matches : []);
+        setCustomerSearchOpen(true);
+      } catch (searchError) {
+        if (searchError?.name === "AbortError") return;
+        if (customerSearchRequestRef.current !== requestId) return;
+        setCustomerSearchResults([]);
+        setCustomerSearchError(searchError?.message || "Unable to search customers");
+      } finally {
+        if (!controller.signal.aborted && customerSearchRequestRef.current === requestId) {
+          setCustomerSearchLoading(false);
+        }
+      }
+    }, 300);
+
+    return () => {
+      clearTimeout(handle);
+      controller.abort();
+    };
+  }, [customerSearch, vendorId]);
+
+  useEffect(() => {
+    if (!vendorId || !customerMobile || customerMobile.length !== 10 || cartItems.length === 0) {
+      setMembershipPreview(null);
+      setMembershipPreviewError("");
+      setMembershipPreviewLoading(false);
+      return undefined;
+    }
+
+    const vendorToken =
+      typeof window !== "undefined"
+        ? localStorage.getItem(`vendorToken:${vendorId}`)
+        : null;
+    if (!vendorToken) {
+      setMembershipPreview(null);
+      setMembershipPreviewError("");
+      setMembershipPreviewLoading(false);
+      return undefined;
+    }
+
+    const controller = new AbortController();
+    const handle = setTimeout(async () => {
+      try {
+        setMembershipPreviewLoading(true);
+        setMembershipPreviewError("");
+        const res = await fetch(`${API_BASE_URL}/api/billing/membership-preview`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${vendorToken}`,
+          },
+          signal: controller.signal,
+          body: JSON.stringify({
+            vendorId,
+            customerMobile,
+            items: buildMembershipPreviewItems(),
+            manualDiscount: {
+              mode: discountMode,
+              amount: appliedDiscount,
+              percent: discountPercent,
+            },
+            loyalty: {
+              percentPer100,
+            },
+          }),
+        });
+        const json = await res.json().catch(() => null);
+        if (!res.ok || !json?.success) {
+          throw new Error(json?.message || "Membership preview failed");
+        }
+        setMembershipPreview(json);
+      } catch (previewError) {
+        if (previewError?.name === "AbortError") return;
+        console.error("Membership preview failed", previewError);
+        setMembershipPreview(null);
+        setMembershipPreviewError(previewError?.message || "Unable to preview membership discount");
+      } finally {
+        if (!controller.signal.aborted) setMembershipPreviewLoading(false);
+      }
+    }, 450);
+
+    return () => {
+      clearTimeout(handle);
+      controller.abort();
+    };
+  }, [vendorId, customerMobile, cartItems, discountMode, appliedDiscount, discountPercent, percentPer100]);
+
   /*
   const saveLoyaltyRule = async () => {
     if (!vendorId) return;
@@ -2995,6 +3454,7 @@ function ExploreContent({ onReady, onOpenServices }) {
       setCustomerValidated(Boolean(id));
       if (id) {
         fetchWallet(id);
+        fetchVendorCustomerName({ mobile, customerId: id });
       }
     } catch (err) {
       console.error("Customer verification failed", err);
@@ -3072,6 +3532,14 @@ function ExploreContent({ onReady, onOpenServices }) {
     setCartItems([]);
     setCustomerId(null);
     setCustomerMobile("");
+    setCustomerSearch("");
+    setCustomerSearchResults([]);
+    setCustomerSearchError("");
+    setCustomerSearchOpen(false);
+    customerMobileLookupRef.current = "";
+    setCustomerName("");
+    setLoadedCustomerName("");
+    setCustomerNameStatus("");
     setMobile("");
     setAvailablePoints(0);
     setRedeemPoints(0);
@@ -3149,8 +3617,27 @@ function ExploreContent({ onReady, onOpenServices }) {
       return;
     }
 
+    if (customerId && cartItems.length > 0) {
+      if (membershipPreviewLoading) {
+        alert("Please wait while membership benefits are calculated.");
+        return;
+      }
+      if (membershipPreviewError) {
+        alert("Resolve the membership preview error before generating the bill.");
+        return;
+      }
+      if (!membershipPreview) {
+        alert("Please wait for membership verification before generating the bill.");
+        return;
+      }
+    }
+
     try {
       setProcessingBill(true);
+
+      if (customerId) {
+        await saveVendorCustomerNameIfNeeded({ vendorToken });
+      }
 
       // STEP 1 - Create billing session
       const createRes = await fetch(`${API_BASE_URL}/api/billing/create`, {
@@ -3192,6 +3679,8 @@ function ExploreContent({ onReady, onOpenServices }) {
           cartItems: billingCartItems,
           grossAmount: billingSubtotal,
           discountAmount: billingDiscount,
+          manualDiscountMode: discountMode,
+          manualDiscountPercent: discountMode === "percent" ? discountPercent : 0,
         }),
       });
 
@@ -4818,7 +5307,7 @@ function ExploreContent({ onReady, onOpenServices }) {
                                 </span>
                               </div>
                             )}
-                            {appliedDiscount > 0 && (
+                            {(appliedDiscount > 0 || hasQualifyingMembershipPreview()) && (
                               <div
                                 style={{
                                   display: "flex",
@@ -4827,14 +5316,14 @@ function ExploreContent({ onReady, onOpenServices }) {
                                   marginTop: 6,
                                 }}
                               >
-                                <span>Final Total</span>
-                                <span>₹ {finalTotal}</span>
+                                <span>Final Payable</span>
+                                <span>₹ {getAuthoritativeCartTotal()}</span>
                               </div>
                             )}
                           </div>
-                          {loyaltyEnabled && earnPoints > 0 && (
+                          {loyaltyEnabled && getAuthoritativeEarnPoints() > 0 && (
                             <div style={{ marginTop: 6 }}>
-                              You will earn: {earnPoints} points
+                              You will earn: {getAuthoritativeEarnPoints()} points
                             </div>
                           )}
                           {hasActiveVendorSession ? (
@@ -4885,6 +5374,7 @@ function ExploreContent({ onReady, onOpenServices }) {
                                   paddingTop: "15px",
                                 }}
                               >
+                                {renderBillingCustomerSearch()}
                                 <label style={{ color: "#e6c37a", fontSize: "14px" }}>
                                   Customer Mobile
                                 </label>
@@ -4912,7 +5402,7 @@ function ExploreContent({ onReady, onOpenServices }) {
                                   </div>
                                   <input
                                     value={customerMobile}
-                                    onChange={(e) => setCustomerMobile(e.target.value)}
+                                    onChange={(e) => handleCustomerMobileInputChange(e.target.value)}
                                     placeholder="Enter mobile"
                                     style={{
                                       flex: 1,
@@ -4924,6 +5414,34 @@ function ExploreContent({ onReady, onOpenServices }) {
                                     }}
                                   />
                                 </div>
+                                {customerMobile && customerMobile.length === 10 && (
+                                  <div style={{ marginBottom: "10px" }}>
+                                    <label style={{ color: "#e6c37a", fontSize: "14px" }}>
+                                      Customer Name
+                                    </label>
+                                    <input
+                                      value={customerName}
+                                      onChange={(e) => setCustomerName(e.target.value)}
+                                      placeholder="Optional customer name"
+                                      maxLength={100}
+                                      style={{
+                                        width: "100%",
+                                        background: "#111",
+                                        border: "1px solid #444",
+                                        borderRadius: "8px",
+                                        color: "#fff",
+                                        marginTop: "6px",
+                                        padding: "10px",
+                                      }}
+                                    />
+                                    {customerNameStatus ? (
+                                      <div style={{ fontSize: "12px", color: "#999", marginTop: 6 }}>
+                                        {customerNameStatus}
+                                      </div>
+                                    ) : null}
+                                  </div>
+                                )}
+                                {renderMembershipPreviewCard()}
                                 {loyaltyEnabled && (
                                   <>
                                     <div style={{ fontSize: "13px", color: "#aaa", marginTop: 6 }}>
@@ -5333,7 +5851,7 @@ function ExploreContent({ onReady, onOpenServices }) {
                                   </span>
                                 </div>
                               )}
-                              {appliedDiscount > 0 && (
+                              {(appliedDiscount > 0 || hasQualifyingMembershipPreview()) && (
                                 <div
                                   style={{
                                     display: "flex",
@@ -5342,14 +5860,14 @@ function ExploreContent({ onReady, onOpenServices }) {
                                     marginTop: 6,
                                   }}
                                 >
-                                  <span>Final Total</span>
-                                  <span>₹ {finalTotal}</span>
+                                  <span>Final Payable</span>
+                                  <span>₹ {getAuthoritativeCartTotal()}</span>
                                 </div>
                               )}
                             </div>
-                            {loyaltyEnabled && earnPoints > 0 && (
+                            {loyaltyEnabled && getAuthoritativeEarnPoints() > 0 && (
                               <div style={{ marginTop: 6 }}>
-                                You will earn: {earnPoints} points
+                                You will earn: {getAuthoritativeEarnPoints()} points
                               </div>
                             )}
                             {hasActiveVendorSession ? (
@@ -5400,6 +5918,7 @@ function ExploreContent({ onReady, onOpenServices }) {
                                     paddingTop: "15px",
                                   }}
                                 >
+                                  {renderBillingCustomerSearch()}
                                   <label style={{ color: "#e6c37a", fontSize: "14px" }}>
                                     Customer Mobile
                                   </label>
@@ -5427,7 +5946,7 @@ function ExploreContent({ onReady, onOpenServices }) {
                                     </div>
                                     <input
                                       value={customerMobile}
-                                      onChange={(e) => setCustomerMobile(e.target.value)}
+                                      onChange={(e) => handleCustomerMobileInputChange(e.target.value)}
                                       placeholder="Enter mobile"
                                       style={{
                                         flex: 1,
@@ -5439,6 +5958,34 @@ function ExploreContent({ onReady, onOpenServices }) {
                                       }}
                                     />
                                   </div>
+                                  {customerMobile && customerMobile.length === 10 && (
+                                    <div style={{ marginBottom: "10px" }}>
+                                      <label style={{ color: "#e6c37a", fontSize: "14px" }}>
+                                        Customer Name
+                                      </label>
+                                      <input
+                                        value={customerName}
+                                        onChange={(e) => setCustomerName(e.target.value)}
+                                        placeholder="Optional customer name"
+                                        maxLength={100}
+                                        style={{
+                                          width: "100%",
+                                          background: "#111",
+                                          border: "1px solid #444",
+                                          borderRadius: "8px",
+                                          color: "#fff",
+                                          marginTop: "6px",
+                                          padding: "10px",
+                                        }}
+                                      />
+                                      {customerNameStatus ? (
+                                        <div style={{ fontSize: "12px", color: "#999", marginTop: 6 }}>
+                                          {customerNameStatus}
+                                        </div>
+                                      ) : null}
+                                    </div>
+                                  )}
+                                  {renderMembershipPreviewCard()}
                                   {loyaltyEnabled && (
                                     <>
                                       <div style={{ fontSize: "13px", color: "#aaa" }}>
@@ -5804,6 +6351,13 @@ function ExploreContent({ onReady, onOpenServices }) {
                   },
                 },
                 {
+                  title: "Memberships",
+                  description: "Create discount membership plans for selected services.",
+                  onClick: () => {
+                    setViewMode("membership-plans-dashboard");
+                  },
+                },
+                {
                   title: "Enquiries",
                   description: "Review recent and past enquiries, inspect details, and call customers back.",
                   onClick: () => {
@@ -6055,12 +6609,16 @@ function ExploreContent({ onReady, onOpenServices }) {
                   key={card.title}
                   className={`new-dashboard-card new-dashboard-card-action ${activeRevenueTab === card.key ? "active" : ""
                     }`}
-                  onClick={() => setActiveRevenueTab(card.key)}
+                  onClick={() => {
+                    if (card.key === "customer") setSelectedRevenueCustomer(null);
+                    setActiveRevenueTab(card.key);
+                  }}
                   role="button"
                   tabIndex={0}
                   onKeyDown={(event) => {
                     if (event.key === "Enter" || event.key === " ") {
                       event.preventDefault();
+                      if (card.key === "customer") setSelectedRevenueCustomer(null);
                       setActiveRevenueTab(card.key);
                     }
                   }}
@@ -6109,7 +6667,7 @@ function ExploreContent({ onReady, onOpenServices }) {
                 )}
 
                 {activeRevenueTab === "customer" && (
-                  <CustomerSearch vendorId={vendorId} />
+                  <CustomerSearch vendorId={vendorId} initialCustomer={selectedRevenueCustomer} />
                 )}
               </div>
             )}
@@ -6144,7 +6702,23 @@ function ExploreContent({ onReady, onOpenServices }) {
           <div className="new-dashboard-shell">
             {renderDashboardHeader("Customer Analytics", () => setViewMode("new-dashboard"))}
 
-            <CustomerAnalyticsDashboard vendorId={vendorId} />
+            <CustomerAnalyticsDashboard
+              vendorId={vendorId}
+              onViewCustomerHistory={(customer) => {
+                setSelectedRevenueCustomer(customer);
+                setActiveRevenueTab("customer");
+                setViewMode("revenue-dashboard");
+              }}
+            />
+          </div>
+        </div>
+      )}
+      {viewMode === "membership-plans-dashboard" && (
+        <div className="new-dashboard-overlay">
+          <div className="new-dashboard-shell">
+            {renderDashboardHeader("Membership Plans", () => setViewMode("new-dashboard"))}
+
+            <MembershipPlansDashboard vendorId={vendorId} />
           </div>
         </div>
       )}
