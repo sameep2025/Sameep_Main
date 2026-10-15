@@ -69,12 +69,30 @@ test("membership preview returns normal billing preview when below minimum", () 
     items: [
       { itemId: "652000000000000000000001", name: "Hair Cut", price: 300, qty: 1 },
     ],
+    loyalty: { percentPer100: 5 },
   });
 
   assert.equal(result.subtotal, 300);
   assert.equal(result.qualifiesForMinimum, false);
   assert.equal(result.membershipDiscountAmount, 0);
+  assert.equal(result.previewPayableAmount, 300);
+  assert.equal(result.estimatedRewardPoints, 15);
   assert.match(result.message, /below ₹500/);
+});
+
+test("membership preview applies the discount exactly at the minimum bill", () => {
+  const result = controller._private.calculateMembershipPreview({
+    membership: membership(),
+    items: [
+      { itemId: "652000000000000000000001", name: "Hair Cut", price: 500, qty: 1 },
+    ],
+    loyalty: { percentPer100: 5 },
+  });
+
+  assert.equal(result.qualifiesForMinimum, true);
+  assert.equal(result.membershipDiscountAmount, 50);
+  assert.equal(result.previewPayableAmount, 450);
+  assert.equal(result.estimatedRewardPoints, 0);
 });
 
 test("membership preview does not apply membership discount to non-eligible items", () => {

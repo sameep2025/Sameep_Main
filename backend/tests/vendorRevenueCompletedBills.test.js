@@ -1751,6 +1751,61 @@ test("billing completion applies active membership discounts and reward rules au
   );
 });
 
+test("billing completion allows an active membership bill below its minimum without a membership discount", async () => {
+  const eligibleId = "652000000000000000000001";
+  const billing = buildCompletionBilling({
+    customerId: new mongoose.Types.ObjectId(CUSTOMER_ID),
+    billingMode: "LOYALTY",
+    grossAmount: 250,
+    discountAmount: 0,
+    totalAmount: 250,
+    cartItems: [
+      {
+        itemId: new mongoose.Types.ObjectId(eligibleId),
+        name: "Hair Cut",
+        price: 250,
+        qty: 1,
+        total: 250,
+      },
+    ],
+  });
+  const membership = buildCustomerMembership({
+    planSnapshot: {
+      ...buildCustomerMembership().planSnapshot,
+      minimumBillAmount: 500,
+      eligibleMenuItemIds: [new mongoose.Types.ObjectId(eligibleId)],
+    },
+  });
+
+  await withMockedCompletionFlow(
+    billing,
+    async (state) => {
+      const res = buildCompletionResponse();
+      await billingController.completeBillingSession(
+        { body: { billingId: COMPLETED_BILL_ID, paymentMode: "ONLINE" } },
+        res
+      );
+
+      assert.equal(res.statusCode, 200);
+      assert.equal(state.closeUpdate.totalAmount, 250);
+      assert.equal(state.closeUpdate.membershipDiscountAmount, 0);
+      assert.equal(state.closeUpdate.discountAmount, 0);
+      assert.equal(state.closeUpdate.pointsEarned, 12);
+      assert.equal(state.closeUpdate.cartItems[0].membershipDiscountAmount, 0);
+      assert.equal(state.closeUpdate.cartItems[0].finalLineAmount, 250);
+      assert.equal(state.transactionPayload.finalPaidAmount, 250);
+      assert.equal(state.transactionPayload.membershipDiscountAmount, 0);
+      assert.equal(state.ledgerCreates.length, 1);
+      assert.equal(state.ledgerCreates[0].type, "EARN");
+      assert.equal(state.ledgerCreates[0].points, 12);
+    },
+    {
+      memberships: [membership],
+      loyaltyRule: { earn: { percentPer100: 5 }, expiry: { expiryDays: 30 } },
+    }
+  );
+});
+
 test("billing completion ignores future scheduled and expired memberships", async () => {
   const billing = buildCompletionBilling({
     customerId: new mongoose.Types.ObjectId(CUSTOMER_ID),

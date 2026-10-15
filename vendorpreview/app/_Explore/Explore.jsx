@@ -1186,6 +1186,7 @@ function ExploreContent({ onReady, onOpenServices }) {
   const [customerValidated, setCustomerValidated] = useState(false);
   const [loyaltyLoaded, setLoyaltyLoaded] = useState(true);
   const [processingBill, setProcessingBill] = useState(false);
+  const processingBillRef = useRef(false);
   const [showBillSuccess, setShowBillSuccess] = useState(false);
   const [billType, setBillType] = useState("customer");
   const [billSuccessMessage, setBillSuccessMessage] = useState("");
@@ -1193,6 +1194,8 @@ function ExploreContent({ onReady, onOpenServices }) {
   const [membershipPreview, setMembershipPreview] = useState(null);
   const [membershipPreviewLoading, setMembershipPreviewLoading] = useState(false);
   const [membershipPreviewError, setMembershipPreviewError] = useState("");
+  const [membershipPreviewRetryNonce, setMembershipPreviewRetryNonce] = useState(0);
+  const membershipPreviewRequestRef = useRef(0);
   const customerSearchRequestRef = useRef(0);
   const selectedBillingCustomerLabelRef = useRef("");
 
@@ -1545,9 +1548,6 @@ function ExploreContent({ onReady, onOpenServices }) {
     setCustomerId(result?.customerId || null);
     setAvailablePoints(0);
     setRedeemPoints(0);
-    setMembershipPreview(null);
-    setMembershipPreviewError("");
-    setMembershipPreviewLoading(false);
   };
 
   const renderBillingCustomerSearch = () => (
@@ -1659,6 +1659,13 @@ function ExploreContent({ onReady, onOpenServices }) {
             <span className="membership-billing-status">Unavailable</span>
           </div>
           <p>{membershipPreviewError}</p>
+          <button
+            type="button"
+            className="membership-billing-preview-retry"
+            onClick={() => setMembershipPreviewRetryNonce((current) => current + 1)}
+          >
+            Retry membership check
+          </button>
         </div>
       );
     }
@@ -3349,7 +3356,16 @@ function ExploreContent({ onReady, onOpenServices }) {
   }, [customerSearch, vendorId]);
 
   useEffect(() => {
-    if (!vendorId || !customerMobile || customerMobile.length !== 10 || cartItems.length === 0) {
+    const requestId = membershipPreviewRequestRef.current + 1;
+    membershipPreviewRequestRef.current = requestId;
+
+    if (
+      !vendorId ||
+      !customerId ||
+      !customerMobile ||
+      customerMobile.length !== 10 ||
+      cartItems.length === 0
+    ) {
       setMembershipPreview(null);
       setMembershipPreviewError("");
       setMembershipPreviewLoading(false);
@@ -3367,11 +3383,13 @@ function ExploreContent({ onReady, onOpenServices }) {
       return undefined;
     }
 
+    setMembershipPreview(null);
+    setMembershipPreviewError("");
+    setMembershipPreviewLoading(true);
+
     const controller = new AbortController();
     const handle = setTimeout(async () => {
       try {
-        setMembershipPreviewLoading(true);
-        setMembershipPreviewError("");
         const res = await fetch(`${API_BASE_URL}/api/billing/membership-preview`, {
           method: "POST",
           headers: {
@@ -3397,14 +3415,18 @@ function ExploreContent({ onReady, onOpenServices }) {
         if (!res.ok || !json?.success) {
           throw new Error(json?.message || "Membership preview failed");
         }
+        if (membershipPreviewRequestRef.current !== requestId) return;
         setMembershipPreview(json);
       } catch (previewError) {
         if (previewError?.name === "AbortError") return;
+        if (membershipPreviewRequestRef.current !== requestId) return;
         console.error("Membership preview failed", previewError);
         setMembershipPreview(null);
         setMembershipPreviewError(previewError?.message || "Unable to preview membership discount");
       } finally {
-        if (!controller.signal.aborted) setMembershipPreviewLoading(false);
+        if (!controller.signal.aborted && membershipPreviewRequestRef.current === requestId) {
+          setMembershipPreviewLoading(false);
+        }
       }
     }, 450);
 
@@ -3412,7 +3434,17 @@ function ExploreContent({ onReady, onOpenServices }) {
       clearTimeout(handle);
       controller.abort();
     };
-  }, [vendorId, customerMobile, cartItems, discountMode, appliedDiscount, discountPercent, percentPer100]);
+  }, [
+    vendorId,
+    customerId,
+    customerMobile,
+    cartItems,
+    discountMode,
+    appliedDiscount,
+    discountPercent,
+    percentPer100,
+    membershipPreviewRetryNonce,
+  ]);
 
   /*
   const saveLoyaltyRule = async () => {
@@ -3663,6 +3695,8 @@ function ExploreContent({ onReady, onOpenServices }) {
   }, [viewMode]);
 
   async function handleGenerateBill() {
+    if (processingBillRef.current || processingBill) return;
+
     if (cartOriginRef.current !== CART_ORIGIN_BILLING) {
       alert("Open Billing and add services from the Billing menu before generating a bill.");
       return;
@@ -3734,6 +3768,7 @@ function ExploreContent({ onReady, onOpenServices }) {
       }
     }
 
+    processingBillRef.current = true;
     try {
       setProcessingBill(true);
 
@@ -3852,6 +3887,7 @@ function ExploreContent({ onReady, onOpenServices }) {
       console.error(err);
       alert("Server error while billing");
     } finally {
+      processingBillRef.current = false;
       setProcessingBill(false);
     }
   }
