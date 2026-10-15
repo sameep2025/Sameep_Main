@@ -5,6 +5,8 @@ const test = require("node:test");
 const mongoose = require("mongoose");
 
 const CustomerMembership = require("../models/CustomerMembership");
+const VendorMenuNode = require("../models/VendorMenuNode");
+const VendorPriceNode = require("../models/VendorPriceNode");
 const controller = require("../controllers/vendorCustomerMembershipController");
 
 test("customer membership schema snapshots purchased discount plan benefits", () => {
@@ -248,6 +250,101 @@ test("customer membership listing supports server-side filters, sorting, and pag
   assert.match(controllerSource, /\.skip\(skip\)/);
   assert.match(controllerSource, /hasMore/);
   assert.match(controllerSource, /status === "EXPIRED"/);
+});
+
+test("vendor membership detail returns effective override services and keeps history", async () => {
+  const originals = {
+    membershipFindOne: CustomerMembership.findOne,
+    membershipFind: CustomerMembership.find,
+    menuFind: VendorMenuNode.find,
+    priceFind: VendorPriceNode.find,
+  };
+  const vendorId = new mongoose.Types.ObjectId("692900000000000000000011");
+  const customerId = new mongoose.Types.ObjectId("692900000000000000000001");
+  const membershipId = new mongoose.Types.ObjectId("692900000000000000000031");
+  const snapshotServiceId = new mongoose.Types.ObjectId("692900000000000000000021");
+  const overrideServiceId = new mongoose.Types.ObjectId("692900000000000000000022");
+  const membership = {
+    _id: membershipId,
+    vendorId,
+    customerId,
+    membershipPlanId: new mongoose.Types.ObjectId("692900000000000000000041"),
+    membershipType: "DISCOUNT",
+    status: "ACTIVE",
+    planSnapshot: {
+      name: "Silver Plan",
+      eligibleMenuItemIds: [snapshotServiceId],
+    },
+    serviceEligibilityOverride: {
+      eligibleMenuItemIds: [overrideServiceId],
+    },
+    activatedAt: new Date("2026-10-01T00:00:00.000Z"),
+    expiresAt: new Date("2026-11-01T00:00:00.000Z"),
+  };
+
+  CustomerMembership.findOne = () => ({ lean: async () => membership });
+  CustomerMembership.find = () => ({
+    sort() {
+      return this;
+    },
+    lean: async () => [membership],
+  });
+  VendorMenuNode.find = () => ({
+    select() {
+      return this;
+    },
+    lean: async () => [{
+      _id: overrideServiceId,
+      vendorId,
+      name: "Diamond Clean Up",
+      pathNames: ["Hash Mens", "Clean Ups"],
+    }],
+  });
+  VendorPriceNode.find = () => ({
+    select() {
+      return this;
+    },
+    lean: async () => [],
+  });
+
+  const res = {
+    statusCode: 200,
+    payload: null,
+    status(code) {
+      this.statusCode = code;
+      return this;
+    },
+    json(payload) {
+      this.payload = payload;
+      return this;
+    },
+  };
+
+  try {
+    await controller.getMembership(
+      {
+        params: { vendorId: String(vendorId), membershipId: String(membershipId) },
+        vendorWriteAuth: { vendorId: String(vendorId) },
+      },
+      res
+    );
+
+    assert.equal(res.statusCode, 200);
+    assert.deepEqual(res.payload.data.planSnapshot.eligibleMenuItemIds, [String(snapshotServiceId)]);
+    assert.deepEqual(res.payload.data.effectiveEligibleMenuItemIds, [String(overrideServiceId)]);
+    assert.equal(res.payload.data.eligibleServices.length, 1);
+    assert.equal(res.payload.data.eligibleServices[0].name, "Diamond Clean Up");
+    assert.equal(
+      res.payload.data.eligibleServices[0].path.join(" / "),
+      "Hash Mens / Clean Ups / Diamond Clean Up"
+    );
+    assert.equal(res.payload.history.length, 1);
+  } finally {
+    CustomerMembership.findOne = originals.membershipFindOne;
+    CustomerMembership.find = originals.membershipFind;
+    VendorMenuNode.find = originals.menuFind;
+    VendorPriceNode.find = originals.priceFind;
+  }
 });
 
 test("customer membership routes are vendor-authenticated and isolated from billing", () => {

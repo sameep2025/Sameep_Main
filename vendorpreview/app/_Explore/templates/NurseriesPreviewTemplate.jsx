@@ -514,17 +514,17 @@ function NurseryProductCard({ row, cartItem, onAddToCart, onIncreaseQty, onDecre
           >
             {formatCurrency(row.price)}
           </span>
-          {cartItem ? (
+          {cartItem && typeof onAddToCart === "function" ? (
             <div className="nursery-qty-controls">
               <button type="button" onClick={() => onDecreaseQty?.(row.cartKey)}>-</button>
               <span>{cartItem.qty || 1}</span>
               <button type="button" onClick={() => onIncreaseQty?.(row.cartKey)}>+</button>
             </div>
-          ) : (
+          ) : typeof onAddToCart === "function" ? (
             <button type="button" className="nursery-add-btn" onClick={handleAdd}>
               Add to Cart
             </button>
-          )}
+          ) : null}
         </div>
       </div>
     </article>
@@ -939,6 +939,7 @@ export default function NurseriesPreviewTemplate({
   const logoUrl = typeof vendorInfo?.logoUrl === "string" ? vendorInfo.logoUrl.trim() : "";
 
   const handleOpenEnquiry = () => {
+    if (hasVendorSession) return;
     if (typeof window !== "undefined") {
       window.dispatchEvent(new CustomEvent(ENQUIRY_OPEN_EVENT));
     }
@@ -1448,7 +1449,7 @@ export default function NurseriesPreviewTemplate({
         </div>
       </section>
 
-      <ContactSection />
+      {!hasVendorSession ? <ContactSection /> : null}
 
       {cartItems.length > 0 ? (
         <div className="nursery-cart-bar">

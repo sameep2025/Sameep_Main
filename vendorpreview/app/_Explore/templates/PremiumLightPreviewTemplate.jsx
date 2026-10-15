@@ -491,9 +491,11 @@ function PremiumLightServiceCard({ card, sectionName, onAddToCart }) {
           </div>
         ) : null}
 
-        <button type="button" className="premium-light-add-btn" onClick={handleAdd}>
-          Add to Cart
-        </button>
+        {typeof onAddToCart === "function" ? (
+          <button type="button" className="premium-light-add-btn" onClick={handleAdd}>
+            Add to Cart
+          </button>
+        ) : null}
       </div>
     </article>
   );
@@ -719,13 +721,15 @@ export default function PremiumLightPreviewTemplate({
           ) : null}
         </div>
 
-        <button
-          type="button"
-          className="premium-light-cta"
-          onClick={() => scrollToElementById("contact")}
-        >
-          Book Appointment
-        </button>
+        {!hasVendorSession ? (
+          <button
+            type="button"
+            className="premium-light-cta"
+            onClick={() => scrollToElementById("contact")}
+          >
+            Book Appointment
+          </button>
+        ) : null}
 
         <button
           type="button"
@@ -982,16 +986,18 @@ export default function PremiumLightPreviewTemplate({
             ) : null}
           </aside>
 
-          <div className="premium-light-contact-form">
-            <ContactSection
-              mode="inline"
-              sectionId="premium-light-form"
-              hideHeader={false}
-              title="Request Appointment"
-              subtitle="Tell us what you need and we will help you pick the right service."
-              submitLabel="Request Appointment Now"
-            />
-          </div>
+          {!hasVendorSession ? (
+            <div className="premium-light-contact-form">
+              <ContactSection
+                mode="inline"
+                sectionId="premium-light-form"
+                hideHeader={false}
+                title="Request Appointment"
+                subtitle="Tell us what you need and we will help you pick the right service."
+                submitLabel="Request Appointment Now"
+              />
+            </div>
+          ) : null}
         </div>
       </section>
 

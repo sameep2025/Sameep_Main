@@ -146,8 +146,10 @@ button {
 
 .portalPhoneRow {
   display: grid;
-  grid-template-columns: 94px 1fr;
+  grid-template-columns: auto minmax(0, 1fr);
   gap: 10px;
+  width: 100%;
+  min-width: 0;
 }
 
 .portalCountryCode,
@@ -164,6 +166,11 @@ button {
   gap: 4px;
   padding: 0 14px;
   color: var(--muted);
+  white-space: nowrap;
+}
+
+.portalPhoneRow input {
+  min-width: 0;
 }
 
 .portalCountryCode input,
@@ -1209,12 +1216,39 @@ button {
   grid-column: 1 / -1;
 }
 
+.portalMembershipServiceControls {
+  display: grid;
+  gap: 6px;
+  margin-top: 9px;
+}
+
+.portalMembershipServiceControls input {
+  width: 100%;
+  min-height: 42px;
+  border: 1px solid rgba(16, 26, 52, 0.12);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.9);
+  color: var(--ink);
+  font: inherit;
+  padding: 10px 12px;
+  outline: none;
+}
+
+.portalMembershipServiceControls input:focus {
+  border-color: rgba(16, 26, 52, 0.35);
+  box-shadow: 0 0 0 3px rgba(16, 26, 52, 0.07);
+}
+
 .portalMembershipServices ul {
   margin: 8px 0 0;
   padding: 0;
   list-style: none;
   display: grid;
   gap: 7px;
+  max-height: min(46vh, 420px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding-right: 4px;
 }
 
 .portalMembershipServices li {
@@ -1229,6 +1263,10 @@ button {
   color: var(--muted);
   font-weight: 700;
   line-height: 1.35;
+}
+
+.portalMembershipServicesEmpty {
+  padding: 14px 0 4px;
 }
 
 .portalItemRow div {
@@ -4170,7 +4208,6 @@ button {
     border-radius: 26px;
   }
 
-  .portalPhoneRow,
   .customerPortalHeader {
     grid-template-columns: 1fr;
   }

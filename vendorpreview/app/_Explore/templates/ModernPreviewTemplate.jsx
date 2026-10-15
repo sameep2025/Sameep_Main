@@ -1123,9 +1123,11 @@ function ModernServiceRow({ card, sectionName, onAddToCart }) {
         ) : null}
 
         <div className="modern-row-actions">
-          <button type="button" className="modern-row-add-btn" onClick={handleAddSelected}>
-            Add to Cart
-          </button>
+          {typeof onAddToCart === "function" ? (
+            <button type="button" className="modern-row-add-btn" onClick={handleAddSelected}>
+              Add to Cart
+            </button>
+          ) : null}
           <span className="modern-row-price">{formatCurrency(currentPrice)}</span>
         </div>
       </div>
@@ -1681,6 +1683,7 @@ export default function ModernPreviewTemplate({
   }, [supportedEnquiryFields]);
 
   const goToQuickInquiry = () => {
+    if (hasVendorSession) return;
     scrollToElementById("quick-inquiry");
   };
 
@@ -1698,6 +1701,7 @@ export default function ModernPreviewTemplate({
   };
 
   const handleSubmitInquiry = async () => {
+    if (hasVendorSession) return;
     if (isSubmittingInquiry) return;
 
     if (!vendorId || !rootCategoryId) {
@@ -2008,9 +2012,11 @@ export default function ModernPreviewTemplate({
           ) : null}
         </div>
 
-        <button type="button" className="modern-book-btn" onClick={goToQuickInquiry}>
-          {enquiryTypeLabel}
-        </button>
+        {!hasVendorSession ? (
+          <button type="button" className="modern-book-btn" onClick={goToQuickInquiry}>
+            {enquiryTypeLabel}
+          </button>
+        ) : null}
 
         {hasVendorSession ? (
           <button
@@ -2063,16 +2069,18 @@ export default function ModernPreviewTemplate({
               My Bills & Rewards
             </a>
           </nav>
-          <button
-            type="button"
-            className="modern-mobile-menu-book"
-            onClick={() => {
-              setMobileMenuOpen(false);
-              goToQuickInquiry();
-            }}
-          >
-            {enquiryTypeLabel}
-          </button>
+          {!hasVendorSession ? (
+            <button
+              type="button"
+              className="modern-mobile-menu-book"
+              onClick={() => {
+                setMobileMenuOpen(false);
+                goToQuickInquiry();
+              }}
+            >
+              {enquiryTypeLabel}
+            </button>
+          ) : null}
 
           <div className="modern-mobile-admin-menu">
             <button
@@ -2548,8 +2556,9 @@ export default function ModernPreviewTemplate({
           ) : null}
         </div>
 
+        {!hasVendorSession ? (
           <div className="modern-contact-right">
-          <div className="modern-contact-card" id="quick-inquiry">
+            <div className="modern-contact-card" id="quick-inquiry">
             <h3>{enquiryTypeLabel}</h3>
             {supportedEnquiryFields.length > 0 ? (
               <div className="modern-inquiry-dynamic">
@@ -2713,8 +2722,9 @@ export default function ModernPreviewTemplate({
             {inquiryFeedback ? (
               <p className="modern-inquiry-feedback">{inquiryFeedback}</p>
             ) : null}
+            </div>
           </div>
-        </div>
+        ) : null}
       </section>
 
       {activeShowcaseItem ? (

@@ -1263,6 +1263,7 @@ function MembershipsTab({ token, onAuthExpired }) {
   const [error, setError] = useState("");
   const [vendorGroups, setVendorGroups] = useState([]);
   const [expandedMembershipIds, setExpandedMembershipIds] = useState({});
+  const [membershipServiceSearch, setMembershipServiceSearch] = useState({});
 
   const loadMemberships = useCallback(async () => {
     try {
@@ -1335,6 +1336,16 @@ function MembershipsTab({ token, onAuthExpired }) {
               const eligibleServices = Array.isArray(membership.benefits?.eligibleServices)
                 ? membership.benefits.eligibleServices
                 : [];
+              const serviceSearch = String(membershipServiceSearch[membership.id] || "");
+              const normalizedServiceSearch = serviceSearch.trim().toLocaleLowerCase();
+              const filteredEligibleServices = normalizedServiceSearch
+                ? eligibleServices.filter((service) => {
+                    const searchableText = [service.name, ...(service.path || [])]
+                      .join(" ")
+                      .toLocaleLowerCase();
+                    return searchableText.includes(normalizedServiceSearch);
+                  })
+                : eligibleServices;
 
               return (
                 <article className="portalMembershipCard" key={membership.id}>
@@ -1403,24 +1414,44 @@ function MembershipsTab({ token, onAuthExpired }) {
                       <div className="portalMembershipServices">
                         <span>Eligible services</span>
                         {eligibleServices.length ? (
-                          <ul>
-                            {eligibleServices.slice(0, 12).map((service) => (
-                              <li key={service.id}>
-                                <strong>{service.name}</strong>
-                                {service.path?.length ? (
-                                  <small>{service.path.join(" / ")}</small>
-                                ) : null}
-                              </li>
-                            ))}
-                          </ul>
+                          <>
+                            <div className="portalMembershipServiceControls">
+                              <input
+                                type="search"
+                                value={serviceSearch}
+                                onChange={(event) => setMembershipServiceSearch((current) => ({
+                                  ...current,
+                                  [membership.id]: event.target.value,
+                                }))}
+                                placeholder="Search eligible services..."
+                                aria-label={`Search eligible services for ${membership.planName || "membership"}`}
+                              />
+                              <small>
+                                {normalizedServiceSearch
+                                  ? `${filteredEligibleServices.length} of ${eligibleServices.length} eligible services`
+                                  : `${eligibleServices.length} eligible services`}
+                              </small>
+                            </div>
+                            {filteredEligibleServices.length ? (
+                              <ul>
+                                {filteredEligibleServices.map((service) => (
+                                  <li key={service.id}>
+                                    <strong>{service.name}</strong>
+                                    {service.path?.length ? (
+                                      <small>{service.path.join(" / ")}</small>
+                                    ) : null}
+                                  </li>
+                                ))}
+                              </ul>
+                            ) : (
+                              <strong className="portalMembershipServicesEmpty">
+                                No matching services found
+                              </strong>
+                            )}
+                          </>
                         ) : (
                           <strong>No services recorded for this membership.</strong>
                         )}
-                        {eligibleServices.length > 12 ? (
-                          <small>
-                            +{eligibleServices.length - 12} more eligible services
-                          </small>
-                        ) : null}
                       </div>
                     </div>
                   ) : null}

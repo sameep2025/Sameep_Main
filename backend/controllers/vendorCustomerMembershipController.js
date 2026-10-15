@@ -4,6 +4,11 @@ const Customer = require("../models/Customer");
 const CustomerMembership = require("../models/CustomerMembership");
 const MembershipPlan = require("../models/MembershipPlan");
 const VendorCustomerProfile = require("../models/VendorCustomerProfile");
+const {
+  getEffectiveEligibleMenuItemIds,
+  getEligibleServicesForMembership,
+  loadMembershipEligibleServiceMap,
+} = require("../utils/membershipEligibleServices");
 
 const PAYMENT_METHODS = CustomerMembership.constants.PAYMENT_METHODS;
 const DURATION_MONTHS = {
@@ -185,12 +190,13 @@ async function getVendorCustomerNameMap(vendorId, memberships = []) {
   );
 }
 
-function serializeMembership(membership, nameMap = new Map()) {
+function serializeMembership(membership, nameMap = new Map(), serviceMap = null) {
   if (!membership) return null;
   const planSnapshot = membership.planSnapshot || {};
   const effectiveStatus = getEffectiveMembershipStatus(membership);
   const serviceEligibilityOverride = membership.serviceEligibilityOverride || null;
   const benefitRulesOverride = membership.benefitRulesOverride || null;
+  const effectiveEligibleMenuItemIds = getEffectiveEligibleMenuItemIds(membership);
 
   return {
     id: String(membership._id),
@@ -219,6 +225,10 @@ function serializeMembership(membership, nameMap = new Map()) {
           source: serviceEligibilityOverride.source || "",
         }
       : null,
+    effectiveEligibleMenuItemIds,
+    eligibleServices: serviceMap
+      ? getEligibleServicesForMembership(membership, serviceMap)
+      : undefined,
     benefitRulesOverride: benefitRulesOverride?.benefitSemanticsVersion
       ? {
           allowAdditionalDiscountOnMembershipItems:
@@ -523,12 +533,15 @@ async function getMembership(req, res) {
       .sort({ activatedAt: 1, createdAt: 1, _id: 1 })
       .lean();
 
-    const nameMap = await getVendorCustomerNameMap(vendorId, [membership, ...history]);
+    const [nameMap, serviceMap] = await Promise.all([
+      getVendorCustomerNameMap(vendorId, [membership, ...history]),
+      loadMembershipEligibleServiceMap([membership, ...history]),
+    ]);
 
     return res.json({
       success: true,
-      data: serializeMembership(membership, nameMap),
-      history: history.map((row) => serializeMembership(row, nameMap)),
+      data: serializeMembership(membership, nameMap, serviceMap),
+      history: history.map((row) => serializeMembership(row, nameMap, serviceMap)),
     });
   } catch (error) {
     console.error("Customer membership detail error:", error?.message || error);

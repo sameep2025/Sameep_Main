@@ -868,6 +868,85 @@
   margin-top: 12px;
 }
 
+.membership-eligible-services-section {
+  margin-top: 18px;
+  padding: 14px;
+  border: 1px solid rgba(230, 195, 122, 0.16);
+  border-radius: 16px;
+  background: rgba(230, 195, 122, 0.045);
+}
+
+.membership-eligible-services-head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.membership-eligible-services-head h4 {
+  margin: 0;
+  color: #fff7d6;
+}
+
+.membership-eligible-services-head span {
+  display: block;
+  margin-top: 4px;
+  color: rgba(255, 255, 255, 0.58);
+  font-size: 12px;
+}
+
+.membership-eligible-services-head input {
+  width: min(300px, 100%);
+  min-height: 42px;
+  border: 1px solid rgba(230, 195, 122, 0.24);
+  border-radius: 12px;
+  background: rgba(0, 0, 0, 0.28);
+  color: #fff7d6;
+  font: inherit;
+  padding: 10px 12px;
+  outline: none;
+}
+
+.membership-eligible-services-head input:focus {
+  border-color: rgba(230, 195, 122, 0.58);
+  box-shadow: 0 0 0 3px rgba(230, 195, 122, 0.08);
+}
+
+.membership-eligible-services-list {
+  display: grid;
+  gap: 8px;
+  max-height: min(42vh, 390px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding-right: 4px;
+}
+
+.membership-eligible-service-row {
+  padding: 10px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 12px;
+  background: rgba(0, 0, 0, 0.2);
+}
+
+.membership-eligible-service-row strong,
+.membership-eligible-service-row span {
+  display: block;
+  overflow-wrap: anywhere;
+}
+
+.membership-eligible-service-row strong {
+  color: #fff7d6;
+  font-size: 14px;
+}
+
+.membership-eligible-service-row span {
+  margin-top: 4px;
+  color: rgba(255, 255, 255, 0.58);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
 .membership-history-section {
   margin-top: 18px;
 }
@@ -1092,8 +1171,17 @@
   .membership-service-picker-head,
   .membership-plan-card-head,
   .membership-plan-actions,
-  .membership-history-row {
+  .membership-history-row,
+  .membership-eligible-services-head {
     flex-direction: column;
+  }
+
+  .membership-eligible-services-head {
+    align-items: stretch;
+  }
+
+  .membership-eligible-services-head input {
+    width: 100%;
   }
 
   .membership-form-row,

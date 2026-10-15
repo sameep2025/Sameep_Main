@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { API_BASE_URL } from "../../../config";
 import { getVendorAuthHeaders } from "../../utils/vendorAuth";
 import "./MembershipPlansDashboard.css";
@@ -304,12 +304,13 @@ export default function MembershipPlansDashboard({ vendorId }) {
   const [editingPlanId, setEditingPlanId] = useState("");
   const [originalEditingItemIds, setOriginalEditingItemIds] = useState([]);
   const [serviceEligibilityScope, setServiceEligibilityScope] = useState(
-    SERVICE_SCOPE_OPTIONS.ALL_ACTIVE_AND_SCHEDULED
+    ""
   );
   const [benefitRulesScope, setBenefitRulesScope] = useState(
     BENEFIT_SCOPE_OPTIONS.ALL_ACTIVE_AND_SCHEDULED
   );
   const [isEditorOpen, setIsEditorOpen] = useState(false);
+  const [isServiceScopeConfirmOpen, setIsServiceScopeConfirmOpen] = useState(false);
   const [editorView, setEditorView] = useState("details");
   const [isActivationOpen, setIsActivationOpen] = useState(false);
   const [activationForm, setActivationForm] = useState(EMPTY_ACTIVATION_FORM);
@@ -336,12 +337,14 @@ export default function MembershipPlansDashboard({ vendorId }) {
   const [membershipsLoading, setMembershipsLoading] = useState(false);
   const [selectedMembership, setSelectedMembership] = useState(null);
   const [selectedMembershipHistory, setSelectedMembershipHistory] = useState([]);
+  const [detailServiceSearch, setDetailServiceSearch] = useState("");
   const [detailLoading, setDetailLoading] = useState(false);
   const [renewalMembership, setRenewalMembership] = useState(null);
   const [renewalForm, setRenewalForm] = useState(EMPTY_RENEWAL_FORM);
   const [renewalSaving, setRenewalSaving] = useState(false);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
+  const saveInFlightRef = useRef(false);
 
   const allEligibleItemIds = useMemo(
     () => eligibleItems.map((item) => String(item.id)),
@@ -380,6 +383,22 @@ export default function MembershipPlansDashboard({ vendorId }) {
     ),
     [baselineForm, editingPlanId, form]
   );
+  const selectedEligibleServices = useMemo(
+    () => Array.isArray(selectedMembership?.eligibleServices)
+      ? selectedMembership.eligibleServices
+      : [],
+    [selectedMembership]
+  );
+  const filteredSelectedEligibleServices = useMemo(() => {
+    const search = detailServiceSearch.trim().toLocaleLowerCase();
+    if (!search) return selectedEligibleServices;
+    return selectedEligibleServices.filter((service) =>
+      [service.name, ...(service.path || [])]
+        .join(" ")
+        .toLocaleLowerCase()
+        .includes(search)
+    );
+  }, [detailServiceSearch, selectedEligibleServices]);
   const removedBenefitLabels = useMemo(() => {
     if (!benefitRulesChanged) return [];
     const labels = [];
@@ -561,7 +580,11 @@ export default function MembershipPlansDashboard({ vendorId }) {
 
   useEffect(() => {
     if (
-      (!isEditorOpen && !isActivationOpen && !selectedMembership && !renewalMembership) ||
+      (!isEditorOpen &&
+        !isServiceScopeConfirmOpen &&
+        !isActivationOpen &&
+        !selectedMembership &&
+        !renewalMembership) ||
       typeof document === "undefined"
     ) return undefined;
 
@@ -571,12 +594,19 @@ export default function MembershipPlansDashboard({ vendorId }) {
     return () => {
       document.body.style.overflow = previousOverflow;
     };
-  }, [isEditorOpen, isActivationOpen, selectedMembership, renewalMembership]);
+  }, [
+    isEditorOpen,
+    isServiceScopeConfirmOpen,
+    isActivationOpen,
+    selectedMembership,
+    renewalMembership,
+  ]);
 
   const resetForm = () => {
     setEditingPlanId("");
     setOriginalEditingItemIds([]);
-    setServiceEligibilityScope(SERVICE_SCOPE_OPTIONS.ALL_ACTIVE_AND_SCHEDULED);
+    setServiceEligibilityScope("");
+    setIsServiceScopeConfirmOpen(false);
     setBenefitRulesScope(BENEFIT_SCOPE_OPTIONS.ALL_ACTIVE_AND_SCHEDULED);
     setForm(EMPTY_FORM);
     setBaselineForm(EMPTY_FORM);
@@ -588,7 +618,8 @@ export default function MembershipPlansDashboard({ vendorId }) {
   const openCreateEditor = () => {
     setEditingPlanId("");
     setOriginalEditingItemIds([]);
-    setServiceEligibilityScope(SERVICE_SCOPE_OPTIONS.ALL_ACTIVE_AND_SCHEDULED);
+    setServiceEligibilityScope("");
+    setIsServiceScopeConfirmOpen(false);
     setBenefitRulesScope(BENEFIT_SCOPE_OPTIONS.ALL_ACTIVE_AND_SCHEDULED);
     setForm(EMPTY_FORM);
     setBaselineForm(EMPTY_FORM);
@@ -765,6 +796,7 @@ export default function MembershipPlansDashboard({ vendorId }) {
     if (!vendorId || !membership?.id) return;
     setSelectedMembership(membership);
     setSelectedMembershipHistory([]);
+    setDetailServiceSearch("");
     setDetailLoading(true);
     setError("");
 
@@ -909,7 +941,8 @@ export default function MembershipPlansDashboard({ vendorId }) {
     setOriginalEditingItemIds(
       Array.isArray(plan?.eligibleMenuItemIds) ? plan.eligibleMenuItemIds.map(String) : []
     );
-    setServiceEligibilityScope(SERVICE_SCOPE_OPTIONS.ALL_ACTIVE_AND_SCHEDULED);
+    setServiceEligibilityScope("");
+    setIsServiceScopeConfirmOpen(false);
     setBenefitRulesScope(BENEFIT_SCOPE_OPTIONS.ALL_ACTIVE_AND_SCHEDULED);
     setForm(nextForm);
     setBaselineForm(nextForm);
@@ -919,10 +952,10 @@ export default function MembershipPlansDashboard({ vendorId }) {
     setIsEditorOpen(true);
   };
 
-  const savePlan = async (event) => {
-    event.preventDefault();
-    if (!vendorId) return;
+  const persistPlan = async (confirmedServiceScope = "") => {
+    if (!vendorId || saveInFlightRef.current) return;
 
+    saveInFlightRef.current = true;
     try {
       setSaving(true);
       setMessage("");
@@ -940,19 +973,10 @@ export default function MembershipPlansDashboard({ vendorId }) {
       } else if (unavailableSelectedIds.length > 0) {
         throw new Error("Remove unavailable services before saving service selection changes");
       } else if (isEditing) {
-        if (
-          removedEligibleServiceCount > 0 &&
-          serviceEligibilityScope === SERVICE_SCOPE_OPTIONS.ALL_ACTIVE_AND_SCHEDULED
-        ) {
-          const confirmed = window.confirm(
-            `This removes ${removedEligibleServiceCount} service${removedEligibleServiceCount === 1 ? "" : "s"} from existing active/scheduled members. Continue?`
-          );
-          if (!confirmed) {
-            setSaving(false);
-            return;
-          }
+        if (!Object.values(SERVICE_SCOPE_OPTIONS).includes(confirmedServiceScope)) {
+          throw new Error("Choose how service changes apply before updating the plan");
         }
-        payload.serviceEligibilityScope = serviceEligibilityScope;
+        payload.serviceEligibilityScope = confirmedServiceScope;
       }
       if (isEditing && benefitRulesChanged) {
         if (
@@ -1015,8 +1039,39 @@ export default function MembershipPlansDashboard({ vendorId }) {
       console.error("Membership save failed", saveError);
       setError(saveError?.message || "Unable to save membership plan");
     } finally {
+      saveInFlightRef.current = false;
       setSaving(false);
     }
+  };
+
+  const savePlan = (event) => {
+    event.preventDefault();
+    if (!vendorId || saving || saveInFlightRef.current) return;
+
+    if (eligibleServicesChanged) {
+      if (unavailableSelectedIds.length > 0) {
+        setError("Remove unavailable services before saving service selection changes");
+        return;
+      }
+      setMessage("");
+      setError("");
+      setServiceEligibilityScope("");
+      setIsServiceScopeConfirmOpen(true);
+      return;
+    }
+
+    persistPlan();
+  };
+
+  const cancelServiceScopeConfirmation = () => {
+    if (saving) return;
+    setServiceEligibilityScope("");
+    setIsServiceScopeConfirmOpen(false);
+  };
+
+  const confirmServiceScopeUpdate = () => {
+    if (!serviceEligibilityScope || saving || saveInFlightRef.current) return;
+    persistPlan(serviceEligibilityScope);
   };
 
   const togglePlanStatus = async (plan) => {
@@ -1362,7 +1417,10 @@ export default function MembershipPlansDashboard({ vendorId }) {
                 <span><strong>{formatDate(selectedMembership.activatedAt)}</strong>Activated</span>
                 <span><strong>{formatDate(selectedMembership.expiresAt)}</strong>Expires</span>
                 <span><strong>{Number(selectedMembership.planSnapshot?.discountPercentage || 0)}%</strong>Discount</span>
-                <span><strong>{selectedMembership.planSnapshot?.eligibleMenuItemIds?.length || 0}</strong>Eligible items</span>
+                <span>
+                  <strong>{selectedMembership.effectiveEligibleMenuItemIds?.length || 0}</strong>
+                  Eligible items
+                </span>
               </div>
               {selectedMembership.planSnapshot?.description ? (
                 <div className="membership-detail-note">
@@ -1374,6 +1432,43 @@ export default function MembershipPlansDashboard({ vendorId }) {
                   Payment reference: {selectedMembership.payment.reference}
                 </div>
               ) : null}
+              <div className="membership-eligible-services-section">
+                <div className="membership-eligible-services-head">
+                  <div>
+                    <h4>Eligible Services</h4>
+                    <span>
+                      {detailServiceSearch.trim()
+                        ? `${filteredSelectedEligibleServices.length} of ${selectedEligibleServices.length} services`
+                        : `${selectedEligibleServices.length} services`}
+                    </span>
+                  </div>
+                  {selectedEligibleServices.length ? (
+                    <input
+                      type="search"
+                      value={detailServiceSearch}
+                      onChange={(event) => setDetailServiceSearch(event.target.value)}
+                      placeholder="Search eligible services..."
+                      aria-label="Search eligible membership services"
+                    />
+                  ) : null}
+                </div>
+                {detailLoading ? (
+                  <div className="membership-empty-small">Loading eligible services...</div>
+                ) : selectedEligibleServices.length === 0 ? (
+                  <div className="membership-empty-small">No eligible services recorded for this membership.</div>
+                ) : filteredSelectedEligibleServices.length === 0 ? (
+                  <div className="membership-empty-small">No matching services found</div>
+                ) : (
+                  <div className="membership-eligible-services-list">
+                    {filteredSelectedEligibleServices.map((service) => (
+                      <div key={service.id} className="membership-eligible-service-row">
+                        <strong>{service.name}</strong>
+                        {service.path?.length ? <span>{service.path.join(" / ")}</span> : null}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
               <div className="membership-history-section">
                 <h4>Membership History</h4>
                 {selectedMembershipHistory.length === 0 ? (
@@ -1407,6 +1502,7 @@ export default function MembershipPlansDashboard({ vendorId }) {
               <button type="button" className="membership-primary-button" onClick={() => {
                 setSelectedMembership(null);
                 setSelectedMembershipHistory([]);
+                setDetailServiceSearch("");
               }}>
                 Done
               </button>
@@ -1691,50 +1787,6 @@ export default function MembershipPlansDashboard({ vendorId }) {
                     </button>
                   </div>
 
-                  {eligibleServicesChanged && (
-                    <div className="membership-service-scope-card">
-                      <strong>Apply service changes</strong>
-                      <p>
-                        Choose whether this updated service list should also affect customers who
-                        already bought this plan. Purchased price, discount %, duration and minimum bill stay unchanged.
-                      </p>
-                      <label>
-                        <input
-                          type="radio"
-                          name="serviceEligibilityScope"
-                          value={SERVICE_SCOPE_OPTIONS.ALL_ACTIVE_AND_SCHEDULED}
-                          checked={serviceEligibilityScope === SERVICE_SCOPE_OPTIONS.ALL_ACTIVE_AND_SCHEDULED}
-                          onChange={() =>
-                            setServiceEligibilityScope(SERVICE_SCOPE_OPTIONS.ALL_ACTIVE_AND_SCHEDULED)
-                          }
-                        />
-                        <span>
-                          <strong>Apply service changes to existing members and future memberships</strong>
-                          <small>Recommended. Active and scheduled members use this new service list.</small>
-                        </span>
-                      </label>
-                      <label>
-                        <input
-                          type="radio"
-                          name="serviceEligibilityScope"
-                          value={SERVICE_SCOPE_OPTIONS.FUTURE_ONLY}
-                          checked={serviceEligibilityScope === SERVICE_SCOPE_OPTIONS.FUTURE_ONLY}
-                          onChange={() => setServiceEligibilityScope(SERVICE_SCOPE_OPTIONS.FUTURE_ONLY)}
-                        />
-                        <span>
-                          <strong>Apply only to new memberships and renewals</strong>
-                          <small>Existing active/scheduled periods keep their current eligible services.</small>
-                        </span>
-                      </label>
-                      {removedEligibleServiceCount > 0 &&
-                        serviceEligibilityScope === SERVICE_SCOPE_OPTIONS.ALL_ACTIVE_AND_SCHEDULED ? (
-                        <div className="membership-service-scope-warning">
-                          {removedEligibleServiceCount} service{removedEligibleServiceCount === 1 ? "" : "s"} will be removed from existing active/scheduled members after confirmation.
-                        </div>
-                      ) : null}
-                    </div>
-                  )}
-
                   {unavailableSelectedIds.length > 0 && (
                     <div className="membership-unavailable-selection">
                       <strong>{unavailableSelectedIds.length} saved selection{unavailableSelectedIds.length === 1 ? "" : "s"} unavailable</strong>
@@ -1846,6 +1898,99 @@ export default function MembershipPlansDashboard({ vendorId }) {
               )}
             </footer>
           </form>
+        </div>
+      )}
+
+      {isServiceScopeConfirmOpen && (
+        <div
+          className="membership-editor-overlay membership-propagation-overlay"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="membership-propagation-title"
+        >
+          <div className="membership-editor-modal membership-propagation-modal">
+            <header className="membership-editor-header">
+              <div>
+                <p className="membership-dashboard-eyebrow">Confirm service update</p>
+                <h3 id="membership-propagation-title">Apply Eligible Service Changes</h3>
+              </div>
+              <button
+                type="button"
+                className="membership-editor-close"
+                onClick={cancelServiceScopeConfirmation}
+                disabled={saving}
+              >
+                Close
+              </button>
+            </header>
+
+            <div className="membership-editor-body membership-propagation-body">
+              {error && <div className="membership-message error">{error}</div>}
+              <p className="membership-propagation-copy">
+                The eligible service list has changed. Choose who should receive the updated list.
+                Existing purchased price, discount percentage, duration and minimum bill remain unchanged.
+              </p>
+
+              <div className="membership-service-scope-card membership-propagation-options">
+                <label>
+                  <input
+                    type="radio"
+                    name="serviceEligibilityScopeConfirmation"
+                    value={SERVICE_SCOPE_OPTIONS.ALL_ACTIVE_AND_SCHEDULED}
+                    checked={serviceEligibilityScope === SERVICE_SCOPE_OPTIONS.ALL_ACTIVE_AND_SCHEDULED}
+                    onChange={() =>
+                      setServiceEligibilityScope(SERVICE_SCOPE_OPTIONS.ALL_ACTIVE_AND_SCHEDULED)
+                    }
+                    disabled={saving}
+                  />
+                  <span>
+                    <strong>Apply service changes to existing members and future memberships</strong>
+                    <small>Active and scheduled members will use this updated service list.</small>
+                  </span>
+                </label>
+                <label>
+                  <input
+                    type="radio"
+                    name="serviceEligibilityScopeConfirmation"
+                    value={SERVICE_SCOPE_OPTIONS.FUTURE_ONLY}
+                    checked={serviceEligibilityScope === SERVICE_SCOPE_OPTIONS.FUTURE_ONLY}
+                    onChange={() => setServiceEligibilityScope(SERVICE_SCOPE_OPTIONS.FUTURE_ONLY)}
+                    disabled={saving}
+                  />
+                  <span>
+                    <strong>Apply only to new memberships and renewals</strong>
+                    <small>Existing active and scheduled periods keep their current eligible services.</small>
+                  </span>
+                </label>
+                {removedEligibleServiceCount > 0 &&
+                serviceEligibilityScope === SERVICE_SCOPE_OPTIONS.ALL_ACTIVE_AND_SCHEDULED ? (
+                  <div className="membership-service-scope-warning">
+                    {removedEligibleServiceCount} service{removedEligibleServiceCount === 1 ? "" : "s"} will be
+                    removed from existing active and scheduled members.
+                  </div>
+                ) : null}
+              </div>
+            </div>
+
+            <footer className="membership-editor-footer">
+              <button
+                type="button"
+                className="membership-secondary-button"
+                onClick={cancelServiceScopeConfirmation}
+                disabled={saving}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="membership-primary-button"
+                onClick={confirmServiceScopeUpdate}
+                disabled={!serviceEligibilityScope || saving}
+              >
+                {saving ? "Updating..." : "Confirm Update"}
+              </button>
+            </footer>
+          </div>
         </div>
       )}
 

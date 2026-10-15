@@ -53,6 +53,7 @@ export default function Header() {
   const [serviceType, setServiceType] = useState(null);
   const [galleryReadOnly, setGalleryReadOnly] = useState(false);
   const [hasSession, setHasSession] = useState(false);
+  const [hasVendorSession, setHasVendorSession] = useState(false);
   const [profileLoading, setProfileLoading] = useState(false);
   const [showAdminMenu, setShowAdminMenu] = useState(false);
   const showHeaderLogout = hasSession && vendorInfo;
@@ -99,12 +100,20 @@ const vendorId =
       }
 
 
-const token =
-  localStorage.getItem("authToken") ||
-  (vendorId
-    ? localStorage.getItem(`vendorToken:${vendorId}`)
-    : null);
+      const token =
+        localStorage.getItem("authToken") ||
+        (vendorId
+          ? localStorage.getItem(`vendorToken:${vendorId}`)
+          : null);
+      const sessionVendorId = localStorage.getItem("vendorSessionVendorId");
+      const vendorToken = vendorId
+        ? localStorage.getItem(`vendorToken:${vendorId}`)
+        : null;
+      const hasActiveVendorSession =
+        Boolean(vendorToken) &&
+        (!sessionVendorId || String(sessionVendorId) === String(vendorId));
       setHasSession(Boolean(token));
+      setHasVendorSession(hasActiveVendorSession);
     };
 
     const handleVisibility = () => {
@@ -177,6 +186,7 @@ if (vendorId) {
     "default";
 
   const handleEnquiryClick = () => {
+    if (hasVendorSession) return;
     if (vendorId) {
       trackVendorPreviewEvent(
         process.env.NEXT_PUBLIC_API_BASE_URL,
@@ -304,15 +314,17 @@ if (vendorId) {
                 ) : null}
               </li>
 
-              <li className="nav-item">
-                <button
-                  className="setup-business-btn"
-                  onClick={handleEnquiryClick}
-                  type="button"
-                >
-                  {enquiryCtaLabel}
-                </button>
-              </li>
+              {!hasVendorSession ? (
+                <li className="nav-item">
+                  <button
+                    className="setup-business-btn"
+                    onClick={handleEnquiryClick}
+                    type="button"
+                  >
+                    {enquiryCtaLabel}
+                  </button>
+                </li>
+              ) : null}
 
             {showHeaderLogout && (
                 <li className="nav-item">

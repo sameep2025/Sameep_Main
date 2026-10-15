@@ -1234,7 +1234,7 @@ export default function EcommercePreviewTemplate({
                               })}
                             </div>
                             <div className="ecommerce-mobile-action-slot">
-                              {qty > 0 ? (
+                              {typeof onAddToCart !== "function" ? null : qty > 0 ? (
                                 <div className="ecommerce-qty-control">
                                   <button type="button" onClick={() => onDecreaseQty(selectedVariant.cartKey)}>-</button>
                                   <span>{qty}</span>
@@ -1255,7 +1255,7 @@ export default function EcommercePreviewTemplate({
                         ) : null}
                         {!item.hasVariantSelector ? (
                           <div className="ecommerce-mobile-action-slot">
-                            {qty > 0 ? (
+                            {typeof onAddToCart !== "function" ? null : qty > 0 ? (
                               <div className="ecommerce-qty-control">
                                 <button type="button" onClick={() => onDecreaseQty(selectedVariant.cartKey)}>-</button>
                                 <span>{qty}</span>
@@ -1277,7 +1277,7 @@ export default function EcommercePreviewTemplate({
                     </div>
 
                     <div className="ecommerce-qty-cell">
-                      {qty > 0 ? (
+                      {typeof onAddToCart !== "function" ? null : qty > 0 ? (
                         <div className="ecommerce-qty-control">
                           <button type="button" onClick={() => onDecreaseQty(selectedVariant.cartKey)}>-</button>
                           <span>{qty}</span>

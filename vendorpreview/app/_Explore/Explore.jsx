@@ -43,6 +43,8 @@ import {
 } from "../utils/adminQuickActions";
 import { getVendorAuthHeaders } from "../utils/vendorAuth";
 const FOOTER_GALLERY_OPEN_EVENT = "ynot-footer-open-gallery";
+const CART_ORIGIN_PUBLIC = "PUBLIC_ENQUIRY";
+const CART_ORIGIN_BILLING = "VENDOR_BILLING";
 
 function normalizePreviewTemplateKey(value) {
   const normalized = String(value || "").trim().toLowerCase();
@@ -644,11 +646,13 @@ const cartKey = [
           </div>
         )}
 
-        <div className="ws-actions">
-          <button className="btn-primary" onClick={handleSimpleAddToCart}>
-            Add to Cart
-          </button>
-        </div>
+        {typeof addToCart === "function" ? (
+          <div className="ws-actions">
+            <button className="btn-primary" onClick={handleSimpleAddToCart}>
+              Add to Cart
+            </button>
+          </div>
+        ) : null}
       </div>
     );
   }
@@ -815,11 +819,13 @@ const cartKey = [
         </div>
       )}
 
-      <div className="ws-actions">
-        <button className="btn-primary" onClick={handleConfiguredAddToCart}>
-          Add to Cart
-        </button>
-      </div>
+      {typeof addToCart === "function" ? (
+        <div className="ws-actions">
+          <button className="btn-primary" onClick={handleConfiguredAddToCart}>
+            Add to Cart
+          </button>
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -1133,6 +1139,8 @@ function ExploreContent({ onReady, onOpenServices }) {
 
   // ================= CART + BILLING STATES =================
   const [cartItems, setCartItems] = useState([]);
+  const [cartOrigin, setCartOrigin] = useState(null);
+  const cartOriginRef = useRef(null);
   const [cartOpen, setCartOpen] = useState(false);
   const cartTotal = cartItems.reduce(
     (sum, item) => sum + (Number(item.price) || 0) * (Number(item.qty) || 0),
@@ -1160,6 +1168,7 @@ function ExploreContent({ onReady, onOpenServices }) {
   const [customerSearchLoading, setCustomerSearchLoading] = useState(false);
   const [customerSearchError, setCustomerSearchError] = useState("");
   const [customerSearchOpen, setCustomerSearchOpen] = useState(false);
+  const [billingCustomerIsNew, setBillingCustomerIsNew] = useState(false);
   const [customerName, setCustomerName] = useState("");
   const [loadedCustomerName, setLoadedCustomerName] = useState("");
   const [customerNameStatus, setCustomerNameStatus] = useState("");
@@ -1185,6 +1194,7 @@ function ExploreContent({ onReady, onOpenServices }) {
   const [membershipPreviewLoading, setMembershipPreviewLoading] = useState(false);
   const [membershipPreviewError, setMembershipPreviewError] = useState("");
   const customerSearchRequestRef = useRef(0);
+  const selectedBillingCustomerLabelRef = useRef("");
 
 
   const [vendorLoaded, setVendorLoaded] = useState(false);
@@ -1220,6 +1230,7 @@ function ExploreContent({ onReady, onOpenServices }) {
 
     setPendingLoginDestination(null);
     setPendingAction(null);
+    resetBillingState();
     setViewMode("preview");
     window.dispatchEvent(new Event("storage"));
     window.dispatchEvent(new Event("auth-changed"));
@@ -1425,12 +1436,28 @@ function ExploreContent({ onReady, onOpenServices }) {
     return earnPoints;
   };
 
-  const handleCustomerMobileInputChange = (value) => {
-    setCustomerMobile(value);
-    customerMobileLookupRef.current = value;
-    setCustomerSearchOpen(false);
+  const handleBillingCustomerInputChange = (value) => {
+    const inputValue = String(value || "");
+    const digits = inputValue.replace(/\D/g, "");
+    const isPhoneInput = /^[\d\s()+-]*$/.test(inputValue);
+    const localDigits = digits.startsWith("91") && digits.length === 12 ? digits.slice(2) : digits;
+    const nextMobile = isPhoneInput && localDigits.length === 10 ? localDigits : "";
+
+    customerSearchRequestRef.current += 1;
+    selectedBillingCustomerLabelRef.current = "";
+    setCustomerSearch(inputValue);
+    setCustomerMobile(nextMobile);
+    customerMobileLookupRef.current = nextMobile;
+    setCustomerSearchOpen(true);
     setCustomerSearchResults([]);
     setCustomerSearchError("");
+    setBillingCustomerIsNew(false);
+    setCustomerId(null);
+    setCustomerValidated(false);
+    setVerifyingCustomer(false);
+    setCheckingCustomer(false);
+    setAvailablePoints(0);
+    setRedeemPoints(0);
     setCustomerName("");
     setLoadedCustomerName("");
     setCustomerNameStatus("");
@@ -1501,11 +1528,15 @@ function ExploreContent({ onReady, onOpenServices }) {
     const localPhone = digits.startsWith("91") && digits.length > 10 ? digits.slice(2) : digits;
     const nextMobile = localPhone.slice(-10);
     const nextName = String(result?.name || "");
-    if (!nextMobile) return;
+    if (!/^\d{10}$/.test(nextMobile)) return;
 
-    setCustomerSearch(nextName ? `${nextName} ${nextMobile}` : nextMobile);
+    const selectedLabel = nextName ? `${nextName} ${nextMobile}` : nextMobile;
+    customerSearchRequestRef.current += 1;
+    selectedBillingCustomerLabelRef.current = selectedLabel;
+    setCustomerSearch(selectedLabel);
     setCustomerSearchOpen(false);
     setCustomerSearchResults([]);
+    setBillingCustomerIsNew(false);
     setCustomerMobile(nextMobile);
     customerMobileLookupRef.current = nextMobile;
     setCustomerName(nextName);
@@ -1522,20 +1553,18 @@ function ExploreContent({ onReady, onOpenServices }) {
   const renderBillingCustomerSearch = () => (
     <div style={{ marginBottom: "10px", position: "relative" }}>
       <label style={{ color: "#e6c37a", fontSize: "14px" }}>
-        Search Existing Customer
+        Customer
       </label>
       <input
         value={customerSearch}
-        onChange={(e) => {
-          setCustomerSearch(e.target.value);
-          setCustomerSearchOpen(true);
-        }}
+        onChange={(e) => handleBillingCustomerInputChange(e.target.value)}
         onFocus={() => {
           if (customerSearchResults.length || customerSearchLoading || customerSearchError) {
             setCustomerSearchOpen(true);
           }
         }}
-        placeholder="Search by name or mobile"
+        placeholder="Search by name or enter mobile"
+        autoComplete="off"
         style={{
           width: "100%",
           background: "#111",
@@ -1592,11 +1621,20 @@ function ExploreContent({ onReady, onOpenServices }) {
                 ) : null}
               </button>
             ))
-          ) : (
+          ) : customerMobile ? null : (
             <div style={{ padding: "10px", color: "#aaa", fontSize: "13px" }}>
-              No saved customer found. Enter a new mobile number below.
+              No matching customers.
             </div>
           )}
+        </div>
+      ) : null}
+      {customerMobile ? (
+        <div style={{ color: "#aaa", fontSize: "12px", marginTop: "6px" }}>
+          {billingCustomerIsNew ? "New customer" : "Billing mobile"}: +91 {customerMobile}
+        </div>
+      ) : customerSearch.trim() ? (
+        <div style={{ color: "#aaa", fontSize: "12px", marginTop: "6px" }}>
+          Select a customer or enter a valid 10-digit mobile number. Clear this field for walk-in billing.
         </div>
       ) : null}
     </div>
@@ -1783,7 +1821,7 @@ function ExploreContent({ onReady, onOpenServices }) {
       setPendingAction(null);
       setPendingLoginDestination(null);
     } else if (pendingLoginDestination === "menu") {
-      persistViewMode("menu");
+      enterVendorBilling();
       setPendingLoginDestination(null);
     } else {
       persistViewMode("new-dashboard");
@@ -2851,7 +2889,7 @@ function ExploreContent({ onReady, onOpenServices }) {
         setPendingAction(null);
         setPendingLoginDestination(null);
       } else if (pendingLoginDestination === "menu") {
-        persistViewMode("menu");
+        enterVendorBilling();
         setPendingLoginDestination(null);
       } else {
         persistViewMode("new-dashboard");
@@ -3232,13 +3270,17 @@ function ExploreContent({ onReady, onOpenServices }) {
     const query = customerSearch.trim();
     const digitCount = query.replace(/\D/g, "").length;
     const hasTextSearch = /[^\d\s()+-]/.test(query) && query.length >= 2;
-    const canSearch = Boolean(vendorId && (hasTextSearch || digitCount >= 3));
+    const isSelectedCustomerLabel = selectedBillingCustomerLabelRef.current === query;
+    const canSearch = Boolean(
+      vendorId && !isSelectedCustomerLabel && (hasTextSearch || digitCount >= 3)
+    );
 
     if (!canSearch) {
       customerSearchRequestRef.current += 1;
       setCustomerSearchResults([]);
       setCustomerSearchLoading(false);
       setCustomerSearchError("");
+      if (!customerMobile) setBillingCustomerIsNew(false);
       return undefined;
     }
 
@@ -3277,12 +3319,21 @@ function ExploreContent({ onReady, onOpenServices }) {
           throw new Error(json?.message || "Customer search failed");
         }
         if (customerSearchRequestRef.current !== requestId) return;
-        setCustomerSearchResults(Array.isArray(json?.data?.matches) ? json.data.matches : []);
-        setCustomerSearchOpen(true);
+        const matches = Array.isArray(json?.data?.matches) ? json.data.matches : [];
+        const queryDigits = query.replace(/\D/g, "");
+        const localQueryDigits = queryDigits.startsWith("91") && queryDigits.length === 12
+          ? queryDigits.slice(2)
+          : queryDigits;
+        const isExactMobileQuery = /^[\d\s()+-]*$/.test(query) && localQueryDigits.length === 10;
+        const isNewCustomer = isExactMobileQuery && matches.length === 0;
+        setCustomerSearchResults(matches);
+        setBillingCustomerIsNew(isNewCustomer);
+        setCustomerSearchOpen(!isNewCustomer);
       } catch (searchError) {
         if (searchError?.name === "AbortError") return;
         if (customerSearchRequestRef.current !== requestId) return;
         setCustomerSearchResults([]);
+        setBillingCustomerIsNew(false);
         setCustomerSearchError(searchError?.message || "Unable to search customers");
       } finally {
         if (!controller.signal.aborted && customerSearchRequestRef.current === requestId) {
@@ -3405,7 +3456,7 @@ function ExploreContent({ onReady, onOpenServices }) {
   };
   */
 
-  async function fetchWallet(cId) {
+  async function fetchWallet(cId, expectedMobile) {
     if (!cId || !vendorId) return;
 
     try {
@@ -3415,6 +3466,7 @@ function ExploreContent({ onReady, onOpenServices }) {
       );
 
       const wallet = await res.json();
+      if (expectedMobile && customerMobileLookupRef.current !== expectedMobile) return;
       if (wallet?.success) {
         setAvailablePoints(wallet?.availablePoints || 0);
         setLoyaltyLoaded(true);
@@ -3448,15 +3500,17 @@ function ExploreContent({ onReady, onOpenServices }) {
       );
 
       const bypassData = await bypassRes.json();
+      if (customerMobileLookupRef.current !== mobile) return;
       const id = bypassData?.customer?._id || null;
 
       setCustomerId(id);
       setCustomerValidated(Boolean(id));
       if (id) {
-        fetchWallet(id);
+        fetchWallet(id, mobile);
         fetchVendorCustomerName({ mobile, customerId: id });
       }
     } catch (err) {
+      if (customerMobileLookupRef.current !== mobile) return;
       console.error("Customer verification failed", err);
       setCustomerValidated(false);
     }
@@ -3465,8 +3519,25 @@ function ExploreContent({ onReady, onOpenServices }) {
     setCheckingCustomer(false);
   }
 
-  const addToCart = (node, nodePath = [], categoryPathIds = []) => {
+  const hasCurrentVendorSession = () => {
+    if (typeof window === "undefined" || !vendorId) return false;
+    const token = localStorage.getItem(`vendorToken:${vendorId}`);
+    const sessionVendorId = localStorage.getItem("vendorSessionVendorId");
+    return Boolean(token) && (!sessionVendorId || String(sessionVendorId) === String(vendorId));
+  };
+
+  const setTrackedCartOrigin = (origin) => {
+    cartOriginRef.current = origin;
+    setCartOrigin(origin);
+  };
+
+  const addToCart = (node, nodePath = [], categoryPathIds = [], origin = CART_ORIGIN_PUBLIC) => {
+    if (origin === CART_ORIGIN_PUBLIC && hasCurrentVendorSession()) return;
+
+    const previousOrigin = cartOriginRef.current;
+    setTrackedCartOrigin(origin);
     setCartItems(prev => {
+      const sourceItems = previousOrigin && previousOrigin !== origin ? [] : prev;
       const safePathIds = (categoryPathIds || []).filter(Boolean);
       const itemId = node._id || node.id || node.categoryId;
       const cartKey = node.cartKey || itemId;
@@ -3478,9 +3549,9 @@ function ExploreContent({ onReady, onOpenServices }) {
           : [];
       const minQty = Math.max(1, Number(node.minQty) || 1);
       const stepQty = Math.max(1, Number(node.stepQty) || 1);
-      const existing = prev.find(i => (i.cartKey || i.itemId) === cartKey);
+      const existing = sourceItems.find(i => (i.cartKey || i.itemId) === cartKey);
       if (existing) {
-        return prev.map(i => {
+        return sourceItems.map(i => {
           if ((i.cartKey || i.itemId) !== cartKey) return i;
           const incrementBy = Math.max(1, Number(i.stepQty) || 1);
           const qty = i.qty + incrementBy;
@@ -3488,7 +3559,7 @@ function ExploreContent({ onReady, onOpenServices }) {
         });
       }
       return [
-        ...prev,
+        ...sourceItems,
         {
           cartKey,
           itemId,
@@ -3518,6 +3589,10 @@ function ExploreContent({ onReady, onOpenServices }) {
       ];
     });
   };
+  const addPublicEnquiryItem = (node, nodePath = [], categoryPathIds = []) =>
+    addToCart(node, nodePath, categoryPathIds, CART_ORIGIN_PUBLIC);
+  const addVendorBillingItem = (node, nodePath = [], categoryPathIds = []) =>
+    addToCart(node, nodePath, categoryPathIds, CART_ORIGIN_BILLING);
   const clearCart = () => {
     setCartItems([]);
     setRedeemPoints(0);
@@ -3530,13 +3605,16 @@ function ExploreContent({ onReady, onOpenServices }) {
 
   const resetBillingState = () => {
     setCartItems([]);
+    setTrackedCartOrigin(null);
     setCustomerId(null);
     setCustomerMobile("");
     setCustomerSearch("");
     setCustomerSearchResults([]);
     setCustomerSearchError("");
     setCustomerSearchOpen(false);
+    setBillingCustomerIsNew(false);
     customerMobileLookupRef.current = "";
+    selectedBillingCustomerLabelRef.current = "";
     setCustomerName("");
     setLoadedCustomerName("");
     setCustomerNameStatus("");
@@ -3557,6 +3635,16 @@ function ExploreContent({ onReady, onOpenServices }) {
     localStorage.removeItem("ynot_cart");
   };
 
+  const enterVendorBilling = () => {
+    if (cartOriginRef.current === CART_ORIGIN_PUBLIC) {
+      resetBillingState();
+    }
+    if (cartOriginRef.current !== CART_ORIGIN_BILLING) {
+      setTrackedCartOrigin(CART_ORIGIN_BILLING);
+    }
+    persistViewMode("menu");
+  };
+
   useEffect(() => {
     // ONLY reset when switching vendor AND NOT in dashboard
     const prevVendorId = vendorIdRef.current;
@@ -3575,6 +3663,10 @@ function ExploreContent({ onReady, onOpenServices }) {
   }, [viewMode]);
 
   async function handleGenerateBill() {
+    if (cartOriginRef.current !== CART_ORIGIN_BILLING) {
+      alert("Open Billing and add services from the Billing menu before generating a bill.");
+      return;
+    }
     if (!vendorId || !cartItems.length) {
       alert("Cart is empty. Please add items.");
       return;
@@ -3614,6 +3706,16 @@ function ExploreContent({ onReady, onOpenServices }) {
       setVendorOtpAttemptToken("");
       resetVendorPasscodeState();
       setShowVendorLogin(true);
+      return;
+    }
+
+    if (customerMobile && (verifyingCustomer || checkingCustomer)) {
+      alert("Please wait while the customer is being verified.");
+      return;
+    }
+
+    if (customerMobile && !customerId) {
+      alert("Unable to verify this customer mobile number. Please try again.");
       return;
     }
 
@@ -3808,7 +3910,7 @@ function ExploreContent({ onReady, onOpenServices }) {
     }
 
     setPendingLoginDestination(null);
-    setViewMode("menu");
+    enterVendorBilling();
   };
 
   const openQuickActionDashboard = () => {
@@ -3913,8 +4015,10 @@ function ExploreContent({ onReady, onOpenServices }) {
     const cartState = {
       vendorId: String(vendorId || ""),
       rootCategoryId: String(rootCategoryId || ""),
-      cartItems,
-      cartTotal,
+      cartItems:
+        cartOrigin === CART_ORIGIN_PUBLIC && !hasActiveVendorSession ? cartItems : [],
+      cartTotal:
+        cartOrigin === CART_ORIGIN_PUBLIC && !hasActiveVendorSession ? cartTotal : 0,
     };
 
     window.__ynotCartState = cartState;
@@ -3923,7 +4027,7 @@ function ExploreContent({ onReady, onOpenServices }) {
         detail: cartState,
       })
     );
-  }, [cartItems, cartTotal, rootCategoryId, vendorId]);
+  }, [cartItems, cartOrigin, cartTotal, hasActiveVendorSession, rootCategoryId, vendorId]);
 
   useEffect(() => {
     if (typeof window === "undefined") return undefined;
@@ -3976,6 +4080,7 @@ function ExploreContent({ onReady, onOpenServices }) {
   }, []);
 
   const handleClassicEnquiryAction = () => {
+    if (hasActiveVendorSession) return;
     if (typeof window === "undefined") return;
 
     setViewMode("preview");
@@ -4344,7 +4449,7 @@ function ExploreContent({ onReady, onOpenServices }) {
             <button
               className="menu-tree-add-btn"
               type="button"
-              onClick={() => addToCart(node, newPath, newPathIds)}
+              onClick={() => addVendorBillingItem(node, newPath, newPathIds)}
             >
               Add
             </button>
@@ -4709,15 +4814,15 @@ function ExploreContent({ onReady, onOpenServices }) {
           heroButton1={heroButton1}
           heroButton2={heroButton2}
           onPrimaryAction={handleHeroButton1Click}
-          onOpenMenu={() => setViewMode("menu")}
+          onOpenMenu={enterVendorBilling}
           onOpenGallery={() => {
             setGalleryReadOnly(true);
             setServiceType("gallery");
             setOpenServices(true);
           }}
-          cartItems={cartItems}
-          cartTotal={cartTotal}
-          onAddToCart={addToCart}
+          cartItems={!hasActiveVendorSession && cartOrigin === CART_ORIGIN_PUBLIC ? cartItems : []}
+          cartTotal={!hasActiveVendorSession && cartOrigin === CART_ORIGIN_PUBLIC ? cartTotal : 0}
+          onAddToCart={hasActiveVendorSession ? undefined : addPublicEnquiryItem}
           onIncreaseQty={increaseQty}
           onDecreaseQty={decreaseQty}
           templateVariant={activeTemplateKey === "astrology" ? "astrology" : "modern"}
@@ -4733,15 +4838,15 @@ function ExploreContent({ onReady, onOpenServices }) {
           mergedHeroImages={mergedHeroImages}
           heroTagline={heroTagline}
           heroDescription={heroDescription}
-          onOpenMenu={() => setViewMode("menu")}
+          onOpenMenu={enterVendorBilling}
           onOpenGallery={() => {
             setGalleryReadOnly(true);
             setServiceType("gallery");
             setOpenServices(true);
           }}
-          cartItems={cartItems}
-          cartTotal={cartTotal}
-          onAddToCart={addToCart}
+          cartItems={!hasActiveVendorSession && cartOrigin === CART_ORIGIN_PUBLIC ? cartItems : []}
+          cartTotal={!hasActiveVendorSession && cartOrigin === CART_ORIGIN_PUBLIC ? cartTotal : 0}
+          onAddToCart={hasActiveVendorSession ? undefined : addPublicEnquiryItem}
           onIncreaseQty={increaseQty}
           onDecreaseQty={decreaseQty}
           hasVendorSession={hasActiveVendorSession}
@@ -4757,12 +4862,12 @@ function ExploreContent({ onReady, onOpenServices }) {
           mergedHeroImages={mergedHeroImages}
           heroTagline={heroTagline}
           heroDescription={heroDescription}
-          cartItems={cartItems}
-          cartTotal={cartTotal}
-          onAddToCart={addToCart}
+          cartItems={!hasActiveVendorSession && cartOrigin === CART_ORIGIN_PUBLIC ? cartItems : []}
+          cartTotal={!hasActiveVendorSession && cartOrigin === CART_ORIGIN_PUBLIC ? cartTotal : 0}
+          onAddToCart={hasActiveVendorSession ? undefined : addPublicEnquiryItem}
           onIncreaseQty={increaseQty}
           onDecreaseQty={decreaseQty}
-          onOpenMenu={() => setViewMode("menu")}
+          onOpenMenu={enterVendorBilling}
           onOpenGallery={() => {
             setGalleryReadOnly(true);
             setServiceType("gallery");
@@ -4781,9 +4886,9 @@ function ExploreContent({ onReady, onOpenServices }) {
           mergedHeroImages={mergedHeroImages}
           heroTagline={heroTagline}
           heroDescription={heroDescription}
-          cartItems={cartItems}
-          cartTotal={cartTotal}
-          onAddToCart={addToCart}
+          cartItems={!hasActiveVendorSession && cartOrigin === CART_ORIGIN_PUBLIC ? cartItems : []}
+          cartTotal={!hasActiveVendorSession && cartOrigin === CART_ORIGIN_PUBLIC ? cartTotal : 0}
+          onAddToCart={hasActiveVendorSession ? undefined : addPublicEnquiryItem}
           onIncreaseQty={increaseQty}
           onDecreaseQty={decreaseQty}
           onClearCart={clearCart}
@@ -4810,9 +4915,9 @@ function ExploreContent({ onReady, onOpenServices }) {
             setServiceType("gallery");
             setOpenServices(true);
           }}
-          cartItems={cartItems}
-          cartTotal={cartTotal}
-          onAddToCart={addToCart}
+          cartItems={!hasActiveVendorSession && cartOrigin === CART_ORIGIN_PUBLIC ? cartItems : []}
+          cartTotal={!hasActiveVendorSession && cartOrigin === CART_ORIGIN_PUBLIC ? cartTotal : 0}
+          onAddToCart={hasActiveVendorSession ? undefined : addPublicEnquiryItem}
           onIncreaseQty={increaseQty}
           onDecreaseQty={decreaseQty}
           hasVendorSession={hasActiveVendorSession}
@@ -4874,7 +4979,13 @@ function ExploreContent({ onReady, onOpenServices }) {
               ))}
             </div>
             <div
-              className={`explore-preview-layout ${!isMobile && cartItems.length > 0 ? "has-cart" : "no-cart"
+              className={`explore-preview-layout ${
+                !hasActiveVendorSession &&
+                cartOrigin === CART_ORIGIN_PUBLIC &&
+                !isMobile &&
+                cartItems.length > 0
+                  ? "has-cart"
+                  : "no-cart"
                 }`}
             >
               <div className="explore-preview-main">
@@ -4899,7 +5010,7 @@ function ExploreContent({ onReady, onOpenServices }) {
                           data={c}
                           sectionName={section.sectionName}
                           openLogin={openLogin}
-                          addToCart={addToCart}
+                          addToCart={hasActiveVendorSession ? undefined : addPublicEnquiryItem}
                         />
                       ))}
                     </div>
@@ -4922,7 +5033,7 @@ function ExploreContent({ onReady, onOpenServices }) {
                           data={c}
                           sectionName={c.title}
                           openLogin={openLogin}
-                          addToCart={addToCart}
+                          addToCart={hasActiveVendorSession ? undefined : addPublicEnquiryItem}
                         />
                       </div>
                     ))}
@@ -4930,7 +5041,10 @@ function ExploreContent({ onReady, onOpenServices }) {
                 )}
               </div>
 
-              {!isMobile && cartItems.length > 0 && (
+              {!hasActiveVendorSession &&
+                cartOrigin === CART_ORIGIN_PUBLIC &&
+                !isMobile &&
+                cartItems.length > 0 && (
                 <aside className="explore-cart-sidebar">
                   <div className="explore-cart-widget">
                     <div className="explore-cart-widget-title">Selected Items</div>
@@ -4982,22 +5096,13 @@ function ExploreContent({ onReady, onOpenServices }) {
                         </div>
 
                         <div className="explore-cart-cashback-actions">
-                          {hasActiveVendorSession ? (
-                            <button
-                              className="explore-cart-go-btn"
-                              onClick={() => setViewMode("menu")}
-                            >
-                              Go to Cart
-                            </button>
-                          ) : (
-                            <button
-                              type="button"
-                              className="explore-cart-login-btn"
-                              onClick={handleClassicEnquiryAction}
-                            >
-                              Service Enquiry
-                            </button>
-                          )}
+                          <button
+                            type="button"
+                            className="explore-cart-login-btn"
+                            onClick={handleClassicEnquiryAction}
+                          >
+                            Service Enquiry
+                          </button>
                         </div>
                       </div>
                     )}
@@ -5016,7 +5121,11 @@ function ExploreContent({ onReady, onOpenServices }) {
               )}
             </div>
           </section>
-          {isMobile && viewMode !== "menu" && cartItems.length > 0 && (
+          {!hasActiveVendorSession &&
+            cartOrigin === CART_ORIGIN_PUBLIC &&
+            isMobile &&
+            viewMode !== "menu" &&
+            cartItems.length > 0 && (
             <div
               className={`explore-mobile-cart-fab theme-${String(vendorInfo?.classicColorScheme || "blackgold").trim().toLowerCase() || "blackgold"}`}
             >
@@ -5052,23 +5161,13 @@ function ExploreContent({ onReady, onOpenServices }) {
                   </div>
                 ))}
               </div>
-              {hasActiveVendorSession ? (
-                <button
-                  type="button"
-                  className="explore-mobile-cart-action explore-mobile-cart-action-primary"
-                  onClick={() => setViewMode("menu")}
-                >
-                  Go to Cart
-                </button>
-              ) : (
-                <button
-                  type="button"
-                  className="explore-mobile-cart-action explore-mobile-cart-action-secondary"
-                  onClick={handleClassicEnquiryAction}
-                >
-                  Service Enquiry
-                </button>
-              )}
+              <button
+                type="button"
+                className="explore-mobile-cart-action explore-mobile-cart-action-secondary"
+                onClick={handleClassicEnquiryAction}
+              >
+                Service Enquiry
+              </button>
             </div>
           )}
         </>
@@ -5093,7 +5192,6 @@ function ExploreContent({ onReady, onOpenServices }) {
                     type="button"
                     onClick={() => {
                       setMenuSearch("");
-                      resetBillingState();
                       setViewMode("preview");
                     }}
                   >
@@ -5373,51 +5471,12 @@ function ExploreContent({ onReady, onOpenServices }) {
                                   marginTop: "20px",
                                   paddingTop: "15px",
                                 }}
-                              >
-                                {renderBillingCustomerSearch()}
-                                <label style={{ color: "#e6c37a", fontSize: "14px" }}>
-                                  Customer Mobile
-                                </label>
-                                <div
-                                  style={{
-                                    display: "flex",
-                                    alignItems: "center",
-                                    background: "#111",
-                                    border: "1px solid #444",
-                                    borderRadius: "8px",
-                                    overflow: "hidden",
-                                    marginTop: "6px",
-                                    marginBottom: "10px",
-                                  }}
                                 >
-                                  <div
-                                    style={{
-                                      padding: "10px 12px",
-                                      borderRight: "1px solid #333",
-                                      color: "#aaa",
-                                      fontWeight: 500,
-                                    }}
-                                  >
-                                    +91
-                                  </div>
-                                  <input
-                                    value={customerMobile}
-                                    onChange={(e) => handleCustomerMobileInputChange(e.target.value)}
-                                    placeholder="Enter mobile"
-                                    style={{
-                                      flex: 1,
-                                      background: "transparent",
-                                      border: "none",
-                                      outline: "none",
-                                      color: "#fff",
-                                      padding: "10px",
-                                    }}
-                                  />
-                                </div>
+                                  {renderBillingCustomerSearch()}
                                 {customerMobile && customerMobile.length === 10 && (
                                   <div style={{ marginBottom: "10px" }}>
                                     <label style={{ color: "#e6c37a", fontSize: "14px" }}>
-                                      Customer Name
+                                      Customer Name {billingCustomerIsNew ? "(optional)" : ""}
                                     </label>
                                     <input
                                       value={customerName}
@@ -5917,51 +5976,12 @@ function ExploreContent({ onReady, onOpenServices }) {
                                     marginTop: "20px",
                                     paddingTop: "15px",
                                   }}
-                                >
-                                  {renderBillingCustomerSearch()}
-                                  <label style={{ color: "#e6c37a", fontSize: "14px" }}>
-                                    Customer Mobile
-                                  </label>
-                                  <div
-                                    style={{
-                                      display: "flex",
-                                      alignItems: "center",
-                                      background: "#111",
-                                      border: "1px solid #444",
-                                      borderRadius: "8px",
-                                      overflow: "hidden",
-                                      marginTop: "6px",
-                                      marginBottom: "10px",
-                                    }}
                                   >
-                                    <div
-                                      style={{
-                                        padding: "10px 12px",
-                                        borderRight: "1px solid #333",
-                                        color: "#aaa",
-                                        fontWeight: 500,
-                                      }}
-                                    >
-                                      +91
-                                    </div>
-                                    <input
-                                      value={customerMobile}
-                                      onChange={(e) => handleCustomerMobileInputChange(e.target.value)}
-                                      placeholder="Enter mobile"
-                                      style={{
-                                        flex: 1,
-                                        background: "transparent",
-                                        border: "none",
-                                        outline: "none",
-                                        color: "#fff",
-                                        padding: "10px",
-                                      }}
-                                    />
-                                  </div>
+                                  {renderBillingCustomerSearch()}
                                   {customerMobile && customerMobile.length === 10 && (
                                     <div style={{ marginBottom: "10px" }}>
                                       <label style={{ color: "#e6c37a", fontSize: "14px" }}>
-                                        Customer Name
+                                        Customer Name {billingCustomerIsNew ? "(optional)" : ""}
                                       </label>
                                       <input
                                         value={customerName}
@@ -6276,7 +6296,7 @@ function ExploreContent({ onReady, onOpenServices }) {
             </button>
             <button
               type="button"
-              onClick={() => setViewMode("menu")}
+              onClick={enterVendorBilling}
               style={{
                 flex: 1,
                 background: "#222",

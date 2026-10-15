@@ -371,9 +371,11 @@ function CatalogServiceItem({ row, onAddToCart, itemIdBase }) {
               {expanded ? "Show less" : "Show more"}
             </button>
           ) : <span />}
-          <button type="button" className="catalog-add-btn" onClick={handleAdd}>
-            Add
-          </button>
+          {typeof onAddToCart === "function" ? (
+            <button type="button" className="catalog-add-btn" onClick={handleAdd}>
+              Add
+            </button>
+          ) : null}
         </div>
       </div>
     </article>
@@ -648,13 +650,15 @@ export default function CatalogPreviewTemplate({
           ) : null}
         </div>
 
-        <button
-          type="button"
-          className="catalog-book-btn"
-          onClick={() => scrollToElementById("contact")}
-        >
-          Book Appointment
-        </button>
+        {!hasVendorSession ? (
+          <button
+            type="button"
+            className="catalog-book-btn"
+            onClick={() => scrollToElementById("contact")}
+          >
+            Book Appointment
+          </button>
+        ) : null}
 
         <button
           type="button"

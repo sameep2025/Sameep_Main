@@ -152,6 +152,13 @@ test("customer portal memberships are scoped to authenticated customer and group
     assert.equal(res.payload.data.vendors[0].vendor.businessName, "Reelook Beauty Saloon");
     assert.equal(res.payload.data.vendors[0].memberships[0].planName, "Silver Plan");
     assert.equal(res.payload.data.vendors[0].memberships[0].benefits.eligibleServices.length, 2);
+    assert.ok(Array.isArray(state.menuQuery.$or));
+    assert.ok(
+      state.menuQuery.$or.some((pair) =>
+        String(pair.vendorId) === String(vendorOne) &&
+        pair._id.$in.some((id) => String(id) === String(serviceOne))
+      )
+    );
     assert.equal(
       res.payload.data.vendors[0].memberships[0].benefits.additionalManualDiscountOnMembershipItems,
       true
@@ -162,6 +169,80 @@ test("customer portal memberships are scoped to authenticated customer and group
     );
     assert.equal(res.payload.data.vendors[1].memberships[0].status, "SCHEDULED");
   });
+});
+
+test("customer portal returns complete large effective eligibility without cross-vendor service names", async () => {
+  await withMockedModels(async () => {
+    const state = {};
+    const customerId = oid("692900000000000000000001");
+    const vendorOne = oid("692900000000000000000011");
+    const vendorTwo = oid("692900000000000000000012");
+    const serviceIds = Array.from({ length: 205 }, (_, index) =>
+      oid((BigInt("0x692900000000000000001000") + BigInt(index)).toString(16).padStart(24, "0"))
+    );
+    const foreignServiceId = oid("692900000000000000009999");
+    const membership = {
+      _id: oid("692900000000000000000031"),
+      vendorId: vendorOne,
+      customerId,
+      membershipPlanId: oid("692900000000000000000041"),
+      membershipType: "DISCOUNT",
+      status: "ACTIVE",
+      planSnapshot: {
+        name: "Large Plan",
+        eligibleMenuItemIds: [],
+      },
+      serviceEligibilityOverride: {
+        eligibleMenuItemIds: [...serviceIds, foreignServiceId],
+      },
+      activatedAt: new Date("2026-10-01T00:00:00.000Z"),
+      expiresAt: new Date("2026-11-01T00:00:00.000Z"),
+    };
+
+    installLeanFind(CustomerMembership, [membership], "membershipQuery", state);
+    installLeanFind(Vendor, [{ _id: vendorOne, businessName: "Large Salon" }], "vendorQuery", state);
+    installLeanFind(VendorMenuNode, [
+      ...serviceIds.map((id, index) => ({
+        _id: id,
+        vendorId: vendorOne,
+        name: `Service ${index + 1}`,
+        pathNames: ["Hash Mens", "Clean Ups"],
+      })),
+      {
+        _id: foreignServiceId,
+        vendorId: vendorTwo,
+        name: "Other Vendor Secret Service",
+        pathNames: ["Private"],
+      },
+    ], "menuQuery", state);
+    installLeanFind(VendorPriceNode, [], "priceQuery", state);
+
+    const res = mockRes();
+    await controller.getMemberships(mockReq({ auth: { customerId: String(customerId) } }), res);
+
+    const services = res.payload.data.memberships[0].benefits.eligibleServices;
+    assert.equal(services.length, 206);
+    assert.equal(services[0].path.join(" / "), "Hash Mens / Clean Ups / Service 1");
+    assert.equal(services.some((service) => service.name === "Other Vendor Secret Service"), false);
+    assert.equal(services.at(-1).unavailable, true);
+  });
+});
+
+test("explicit empty eligibility override stays empty instead of using purchased snapshot", () => {
+  const membership = {
+    _id: oid("692900000000000000000031"),
+    vendorId: oid("692900000000000000000011"),
+    planSnapshot: {
+      eligibleMenuItemIds: [oid("692900000000000000000021")],
+    },
+    serviceEligibilityOverride: {
+      eligibleMenuItemIds: [],
+    },
+  };
+
+  const serialized = controller.serializeMembership(membership);
+  assert.deepEqual(serialized.benefits.eligibleMenuItemIds, []);
+  assert.deepEqual(serialized.benefits.eligibleServices, []);
 });
 
 test("customer portal memberships returns empty state for customers without memberships", async () => {
