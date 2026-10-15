@@ -1173,6 +1173,8 @@ function ExploreContent({ onReady, onOpenServices }) {
   const [loadedCustomerName, setLoadedCustomerName] = useState("");
   const [customerNameStatus, setCustomerNameStatus] = useState("");
   const customerMobileLookupRef = useRef("");
+  const customerVerificationRequestRef = useRef(0);
+  const customerNameRequestRef = useRef(0);
   const [availablePoints, setAvailablePoints] = useState(0);
   const [redeemPoints, setRedeemPoints] = useState(0);
   const [earnPoints, setEarnPoints] = useState(0);
@@ -1184,7 +1186,9 @@ function ExploreContent({ onReady, onOpenServices }) {
   const [verifyingCustomer, setVerifyingCustomer] = useState(false);
   const [checkingCustomer, setCheckingCustomer] = useState(false);
   const [customerValidated, setCustomerValidated] = useState(false);
-  const [loyaltyLoaded, setLoyaltyLoaded] = useState(true);
+  const [loyaltyWalletStatus, setLoyaltyWalletStatus] = useState("idle");
+  const [loyaltyWalletError, setLoyaltyWalletError] = useState("");
+  const loyaltyWalletRequestRef = useRef(0);
   const [processingBill, setProcessingBill] = useState(false);
   const processingBillRef = useRef(false);
   const [showBillSuccess, setShowBillSuccess] = useState(false);
@@ -1245,6 +1249,7 @@ function ExploreContent({ onReady, onOpenServices }) {
     return stored || "preview";
   };
   const [viewMode, setViewMode] = useState("preview");
+  const previousViewModeRef = useRef("preview");
 
   useEffect(() => {
     const stored = localStorage.getItem("viewMode");
@@ -1447,6 +1452,9 @@ function ExploreContent({ onReady, onOpenServices }) {
     const nextMobile = isPhoneInput && localDigits.length === 10 ? localDigits : "";
 
     customerSearchRequestRef.current += 1;
+    customerVerificationRequestRef.current += 1;
+    customerNameRequestRef.current += 1;
+    loyaltyWalletRequestRef.current += 1;
     selectedBillingCustomerLabelRef.current = "";
     setCustomerSearch(inputValue);
     setCustomerMobile(nextMobile);
@@ -1461,6 +1469,8 @@ function ExploreContent({ onReady, onOpenServices }) {
     setCheckingCustomer(false);
     setAvailablePoints(0);
     setRedeemPoints(0);
+    setLoyaltyWalletStatus("idle");
+    setLoyaltyWalletError("");
     setCustomerName("");
     setLoadedCustomerName("");
     setCustomerNameStatus("");
@@ -1471,6 +1481,9 @@ function ExploreContent({ onReady, onOpenServices }) {
 
   const fetchVendorCustomerName = async ({ mobile, customerId: resolvedCustomerId }) => {
     if (!vendorId || !mobile || mobile.length !== 10 || !resolvedCustomerId) return;
+    const requestId = customerNameRequestRef.current + 1;
+    const expectedVendorId = String(vendorId);
+    customerNameRequestRef.current = requestId;
     const vendorToken =
       typeof window !== "undefined"
         ? localStorage.getItem(`vendorToken:${vendorId}`)
@@ -1490,13 +1503,21 @@ function ExploreContent({ onReady, onOpenServices }) {
       );
       const json = await res.json().catch(() => null);
       if (!res.ok || !json?.success) throw new Error(json?.message || "Name lookup failed");
-      if (customerMobileLookupRef.current !== mobile) return;
+      if (
+        customerNameRequestRef.current !== requestId ||
+        customerMobileLookupRef.current !== mobile ||
+        String(vendorIdRef.current || "") !== expectedVendorId
+      ) return;
       const nextName = String(json?.data?.name || "");
       setCustomerName(nextName);
       setLoadedCustomerName(nextName);
       setCustomerNameStatus(nextName ? "Saved name loaded" : "");
     } catch (error) {
-      if (customerMobileLookupRef.current === mobile) {
+      if (
+        customerNameRequestRef.current === requestId &&
+        customerMobileLookupRef.current === mobile &&
+        String(vendorIdRef.current || "") === expectedVendorId
+      ) {
         setCustomerNameStatus("");
       }
     }
@@ -1548,6 +1569,12 @@ function ExploreContent({ onReady, onOpenServices }) {
     setCustomerId(result?.customerId || null);
     setAvailablePoints(0);
     setRedeemPoints(0);
+    loyaltyWalletRequestRef.current += 1;
+    setLoyaltyWalletStatus(result?.customerId ? "loading" : "idle");
+    setLoyaltyWalletError("");
+    if (result?.customerId) {
+      fetchWallet(result.customerId, nextMobile);
+    }
   };
 
   const renderBillingCustomerSearch = () => (
@@ -3491,26 +3518,46 @@ function ExploreContent({ onReady, onOpenServices }) {
   async function fetchWallet(cId, expectedMobile) {
     if (!cId || !vendorId) return;
 
+    const requestId = loyaltyWalletRequestRef.current + 1;
+    const expectedVendorId = String(vendorId);
+    loyaltyWalletRequestRef.current = requestId;
+    setLoyaltyWalletStatus("loading");
+    setLoyaltyWalletError("");
+    setRedeemPoints(0);
+
     try {
-      setLoyaltyLoaded(false);
       const res = await fetch(
-        `${API_BASE_URL}/api/loyalty/wallet?vendorId=${vendorId}&customerId=${cId}`
+        `${API_BASE_URL}/api/loyalty/wallet?vendorId=${encodeURIComponent(vendorId)}&customerId=${encodeURIComponent(cId)}`
       );
 
-      const wallet = await res.json();
-      if (expectedMobile && customerMobileLookupRef.current !== expectedMobile) return;
-      if (wallet?.success) {
-        setAvailablePoints(wallet?.availablePoints || 0);
-        setLoyaltyLoaded(true);
+      const wallet = await res.json().catch(() => null);
+      if (
+        loyaltyWalletRequestRef.current !== requestId ||
+        (expectedMobile && customerMobileLookupRef.current !== expectedMobile) ||
+        String(vendorIdRef.current || "") !== expectedVendorId
+      ) return;
+      if (!res.ok || !wallet?.success) {
+        throw new Error(wallet?.message || "Unable to load available points");
       }
+      setAvailablePoints(Math.max(Number(wallet.availablePoints) || 0, 0));
+      setLoyaltyWalletStatus("ready");
     } catch (err) {
-      console.error("Wallet fetch failed", err);
-      setLoyaltyLoaded(false);
+      if (
+        loyaltyWalletRequestRef.current !== requestId ||
+        (expectedMobile && customerMobileLookupRef.current !== expectedMobile) ||
+        String(vendorIdRef.current || "") !== expectedVendorId
+      ) return;
+      console.error("Wallet fetch failed", err?.message || err);
+      setAvailablePoints(0);
+      setLoyaltyWalletStatus("error");
+      setLoyaltyWalletError(err?.message || "Unable to load available points");
     }
   }
 
   async function verifyCustomer(mobile) {
     if (!mobile || mobile.length !== 10) return;
+    const requestId = customerVerificationRequestRef.current + 1;
+    customerVerificationRequestRef.current = requestId;
 
     try {
       setVerifyingCustomer(true);
@@ -3532,7 +3579,10 @@ function ExploreContent({ onReady, onOpenServices }) {
       );
 
       const bypassData = await bypassRes.json();
-      if (customerMobileLookupRef.current !== mobile) return;
+      if (
+        customerVerificationRequestRef.current !== requestId ||
+        customerMobileLookupRef.current !== mobile
+      ) return;
       const id = bypassData?.customer?._id || null;
 
       setCustomerId(id);
@@ -3542,13 +3592,18 @@ function ExploreContent({ onReady, onOpenServices }) {
         fetchVendorCustomerName({ mobile, customerId: id });
       }
     } catch (err) {
-      if (customerMobileLookupRef.current !== mobile) return;
+      if (
+        customerVerificationRequestRef.current !== requestId ||
+        customerMobileLookupRef.current !== mobile
+      ) return;
       console.error("Customer verification failed", err);
       setCustomerValidated(false);
+    } finally {
+      if (customerVerificationRequestRef.current === requestId) {
+        setVerifyingCustomer(false);
+        setCheckingCustomer(false);
+      }
     }
-
-    setVerifyingCustomer(false);
-    setCheckingCustomer(false);
   }
 
   const hasCurrentVendorSession = () => {
@@ -3626,22 +3681,26 @@ function ExploreContent({ onReady, onOpenServices }) {
   const addVendorBillingItem = (node, nodePath = [], categoryPathIds = []) =>
     addToCart(node, nodePath, categoryPathIds, CART_ORIGIN_BILLING);
   const clearCart = () => {
-    setCartItems([]);
-    setRedeemPoints(0);
-    setDiscountAmount(0);
-    setDiscountPercent(0);
-    setAppliedDiscount(0);
-    setDiscountMode(null);
-    setPaymentMode("ONLINE");
+    resetBillingState({
+      nextCartOrigin:
+        viewMode === "menu" && hasCurrentVendorSession() ? CART_ORIGIN_BILLING : null,
+    });
   };
 
-  const resetBillingState = () => {
+  const resetBillingState = ({ nextCartOrigin = null } = {}) => {
+    customerSearchRequestRef.current += 1;
+    customerVerificationRequestRef.current += 1;
+    customerNameRequestRef.current += 1;
+    membershipPreviewRequestRef.current += 1;
+    loyaltyWalletRequestRef.current += 1;
     setCartItems([]);
-    setTrackedCartOrigin(null);
+    setTrackedCartOrigin(nextCartOrigin);
+    setCartOpen(false);
     setCustomerId(null);
     setCustomerMobile("");
     setCustomerSearch("");
     setCustomerSearchResults([]);
+    setCustomerSearchLoading(false);
     setCustomerSearchError("");
     setCustomerSearchOpen(false);
     setBillingCustomerIsNew(false);
@@ -3654,28 +3713,44 @@ function ExploreContent({ onReady, onOpenServices }) {
     setAvailablePoints(0);
     setRedeemPoints(0);
     setEarnPoints(0);
+    setLoyaltyWalletStatus("idle");
+    setLoyaltyWalletError("");
+    setCustomerValidated(false);
+    setVerifyingCustomer(false);
+    setCheckingCustomer(false);
+    setMembershipPreview(null);
+    setMembershipPreviewLoading(false);
+    setMembershipPreviewError("");
     setBillingId(null);
     setShowOtpInput(false);
     setOtp("");
+    setOtpAttemptToken("");
     setDiscountAmount(0);
     setDiscountPercent(0);
     setAppliedDiscount(0);
     setDiscountMode(null);
+    setShowDiscountPopup(false);
     setPaymentMode("ONLINE");
+    setMenuSearch("");
 
-    // optional safety
     localStorage.removeItem("ynot_cart");
   };
 
   const enterVendorBilling = () => {
-    if (cartOriginRef.current === CART_ORIGIN_PUBLIC) {
-      resetBillingState();
-    }
-    if (cartOriginRef.current !== CART_ORIGIN_BILLING) {
-      setTrackedCartOrigin(CART_ORIGIN_BILLING);
+    if (previousViewModeRef.current !== "menu") {
+      resetBillingState({ nextCartOrigin: CART_ORIGIN_BILLING });
+      previousViewModeRef.current = "menu";
     }
     persistViewMode("menu");
   };
+
+  useEffect(() => {
+    const previousViewMode = previousViewModeRef.current;
+    if (viewMode === "menu" && previousViewMode !== "menu") {
+      resetBillingState({ nextCartOrigin: CART_ORIGIN_BILLING });
+    }
+    previousViewModeRef.current = viewMode;
+  }, [viewMode]);
 
   useEffect(() => {
     // ONLY reset when switching vendor AND NOT in dashboard
@@ -5539,20 +5614,38 @@ function ExploreContent({ onReady, onOpenServices }) {
                                 {renderMembershipPreviewCard()}
                                 {loyaltyEnabled && (
                                   <>
-                                    <div style={{ fontSize: "13px", color: "#aaa", marginTop: 6 }}>
-                                      Available Points: {availablePoints}
-                                    </div>
                                     {!customerMobile && (
                                       <div style={{ fontSize: "12px", color: "#facc15", marginTop: 6 }}>
                                         Walk-in billing — no loyalty points will be applied
                                       </div>
                                     )}
-                                    {verifyingCustomer && (
+                                    {customerMobile &&
+                                      (verifyingCustomer || loyaltyWalletStatus === "loading") && (
                                       <div style={{ fontSize: "12px", color: "#999", marginTop: 6 }}>
-                                        Checking customer...
+                                        Loading available points...
                                       </div>
                                     )}
-                                    {availablePoints > 0 && (
+                                    {customerMobile && loyaltyWalletStatus === "error" && (
+                                      <div style={{ marginTop: 6 }}>
+                                        <div style={{ fontSize: "12px", color: "#fca5a5" }}>
+                                          {loyaltyWalletError || "Unable to load available points"}
+                                        </div>
+                                        <button
+                                          type="button"
+                                          className="membership-billing-preview-retry"
+                                          onClick={() => fetchWallet(customerId, customerMobile)}
+                                          disabled={!customerId}
+                                        >
+                                          Retry points lookup
+                                        </button>
+                                      </div>
+                                    )}
+                                    {customerMobile && loyaltyWalletStatus === "ready" && (
+                                      <div style={{ fontSize: "13px", color: "#aaa", marginTop: 6 }}>
+                                        Available Points: {availablePoints}
+                                      </div>
+                                    )}
+                                    {loyaltyWalletStatus === "ready" && availablePoints > 0 && (
                                       <div style={{ marginTop: 8 }}>
                                         <div style={{ fontSize: "12px", color: "#aaa" }}>
                                           Redeem Points
@@ -6044,20 +6137,38 @@ function ExploreContent({ onReady, onOpenServices }) {
                                   {renderMembershipPreviewCard()}
                                   {loyaltyEnabled && (
                                     <>
-                                      <div style={{ fontSize: "13px", color: "#aaa" }}>
-                                        Available Points: {availablePoints}
-                                      </div>
                                       {!customerMobile && (
                                         <div style={{ fontSize: "12px", color: "#facc15", marginTop: 6 }}>
                                           Walk-in billing — no loyalty points will be applied
                                         </div>
                                       )}
-                                      {verifyingCustomer && (
+                                      {customerMobile &&
+                                        (verifyingCustomer || loyaltyWalletStatus === "loading") && (
                                         <div style={{ fontSize: "12px", color: "#999", marginTop: 6 }}>
-                                          Checking customer...
+                                          Loading available points...
                                         </div>
                                       )}
-                                      {availablePoints > 0 && (
+                                      {customerMobile && loyaltyWalletStatus === "error" && (
+                                        <div style={{ marginTop: 6 }}>
+                                          <div style={{ fontSize: "12px", color: "#fca5a5" }}>
+                                            {loyaltyWalletError || "Unable to load available points"}
+                                          </div>
+                                          <button
+                                            type="button"
+                                            className="membership-billing-preview-retry"
+                                            onClick={() => fetchWallet(customerId, customerMobile)}
+                                            disabled={!customerId}
+                                          >
+                                            Retry points lookup
+                                          </button>
+                                        </div>
+                                      )}
+                                      {customerMobile && loyaltyWalletStatus === "ready" && (
+                                        <div style={{ fontSize: "13px", color: "#aaa" }}>
+                                          Available Points: {availablePoints}
+                                        </div>
+                                      )}
+                                      {loyaltyWalletStatus === "ready" && availablePoints > 0 && (
                                         <div style={{ marginTop: 8 }}>
                                           <div style={{ fontSize: "12px", color: "#aaa" }}>
                                             Redeem Points
@@ -6067,7 +6178,12 @@ function ExploreContent({ onReady, onOpenServices }) {
                                             value={redeemPoints}
                                             min={0}
                                             max={availablePoints}
-                                            onChange={(e) => setRedeemPoints(Number(e.target.value))}
+                                            onChange={(e) => {
+                                              const value = Number(e.target.value) || 0;
+                                              setRedeemPoints(
+                                                Math.min(Math.max(value, 0), availablePoints)
+                                              );
+                                            }}
                                             style={{
                                               width: "100%",
                                               background: "#111",
