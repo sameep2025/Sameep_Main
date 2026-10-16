@@ -63,3 +63,43 @@ test("customer selection refreshes wallet and wallet failures are not presented 
   assert.match(exploreSource, /loyaltyWalletStatus === "error"/);
   assert.match(exploreSource, /Retry points lookup/);
 });
+
+test("membership preview sends redemption and refreshes loyalty estimates when it changes", () => {
+  const previewEffect = sourceBetween(
+    "const requestId = membershipPreviewRequestRef.current + 1",
+    "/*\n  const saveLoyaltyRule"
+  );
+  const earnHelper = sourceBetween(
+    "const getAuthoritativeEarnPoints = () =>",
+    "const handleBillingCustomerInputChange ="
+  );
+
+  assert.match(previewEffect, /redemption:\s*\{\s*amount: redeemPoints/);
+  assert.match(previewEffect, /percentPer100,\s*redeemPoints,\s*membershipPreviewRetryNonce/);
+  assert.match(earnHelper, /membershipPreview\?\.hasEffectiveMembership/);
+  assert.match(earnHelper, /preview\?\.estimatedRewardPoints/);
+  assert.match(earnHelper, /finalTotal[\s\S]*redeemPoints/);
+});
+
+test("Billing discount summaries use a defined qualifying-membership predicate", () => {
+  const helperSource = sourceBetween(
+    "const hasQualifyingMembershipPreview = () =>",
+    "const getAuthoritativeCartTotal ="
+  );
+  const evaluate = new Function(
+    "membershipPreview",
+    `${helperSource}; return hasQualifyingMembershipPreview();`
+  );
+  const helperCalls = exploreSource.match(/hasQualifyingMembershipPreview\(\)/g) || [];
+
+  assert.equal(helperCalls.length, 2, "expected desktop and mobile render calls");
+  assert.equal(evaluate(null), false);
+  assert.equal(evaluate({
+    hasEffectiveMembership: true,
+    preview: { qualifiesForMinimum: false, membershipDiscountAmount: 0 },
+  }), false);
+  assert.equal(evaluate({
+    hasEffectiveMembership: true,
+    preview: { qualifiesForMinimum: true, membershipDiscountAmount: 50 },
+  }), true);
+});

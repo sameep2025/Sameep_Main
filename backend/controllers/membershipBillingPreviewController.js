@@ -131,7 +131,7 @@ function normalizePreviewItems(items = []) {
   }).filter((item) => item.qty > 0);
 }
 
-function calculateMembershipPreview({ membership, items, manualDiscount, loyalty }) {
+function calculateMembershipPreview({ membership, items, manualDiscount, loyalty, redemption }) {
   const snapshot = membership.planSnapshot || {};
   const benefits = resolveEffectiveBenefitFlags(membership);
   const calculation = calculateMembershipBillingPreview({
@@ -144,6 +144,7 @@ function calculateMembershipPreview({ membership, items, manualDiscount, loyalty
     },
     manualDiscount,
     loyalty,
+    redemption,
   });
 
   return {
@@ -211,6 +212,7 @@ async function previewMembershipDiscount(req, res) {
       items: req.body?.items || req.body?.cartItems || [],
       manualDiscount: req.body?.manualDiscount || {},
       loyalty: req.body?.loyalty || {},
+      redemption: req.body?.redemption || {},
     });
 
     return res.json({

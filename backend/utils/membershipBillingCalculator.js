@@ -66,6 +66,7 @@ function calculateMembershipBillingPreview({
   membership = {},
   manualDiscount = {},
   loyalty = {},
+  redemption = {},
 } = {}) {
   const normalizedItems = normalizeItems(items);
   const subtotalCents = normalizedItems.reduce((sum, item) => sum + item.grossCents, 0);
@@ -162,6 +163,25 @@ function calculateMembershipBillingPreview({
     subtotalCents - membershipDiscountTotalCents - manualDiscountTotalCents,
     0
   );
+  const redeemedCents = Math.min(
+    toCents(redemption?.amount ?? redemption?.redeemValue ?? redemption?.points),
+    previewPayableCents
+  );
+  const finalPayableCents = Math.max(previewPayableCents - redeemedCents, 0);
+  const paidRewardEligibleCents = Math.max(rewardEligibleCents - redeemedCents, 0);
+  let remainingRewardRedemptionCents = redeemedCents;
+  const redemptionAdjustedBreakdown = breakdown.map((item) => {
+    const rewardBaseCents = item.rewardsEligible ? toCents(item.finalLineAmount) : 0;
+    const lineRedeemedCents = Math.min(rewardBaseCents, remainingRewardRedemptionCents);
+    const paidRewardBaseCents = rewardBaseCents - lineRedeemedCents;
+    remainingRewardRedemptionCents -= lineRedeemedCents;
+    return {
+      ...item,
+      rewardRedeemedAmount: fromCents(lineRedeemedCents),
+      paidRewardEligibleAmount: fromCents(paidRewardBaseCents),
+      estimatedRewardPoints: Math.floor((fromCents(paidRewardBaseCents) / 100) * earnPercent),
+    };
+  });
   const cappedManualDiscount = manualMode === "amount" &&
     requestedManualDiscountCents > manualDiscountTotalCents;
 
@@ -175,9 +195,12 @@ function calculateMembershipBillingPreview({
     requestedManualDiscountAmount: fromCents(requestedManualDiscountCents),
     manualDiscountCapped: cappedManualDiscount,
     previewPayableAmount: fromCents(previewPayableCents),
+    redeemedAmount: fromCents(redeemedCents),
+    finalPayableAmount: fromCents(finalPayableCents),
     rewardEligibleAmount: fromCents(rewardEligibleCents),
-    estimatedRewardPoints: Math.floor((fromCents(rewardEligibleCents) / 100) * earnPercent),
-    items: breakdown,
+    paidRewardEligibleAmount: fromCents(paidRewardEligibleCents),
+    estimatedRewardPoints: Math.floor((fromCents(paidRewardEligibleCents) / 100) * earnPercent),
+    items: redemptionAdjustedBreakdown,
   };
 }
 

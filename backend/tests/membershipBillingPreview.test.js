@@ -80,6 +80,68 @@ test("membership preview returns normal billing preview when below minimum", () 
   assert.match(result.message, /below ₹500/);
 });
 
+test("membership preview calculates rewards after partial redemption below minimum", () => {
+  const result = controller._private.calculateMembershipPreview({
+    membership: membership(),
+    items: [
+      { itemId: "652000000000000000000001", name: "Hair Cut", price: 250, qty: 1 },
+    ],
+    loyalty: { percentPer100: 5 },
+    redemption: { amount: 100 },
+  });
+
+  assert.equal(result.qualifiesForMinimum, false);
+  assert.equal(result.membershipDiscountAmount, 0);
+  assert.equal(result.previewPayableAmount, 250);
+  assert.equal(result.redeemedAmount, 100);
+  assert.equal(result.finalPayableAmount, 150);
+  assert.equal(result.paidRewardEligibleAmount, 150);
+  assert.equal(result.estimatedRewardPoints, 7);
+  assert.equal(result.items[0].rewardRedeemedAmount, 100);
+  assert.equal(result.items[0].paidRewardEligibleAmount, 150);
+  assert.equal(result.items[0].estimatedRewardPoints, 7);
+});
+
+test("membership preview awards no rewards after full redemption below minimum", () => {
+  const result = controller._private.calculateMembershipPreview({
+    membership: membership(),
+    items: [
+      { itemId: "652000000000000000000001", name: "Hair Cut", price: 250, qty: 1 },
+    ],
+    loyalty: { percentPer100: 5 },
+    redemption: { amount: 250 },
+  });
+
+  assert.equal(result.qualifiesForMinimum, false);
+  assert.equal(result.previewPayableAmount, 250);
+  assert.equal(result.redeemedAmount, 250);
+  assert.equal(result.finalPayableAmount, 0);
+  assert.equal(result.paidRewardEligibleAmount, 0);
+  assert.equal(result.estimatedRewardPoints, 0);
+  assert.equal(result.items[0].estimatedRewardPoints, 0);
+});
+
+test("membership preview preserves service-level reward exclusions after redemption", () => {
+  const result = controller._private.calculateMembershipPreview({
+    membership: membership({
+      planSnapshot: {
+        allowRewardsOnMembershipItems: false,
+      },
+    }),
+    items: [
+      { itemId: "652000000000000000000001", name: "Hair Cut", price: 600, qty: 1 },
+      { itemId: "652000000000000000000002", name: "Facial", price: 500, qty: 1 },
+    ],
+    loyalty: { percentPer100: 5 },
+    redemption: { amount: 100 },
+  });
+
+  assert.equal(result.membershipDiscountAmount, 60);
+  assert.equal(result.rewardEligibleAmount, 500);
+  assert.equal(result.paidRewardEligibleAmount, 400);
+  assert.equal(result.estimatedRewardPoints, 20);
+});
+
 test("membership preview applies the discount exactly at the minimum bill", () => {
   const result = controller._private.calculateMembershipPreview({
     membership: membership(),
@@ -92,6 +154,27 @@ test("membership preview applies the discount exactly at the minimum bill", () =
   assert.equal(result.qualifiesForMinimum, true);
   assert.equal(result.membershipDiscountAmount, 50);
   assert.equal(result.previewPayableAmount, 450);
+  assert.equal(result.estimatedRewardPoints, 0);
+});
+
+test("membership preview awards no rewards when a discounted bill is fully redeemed", () => {
+  const result = controller._private.calculateMembershipPreview({
+    membership: membership({
+      planSnapshot: {
+        allowRewardsOnMembershipItems: true,
+      },
+    }),
+    items: [
+      { itemId: "652000000000000000000001", name: "Hair Cut", price: 500, qty: 1 },
+    ],
+    loyalty: { percentPer100: 5 },
+    redemption: { amount: 450 },
+  });
+
+  assert.equal(result.membershipDiscountAmount, 50);
+  assert.equal(result.previewPayableAmount, 450);
+  assert.equal(result.finalPayableAmount, 0);
+  assert.equal(result.paidRewardEligibleAmount, 0);
   assert.equal(result.estimatedRewardPoints, 0);
 });
 

@@ -1591,6 +1591,39 @@ test("billing completion redemption equal to available points deducts all points
   );
 });
 
+test("non-membership completion awards zero rewards after full redemption", async () => {
+  const redeemEarn = buildMockEarn(800);
+  const billing = buildCompletionBilling({
+    customerId: new mongoose.Types.ObjectId(CUSTOMER_ID),
+    billingMode: "CUSTOMER",
+    pointsRedeemed: 800,
+    otpVerified: true,
+  });
+
+  await withMockedCompletionFlow(
+    billing,
+    async (state) => {
+      const res = buildCompletionResponse();
+      await billingController.completeBillingSession(
+        { body: { billingId: COMPLETED_BILL_ID, paymentMode: "ONLINE" } },
+        res
+      );
+
+      assert.equal(res.statusCode, 200);
+      assert.equal(state.closeUpdate.pointsEarned, 0);
+      assert.equal(state.transactionPayload.redeemValue, 800);
+      assert.equal(state.transactionPayload.finalPaidAmount, 0);
+      assert.equal(state.ledgerCreates.length, 1);
+      assert.equal(state.ledgerCreates[0].type, "REDEEM");
+      assert.equal(state.ledgerCreates[0].points, -800);
+    },
+    {
+      loyaltyRule: { earn: { percentPer100: 5 }, expiry: { expiryDays: 30 } },
+      loyaltyEarns: [redeemEarn],
+    }
+  );
+});
+
 test("billing completion rejects redemption above authoritative available points before any mutation", async () => {
   const firstEarn = buildMockEarn(50);
   const secondEarn = buildMockEarn(100);
@@ -1802,6 +1835,115 @@ test("billing completion allows an active membership bill below its minimum with
     {
       memberships: [membership],
       loyaltyRule: { earn: { percentPer100: 5 }, expiry: { expiryDays: 30 } },
+    }
+  );
+});
+
+test("billing completion calculates membership rewards after partial redemption below minimum", async () => {
+  const eligibleId = "652000000000000000000001";
+  const redeemEarn = buildMockEarn(100);
+  const billing = buildCompletionBilling({
+    customerId: new mongoose.Types.ObjectId(CUSTOMER_ID),
+    billingMode: "LOYALTY",
+    grossAmount: 250,
+    discountAmount: 0,
+    totalAmount: 250,
+    pointsRedeemed: 100,
+    otpVerified: true,
+    cartItems: [
+      {
+        itemId: new mongoose.Types.ObjectId(eligibleId),
+        name: "Hair Cut",
+        price: 250,
+        qty: 1,
+        total: 250,
+      },
+    ],
+  });
+  const activeMembership = buildCustomerMembership({
+    planSnapshot: {
+      ...buildCustomerMembership().planSnapshot,
+      minimumBillAmount: 500,
+      eligibleMenuItemIds: [new mongoose.Types.ObjectId(eligibleId)],
+    },
+  });
+
+  await withMockedCompletionFlow(
+    billing,
+    async (state) => {
+      const res = buildCompletionResponse();
+      await billingController.completeBillingSession(
+        { body: { billingId: COMPLETED_BILL_ID, paymentMode: "ONLINE" } },
+        res
+      );
+
+      assert.equal(res.statusCode, 200);
+      assert.equal(state.closeUpdate.membershipDiscountAmount, 0);
+      assert.equal(state.closeUpdate.pointsEarned, 7);
+      assert.equal(state.transactionPayload.redeemValue, 100);
+      assert.equal(state.transactionPayload.finalPaidAmount, 150);
+      assert.deepEqual(state.ledgerCreates.map((entry) => entry.type), ["REDEEM", "EARN"]);
+      assert.equal(state.ledgerCreates[1].points, 7);
+    },
+    {
+      memberships: [activeMembership],
+      loyaltyRule: { earn: { percentPer100: 5 }, expiry: { expiryDays: 30 } },
+      loyaltyEarns: [redeemEarn],
+    }
+  );
+});
+
+test("billing completion awards zero membership rewards after full redemption below minimum", async () => {
+  const eligibleId = "652000000000000000000001";
+  const redeemEarn = buildMockEarn(250);
+  const billing = buildCompletionBilling({
+    customerId: new mongoose.Types.ObjectId(CUSTOMER_ID),
+    billingMode: "LOYALTY",
+    grossAmount: 250,
+    discountAmount: 0,
+    totalAmount: 250,
+    pointsRedeemed: 250,
+    otpVerified: true,
+    cartItems: [
+      {
+        itemId: new mongoose.Types.ObjectId(eligibleId),
+        name: "Hair Cut",
+        price: 250,
+        qty: 1,
+        total: 250,
+      },
+    ],
+  });
+  const activeMembership = buildCustomerMembership({
+    planSnapshot: {
+      ...buildCustomerMembership().planSnapshot,
+      minimumBillAmount: 500,
+      eligibleMenuItemIds: [new mongoose.Types.ObjectId(eligibleId)],
+    },
+  });
+
+  await withMockedCompletionFlow(
+    billing,
+    async (state) => {
+      const res = buildCompletionResponse();
+      await billingController.completeBillingSession(
+        { body: { billingId: COMPLETED_BILL_ID, paymentMode: "CASH" } },
+        res
+      );
+
+      assert.equal(res.statusCode, 200);
+      assert.equal(state.closeUpdate.membershipDiscountAmount, 0);
+      assert.equal(state.closeUpdate.pointsEarned, 0);
+      assert.equal(state.transactionPayload.redeemValue, 250);
+      assert.equal(state.transactionPayload.finalPaidAmount, 0);
+      assert.equal(state.ledgerCreates.length, 1);
+      assert.equal(state.ledgerCreates[0].type, "REDEEM");
+      assert.equal(state.ledgerCreates[0].points, -250);
+    },
+    {
+      memberships: [activeMembership],
+      loyaltyRule: { earn: { percentPer100: 5 }, expiry: { expiryDays: 30 } },
+      loyaltyEarns: [redeemEarn],
     }
   );
 });

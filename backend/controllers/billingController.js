@@ -219,7 +219,14 @@ function mergeMembershipItemBreakdown(cartItems = [], calculationItems = []) {
   });
 }
 
-async function calculateAuthoritativeBillingFinancials({ billing, isWalkIn, loyaltyRule, now, session }) {
+async function calculateAuthoritativeBillingFinancials({
+  billing,
+  isWalkIn,
+  loyaltyRule,
+  redeemedAmount = 0,
+  now,
+  session,
+}) {
   const grossAmount = Number.isFinite(Number(billing.grossAmount))
     ? roundMoney(billing.grossAmount)
     : roundMoney(
@@ -290,6 +297,9 @@ async function calculateAuthoritativeBillingFinancials({ billing, isWalkIn, loya
     },
     loyalty: {
       percentPer100: loyaltyRule?.earn?.percentPer100 ?? 0,
+    },
+    redemption: {
+      amount: redeemedAmount,
     },
   });
   const membershipDiscountAmount = roundMoney(calculation.membershipDiscountAmount);
@@ -2254,6 +2264,7 @@ exports.completeBillingSession = async (req, res) => {
         billing,
         isWalkIn,
         loyaltyRule: rule,
+        redeemedAmount: effectiveRedeemPoints,
         now,
         session,
       });

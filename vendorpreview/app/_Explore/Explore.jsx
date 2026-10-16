@@ -1427,21 +1427,27 @@ function ExploreContent({ onReady, onOpenServices }) {
     );
 
   const getAuthoritativeCartTotal = () => {
-    if (hasQualifyingMembershipPreview()) {
-      return Math.max(
-        Number(membershipPreview?.preview?.previewPayableAmount ?? finalTotal) -
-          Number(redeemPoints || 0),
-        0
+    if (membershipPreview?.hasEffectiveMembership) {
+      return Number(
+        membershipPreview?.preview?.finalPayableAmount ??
+          Math.max(
+            Number(membershipPreview?.preview?.previewPayableAmount ?? finalTotal) -
+              Number(redeemPoints || 0),
+            0
+          )
       );
     }
-    return finalTotal;
+    return Math.max(Number(finalTotal || 0) - Number(redeemPoints || 0), 0);
   };
 
   const getAuthoritativeEarnPoints = () => {
-    if (hasQualifyingMembershipPreview()) {
+    if (membershipPreview?.hasEffectiveMembership) {
       return Number(membershipPreview?.preview?.estimatedRewardPoints || 0);
     }
-    return earnPoints;
+    return Math.floor(
+      (Math.max(Number(finalTotal || 0) - Number(redeemPoints || 0), 0) / 100) *
+        Number(percentPer100 || 0)
+    );
   };
 
   const handleBillingCustomerInputChange = (value) => {
@@ -3436,6 +3442,9 @@ function ExploreContent({ onReady, onOpenServices }) {
             loyalty: {
               percentPer100,
             },
+            redemption: {
+              amount: redeemPoints,
+            },
           }),
         });
         const json = await res.json().catch(() => null);
@@ -3470,6 +3479,7 @@ function ExploreContent({ onReady, onOpenServices }) {
     appliedDiscount,
     discountPercent,
     percentPer100,
+    redeemPoints,
     membershipPreviewRetryNonce,
   ]);
 
