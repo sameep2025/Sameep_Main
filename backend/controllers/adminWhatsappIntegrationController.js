@@ -3,6 +3,7 @@ const DummyVendor = require("../models/DummyVendor");
 const Vendor = require("../models/Vendor");
 const {
   buildAdminSnapshot,
+  buildStoredPinValidationOutcome,
   readLiveMetaStatus,
   validateStoredPin,
 } = require("../services/adminWhatsappIntegrationService");
@@ -77,7 +78,11 @@ async function validateAdminStoredWhatsappPin(req, res) {
       });
     }
 
-    return res.json(validateStoredPin(config));
+    const storedPinResult = validateStoredPin(config);
+    const liveMeta = storedPinResult.code === "encrypted_pin_missing"
+      ? await readLiveMetaStatus(config)
+      : null;
+    return res.json(buildStoredPinValidationOutcome(storedPinResult, liveMeta));
   } catch (error) {
     console.error("[Admin WhatsApp PIN Preflight Error]", {
       adminId: String(req.admin?.id || ""),

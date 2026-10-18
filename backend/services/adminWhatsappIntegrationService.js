@@ -43,6 +43,89 @@ function validateStoredPin(config, decryptPin = decryptMetaRegistrationPin) {
   }
 }
 
+function buildStoredPinValidationOutcome(storedPinResult, liveMeta = null) {
+  const metaStatusVerified = liveMeta?.accessible === true;
+  const metaPinEnabled = metaStatusVerified && typeof liveMeta?.isPinEnabled === "boolean"
+    ? liveMeta.isPinEnabled
+    : null;
+
+  const common = { metaStatusVerified, metaPinEnabled };
+  switch (storedPinResult?.code) {
+    case "stored_pin_valid":
+      return {
+        ...common,
+        result: "PASS",
+        status: "valid",
+        severity: "success",
+        code: "stored_pin_valid",
+        title: "Stored PIN Valid",
+        message: "Existing encrypted PIN successfully decrypted and validated.",
+      };
+    case "stored_pin_decryption_failed":
+      return {
+        ...common,
+        result: "BLOCKED",
+        status: "invalid",
+        severity: "error",
+        code: "stored_pin_decryption_failed",
+        title: "Stored PIN Invalid",
+        message: "Unable to decrypt the existing PIN.",
+      };
+    case "stored_pin_format_invalid":
+      return {
+        ...common,
+        result: "BLOCKED",
+        status: "invalid",
+        severity: "error",
+        code: "stored_pin_format_invalid",
+        title: "Stored PIN Invalid",
+        message: "Decrypted PIN is not six digits.",
+      };
+    case "encrypted_pin_missing":
+      if (!metaStatusVerified) {
+        return {
+          ...common,
+          result: "BLOCKED",
+          status: "missing",
+          severity: "warning",
+          code: "stored_pin_missing_meta_unverified",
+          title: "Stored PIN Missing",
+          message: "Live Meta readiness could not be verified. Meta PIN status remains unknown.",
+        };
+      }
+      if (metaPinEnabled) {
+        return {
+          ...common,
+          result: "BLOCKED",
+          status: "missing",
+          severity: "info",
+          code: "stored_pin_not_available_meta_ready",
+          title: "Stored PIN Not Available",
+          message: "Meta PIN is already enabled. No PIN recovery is required for the current registration.",
+        };
+      }
+      return {
+        ...common,
+        result: "BLOCKED",
+        status: "missing",
+        severity: "warning",
+        code: "stored_pin_missing_meta_not_ready",
+        title: "Stored PIN Missing",
+        message: "Registration recovery cannot use an existing stored PIN.",
+      };
+    default:
+      return {
+        ...common,
+        result: "BLOCKED",
+        status: "not_checked",
+        severity: "warning",
+        code: "stored_pin_validation_unavailable",
+        title: "Stored PIN Validation Unavailable",
+        message: "Stored PIN validation could not be completed.",
+      };
+  }
+}
+
 async function readLiveMetaStatus(
   config,
   {
@@ -177,6 +260,7 @@ function buildAdminSnapshot({ vendor, liveMeta }) {
 
 module.exports = {
   buildAdminSnapshot,
+  buildStoredPinValidationOutcome,
   readLiveMetaStatus,
   validateStoredPin,
 };

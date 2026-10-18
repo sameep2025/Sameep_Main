@@ -5,6 +5,7 @@ const test = require("node:test");
 
 const {
   buildAdminSnapshot,
+  buildStoredPinValidationOutcome,
   readLiveMetaStatus,
   validateStoredPin,
 } = require("../services/adminWhatsappIntegrationService");
@@ -41,6 +42,50 @@ test("stored PIN preflight blocks missing, invalid and undecryptable values", ()
     validateStoredPin(config(), () => { throw new Error("secret failure"); }).code,
     "stored_pin_decryption_failed"
   );
+});
+
+test("stored PIN outcomes distinguish valid, invalid and each missing-PIN Meta state", () => {
+  const valid = buildStoredPinValidationOutcome({ code: "stored_pin_valid" });
+  assert.equal(valid.status, "valid");
+  assert.equal(valid.result, "PASS");
+  assert.equal(valid.title, "Stored PIN Valid");
+
+  const invalidFormat = buildStoredPinValidationOutcome({
+    code: "stored_pin_format_invalid",
+  });
+  assert.equal(invalidFormat.status, "invalid");
+  assert.match(invalidFormat.message, /not six digits/i);
+
+  const decryptionFailure = buildStoredPinValidationOutcome({
+    code: "stored_pin_decryption_failed",
+  });
+  assert.equal(decryptionFailure.status, "invalid");
+  assert.match(decryptionFailure.message, /unable to decrypt/i);
+
+  const missingButReady = buildStoredPinValidationOutcome(
+    { code: "encrypted_pin_missing" },
+    { accessible: true, isPinEnabled: true }
+  );
+  assert.equal(missingButReady.status, "missing");
+  assert.equal(missingButReady.severity, "info");
+  assert.equal(missingButReady.metaPinEnabled, true);
+  assert.match(missingButReady.message, /no pin recovery is required/i);
+
+  const missingAndDisabled = buildStoredPinValidationOutcome(
+    { code: "encrypted_pin_missing" },
+    { accessible: true, isPinEnabled: false }
+  );
+  assert.equal(missingAndDisabled.status, "missing");
+  assert.equal(missingAndDisabled.metaPinEnabled, false);
+  assert.match(missingAndDisabled.message, /cannot use an existing stored pin/i);
+
+  const missingAndUnverified = buildStoredPinValidationOutcome(
+    { code: "encrypted_pin_missing" },
+    { accessible: false, code: "meta_status_unavailable" }
+  );
+  assert.equal(missingAndUnverified.status, "missing");
+  assert.equal(missingAndUnverified.metaPinEnabled, null);
+  assert.match(missingAndUnverified.message, /could not be verified/i);
 });
 
 test("live status verifies exact WABA and phone identity", async () => {
@@ -108,4 +153,18 @@ test("Phase 1 routes require admin auth and expose no recovery endpoint", () => 
   assert.match(source, /router\.use\(requireAdminAuth\)/);
   assert.match(source, /whatsapp-integration\/pin-preflight/);
   assert.doesNotMatch(source, /recover|history/i);
+});
+
+test("Phase 1 PIN validation contains no database writes or Meta POST requests", () => {
+  const controllerSource = fs.readFileSync(
+    path.join(__dirname, "../controllers/adminWhatsappIntegrationController.js"),
+    "utf8"
+  );
+  const serviceSource = fs.readFileSync(
+    path.join(__dirname, "../services/adminWhatsappIntegrationService.js"),
+    "utf8"
+  );
+  const source = `${controllerSource}\n${serviceSource}`;
+  assert.doesNotMatch(source, /axios\.post|fetch\([^)]*method\s*:\s*["']POST/i);
+  assert.doesNotMatch(source, /\.save\s*\(|updateOne|findOneAndUpdate|findByIdAndUpdate/);
 });

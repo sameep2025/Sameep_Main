@@ -14,6 +14,19 @@ const formatDate = (value) => {
   return Number.isNaN(date.getTime()) ? "Not checked" : date.toLocaleString();
 };
 
+const unavailablePinResult = {
+  result: "BLOCKED",
+  status: "not_checked",
+  severity: "warning",
+  title: "Stored PIN Validation Unavailable",
+  message: "Stored PIN validation could not be completed.",
+};
+
+const normalizePinResult = (value) => ({
+  ...unavailablePinResult,
+  ...(value || {}),
+});
+
 function Detail({ label, value, mono = false }) {
   return (
     <div style={styles.detail}>
@@ -34,6 +47,7 @@ export default function WhatsappIntegrationModal({ vendor, onClose }) {
     if (!vendor?._id) return;
     setLoading(true);
     setError("");
+    setPinResult(null);
     try {
       const response = await API.get(`/api/admin/vendors/${vendor._id}/whatsapp-integration`);
       setData(response.data?.data || null);
@@ -55,17 +69,32 @@ export default function WhatsappIntegrationModal({ vendor, onClose }) {
       const response = await API.post(
         `/api/admin/vendors/${vendor._id}/whatsapp-integration/pin-preflight`
       );
-      setPinResult(response.data || { result: "BLOCKED", code: "validation_failed" });
+      setPinResult(normalizePinResult(response.data));
     } catch (requestError) {
-      setPinResult(
-        requestError?.response?.data || { result: "BLOCKED", code: "validation_failed" }
-      );
+      setPinResult(normalizePinResult(requestError?.response?.data));
     } finally {
       setValidatingPin(false);
     }
   };
 
   const live = data?.liveMeta || {};
+  const metaPinStatus = live.accessible && typeof live.isPinEnabled === "boolean"
+    ? live.isPinEnabled
+    : "Unknown";
+  const storedPinStatus = pinResult?.status === "valid"
+    ? "Valid"
+    : pinResult?.status === "missing"
+      ? "Missing"
+      : pinResult?.status === "invalid"
+        ? "Invalid"
+        : "Not Checked";
+  const pinResultStyle = pinResult?.severity === "success"
+    ? styles.success
+    : pinResult?.severity === "info"
+      ? styles.info
+      : pinResult?.severity === "error"
+        ? styles.error
+        : styles.warning;
   return (
     <div style={styles.backdrop} role="presentation" onMouseDown={(event) => {
       if (event.target === event.currentTarget) onClose();
@@ -97,7 +126,8 @@ export default function WhatsappIntegrationModal({ vendor, onClose }) {
                 <Detail label="Phone Number ID" value={data.connection?.phoneNumberId} mono />
                 <Detail label="Connection" value={data.connection?.status} />
                 <Detail label="Registration" value={data.registration?.status} />
-                <Detail label="Meta PIN enabled" value={live.accessible ? live.isPinEnabled : null} />
+                <Detail label="Meta PIN enabled" value={metaPinStatus} />
+                <Detail label="Stored PIN validation" value={storedPinStatus} />
                 <Detail label="Meta phone status" value={live.phoneStatus} />
                 <Detail label="Messaging readiness" value={live.accessible ? live.messagingReadiness?.status : data.messagingReadiness?.status} />
                 <Detail label="Display-name readiness" value={live.accessible ? live.displayNameReadiness?.status : data.displayNameReadiness?.status} />
@@ -108,8 +138,9 @@ export default function WhatsappIntegrationModal({ vendor, onClose }) {
               </div>
 
               {pinResult ? (
-                <div style={pinResult.result === "PASS" ? styles.success : styles.error}>
-                  Stored PIN validation: {pinResult.result} ({formatValue(pinResult.code)})
+                <div style={pinResultStyle} role="status">
+                  <strong style={styles.resultTitle}>{pinResult.title}</strong>
+                  <span>{pinResult.message}</span>
                 </div>
               ) : null}
             </>
@@ -149,8 +180,11 @@ const styles = {
   goodDot: { width: 10, height: 10, borderRadius: "50%", background: "#16a34a" },
   warnDot: { width: 10, height: 10, borderRadius: "50%", background: "#f59e0b" },
   notice: { padding: 14, borderRadius: 10, background: "#e0f2fe", color: "#075985" },
-  success: { marginTop: 14, padding: 12, borderRadius: 10, background: "#dcfce7", color: "#166534", fontWeight: 700 },
-  error: { marginTop: 14, padding: 12, borderRadius: 10, background: "#fee2e2", color: "#991b1b", fontWeight: 700 },
+  success: { marginTop: 14, padding: 12, borderRadius: 10, background: "#dcfce7", color: "#166534" },
+  info: { marginTop: 14, padding: 12, borderRadius: 10, background: "#e0f2fe", color: "#075985" },
+  warning: { marginTop: 14, padding: 12, borderRadius: 10, background: "#fef3c7", color: "#92400e" },
+  error: { marginTop: 14, padding: 12, borderRadius: 10, background: "#fee2e2", color: "#991b1b" },
+  resultTitle: { display: "block", marginBottom: 3 },
   footer: { display: "flex", flexWrap: "wrap", gap: 10, padding: "15px 20px", borderTop: "1px solid #e2e8f0", background: "#fff" },
   primaryButton: { padding: "9px 13px", border: 0, borderRadius: 8, background: "#0e7490", color: "#fff", fontWeight: 700, cursor: "pointer" },
   secondaryButton: { padding: "9px 13px", border: "1px solid #0e7490", borderRadius: 8, background: "#ecfeff", color: "#155e75", fontWeight: 700, cursor: "pointer" },
