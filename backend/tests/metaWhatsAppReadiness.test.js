@@ -4,6 +4,7 @@ const test = require("node:test");
 const {
   applyPhoneRegistrationReadiness,
   buildMessagingReadiness,
+  hasConclusiveMetaPhoneRegistrationState,
   isMetaPhoneRegistrationReady,
   sanitizeMessagingBlockers,
 } = require("../services/metaWhatsAppReadiness");
@@ -62,13 +63,51 @@ test("existing active registration remains active", () => {
   assert.equal(result.config.phoneRegistrationStatus, "active");
 });
 
-test("active registration is not downgraded by temporary Meta read failures", () => {
+test("active registration is not downgraded by an incomplete Meta response", () => {
   const result = applyPhoneRegistrationReadiness({
     config: { phoneRegistrationStatus: "active" },
     phoneStatus: { status: "DISCONNECTED" },
   });
 
   assert.equal(result.config.phoneRegistrationStatus, "active");
+});
+
+test("active registration is not downgraded when Meta readiness is unavailable", () => {
+  const result = applyPhoneRegistrationReadiness({
+    config: { phoneRegistrationStatus: "active" },
+    phoneStatus: null,
+  });
+
+  assert.equal(result.changed, false);
+  assert.equal(result.config.phoneRegistrationStatus, "active");
+});
+
+test("active registration is marked error after a conclusive PIN-disabled response", () => {
+  const result = applyPhoneRegistrationReadiness({
+    config: { phoneRegistrationStatus: "active", enabled: true },
+    phoneStatus: {
+      ...readyPhoneStatus,
+      is_pin_enabled: false,
+    },
+  });
+
+  assert.equal(result.changed, true);
+  assert.equal(result.config.phoneRegistrationStatus, "error");
+  assert.equal(result.config.phoneRegistrationLastError, "meta_phone_registration_readiness_failed");
+  assert.equal(result.config.enabled, true);
+});
+
+test("conclusive readiness requires complete operational fields and a boolean PIN state", () => {
+  assert.equal(hasConclusiveMetaPhoneRegistrationState(readyPhoneStatus), true);
+  assert.equal(hasConclusiveMetaPhoneRegistrationState(null), false);
+  assert.equal(
+    hasConclusiveMetaPhoneRegistrationState({
+      status: "CONNECTED",
+      platform_type: "CLOUD_API",
+      account_mode: "LIVE",
+    }),
+    false
+  );
 });
 
 test("registration_required does not auto-promote even if Meta phone is ready", () => {

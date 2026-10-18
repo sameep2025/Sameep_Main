@@ -104,6 +104,12 @@ const whatsappBusinessConfigSchema = new mongoose.Schema(
     metaRegistration: {
       pinEncrypted: { type: String, default: "" },
     },
+    registrationRecovery: {
+      required: { type: Boolean, default: false },
+      wabaId: { type: String, default: "" },
+      phoneNumberId: { type: String, default: "" },
+      disconnectedAt: { type: Date, default: null },
+    },
     phoneRegistrationStatus: {
       type: String,
       enum: WHATSAPP_PHONE_REGISTRATION_STATUSES,
@@ -166,6 +172,12 @@ function getDefaultWhatsappBusinessConfig() {
     },
     metaRegistration: {
       pinEncrypted: "",
+    },
+    registrationRecovery: {
+      required: false,
+      wabaId: "",
+      phoneNumberId: "",
+      disconnectedAt: null,
     },
     phoneRegistrationStatus: "unknown",
     phoneRegisteredAt: null,

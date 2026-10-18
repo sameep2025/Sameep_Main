@@ -621,20 +621,48 @@ async function registerMetaPhoneNumber({ phoneNumberId, accessToken, pin }) {
       }
     );
 
-    return response.data || {};
+    const success = response?.data?.success === true;
+    if (!success) {
+      const error = new Error("Meta did not confirm WhatsApp phone registration");
+      error.code = "meta_phone_registration_unconfirmed";
+      error.registrationOutcome = "unconfirmed";
+      error.metaError = {
+        status: response?.status || null,
+        type: "",
+        code: "",
+        subcode: "",
+        message: "Meta registration response did not contain success=true",
+        errorUserTitle: "",
+        errorUserMessage: "",
+        fbtraceId: "",
+        hasErrorData: false,
+      };
+      throw error;
+    }
+
+    return {
+      success: true,
+      registrationOutcome: "registered",
+      httpStatus: response?.status || 200,
+    };
   } catch (error) {
+    if (error.code === "meta_phone_registration_unconfirmed") throw error;
+
     const metaError = getSafeMetaErrorDetails(error);
     const message = String(metaError.message || "").toLowerCase();
     if (message.includes("already") && message.includes("register")) {
-      return {
-        success: true,
-        alreadyRegistered: true,
-        metaError,
-      };
+      const wrapped = new Error(
+        "Meta reports that the WhatsApp phone number is already registered"
+      );
+      wrapped.code = "meta_phone_already_registered";
+      wrapped.registrationOutcome = "already_registered";
+      wrapped.metaError = metaError;
+      throw wrapped;
     }
 
     const wrapped = new Error("Unable to register WhatsApp phone number with Meta");
     wrapped.code = "meta_phone_registration_failed";
+    wrapped.registrationOutcome = "failed";
     wrapped.metaError = metaError;
     throw wrapped;
   }

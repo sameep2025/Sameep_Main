@@ -1,7 +1,10 @@
 const Customer = require("../models/Customer");
 const Vendor = require("../models/DummyVendor");
 const { calculateCustomerBalance } = require("./loyaltyService");
-const { buildMessagingReadiness } = require("./metaWhatsAppReadiness");
+const {
+  applyMetaPhoneReadinessSnapshot,
+  buildMessagingReadiness,
+} = require("./metaWhatsAppReadiness");
 const {
   getPhoneNumberReadinessWithSystemUserToken,
 } = require("./metaWhatsAppService");
@@ -82,12 +85,13 @@ async function sendCompletedBillWhatsApp({ billing, referencePrefix = "billing" 
       const phoneStatus = await getPhoneNumberReadinessWithSystemUserToken({
         phoneNumberId: vendor.whatsappBusiness.phoneNumberId,
       });
+      const readinessSnapshot = applyMetaPhoneReadinessSnapshot({
+        config: vendor.whatsappBusiness,
+        phoneStatus,
+      });
       vendorForWhatsApp = {
         ...vendor,
-        whatsappBusiness: {
-          ...vendor.whatsappBusiness,
-          messagingReadiness: buildMessagingReadiness(phoneStatus?.health_status || null),
-        },
+        whatsappBusiness: readinessSnapshot.config,
       };
     } catch (readinessErr) {
       vendorForWhatsApp = {

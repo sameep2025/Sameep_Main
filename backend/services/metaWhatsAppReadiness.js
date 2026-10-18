@@ -34,6 +34,16 @@ function isMetaPhoneRegistrationReady(phoneStatus) {
   );
 }
 
+function hasConclusiveMetaPhoneRegistrationState(phoneStatus) {
+  return (
+    Boolean(phoneStatus && typeof phoneStatus === "object") &&
+    Boolean(normalizeMetaValue(phoneStatus.status)) &&
+    Boolean(normalizeMetaValue(phoneStatus.platform_type)) &&
+    Boolean(normalizeMetaValue(phoneStatus.account_mode)) &&
+    typeof phoneStatus.is_pin_enabled === "boolean"
+  );
+}
+
 function getMessagingReadinessStatus(healthStatus) {
   const value = normalizeMetaValue(healthStatus?.can_send_message);
   return MESSAGING_READINESS_STATUSES[value] || "unknown";
@@ -105,8 +115,21 @@ function buildMessagingReadiness(healthStatus) {
 function applyPhoneRegistrationReadiness({ config, phoneStatus, now = new Date() }) {
   const currentConfig = config && typeof config === "object" ? config : {};
   const currentStatus = normalizeLifecycleStatus(currentConfig.phoneRegistrationStatus);
+  const ready = isMetaPhoneRegistrationReady(phoneStatus);
+  const conclusive = hasConclusiveMetaPhoneRegistrationState(phoneStatus);
 
   if (currentStatus === "active") {
+    if (conclusive && !ready) {
+      return {
+        changed: true,
+        config: {
+          ...currentConfig,
+          phoneRegistrationStatus: "error",
+          phoneRegistrationLastError: "meta_phone_registration_readiness_failed",
+        },
+      };
+    }
+
     return {
       changed: false,
       config: {
@@ -118,7 +141,7 @@ function applyPhoneRegistrationReadiness({ config, phoneStatus, now = new Date()
 
   if (
     currentStatus === "registration_submitted" &&
-    isMetaPhoneRegistrationReady(phoneStatus)
+    ready
   ) {
     return {
       changed: true,
@@ -140,9 +163,27 @@ function applyPhoneRegistrationReadiness({ config, phoneStatus, now = new Date()
   };
 }
 
+function applyMetaPhoneReadinessSnapshot({ config, phoneStatus, now = new Date() }) {
+  const readinessResult = applyPhoneRegistrationReadiness({
+    config,
+    phoneStatus,
+    now,
+  });
+
+  return {
+    ...readinessResult,
+    config: {
+      ...readinessResult.config,
+      messagingReadiness: buildMessagingReadiness(phoneStatus?.health_status || null),
+    },
+  };
+}
+
 module.exports = {
+  applyMetaPhoneReadinessSnapshot,
   buildMessagingReadiness,
   getMessagingReadinessStatus,
+  hasConclusiveMetaPhoneRegistrationState,
   isMetaPhoneRegistrationReady,
   applyPhoneRegistrationReadiness,
   normalizeLifecycleStatus,

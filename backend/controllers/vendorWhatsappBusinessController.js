@@ -38,7 +38,16 @@ const {
 const {
   applyPhoneRegistrationReadiness,
   buildMessagingReadiness,
+  isMetaPhoneRegistrationReady,
 } = require("../services/metaWhatsAppReadiness");
+const {
+  PIN_RECOVERY_REQUIRED_CODE,
+  applyReconnectRegistrationLifecycle,
+  buildDisconnectRegistrationRecovery,
+  buildRegistrationRecoveryState,
+  emptyRegistrationRecovery,
+  isRegistrationPinRecoveryRequired,
+} = require("../services/metaWhatsAppRegistrationLifecycle");
 const {
   buildActivatedWhatsappBusinessConfig,
   buildActivationEligibility,
@@ -211,9 +220,11 @@ async function refreshMetaPhoneReadinessForResponse(record) {
     if (readinessResult.changed || displayNameReadinessChanged) {
       const updates = {};
       if (readinessResult.changed) {
-        updates["whatsappBusiness.phoneRegistrationStatus"] = "active";
+        updates["whatsappBusiness.phoneRegistrationStatus"] =
+          refreshedConfig.phoneRegistrationStatus;
         updates["whatsappBusiness.phoneRegisteredAt"] = refreshedConfig.phoneRegisteredAt;
-        updates["whatsappBusiness.phoneRegistrationLastError"] = "";
+        updates["whatsappBusiness.phoneRegistrationLastError"] =
+          refreshedConfig.phoneRegistrationLastError || "";
       }
       if (displayNameReadinessChanged) {
         updates["whatsappBusiness.displayNameReadiness"] = displayNameReadiness;
@@ -223,7 +234,10 @@ async function refreshMetaPhoneReadinessForResponse(record) {
         {
           _id: record.vendor._id,
           ...(readinessResult.changed
-            ? { "whatsappBusiness.phoneRegistrationStatus": "registration_submitted" }
+            ? {
+                "whatsappBusiness.phoneRegistrationStatus":
+                  config.phoneRegistrationStatus,
+              }
             : {}),
         },
         {
@@ -529,10 +543,14 @@ function isMetaDisplayNameApprovalError(error) {
 function sendPhoneRegistrationError(res, error) {
   const meta = formatSafeMetaForResponse(error.metaError);
   const status =
-    error.code === "meta_token_encryption_missing" ||
-    error.code === "meta_system_user_token_missing" ||
-    error.code === "meta_phone_registration_failed" ||
-    error.code === "meta_phone_status_failed"
+    error.code === "meta_phone_already_registered" ||
+    error.code === PIN_RECOVERY_REQUIRED_CODE
+      ? 409
+      : error.code === "meta_token_encryption_missing" ||
+        error.code === "meta_system_user_token_missing" ||
+        error.code === "meta_phone_registration_failed" ||
+        error.code === "meta_phone_registration_unconfirmed" ||
+        error.code === "meta_phone_status_failed"
       ? 500
       : 400;
 
@@ -548,6 +566,9 @@ function sendPhoneRegistrationError(res, error) {
         ? "WhatsApp phone registration is not configured correctly. Please contact YNOT support."
         : error.code === "meta_system_user_token_missing"
         ? "WhatsApp phone registration is not configured correctly. Please contact YNOT support."
+        : error.code === "meta_phone_already_registered" ||
+          error.code === PIN_RECOVERY_REQUIRED_CODE
+        ? "This number is already registered with Meta, but YNOT cannot verify that its stored PIN matches. Use the supported PIN recovery process before activation."
         : "Unable to register WhatsApp number.",
     ...(meta ? { meta } : {}),
   });
@@ -1318,16 +1339,18 @@ async function sendWhatsappTemplateTestMessage(req, res) {
 }
 
 async function registerWhatsappPhoneNumber(req, res) {
+  let record = null;
+  let config = null;
   let logContext = {
     vendorId: "",
     phoneNumberId: "",
   };
 
   try {
-    const record = await findVendorRecord(getAuthorizedVendorId(req));
+    record = await findVendorRecord(getAuthorizedVendorId(req));
     if (!record) return sendVendorNotFound(res);
 
-    const config = normalizeWhatsappBusinessConfig(record.vendor.whatsappBusiness);
+    config = normalizeWhatsappBusinessConfig(record.vendor.whatsappBusiness);
     assertConnectedMetaConfig(config);
 
     if (!config.phoneNumberId) {
@@ -1341,48 +1364,49 @@ async function registerWhatsappPhoneNumber(req, res) {
       phoneNumberId: String(config.phoneNumberId),
     };
 
-    const hadStoredPin = Boolean(config.metaRegistration?.pinEncrypted);
-    const { pin, pinEncrypted } = getOrCreateRegistrationPin(config);
-    if (!hadStoredPin) {
-      await record.Model.updateOne(
-        { _id: record.vendor._id },
-        { $set: { "whatsappBusiness.metaRegistration.pinEncrypted": pinEncrypted } }
-      );
-      config.metaRegistration = {
-        ...(config.metaRegistration || {}),
-        pinEncrypted,
-      };
-    }
-    let statusBefore = null;
-
-    try {
-      statusBefore = await getPhoneNumberStatusWithSystemUserToken({
-        phoneNumberId: config.phoneNumberId,
-      });
-    } catch (error) {
-      statusBefore = null;
-    }
+    const statusBefore = await getPhoneNumberStatusWithSystemUserToken({
+      phoneNumberId: config.phoneNumberId,
+    });
 
     const beforeRegistrationStatus = mapPhoneRegistrationStatus(
       statusBefore,
       config.phoneRegistrationStatus || "unknown"
     );
     let registrationResult = null;
+    let registrationOutcome = "readiness_check_only";
+    let pinEncrypted = config.metaRegistration?.pinEncrypted || "";
+    let statusAfter = statusBefore;
 
-    if (
+    if (isMetaPhoneRegistrationReady(statusBefore)) {
+      registrationOutcome = "already_ready";
+    } else if (isRegistrationPinRecoveryRequired(config)) {
+      const error = new Error("Stored registration PIN cannot be safely reused after reconnect");
+      error.code = PIN_RECOVERY_REQUIRED_CODE;
+      error.registrationOutcome = "pin_recovery_required";
+      throw error;
+    } else if (
       beforeRegistrationStatus !== "registration_submitted" &&
       beforeRegistrationStatus !== "active"
     ) {
+      const registrationPin = getOrCreateRegistrationPin(config);
       registrationResult = await registerPhoneNumberWithSystemUserToken({
         phoneNumberId: config.phoneNumberId,
-        pin,
+        pin: registrationPin.pin,
+      });
+      pinEncrypted = registrationPin.pinEncrypted;
+      registrationOutcome = registrationResult.registrationOutcome || "registered";
+      statusAfter = await getPhoneNumberStatusWithSystemUserToken({
+        phoneNumberId: config.phoneNumberId,
+      });
+    } else {
+      registrationOutcome = "existing_submission_rechecked";
+      statusAfter = await getPhoneNumberStatusWithSystemUserToken({
+        phoneNumberId: config.phoneNumberId,
       });
     }
 
-    const statusAfter = await getPhoneNumberStatusWithSystemUserToken({
-      phoneNumberId: config.phoneNumberId,
-    });
-    const submittedStatus = registrationResult?.success
+    const submittedStatus =
+      registrationResult?.success || isMetaPhoneRegistrationReady(statusAfter)
       ? getSubmittedPhoneRegistrationStatus()
       : beforeRegistrationStatus;
     const mappedStatus = mapPhoneRegistrationStatus(statusAfter, submittedStatus);
@@ -1406,12 +1430,17 @@ async function registerWhatsappPhoneNumber(req, res) {
       enabled: false,
       phoneRegistrationStatus: registrationStatus,
       phoneRegisteredAt: registeredAt,
-      phoneRegistrationLastError: "",
+      phoneRegistrationLastError:
+        readinessResult.config.phoneRegistrationLastError || "",
       displayNameReadiness,
       metaRegistration: {
         ...(config.metaRegistration || {}),
         pinEncrypted,
       },
+      registrationRecovery:
+        registrationResult?.success || registrationStatus === "active"
+          ? emptyRegistrationRecovery()
+          : config.registrationRecovery || emptyRegistrationRecovery(),
     };
     const responseWhatsappBusiness = {
       ...whatsappBusiness,
@@ -1423,8 +1452,11 @@ async function registerWhatsappPhoneNumber(req, res) {
       { $set: { whatsappBusiness } }
     );
 
-    console.log("[Meta Phone Registration Success]", {
+    console.log("[Meta Phone Registration Outcome]", {
       ...logContext,
+      httpStatus: registrationResult?.httpStatus || null,
+      registrationOutcome,
+      registrationRequestAccepted: registrationResult?.success === true,
       registrationStatus,
       registeredAt,
     });
@@ -1445,20 +1477,36 @@ async function registerWhatsappPhoneNumber(req, res) {
     });
   } catch (error) {
     const meta = formatSafeMetaForResponse(error.metaError);
-    console.error("Failed to register WhatsApp phone number:", error.code || error.message || error);
-    if (error.metaError) {
-      console.error("[Meta Phone Registration Error]", {
-        ...logContext,
-        httpStatus: meta?.status || null,
-        metaType: meta?.type || "",
-        metaCode: meta?.code || "",
-        metaSubcode: meta?.subcode || "",
-        metaMessage: meta?.message || "",
-        metaUserTitle: meta?.userTitle || "",
-        metaUserMessage: meta?.userMessage || "",
-        fbtraceId: meta?.fbtraceId || "",
+    if (
+      record &&
+      config &&
+      (error.code === "meta_phone_already_registered" ||
+        error.code === PIN_RECOVERY_REQUIRED_CODE)
+    ) {
+      const recoveryConfig = buildRegistrationRecoveryState(config);
+      await record.Model.updateOne(
+        { _id: record.vendor._id },
+        { $set: { whatsappBusiness: recoveryConfig } }
+      ).catch((updateError) => {
+        console.error("Failed to persist Meta PIN recovery requirement:", {
+          vendorId: String(record.vendor._id || ""),
+          code: updateError.code || "meta_pin_recovery_persistence_failed",
+        });
       });
     }
+    console.error("Failed to register WhatsApp phone number:", error.code || error.message || error);
+    console.error("[Meta Phone Registration Error]", {
+      ...logContext,
+      registrationOutcome: error.registrationOutcome || "failed",
+      httpStatus: meta?.status || null,
+      metaType: meta?.type || "",
+      metaCode: meta?.code || "",
+      metaSubcode: meta?.subcode || "",
+      metaMessage: meta?.message || "",
+      metaUserTitle: meta?.userTitle || "",
+      metaUserMessage: meta?.userMessage || "",
+      fbtraceId: meta?.fbtraceId || "",
+    });
     return sendPhoneRegistrationError(res, error);
   }
 }
@@ -1587,7 +1635,7 @@ async function completeMetaWhatsappConnection(req, res) {
       String(current.wabaId || "") !== resolvedWabaId ||
       String(current.phoneNumberId || "") !== resolvedPhoneNumberId;
     const defaultWhatsappBusiness = getDefaultWhatsappBusinessConfig();
-    const whatsappBusiness = {
+    const connectedWhatsappBusiness = {
       ...current,
       enabled: false,
       provider: "meta",
@@ -1610,6 +1658,10 @@ async function completeMetaWhatsappConnection(req, res) {
         expiresAt: getTokenExpiryDate(tokenResult?.expires_in),
       },
     };
+    const whatsappBusiness = applyReconnectRegistrationLifecycle({
+      current,
+      connectedConfig: connectedWhatsappBusiness,
+    });
 
     await record.Model.updateOne(
       { _id: record.vendor._id },
@@ -1787,7 +1839,11 @@ async function disconnectWhatsappBusiness(req, res) {
     const record = await findVendorRecord(getAuthorizedVendorId(req));
     if (!record) return sendVendorNotFound(res);
 
-    const whatsappBusiness = getDefaultWhatsappBusinessConfig();
+    const current = normalizeWhatsappBusinessConfig(record.vendor.whatsappBusiness);
+    const whatsappBusiness = {
+      ...getDefaultWhatsappBusinessConfig(),
+      registrationRecovery: buildDisconnectRegistrationRecovery(current),
+    };
     await record.Model.updateOne(
       { _id: record.vendor._id },
       { $set: { whatsappBusiness } }

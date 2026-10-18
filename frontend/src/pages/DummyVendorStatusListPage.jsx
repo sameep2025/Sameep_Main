@@ -6,6 +6,7 @@ import DummyBusinessHoursModal from "../components/DummyBusinessHoursModal";
 import DummyBusinessLocationModal from "../components/DummyBusinessLocationModal";
 import DummyLocationPickerModal from "../components/DummyLocationPickerModal";
 import PricingDetailsModal from "../components/PricingDetailsModal";
+import WhatsappIntegrationModal from "../components/WhatsappIntegrationModal";
 
 const FALLBACK_STATUSES = [
   "Accepted",
@@ -55,6 +56,7 @@ export default function DummyVendorStatusListPage() {
   const [vendorSocialLinks, setVendorSocialLinks] = useState({}); // raw { [handleName]: url }
   const [socialLinksSaving, setSocialLinksSaving] = useState(false);
   const [showScrollTop, setShowScrollTop] = useState(false);
+  const [whatsappIntegrationVendor, setWhatsappIntegrationVendor] = useState(null);
   const previewBase = String(PREVIEW_BASE_URL || "").trim().replace(/\/$/, "");
 
   const isRegisteredStatus = String(status || "").trim().toLowerCase() === "registered";
@@ -512,6 +514,14 @@ export default function DummyVendorStatusListPage() {
         <div style={{ fontWeight: 600, color: '#334155', marginRight: 8 }}>Actions:</div>
         <button
           onClick={() => {
+            const v = vendors.find((item) => item._id === selectedVendorId);
+            if (!v) return alert("Please select a vendor first");
+            setWhatsappIntegrationVendor(v);
+          }}
+          style={{ padding: '6px 12px', borderRadius: 6, background: '#0e7490', color: '#fff', border: 'none' }}
+        >WhatsApp Integration</button>
+        <button
+          onClick={() => {
             const v = vendors.find(x => x._id === selectedVendorId);
             if (!v) return alert('Please select a vendor first');
             const vStatus = String(v.status || "").trim().toLowerCase();
@@ -774,6 +784,13 @@ export default function DummyVendorStatusListPage() {
         >
           ↑
         </button>
+      ) : null}
+
+      {whatsappIntegrationVendor ? (
+        <WhatsappIntegrationModal
+          vendor={whatsappIntegrationVendor}
+          onClose={() => setWhatsappIntegrationVendor(null)}
+        />
       ) : null}
 
       {showStatusModal && (
