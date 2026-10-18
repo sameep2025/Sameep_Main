@@ -688,6 +688,55 @@ async function registerPhoneNumberWithSystemUserToken({ phoneNumberId, pin }) {
   });
 }
 
+async function setTwoStepVerificationPinWithSystemUserToken({
+  phoneNumberId,
+  pin,
+  timeoutMs = 15000,
+}) {
+  const { systemUserAccessToken } = getMetaWhatsAppConfig();
+  const id = String(phoneNumberId || "").trim();
+  const registrationPin = String(pin || "").trim();
+
+  if (!systemUserAccessToken) {
+    const error = new Error("Meta system-user access token is not configured");
+    error.code = "meta_system_user_token_missing";
+    throw error;
+  }
+  if (!id || !/^\d{6}$/.test(registrationPin)) {
+    const error = new Error("Phone number ID and a 6-digit PIN are required");
+    error.code = "meta_pin_recovery_payload_invalid";
+    throw error;
+  }
+
+  try {
+    const response = await axios.post(
+      graphUrl(id),
+      { pin: registrationPin },
+      {
+        headers: {
+          Authorization: `Bearer ${systemUserAccessToken}`,
+          "Content-Type": "application/json",
+        },
+        timeout: timeoutMs,
+      }
+    );
+    if (response?.data?.success !== true) {
+      const error = new Error("Meta did not confirm the PIN update");
+      error.code = "meta_pin_recovery_unconfirmed";
+      error.metaError = { status: response?.status || null, code: "", subcode: "" };
+      throw error;
+    }
+    return { success: true, httpStatus: response?.status || 200 };
+  } catch (error) {
+    if (error.code === "meta_pin_recovery_unconfirmed") throw error;
+    const wrapped = new Error("Unable to set Meta two-step verification PIN");
+    wrapped.code = "meta_pin_recovery_failed";
+    wrapped.ambiguous = !error?.response && ["ECONNABORTED", "ETIMEDOUT"].includes(error?.code);
+    wrapped.metaError = getSafeMetaErrorDetails(error);
+    throw wrapped;
+  }
+}
+
 async function sendMetaTemplateMessage({
   phoneNumberId,
   accessToken,
@@ -767,6 +816,7 @@ module.exports = {
   runMetaSystemUserAssetDiagnostics,
   sendMetaTemplateMessage,
   sendTemplateMessage,
+  setTwoStepVerificationPinWithSystemUserToken,
   subscribeAppToWaba,
   validateConnection,
   exchangeEmbeddedSignupCode,

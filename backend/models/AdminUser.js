@@ -9,6 +9,7 @@ const AdminUserSchema = new mongoose.Schema({
     lowercase: true,
   },
   passwordHash: { type: String, required: true },
+  permissions: [{ type: String, trim: true }],
   createdAt: { type: Date, default: Date.now },
 });
 

@@ -1,4 +1,7 @@
+const mongoose = require("mongoose");
 const { getMetaWhatsAppConfig } = require("../config/metaWhatsAppConfig");
+const DummyVendor = require("../models/DummyVendor");
+const Vendor = require("../models/Vendor");
 const { getDefaultWhatsappBusinessConfig } = require("../models/whatsappBusinessConfigSchema");
 const {
   getPhoneNumberReadinessWithSystemUserToken,
@@ -17,6 +20,21 @@ const {
 function normalizeConfig(value) {
   const config = value && typeof value.toObject === "function" ? value.toObject() : value;
   return { ...getDefaultWhatsappBusinessConfig(), ...(config || {}) };
+}
+
+async function findExactVendorById(vendorId, projection = "businessName whatsappBusiness") {
+  const id = String(vendorId || "").trim();
+  if (!mongoose.Types.ObjectId.isValid(id)) return { status: "invalid", matches: [] };
+
+  const [vendors, dummyVendors] = await Promise.all([
+    Vendor.find({ _id: id }).select(projection).lean(),
+    DummyVendor.find({ _id: id }).select(projection).lean(),
+  ]);
+  const matches = [
+    ...vendors.map((vendor) => ({ ...vendor, vendorModel: "Vendor" })),
+    ...dummyVendors.map((vendor) => ({ ...vendor, vendorModel: "DummyVendor" })),
+  ];
+  return { status: matches.length === 1 ? "matched" : "ambiguous", matches };
 }
 
 function sanitizeMetaFailure(error) {
@@ -261,6 +279,7 @@ function buildAdminSnapshot({ vendor, liveMeta }) {
 module.exports = {
   buildAdminSnapshot,
   buildStoredPinValidationOutcome,
+  findExactVendorById,
   readLiveMetaStatus,
   validateStoredPin,
 };

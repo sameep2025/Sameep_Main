@@ -145,14 +145,16 @@ test("admin snapshot contains operational statuses but no stored secrets", () =>
   assert.equal(serialized.includes("accessToken"), false);
 });
 
-test("Phase 1 routes require admin auth and expose no recovery endpoint", () => {
+test("WhatsApp admin routes require admin auth and expose explicit recovery endpoints", () => {
   const source = fs.readFileSync(
     path.join(__dirname, "../routes/adminWhatsappIntegrationRoutes.js"),
     "utf8"
   );
   assert.match(source, /router\.use\(requireAdminAuth\)/);
   assert.match(source, /whatsapp-integration\/pin-preflight/);
-  assert.doesNotMatch(source, /recover|history/i);
+  assert.match(source, /recovery-challenge/);
+  assert.match(source, /recover-registration/);
+  assert.match(source, /recovery-history/);
 });
 
 test("Phase 1 PIN validation contains no database writes or Meta POST requests", () => {
