@@ -9,6 +9,7 @@ const MESSAGING_READINESS_STATUSES = {
 };
 
 const IGNORED_BILLING_WARNING_CODES = new Set(["138024", "138025"]);
+const COEXISTENCE_CONNECTION_MODE = "coexistence";
 
 function normalizeMetaValue(value) {
   return String(value || "").trim().toUpperCase();
@@ -112,6 +113,75 @@ function buildMessagingReadiness(healthStatus) {
   };
 }
 
+function toValidTimestamp(value) {
+  if (!value) return null;
+  const timestamp = new Date(value).getTime();
+  return Number.isFinite(timestamp) ? timestamp : null;
+}
+
+function evaluateCoexistenceReadiness({ config, phoneStatus }) {
+  const current = config && typeof config === "object" ? config : {};
+  const evidence = current.coexistenceEvidence || {};
+  const configuredWabaId = String(current.wabaId || "").trim();
+  const configuredPhoneNumberId = String(current.phoneNumberId || "").trim();
+  const evidenceWabaId = String(evidence.wabaId || "").trim();
+  const evidencePhoneNumberId = String(evidence.phoneNumberId || "").trim();
+  const livePhoneNumberId = String(phoneStatus?.id || "").trim();
+  const verifiedAt = toValidTimestamp(evidence.verifiedAt);
+  const subscriptionVerifiedAt = toValidTimestamp(evidence.appSubscriptionVerifiedAt);
+  const connectedAt = toValidTimestamp(current.connectedAt);
+  const evidenceBelongsToCurrentConnection =
+    verifiedAt !== null &&
+    subscriptionVerifiedAt !== null &&
+    (connectedAt === null ||
+      (verifiedAt >= connectedAt && subscriptionVerifiedAt >= connectedAt));
+
+  const checks = {
+    connectionMode: current.connectionMode === COEXISTENCE_CONNECTION_MODE,
+    configuredIdentityPresent: Boolean(configuredWabaId && configuredPhoneNumberId),
+    evidenceIdentityMatches:
+      Boolean(evidenceWabaId && evidencePhoneNumberId) &&
+      evidenceWabaId === configuredWabaId &&
+      evidencePhoneNumberId === configuredPhoneNumberId,
+    evidenceCurrent: evidenceBelongsToCurrentConnection,
+    businessAppVerified: evidence.isOnBizApp === true,
+    evidencePlatformCloudApi: normalizeMetaValue(evidence.platformType) === META_PHONE_READY_PLATFORM,
+    appSubscriptionVerified: evidence.appSubscriptionVerified === true,
+    liveIdentityMatches:
+      Boolean(livePhoneNumberId) && livePhoneNumberId === configuredPhoneNumberId,
+    liveBusinessAppVerified: phoneStatus?.is_on_biz_app === true,
+    livePhoneConnected: normalizeMetaValue(phoneStatus?.status) === META_PHONE_READY_STATUS,
+    livePlatformCloudApi:
+      normalizeMetaValue(phoneStatus?.platform_type) === META_PHONE_READY_PLATFORM,
+  };
+
+  return {
+    ready: Object.values(checks).every(Boolean),
+    checkedAt: new Date(),
+    checks,
+    blockers: Object.entries(checks)
+      .filter(([, passed]) => !passed)
+      .map(([name]) => name),
+  };
+}
+
+function applyCoexistencePhoneReadiness({ config, phoneStatus }) {
+  const currentConfig = config && typeof config === "object" ? config : {};
+  const coexistenceReadiness = evaluateCoexistenceReadiness({
+    config: currentConfig,
+    phoneStatus,
+  });
+
+  return {
+    changed: false,
+    config: {
+      ...currentConfig,
+      coexistenceReadiness,
+      messagingReadiness: buildMessagingReadiness(phoneStatus?.health_status || null),
+    },
+  };
+}
+
 function applyPhoneRegistrationReadiness({ config, phoneStatus, now = new Date() }) {
   const currentConfig = config && typeof config === "object" ? config : {};
   const currentStatus = normalizeLifecycleStatus(currentConfig.phoneRegistrationStatus);
@@ -164,6 +234,10 @@ function applyPhoneRegistrationReadiness({ config, phoneStatus, now = new Date()
 }
 
 function applyMetaPhoneReadinessSnapshot({ config, phoneStatus, now = new Date() }) {
+  if (config?.connectionMode === COEXISTENCE_CONNECTION_MODE) {
+    return applyCoexistencePhoneReadiness({ config, phoneStatus });
+  }
+
   const readinessResult = applyPhoneRegistrationReadiness({
     config,
     phoneStatus,
@@ -180,11 +254,13 @@ function applyMetaPhoneReadinessSnapshot({ config, phoneStatus, now = new Date()
 }
 
 module.exports = {
+  applyCoexistencePhoneReadiness,
   applyMetaPhoneReadinessSnapshot,
   buildMessagingReadiness,
   getMessagingReadinessStatus,
   hasConclusiveMetaPhoneRegistrationState,
   isMetaPhoneRegistrationReady,
+  evaluateCoexistenceReadiness,
   applyPhoneRegistrationReadiness,
   normalizeLifecycleStatus,
   sanitizeMessagingBlockers,

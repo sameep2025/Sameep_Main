@@ -9,6 +9,10 @@ const {
   getSafeErrorCode,
   sendVendorMetaBillMessage,
 } = require("./vendorMetaBillSender");
+const {
+  getManeaSendDiagnosticAuthorization,
+  prepareManeaDiagnosticSend,
+} = require("./maneaWhatsappDiagnostic");
 
 const UNCERTAIN_ERROR_CODES = new Set([
   "ECONNABORTED",
@@ -47,9 +51,15 @@ function resolveBillingWhatsappProvider({ vendor, env = process.env } = {}) {
     };
   }
 
-  const decision = resolveWhatsAppBillingRoute({
+  const diagnosticAuthorization = getManeaSendDiagnosticAuthorization({
+    env,
+    vendorId: vendor?._id || vendor?.id,
     whatsappBusiness: vendor?.whatsappBusiness || {},
   });
+  const decision = resolveWhatsAppBillingRoute(
+    { whatsappBusiness: vendor?.whatsappBusiness || {} },
+    { phoneRegistrationReadyOverride: diagnosticAuthorization.allowed }
+  );
 
   return {
     ...decision,
@@ -98,7 +108,14 @@ function logBillingTrace(details = {}, logger = console, level = "log") {
 }
 
 async function sendRoutedWhatsAppBillingMessage(
-  { vendor, vendorId: explicitVendorId, billId, msg91Payload, metaPayload },
+  {
+    vendor,
+    vendorId: explicitVendorId,
+    billId,
+    msg91Payload,
+    metaPayload,
+    diagnosticContext: suppliedDiagnosticContext,
+  },
   deps = {}
 ) {
   const env = deps.env || process.env;
@@ -107,7 +124,42 @@ async function sendRoutedWhatsAppBillingMessage(
   const sendVendorMeta = deps.sendVendorMeta || sendVendorMetaBillMessage;
   const hasMsg91Balance = deps.hasMsg91Balance || hasAvailableWhatsAppBalance;
   const resolveRoute = deps.resolveRoute || resolveWhatsAppBillingRoute;
+  const prepareDiagnosticSend = deps.prepareDiagnosticSend || prepareManeaDiagnosticSend;
   const vendorId = String(explicitVendorId || vendor?._id || vendor?.id || msg91Payload?.vendorId || "");
+  let diagnosticContext = suppliedDiagnosticContext;
+
+  if (!diagnosticContext) {
+    try {
+      diagnosticContext = await prepareDiagnosticSend({
+        env,
+        vendorId,
+        billId,
+        recipientPhoneNumber: metaPayload?.recipientPhoneNumber,
+        whatsappBusiness: vendor?.whatsappBusiness || {},
+      });
+    } catch (error) {
+      logSafeBillingSendError("[WhatsApp Billing Diagnostic Guard Failed]", {
+        vendorId,
+        billId: String(billId || ""),
+        code: String(error?.code || "diagnostic_claim_lookup_failed"),
+      }, logger);
+      return {
+        provider: "",
+        route: "",
+        status: "skipped",
+        reason: "diagnostic_claim_lookup_failed",
+      };
+    }
+  }
+
+  if (!diagnosticContext.proceed) {
+    return {
+      provider: ROUTES.VENDOR_META,
+      route: ROUTES.VENDOR_META,
+      status: "skipped",
+      reason: diagnosticContext.reason || "diagnostic_claim_exists",
+    };
+  }
 
   if (!isVendorMetaBillRoutingEnabled(env)) {
     logBillingTrace({
@@ -160,9 +212,23 @@ async function sendRoutedWhatsAppBillingMessage(
     };
   }
 
-  const decision = resolveRoute({
+  let decision = resolveRoute({
     whatsappBusiness: vendor?.whatsappBusiness || {},
   });
+
+  if (diagnosticContext.diagnostic) {
+    decision = resolveRoute(
+      { whatsappBusiness: vendor?.whatsappBusiness || {} },
+      { phoneRegistrationReadyOverride: true }
+    );
+    if (decision.route === ROUTES.VENDOR_META) {
+      decision = {
+        ...decision,
+        reason: diagnosticContext.authorization?.reason ||
+          "manea_registration_readiness_diagnostic",
+      };
+    }
+  }
   logWhatsAppBillingRouteDecision({ vendorId, decision });
   logBillingTrace({
     stage: "route",
@@ -256,7 +322,6 @@ async function sendRoutedWhatsAppBillingMessage(
     const safeErrorCode = getSafeErrorCode(error);
     const status = isUncertainSendError(error) ? "uncertain" : "failed";
     const metaError = error?.metaError || {};
-
     logBillingTrace({
       stage: status === "uncertain" ? "meta_uncertain" : "meta_failed",
       vendorId,

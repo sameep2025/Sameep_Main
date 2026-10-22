@@ -159,6 +159,79 @@ async function getPhoneNumbers(wabaId, accessToken) {
   }
 }
 
+async function getCoexistencePhoneNumbers(wabaId, accessToken) {
+  const id = String(wabaId || "").trim();
+  if (!id || !accessToken) {
+    const error = new Error("WABA ID and access token are required");
+    error.code = "meta_coexistence_phone_lookup_payload_invalid";
+    throw error;
+  }
+
+  try {
+    const response = await axios.get(graphUrl(`${id}/phone_numbers`), {
+      headers: { Authorization: `Bearer ${accessToken}` },
+      params: {
+        fields:
+          "id,display_phone_number,verified_name,name_status,is_on_biz_app,platform_type,status",
+      },
+    });
+    return Array.isArray(response.data?.data) ? response.data.data : [];
+  } catch (error) {
+    const wrapped = new Error("Unable to resolve Meta coexistence phone numbers");
+    wrapped.code = "meta_coexistence_phone_lookup_failed";
+    wrapped.metaError = getSafeMetaErrorDetails(error);
+    throw wrapped;
+  }
+}
+
+async function validateCoexistenceConnection({ accessToken, wabaId, phoneNumberId = "" }) {
+  const requestedWabaId = String(wabaId || "").trim();
+  const requestedPhoneNumberId = String(phoneNumberId || "").trim();
+  const account = await getWhatsAppBusinessAccount(requestedWabaId, accessToken);
+
+  if (String(account?.id || "") !== requestedWabaId) {
+    const error = new Error("Meta WABA identity could not be verified");
+    error.code = "meta_coexistence_waba_mismatch";
+    throw error;
+  }
+
+  const phoneNumbers = await getCoexistencePhoneNumbers(requestedWabaId, accessToken);
+  let selectedPhone = null;
+
+  if (requestedPhoneNumberId) {
+    selectedPhone =
+      phoneNumbers.find((phone) => String(phone?.id || "") === requestedPhoneNumberId) || null;
+    if (!selectedPhone) {
+      const error = new Error("Meta phone does not belong to the selected WABA");
+      error.code = "meta_coexistence_phone_mismatch";
+      throw error;
+    }
+  } else {
+    const coexistencePhones = phoneNumbers.filter((phone) => phone?.is_on_biz_app === true);
+    if (coexistencePhones.length !== 1) {
+      const error = new Error(
+        coexistencePhones.length > 1
+          ? "Multiple WhatsApp Business App phones require an explicit phone selection"
+          : "No verified WhatsApp Business App phone was found"
+      );
+      error.code =
+        coexistencePhones.length > 1
+          ? "meta_coexistence_phone_ambiguous"
+          : "meta_coexistence_phone_not_found";
+      throw error;
+    }
+    selectedPhone = coexistencePhones[0];
+  }
+
+  if (selectedPhone?.is_on_biz_app !== true) {
+    const error = new Error("Meta did not verify this phone as a WhatsApp Business App number");
+    error.code = "meta_coexistence_not_on_business_app";
+    throw error;
+  }
+
+  return { account, phoneNumbers, selectedPhone };
+}
+
 async function validateConnection({ accessToken, wabaId, phoneNumberId }) {
   const account = await getWhatsAppBusinessAccount(wabaId, accessToken);
   const phoneNumbers = await getPhoneNumbers(wabaId, accessToken);
@@ -346,6 +419,17 @@ const META_PHONE_READINESS_DIAGNOSTIC_FIELDS = [
   "name_status",
 ].join(",");
 
+const META_COEXISTENCE_READINESS_FIELDS = [
+  "id",
+  "display_phone_number",
+  "verified_name",
+  "platform_type",
+  "status",
+  "health_status",
+  "name_status",
+  "is_on_biz_app",
+].join(",");
+
 function sanitizePhoneReadinessData(data) {
   return {
     accessible: true,
@@ -461,14 +545,82 @@ async function getPhoneNumberReadinessWithSystemUserToken({ phoneNumberId }) {
   return result.data || {};
 }
 
+async function getCoexistencePhoneReadiness({ phoneNumberId, accessToken }) {
+  const id = String(phoneNumberId || "").trim();
+  if (!id || !accessToken) {
+    const error = new Error("Meta Coexistence phone ID and access token are required");
+    error.code = "meta_coexistence_readiness_payload_invalid";
+    throw error;
+  }
+
+  try {
+    const response = await axios.get(graphUrl(id), {
+      headers: { Authorization: `Bearer ${accessToken}` },
+      params: { fields: META_COEXISTENCE_READINESS_FIELDS },
+    });
+    return response.data || {};
+  } catch (error) {
+    const wrapped = new Error("Unable to read Meta Coexistence phone readiness");
+    wrapped.code = "meta_coexistence_readiness_lookup_failed";
+    wrapped.metaError = getSafeMetaErrorDetails(error);
+    throw wrapped;
+  }
+}
+
 async function disconnectAuthorization() {
   // Keep external Meta assets intact. Revocation can be wired here later if YNOT
   // receives a token model where revocation is required and safe.
   return { revoked: false, reason: "not_implemented" };
 }
 
-async function subscribeAppToWaba() {
-  throw new Error("subscribeAppToWaba is reserved for the Meta onboarding phase that requires it.");
+async function subscribeAppToWaba({ wabaId, accessToken, appId } = {}) {
+  const id = String(wabaId || "").trim();
+  const expectedAppId = String(appId || "").trim();
+  if (!id || !accessToken || !expectedAppId) {
+    const error = new Error("WABA ID, access token, and Meta app ID are required");
+    error.code = "meta_waba_subscription_payload_invalid";
+    throw error;
+  }
+
+  try {
+    const endpoint = graphUrl(`${id}/subscribed_apps`);
+    const headers = { Authorization: `Bearer ${accessToken}` };
+    const subscription = await axios.post(endpoint, {}, { headers });
+    if (subscription?.data?.success !== true) {
+      const error = new Error("Meta did not confirm the WABA subscription");
+      error.code = "meta_waba_subscription_unconfirmed";
+      throw error;
+    }
+
+    const verification = await axios.get(endpoint, {
+      headers,
+      params: { fields: "id,name" },
+    });
+    const subscriptions = Array.isArray(verification?.data?.data)
+      ? verification.data.data
+      : [];
+    const verified = subscriptions.some(
+      (app) => String(app?.id || "").trim() === expectedAppId
+    );
+    if (!verified) {
+      const error = new Error("YNOT app subscription could not be verified on the WABA");
+      error.code = "meta_waba_subscription_verification_failed";
+      throw error;
+    }
+
+    return { success: true, verified: true, appId: expectedAppId };
+  } catch (error) {
+    if (
+      error.code === "meta_waba_subscription_unconfirmed" ||
+      error.code === "meta_waba_subscription_verification_failed"
+    ) {
+      throw error;
+    }
+    const wrapped = new Error("Unable to subscribe the YNOT app to the WABA");
+    wrapped.code = "meta_waba_subscription_failed";
+    wrapped.metaError = getSafeMetaErrorDetails(error);
+    throw wrapped;
+  }
 }
 
 async function sendTemplateMessage(args) {
@@ -802,6 +954,8 @@ module.exports = {
   findTemplateByName,
   getAuthorizedBusinesses,
   getPhoneNumbers,
+  getCoexistencePhoneNumbers,
+  getCoexistencePhoneReadiness,
   getPhoneNumberStatus,
   getPhoneNumberStatusWithSystemUserToken,
   getPhoneNumberReadinessWithSystemUserToken,
@@ -818,6 +972,7 @@ module.exports = {
   sendTemplateMessage,
   setTwoStepVerificationPinWithSystemUserToken,
   subscribeAppToWaba,
+  validateCoexistenceConnection,
   validateConnection,
   exchangeEmbeddedSignupCode,
 };

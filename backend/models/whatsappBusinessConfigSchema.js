@@ -1,6 +1,11 @@
 const mongoose = require("mongoose");
 
 const WHATSAPP_BUSINESS_PROVIDERS = ["msg91", "meta"];
+const WHATSAPP_CONNECTION_MODES = [
+  "standard_cloud_api",
+  "coexistence",
+  "legacy_unknown",
+];
 
 const WHATSAPP_BUSINESS_CONNECTION_STATUSES = [
   "not_connected",
@@ -61,6 +66,11 @@ const whatsappBusinessConfigSchema = new mongoose.Schema(
       enum: WHATSAPP_BUSINESS_PROVIDERS,
       default: "msg91",
     },
+    connectionMode: {
+      type: String,
+      enum: WHATSAPP_CONNECTION_MODES,
+      default: "legacy_unknown",
+    },
     connectionStatus: {
       type: String,
       enum: WHATSAPP_BUSINESS_CONNECTION_STATUSES,
@@ -104,6 +114,16 @@ const whatsappBusinessConfigSchema = new mongoose.Schema(
     metaRegistration: {
       pinEncrypted: { type: String, default: "" },
     },
+    coexistenceEvidence: {
+      wabaId: { type: String, default: "" },
+      phoneNumberId: { type: String, default: "" },
+      isOnBizApp: { type: Boolean, default: null },
+      platformType: { type: String, default: "" },
+      verifiedAt: { type: Date, default: null },
+      signupEventType: { type: String, default: "" },
+      appSubscriptionVerified: { type: Boolean, default: false },
+      appSubscriptionVerifiedAt: { type: Date, default: null },
+    },
     registrationRecovery: {
       required: { type: Boolean, default: false },
       wabaId: { type: String, default: "" },
@@ -141,6 +161,7 @@ function getDefaultWhatsappBusinessConfig() {
   return {
     enabled: false,
     provider: "msg91",
+    connectionMode: "legacy_unknown",
     connectionStatus: "not_connected",
     businessId: "",
     wabaId: "",
@@ -173,6 +194,16 @@ function getDefaultWhatsappBusinessConfig() {
     metaRegistration: {
       pinEncrypted: "",
     },
+    coexistenceEvidence: {
+      wabaId: "",
+      phoneNumberId: "",
+      isOnBizApp: null,
+      platformType: "",
+      verifiedAt: null,
+      signupEventType: "",
+      appSubscriptionVerified: false,
+      appSubscriptionVerifiedAt: null,
+    },
     registrationRecovery: {
       required: false,
       wabaId: "",
@@ -199,6 +230,7 @@ function getDefaultWhatsappBusinessConfig() {
 
 module.exports = {
   WHATSAPP_BUSINESS_CONNECTION_STATUSES,
+  WHATSAPP_CONNECTION_MODES,
   WHATSAPP_BUSINESS_TEMPLATE_STATUSES,
   WHATSAPP_PHONE_REGISTRATION_STATUSES,
   WHATSAPP_BUSINESS_PROVIDERS,

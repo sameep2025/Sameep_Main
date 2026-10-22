@@ -169,15 +169,20 @@ function isBillingTemplateApproved(config) {
   return instance?.status === "approved";
 }
 
-function buildActivationEligibility(config, messagingReadiness = {}) {
+function buildActivationEligibility(config, messagingReadiness = {}, options = {}) {
   const current = config && typeof config === "object" ? config : {};
+  const isCoexistence = current.connectionMode === "coexistence";
   const messagingStatus = String(messagingReadiness?.status || "unknown").trim();
   const testMessage = normalizeTestMessageState(current.testMessage);
   const displayNameReadiness = normalizeDisplayNameReadiness(current.displayNameReadiness);
   const checks = {
     accountConnected:
       current.provider === "meta" && CONNECTED_STATUSES.has(current.connectionStatus),
-    phoneRegistrationReady: current.phoneRegistrationStatus === "active",
+    phoneRegistrationReady:
+      isCoexistence
+        ? current.coexistenceReadiness?.ready === true
+        : current.phoneRegistrationStatus === "active" ||
+          options.phoneRegistrationReadyOverride === true,
     messagingNotBlocked: messagingStatus === "available" || messagingStatus === "limited",
     displayNameSendReady: displayNameReadiness.canSend !== false,
     billingTemplateApproved: isBillingTemplateApproved(current),
@@ -198,6 +203,14 @@ function buildActivationEligibility(config, messagingReadiness = {}) {
     eligible: Object.values(checks).every(Boolean),
     checks,
     blockers,
+    diagnostic: {
+      phoneRegistrationBypassApplied:
+        !isCoexistence &&
+        current.phoneRegistrationStatus !== "active" &&
+        options.phoneRegistrationReadyOverride === true,
+      coexistenceReadinessVerified:
+        isCoexistence && current.coexistenceReadiness?.ready === true,
+    },
   };
 }
 

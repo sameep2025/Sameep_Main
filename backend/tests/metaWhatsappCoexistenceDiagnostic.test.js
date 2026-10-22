@@ -71,7 +71,7 @@ test("standard and WABA-only signup configurations remain unchanged", () => {
   );
 });
 
-test("coexistence Button 2 uses the isolated diagnostic endpoint only", () => {
+test("coexistence Button 2 uses the dedicated completion endpoint", () => {
   assert.match(whatsappConnectSource, /SIGNUP_MODE_COEXISTENCE_TEST/);
   assert.match(
     whatsappConnectSource,
@@ -79,7 +79,7 @@ test("coexistence Button 2 uses the isolated diagnostic endpoint only", () => {
   );
   assert.match(
     whatsappConnectSource,
-    /\/api\/vendor\/whatsapp-business\/meta\/coexistence-diagnostic/
+    /\/api\/vendor\/whatsapp-business\/meta\/coexistence\/complete/
   );
   assert.match(
     whatsappConnectSource,

@@ -15,13 +15,17 @@ function normalizeWhatsappBusiness(value) {
   return value && typeof value === "object" ? value : {};
 }
 
-function resolveWhatsAppBillingRoute(vendorContext = {}) {
+function resolveWhatsAppBillingRoute(vendorContext = {}, options = {}) {
   const whatsappBusiness = normalizeWhatsappBusiness(
     vendorContext.whatsappBusiness || vendorContext
   );
   const messagingReadiness =
     vendorContext.messagingReadiness || whatsappBusiness.messagingReadiness || {};
-  const eligibility = buildActivationEligibility(whatsappBusiness, messagingReadiness);
+  const eligibility = buildActivationEligibility(
+    whatsappBusiness,
+    messagingReadiness,
+    options
+  );
   const checks = {
     providerMeta: whatsappBusiness.provider === "meta",
     explicitlyEnabled: whatsappBusiness.enabled === true,
@@ -62,6 +66,7 @@ function resolveWhatsAppBillingRoute(vendorContext = {}) {
             ...(!checks.explicitlyEnabled ? ["not_explicitly_enabled"] : []),
             ...(Array.isArray(eligibility.blockers) ? eligibility.blockers : []),
           ],
+    diagnostic: eligibility.diagnostic,
   };
 }
 

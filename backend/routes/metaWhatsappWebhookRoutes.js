@@ -1,5 +1,6 @@
 const express = require("express");
 const {
+  hasCoexistenceWebhookEvents,
   processMetaWhatsappWebhook,
   verifyWebhookSignature,
 } = require("../services/metaWhatsappWebhookService");
@@ -35,14 +36,34 @@ router.post(
       signature: req.headers["x-hub-signature-256"],
     });
 
-    if (signatureResult.enforceable && !signatureResult.verified) {
+    const hasCoexistenceEvents = hasCoexistenceWebhookEvents(req.body || {});
+    if (
+      (signatureResult.enforceable && !signatureResult.verified) ||
+      (hasCoexistenceEvents && !signatureResult.verified)
+    ) {
       return res.sendStatus(403);
+    }
+
+    if (hasCoexistenceEvents) {
+      try {
+        await processMetaWhatsappWebhook(req.body || {}, {
+          signatureVerified: true,
+        });
+        return res.sendStatus(200);
+      } catch (error) {
+        console.error("Meta WhatsApp Coexistence webhook processing failed:", {
+          code: error.code || "meta_coexistence_webhook_processing_failed",
+        });
+        return res.sendStatus(500);
+      }
     }
 
     res.sendStatus(200);
 
     try {
-      await processMetaWhatsappWebhook(req.body || {});
+      await processMetaWhatsappWebhook(req.body || {}, {
+        signatureVerified: signatureResult.verified,
+      });
     } catch (error) {
       console.error("Meta WhatsApp webhook processing failed:", error.message || error);
     }

@@ -23,6 +23,7 @@ const {
   createTemplate,
   exchangeEmbeddedSignupCode,
   getPhoneNumberStatus,
+  getCoexistencePhoneReadiness,
   getPhoneNumberReadinessWithSystemUserToken,
   getPhoneNumberStatusWithSystemUserToken,
   getTemplateStatus,
@@ -36,6 +37,16 @@ const {
   validateConnection,
 } = require("../services/metaWhatsAppService");
 const {
+  completeCoexistenceOnboarding,
+  isCoexistenceOnboardingEnabled,
+} = require("../services/metaWhatsappCoexistenceOnboarding");
+const {
+  commitMetaWhatsappAssetReservation,
+  releasePendingMetaWhatsappAssetReservation,
+  reserveMetaWhatsappAssets,
+} = require("../services/metaWhatsappAssetOwnership");
+const {
+  applyCoexistencePhoneReadiness,
   applyPhoneRegistrationReadiness,
   buildMessagingReadiness,
   isMetaPhoneRegistrationReady,
@@ -62,9 +73,17 @@ const {
   normalizeTestMessageState,
 } = require("../services/whatsappBillingActivationEligibility");
 const { normalizeWhatsappRecipientPhone } = require("../utils/whatsappRecipientPhone");
+const {
+  getManeaActivationDiagnosticAuthorization,
+} = require("../services/maneaWhatsappDiagnostic");
 
 const REELOOK_DIAGNOSTIC_WABA_ID = "1074343041678320";
 const REELOOK_DIAGNOSTIC_PHONE_NUMBER_ID = "1336796569515966";
+const LIVE_READINESS_REGISTRATION_STATUSES = new Set([
+  "registration_submitted",
+  "active",
+]);
+const CONNECTED_META_STATUSES = new Set(["connected", "template_pending", "ready"]);
 
 function normalizeVendorId(value) {
   const id = String(value || "").trim();
@@ -137,7 +156,7 @@ function normalizePhoneRegistrationLifecycleStatus(value) {
   return "registration_required";
 }
 
-function sanitizeWhatsappBusinessConfig(config) {
+function sanitizeWhatsappBusinessConfig(config, { vendorId, env = process.env } = {}) {
   const normalized = normalizeWhatsappBusinessConfig(config);
   const phoneRegistrationStatus = normalizePhoneRegistrationLifecycleStatus(
     normalized.phoneRegistrationStatus
@@ -145,6 +164,11 @@ function sanitizeWhatsappBusinessConfig(config) {
   const messagingReadiness = normalized.messagingReadiness || buildMessagingReadiness(null);
   const testMessage = normalizeTestMessageState(normalized.testMessage);
   const displayNameReadiness = normalizeDisplayNameReadiness(normalized.displayNameReadiness);
+  const diagnosticAuthorization = getManeaActivationDiagnosticAuthorization({
+    env,
+    vendorId,
+    whatsappBusiness: normalized,
+  });
   const activationEligibility = buildActivationEligibility(
     {
       ...normalized,
@@ -152,7 +176,10 @@ function sanitizeWhatsappBusinessConfig(config) {
       testMessage,
       displayNameReadiness,
     },
-    messagingReadiness
+    messagingReadiness,
+    {
+      phoneRegistrationReadyOverride: diagnosticAuthorization.allowed,
+    }
   );
   const activationState = buildBillingActivationState(normalized, activationEligibility);
 
@@ -184,25 +211,47 @@ function sanitizeWhatsappBusinessConfig(config) {
   };
 }
 
-async function refreshMetaPhoneReadinessForResponse(record) {
+async function refreshMetaPhoneReadinessForResponse(
+  record,
+  {
+    getPhoneReadiness = getPhoneNumberReadinessWithSystemUserToken,
+    getCoexistenceReadiness = getCoexistencePhoneReadiness,
+    getMetaAccessToken = getDecryptedMetaToken,
+    logger = console,
+  } = {}
+) {
   const config = normalizeWhatsappBusinessConfig(record.vendor.whatsappBusiness);
+  const canRefreshRegistrationError =
+    config.phoneRegistrationStatus === "error" &&
+    CONNECTED_META_STATUSES.has(config.connectionStatus);
+  const canRefreshCoexistence =
+    config.connectionMode === "coexistence" &&
+    CONNECTED_META_STATUSES.has(config.connectionStatus);
   if (
     config.provider !== "meta" ||
     !config.phoneNumberId ||
-    (config.phoneRegistrationStatus !== "registration_submitted" &&
-      config.phoneRegistrationStatus !== "active")
+    (!canRefreshCoexistence &&
+      !LIVE_READINESS_REGISTRATION_STATUSES.has(config.phoneRegistrationStatus) &&
+      !canRefreshRegistrationError)
   ) {
     return config;
   }
 
   try {
-    const phoneStatus = await getPhoneNumberReadinessWithSystemUserToken({
-      phoneNumberId: config.phoneNumberId,
-    });
-    const readinessResult = applyPhoneRegistrationReadiness({
-      config,
-      phoneStatus,
-    });
+    const phoneStatus = canRefreshCoexistence
+      ? await getCoexistenceReadiness({
+          phoneNumberId: config.phoneNumberId,
+          accessToken: getMetaAccessToken(config),
+        })
+      : await getPhoneReadiness({ phoneNumberId: config.phoneNumberId });
+    if (String(phoneStatus?.id || "").trim() !== String(config.phoneNumberId).trim()) {
+      const identityError = new Error("Meta phone readiness identity mismatch");
+      identityError.code = "meta_phone_identity_mismatch";
+      throw identityError;
+    }
+    const readinessResult = canRefreshCoexistence
+      ? applyCoexistencePhoneReadiness({ config, phoneStatus })
+      : applyPhoneRegistrationReadiness({ config, phoneStatus });
     const hasNameStatus = Object.prototype.hasOwnProperty.call(phoneStatus || {}, "name_status");
     const displayNameReadiness = hasNameStatus
       ? buildDisplayNameReadinessFromNameStatus(phoneStatus?.name_status)
@@ -217,9 +266,9 @@ async function refreshMetaPhoneReadinessForResponse(record) {
       JSON.stringify(normalizeDisplayNameReadiness(config.displayNameReadiness)) !==
       JSON.stringify(displayNameReadiness);
 
-    if (readinessResult.changed || displayNameReadinessChanged) {
+    if ((!canRefreshCoexistence && readinessResult.changed) || displayNameReadinessChanged) {
       const updates = {};
-      if (readinessResult.changed) {
+      if (!canRefreshCoexistence && readinessResult.changed) {
         updates["whatsappBusiness.phoneRegistrationStatus"] =
           refreshedConfig.phoneRegistrationStatus;
         updates["whatsappBusiness.phoneRegisteredAt"] = refreshedConfig.phoneRegisteredAt;
@@ -233,7 +282,7 @@ async function refreshMetaPhoneReadinessForResponse(record) {
       await record.Model.updateOne(
         {
           _id: record.vendor._id,
-          ...(readinessResult.changed
+          ...(!canRefreshCoexistence && readinessResult.changed
             ? {
                 "whatsappBusiness.phoneRegistrationStatus":
                   config.phoneRegistrationStatus,
@@ -248,7 +297,7 @@ async function refreshMetaPhoneReadinessForResponse(record) {
 
     return refreshedConfig;
   } catch (error) {
-    console.error("[Meta Phone Readiness Refresh Error]", {
+    logger.error("[Meta Phone Readiness Refresh Error]", {
       vendorId: String(record.vendor._id),
       phoneNumberId: String(config.phoneNumberId || ""),
       code: error.code || "",
@@ -259,6 +308,9 @@ async function refreshMetaPhoneReadinessForResponse(record) {
     return {
       ...config,
       messagingReadiness: buildMessagingReadiness(null),
+      ...(canRefreshCoexistence
+        ? applyCoexistencePhoneReadiness({ config, phoneStatus: null }).config
+        : {}),
     };
   }
 }
@@ -410,6 +462,46 @@ function assertConnectedMetaConfig(config) {
     error.code = "meta_whatsapp_connection_incomplete";
     throw error;
   }
+}
+
+function assertStandardPhoneRegistrationAllowed(config) {
+  if (config.connectionMode === "coexistence") {
+    const error = new Error(
+      "Phone registration is not applicable to a verified Coexistence connection"
+    );
+    error.code = "meta_coexistence_registration_not_applicable";
+    throw error;
+  }
+}
+
+function hasExistingWhatsappConnection(config) {
+  const connectionStatus = String(config?.connectionStatus || "").trim();
+  return (
+    ["connected", "template_pending", "ready"].includes(connectionStatus) ||
+    Boolean(config?.wabaId) ||
+    Boolean(config?.phoneNumberId) ||
+    Boolean(config?.metaAuth?.accessTokenEncrypted)
+  );
+}
+
+function isSameVerifiedCoexistenceConnection(config, { wabaId, phoneNumberId } = {}) {
+  const requestedWabaId = String(wabaId || "").trim();
+  const requestedPhoneNumberId = String(phoneNumberId || "").trim();
+  const evidence = config?.coexistenceEvidence || {};
+  const configuredWabaId = String(config?.wabaId || "").trim();
+  const configuredPhoneNumberId = String(config?.phoneNumberId || "").trim();
+
+  return (
+    config?.connectionMode === "coexistence" &&
+    ["connected", "template_pending", "ready"].includes(config?.connectionStatus) &&
+    Boolean(requestedWabaId && configuredWabaId && configuredPhoneNumberId) &&
+    requestedWabaId === configuredWabaId &&
+    (!requestedPhoneNumberId || requestedPhoneNumberId === configuredPhoneNumberId) &&
+    String(evidence.wabaId || "").trim() === configuredWabaId &&
+    String(evidence.phoneNumberId || "").trim() === configuredPhoneNumberId &&
+    evidence.isOnBizApp === true &&
+    evidence.appSubscriptionVerified === true
+  );
 }
 
 function getDecryptedMetaToken(config) {
@@ -633,7 +725,9 @@ async function getWhatsappBusinessConfig(req, res) {
 
     return res.json({
       success: true,
-      data: sanitizeWhatsappBusinessConfig(whatsappBusiness),
+      data: sanitizeWhatsappBusinessConfig(whatsappBusiness, {
+        vendorId: record.vendor._id,
+      }),
     });
   } catch (error) {
     console.error("Failed to fetch WhatsApp Business config:", error.message || error);
@@ -650,7 +744,9 @@ async function activateWhatsappBusinessBilling(req, res) {
     if (!record) return sendVendorNotFound(res);
 
     const current = await refreshMetaPhoneReadinessForResponse(record);
-    const sanitizedCurrent = sanitizeWhatsappBusinessConfig(current);
+    const sanitizedCurrent = sanitizeWhatsappBusinessConfig(current, {
+      vendorId: record.vendor._id,
+    });
 
     if (current.enabled) {
       return res.json({
@@ -684,7 +780,9 @@ async function activateWhatsappBusinessBilling(req, res) {
 
     return res.json({
       success: true,
-      data: sanitizeWhatsappBusinessConfig(whatsappBusiness),
+      data: sanitizeWhatsappBusinessConfig(whatsappBusiness, {
+        vendorId: record.vendor._id,
+      }),
       message: "WhatsApp billing activation preference has been saved.",
     });
   } catch (error) {
@@ -828,6 +926,7 @@ async function runSystemUserPhoneRegistrationDiagnostic(req, res) {
     }
 
     const config = normalizeWhatsappBusinessConfig(record.vendor.whatsappBusiness);
+    assertStandardPhoneRegistrationAllowed(config);
     const encryptedPin = config.metaRegistration?.pinEncrypted || "";
     console.log("[Meta System User Phone Registration Diagnostic]", {
       ...diagnosticContext,
@@ -1352,6 +1451,7 @@ async function registerWhatsappPhoneNumber(req, res) {
 
     config = normalizeWhatsappBusinessConfig(record.vendor.whatsappBusiness);
     assertConnectedMetaConfig(config);
+    assertStandardPhoneRegistrationAllowed(config);
 
     if (!config.phoneNumberId) {
       const error = new Error("Meta phone number ID is required");
@@ -1707,6 +1807,202 @@ async function completeMetaWhatsappConnection(req, res) {
   }
 }
 
+async function completeMetaWhatsappCoexistenceConnection(req, res) {
+  let ownershipReservation = null;
+  let coexistenceCredentialsPersisted = false;
+  try {
+    if (!isCoexistenceOnboardingEnabled()) {
+      return res.status(404).json({ success: false, message: "Not found" });
+    }
+
+    const coexistenceConfig = getPublicMetaWhatsAppConfig();
+    if (
+      !coexistenceConfig.isCoexistenceEmbeddedSignupConfigured ||
+      !coexistenceConfig.isTokenExchangeConfigured ||
+      !coexistenceConfig.isTokenStorageConfigured
+    ) {
+      return res.status(503).json({
+        success: false,
+        code: "meta_coexistence_not_configured",
+        message: "WhatsApp Business App Coexistence is not configured.",
+      });
+    }
+
+    const record = await findVendorRecord(getAuthorizedVendorId(req));
+    if (!record) return sendVendorNotFound(res);
+
+    const current = normalizeWhatsappBusinessConfig(record.vendor.whatsappBusiness);
+    const signupData = req.body?.signupData || {};
+    const code = String(req.body?.code || req.body?.authCode || "").trim();
+    const requestedWabaId = String(req.body?.wabaId || "").trim();
+    const requestedPhoneNumberId = String(req.body?.phoneNumberId || "").trim();
+    const signupWabaId = getMetaSignupValue(signupData, [
+      "waba_id",
+      "wabaId",
+      "whatsapp_business_account_id",
+      "whatsappBusinessAccountId",
+    ]);
+    const eventType = String(req.body?.event || signupData?.event || "").trim();
+
+    if (hasExistingWhatsappConnection(current)) {
+      if (
+        isSameVerifiedCoexistenceConnection(current, {
+          wabaId: requestedWabaId,
+          phoneNumberId: requestedPhoneNumberId,
+        })
+      ) {
+        return res.json({
+          success: true,
+          data: {
+            connectionMode: "coexistence",
+            connectionStatus: current.connectionStatus,
+            enabled: current.enabled === true,
+            wabaId: current.wabaId,
+            phoneNumberId: current.phoneNumberId,
+            isOnBizApp: true,
+            appSubscriptionVerified: true,
+            registrationCalled: false,
+            alreadyConnected: true,
+          },
+          returnUrl: req.whatsappConnectAuth?.returnUrl || "",
+          message: "This verified WhatsApp Business App connection is already saved.",
+        });
+      }
+      return res.status(409).json({
+        success: false,
+        code: "meta_coexistence_existing_connection",
+        message:
+          "An existing WhatsApp connection must be disconnected through an approved replacement flow before connecting another number.",
+      });
+    }
+
+    if (signupWabaId && signupWabaId !== requestedWabaId) {
+      return res.status(400).json({
+        success: false,
+        code: "meta_coexistence_session_mismatch",
+        message: "Meta signup session does not match the requested WABA.",
+      });
+    }
+
+    const completion = await completeCoexistenceOnboarding({
+      code,
+      wabaId: requestedWabaId,
+      phoneNumberId: requestedPhoneNumberId,
+      eventType,
+    });
+    ownershipReservation = await reserveMetaWhatsappAssets({
+      vendorId: record.vendor._id,
+      vendorCollection: record.Model.modelName,
+      wabaId: completion.evidence.wabaId,
+      phoneNumberId: completion.evidence.phoneNumberId,
+    });
+    const defaultWhatsappBusiness = getDefaultWhatsappBusinessConfig();
+    const verifiedAt = completion.evidence.verifiedAt;
+    const whatsappBusiness = {
+      ...defaultWhatsappBusiness,
+      enabled: false,
+      provider: "meta",
+      connectionMode: "coexistence",
+      connectionStatus: "connected",
+      businessId: getMetaSignupValue(signupData, [
+        "business_id",
+        "businessId",
+        "businessID",
+      ]),
+      wabaId: completion.evidence.wabaId,
+      phoneNumberId: completion.evidence.phoneNumberId,
+      displayPhoneNumber: String(completion.phone?.display_phone_number || ""),
+      displayName: String(
+        completion.phone?.verified_name || completion.account?.name || ""
+      ),
+      displayNameReadiness: buildDisplayNameReadinessFromNameStatus(
+        completion.phone?.name_status || ""
+      ),
+      connectedAt: verifiedAt,
+      phoneRegistrationStatus: "registered",
+      phoneRegisteredAt: null,
+      coexistenceEvidence: completion.evidence,
+      metaAuth: {
+        accessTokenEncrypted: encryptMetaAccessToken(completion.accessToken),
+        tokenType: completion.tokenType,
+        expiresAt: getTokenExpiryDate(completion.expiresIn),
+      },
+      metaRegistration: { pinEncrypted: "" },
+    };
+
+    const writeResult = await record.Model.updateOne(
+      {
+        _id: record.vendor._id,
+        "whatsappBusiness.connectionStatus": {
+          $nin: ["connected", "template_pending", "ready"],
+        },
+        "whatsappBusiness.wabaId": { $in: ["", null] },
+        "whatsappBusiness.phoneNumberId": { $in: ["", null] },
+        "whatsappBusiness.metaAuth.accessTokenEncrypted": { $in: ["", null] },
+      },
+      { $set: { whatsappBusiness } }
+    );
+    if (writeResult?.matchedCount !== 1) {
+      const error = new Error("WhatsApp connection changed during Coexistence onboarding");
+      error.code = "meta_coexistence_connection_conflict";
+      throw error;
+    }
+    coexistenceCredentialsPersisted = true;
+    await commitMetaWhatsappAssetReservation(ownershipReservation);
+
+    return res.json({
+      success: true,
+      data: {
+        connectionMode: "coexistence",
+        connectionStatus: "connected",
+        enabled: false,
+        wabaId: completion.evidence.wabaId,
+        phoneNumberId: completion.evidence.phoneNumberId,
+        isOnBizApp: true,
+        appSubscriptionVerified: true,
+        registrationCalled: false,
+        phone: {
+          platformType: completion.evidence.platformType,
+          status: String(completion.phone?.status || ""),
+          codeVerificationStatus: String(
+            completion.phone?.code_verification_status || ""
+          ),
+        },
+      },
+      returnUrl: req.whatsappConnectAuth?.returnUrl || "",
+      message: "WhatsApp Business App Coexistence connection verified and saved.",
+    });
+  } catch (error) {
+    if (ownershipReservation?.created && !coexistenceCredentialsPersisted) {
+      await releasePendingMetaWhatsappAssetReservation(ownershipReservation).catch(
+        (releaseError) => {
+          console.error("[Meta Coexistence Ownership Cleanup Error]", {
+            code: releaseError.code || "meta_asset_reservation_cleanup_failed",
+          });
+        }
+      );
+    }
+    console.error("[Meta Coexistence Completion Error]", {
+      code: error.code || "meta_coexistence_completion_failed",
+      metaCode: error.metaError?.code || "",
+      metaSubcode: error.metaError?.subcode || "",
+    });
+    const status =
+      error.code === "meta_not_configured" ? 503
+      : error.code === "meta_coexistence_connection_conflict" ||
+        error.code === "meta_asset_ownership_conflict" ||
+        error.code === "meta_asset_reservation_in_progress" ||
+        error.code === "meta_asset_reservation_commit_failed"
+      ? 409
+      : 400;
+    return res.status(status).json({
+      success: false,
+      code: error.code || "meta_coexistence_completion_failed",
+      message: "Unable to complete WhatsApp Business App Coexistence onboarding.",
+    });
+  }
+}
+
 async function diagnoseMetaCoexistenceSignup(req, res) {
   try {
     if (!isCoexistenceDiagnosticEnabled()) {
@@ -1869,6 +2165,7 @@ module.exports = {
   deactivateWhatsappBusinessBilling,
   diagnoseMetaCoexistenceSignup,
   disconnectWhatsappBusiness,
+  completeMetaWhatsappCoexistenceConnection,
   completeMetaWhatsappConnection,
   createMetaConnectSession,
   getMetaDiagnostics,
@@ -1878,9 +2175,12 @@ module.exports = {
   getWhatsappTemplateLibrary,
   getWhatsappTemplatePreview,
   getWhatsappBusinessConfig,
+  isSameVerifiedCoexistenceConnection,
   prepareWhatsappBusinessConnect,
+  refreshMetaPhoneReadinessForResponse,
   registerWhatsappPhoneNumber,
   runSystemUserPhoneRegistrationDiagnostic,
+  sanitizeWhatsappBusinessConfig,
   sendWhatsappTemplateTestMessage,
   submitWhatsappTemplate,
   updateWhatsappBusinessConfig,

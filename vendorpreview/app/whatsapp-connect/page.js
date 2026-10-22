@@ -107,6 +107,8 @@ function getFrontendMetaConfig() {
   return {
     appId: process.env.NEXT_PUBLIC_META_APP_ID || "",
     embeddedSignupConfigId: process.env.NEXT_PUBLIC_META_WHATSAPP_CONFIG_ID || "",
+    coexistenceEmbeddedSignupConfigId:
+      process.env.NEXT_PUBLIC_META_WHATSAPP_COEXISTENCE_CONFIG_ID || "",
     graphApiVersion: process.env.NEXT_PUBLIC_META_GRAPH_API_VERSION || "v26.0",
   };
 }
@@ -211,6 +213,12 @@ function WhatsappConnectContent() {
             frontendConfig.embeddedSignupConfigId ||
             payload.data?.embeddedSignupConfigId ||
             "",
+          coexistenceEmbeddedSignupConfigId:
+            frontendConfig.coexistenceEmbeddedSignupConfigId ||
+            payload.data?.coexistenceEmbeddedSignupConfigId ||
+            "",
+          isCoexistenceOnboardingEnabled:
+            payload.data?.isCoexistenceOnboardingEnabled === true,
           graphApiVersion:
             frontendConfig.graphApiVersion ||
             payload.data?.graphApiVersion ||
@@ -289,12 +297,10 @@ function WhatsappConnectContent() {
       ) {
         const metadata = buildCoexistenceMetadata(payload);
         setCoexistenceMetadata(metadata);
-        setStatus(metadata.phoneNumberId ? "Test Completed" : "Waiting for phone number details");
+        setStatus("Signup details received");
         setError("");
         setSuccessMessage(
-          metadata.phoneNumberId
-            ? "Coexistence signup test completed in Meta. YNOT will run a TEST-only read diagnostic if the server-side diagnostic flag is enabled. No WhatsApp settings will be saved."
-            : "Coexistence signup test returned WABA metadata without a phone number ID. No backend diagnostic will run and no WhatsApp settings were saved."
+          "Coexistence signup completed in Meta. YNOT is verifying the WABA, phone, and app subscription before saving the disabled connection."
         );
         return;
       }
@@ -402,13 +408,6 @@ function WhatsappConnectContent() {
       if (coexistenceDiagnosticStartedRef.current) return;
       if (!coexistenceAuthCode || !coexistenceMetadata?.wabaId) return;
 
-      if (!coexistenceMetadata.phoneNumberId) {
-        setCoexistenceDiagnosticError(
-          "Meta did not return a phone number ID, so the TEST backend diagnostic was not run."
-        );
-        return;
-      }
-
       try {
         coexistenceDiagnosticStartedRef.current = true;
         setCoexistenceDiagnosticLoading(true);
@@ -417,7 +416,7 @@ function WhatsappConnectContent() {
         setStatus("Verifying");
 
         const res = await fetch(
-          `${API_BASE_URL}/api/vendor/whatsapp-business/meta/coexistence-diagnostic`,
+          `${API_BASE_URL}/api/vendor/whatsapp-business/meta/coexistence/complete`,
           {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -437,22 +436,22 @@ function WhatsappConnectContent() {
         );
         const payload = await readApiResponse(
           res,
-          "Unable to run the TEST coexistence diagnostic"
+          "Unable to complete WhatsApp Business App Coexistence onboarding"
         );
 
         setCoexistenceDiagnostic(payload.data || null);
-        setStatus("Test Verified");
+        setStatus("Connected");
         setSuccessMessage(
-          "TEST-only coexistence diagnostic completed. No WhatsApp settings were saved and no phone registration was attempted."
+          "WhatsApp Business App Coexistence was verified and saved. Billing remains disabled until the remaining setup checks are completed."
         );
       } catch (err) {
         console.error("Coexistence diagnostic failed", {
           message: err?.message || "Unable to run coexistence diagnostic",
         });
-        setStatus("Test Completed");
+        setStatus("Error");
         setCoexistenceDiagnosticError(
           err?.message ||
-            "The TEST backend diagnostic is unavailable or could not validate the coexistence session."
+            "YNOT could not verify the Coexistence connection. Your current WhatsApp billing route was not changed."
         );
       } finally {
         setCoexistenceDiagnosticLoading(false);
@@ -465,6 +464,16 @@ function WhatsappConnectContent() {
   const startMetaSignup = async (signupMode = SIGNUP_MODE_STANDARD) => {
     if (!metaConfig?.isEmbeddedSignupConfigured) {
       setError("Meta Embedded Signup is not configured for this environment.");
+      setStatus("Error");
+      return;
+    }
+
+    if (
+      signupMode === SIGNUP_MODE_COEXISTENCE_TEST &&
+      (!metaConfig?.isCoexistenceOnboardingEnabled ||
+        !metaConfig?.coexistenceEmbeddedSignupConfigId)
+    ) {
+      setError("WhatsApp Business App Coexistence is not enabled for this environment.");
       setStatus("Error");
       return;
     }
@@ -516,7 +525,7 @@ function WhatsappConnectContent() {
             }
           : signupMode === SIGNUP_MODE_COEXISTENCE_TEST
           ? {
-              config_id: metaConfig.embeddedSignupConfigId,
+              config_id: metaConfig.coexistenceEmbeddedSignupConfigId,
               response_type: "code",
               override_default_response_type: true,
               extras: {
@@ -561,7 +570,7 @@ function WhatsappConnectContent() {
             setStatus("Test Started");
             setError("");
             setSuccessMessage(
-              "Coexistence signup was opened in Meta. This diagnostic flow will not connect to the YNOT backend or save WhatsApp settings. If you complete or close the Meta popup, no YNOT account state will be changed."
+              "Coexistence signup was opened in Meta. YNOT will save a disabled connection only after exact phone and app-subscription verification succeeds."
             );
             return;
           }
@@ -633,7 +642,12 @@ function WhatsappConnectContent() {
         <button
           type="button"
           className="whatsapp-connect-button whatsapp-connect-button-secondary"
-          disabled={status === "Connecting" || status === "Verifying" || status === "Connected"}
+          disabled={
+            status === "Connecting" ||
+            status === "Verifying" ||
+            status === "Connected" ||
+            !metaConfig?.isCoexistenceOnboardingEnabled
+          }
           onClick={() => startMetaSignup(SIGNUP_MODE_COEXISTENCE_TEST)}
         >
           Connect Existing WhatsApp Business Number
@@ -645,8 +659,8 @@ function WhatsappConnectContent() {
         coexistenceDiagnosticLoading ? (
           <div className="whatsapp-connect-diagnostic-panel whatsapp-connect-coexistence-panel">
             <p className="whatsapp-connect-warning">
-              TEST coexistence diagnostic only. YNOT will not save WhatsApp settings, activate
-              routing, or register this phone number.
+              Coexistence onboarding verifies the existing WhatsApp Business App number and keeps
+              billing disabled. YNOT will not register this phone number or generate a PIN.
             </p>
             <div className="whatsapp-connect-metadata" aria-live="polite">
               <div>
@@ -666,9 +680,9 @@ function WhatsappConnectContent() {
                 <strong>
                   {coexistenceDiagnosticLoading
                     ? "Checking..."
-                    : coexistenceDiagnostic?.verification?.wabaMatched &&
-                      coexistenceDiagnostic?.verification?.phoneNumberMatched
-                    ? "WABA and phone matched"
+                    : coexistenceDiagnostic?.isOnBizApp &&
+                      coexistenceDiagnostic?.appSubscriptionVerified
+                    ? "Phone and app subscription verified"
                     : coexistenceDiagnosticError
                     ? "Not verified"
                     : "Pending"}
@@ -693,11 +707,7 @@ function WhatsappConnectContent() {
                   <div>
                     <span>On Business App</span>
                     <strong>
-                      {coexistenceDiagnostic.isOnBizApp?.supported
-                        ? coexistenceDiagnostic.isOnBizApp.value
-                          ? "Yes"
-                          : "No"
-                        : "Unsupported by API"}
+                      {coexistenceDiagnostic.isOnBizApp ? "Yes" : "No"}
                     </strong>
                   </div>
                 </>

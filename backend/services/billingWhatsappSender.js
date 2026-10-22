@@ -3,11 +3,12 @@ const Vendor = require("../models/DummyVendor");
 const { calculateCustomerBalance } = require("./loyaltyService");
 const {
   applyMetaPhoneReadinessSnapshot,
-  buildMessagingReadiness,
 } = require("./metaWhatsAppReadiness");
 const {
+  getCoexistencePhoneReadiness,
   getPhoneNumberReadinessWithSystemUserToken,
 } = require("./metaWhatsAppService");
+const { decryptMetaAccessToken } = require("./metaTokenStorage");
 const {
   isVendorMetaBillRoutingEnabled,
   sendRoutedWhatsAppBillingMessage,
@@ -15,6 +16,9 @@ const {
 const {
   isSendWhatsAppBillEnabled,
 } = require("./vendorBillingPreferences");
+const {
+  prepareManeaDiagnosticSend,
+} = require("./maneaWhatsappDiagnostic");
 const { deductWhatsApp } = require("./vendorWalletService");
 const {
   buildPublicBillPath,
@@ -75,6 +79,41 @@ async function sendCompletedBillWhatsApp({ billing, referencePrefix = "billing" 
     };
   }
 
+  let diagnosticContext;
+  try {
+    diagnosticContext = await prepareManeaDiagnosticSend({
+      vendorId: billing.vendorId,
+      billId: billing._id,
+      recipientPhoneNumber: mobile,
+      whatsappBusiness: vendor.whatsappBusiness,
+    });
+  } catch (error) {
+    console.error("[WhatsApp Billing Diagnostic Guard Failed]", {
+      vendorId: String(billing.vendorId || ""),
+      billId: String(billing._id || ""),
+      code: String(error?.code || "diagnostic_claim_lookup_failed"),
+    });
+    return {
+      success: false,
+      skipped: true,
+      provider: "",
+      status: "skipped",
+      reason: "diagnostic_claim_lookup_failed",
+      mobile,
+    };
+  }
+
+  if (!diagnosticContext.proceed) {
+    return {
+      success: false,
+      skipped: true,
+      provider: "vendor_meta",
+      status: "skipped",
+      reason: diagnosticContext.reason,
+      mobile,
+    };
+  }
+
   if (
     isVendorMetaBillRoutingEnabled() &&
     vendor?.whatsappBusiness?.provider === "meta" &&
@@ -82,9 +121,17 @@ async function sendCompletedBillWhatsApp({ billing, referencePrefix = "billing" 
     vendor?.whatsappBusiness?.phoneNumberId
   ) {
     try {
-      const phoneStatus = await getPhoneNumberReadinessWithSystemUserToken({
-        phoneNumberId: vendor.whatsappBusiness.phoneNumberId,
-      });
+      const isCoexistence = vendor.whatsappBusiness.connectionMode === "coexistence";
+      const phoneStatus = isCoexistence
+        ? await getCoexistencePhoneReadiness({
+            phoneNumberId: vendor.whatsappBusiness.phoneNumberId,
+            accessToken: decryptMetaAccessToken(
+              vendor.whatsappBusiness.metaAuth?.accessTokenEncrypted || ""
+            ),
+          })
+        : await getPhoneNumberReadinessWithSystemUserToken({
+            phoneNumberId: vendor.whatsappBusiness.phoneNumberId,
+          });
       const readinessSnapshot = applyMetaPhoneReadinessSnapshot({
         config: vendor.whatsappBusiness,
         phoneStatus,
@@ -94,12 +141,13 @@ async function sendCompletedBillWhatsApp({ billing, referencePrefix = "billing" 
         whatsappBusiness: readinessSnapshot.config,
       };
     } catch (readinessErr) {
+      const failedSnapshot = applyMetaPhoneReadinessSnapshot({
+        config: vendor.whatsappBusiness,
+        phoneStatus: null,
+      });
       vendorForWhatsApp = {
         ...vendor,
-        whatsappBusiness: {
-          ...vendor.whatsappBusiness,
-          messagingReadiness: buildMessagingReadiness(null),
-        },
+        whatsappBusiness: failedSnapshot.config,
       };
       console.error("[WhatsApp Billing Meta Readiness Refresh Failed]", {
         vendorId: String(billing.vendorId || ""),
@@ -157,6 +205,7 @@ async function sendCompletedBillWhatsApp({ billing, referencePrefix = "billing" 
       loyaltyBalance: balance,
       billUrl,
     },
+    diagnosticContext,
   });
 
   if (sendResult?.status === "accepted" && sendResult?.provider === "ynot_msg91") {
@@ -168,6 +217,7 @@ async function sendCompletedBillWhatsApp({ billing, referencePrefix = "billing" 
     skipped: false,
     provider: sendResult?.provider || "",
     status: sendResult?.status || "",
+    reason: sendResult?.reason || "",
     mobile,
   };
 }
