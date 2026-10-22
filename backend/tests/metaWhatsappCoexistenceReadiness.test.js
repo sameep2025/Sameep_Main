@@ -17,6 +17,7 @@ const {
 } = require("../services/whatsappBillingRouteResolver");
 const {
   refreshMetaPhoneReadinessForResponse,
+  sanitizeWhatsappBusinessConfig,
 } = require("../controllers/vendorWhatsappBusinessController");
 const {
   getCoexistencePhoneReadiness,
@@ -28,6 +29,13 @@ const controllerSource = fs.readFileSync(
 );
 const senderSource = fs.readFileSync(
   path.join(__dirname, "../services/billingWhatsappSender.js"),
+  "utf8"
+);
+const dashboardSource = fs.readFileSync(
+  path.join(
+    __dirname,
+    "../../vendorpreview/app/components/dashboard/WhatsappBusinessDashboard.jsx"
+  ),
   "utf8"
 );
 
@@ -247,6 +255,47 @@ test("dashboard and activation refresh use the dedicated verified Coexistence lo
   assert.equal(
     Object.hasOwn(writes[0][1].$set, "whatsappBusiness.phoneRegistrationStatus"),
     false
+  );
+});
+
+test("dashboard response exposes sanitized mode and backend-derived Coexistence readiness", () => {
+  const sanitized = sanitizeWhatsappBusinessConfig(readySnapshot());
+
+  assert.equal(sanitized.connectionMode, "coexistence");
+  assert.equal(sanitized.phoneRegistrationStatus, "registration_required");
+  assert.equal(sanitized.activationEligibility.checks.phoneRegistrationReady, true);
+  assert.equal(Object.hasOwn(sanitized, "metaAuth"), false);
+  assert.equal(Object.hasOwn(sanitized, "coexistenceEvidence"), false);
+});
+
+test("dashboard hides registration actions and labels verified Coexistence as ready", () => {
+  assert.match(
+    dashboardSource,
+    /const isCoexistenceConnection = config\?\.connectionMode === "coexistence";/
+  );
+  assert.match(
+    dashboardSource,
+    /isConnected && !isCoexistenceConnection && canRegisterPhoneNumber\(phoneRegistrationStatus\)/
+  );
+  assert.match(
+    dashboardSource,
+    /isCoexistenceConnection\s*\? activationChecks\.phoneRegistrationReady === true\s*:\s*isPhoneRegistrationReady\(phoneRegistrationStatus\)/
+  );
+  assert.match(dashboardSource, /phoneRegistrationReady\s*\? "Ready"/);
+});
+
+test("successful test message refreshes full dashboard readiness before replacing config", () => {
+  assert.match(
+    dashboardSource,
+    /const json = await parseApiResponse\(res, "Unable to send WhatsApp test message"\);[\s\S]*setTestResult\([\s\S]*setConfig\(await fetchWhatsappBusinessConfig\(vendorId\)\)/
+  );
+  assert.doesNotMatch(
+    dashboardSource,
+    /const json = await parseApiResponse\(res, "Unable to send WhatsApp test message"\);\s*if \(json\.data\) \{\s*setConfig\(json\.data\)/
+  );
+  assert.match(
+    dashboardSource,
+    /setConfig\(\(current\) => \(\{[\s\S]*\.\.\.\(current \|\| \{\}\)[\s\S]*testMessage:/
   );
 });
 

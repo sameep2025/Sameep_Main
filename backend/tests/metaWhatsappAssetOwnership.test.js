@@ -5,6 +5,7 @@ const test = require("node:test");
 
 const MetaWhatsappAssetOwnership = require("../models/MetaWhatsappAssetOwnership");
 const {
+  commitMetaWhatsappAssetReservation,
   releasePendingMetaWhatsappAssetReservation,
   reserveMetaWhatsappAssets,
 } = require("../services/metaWhatsappAssetOwnership");
@@ -237,6 +238,19 @@ test("a committed reservation is idempotent for the same vendor and exact assets
   assert.equal(OwnershipModel.records.length, 1);
 });
 
+test("pre-subscription ownership remains protected and retryable after a Meta failure", async () => {
+  const OwnershipModel = makeOwnershipModel();
+  const deps = { OwnershipModel, findLegacyOwners: async () => [] };
+  const reservation = await reserveMetaWhatsappAssets(input(), deps);
+  await commitMetaWhatsappAssetReservation(reservation, deps);
+
+  const retry = await reserveMetaWhatsappAssets(input(), deps);
+  assert.equal(retry.created, false);
+  assert.equal(retry.committed, true);
+  assert.equal(OwnershipModel.records.length, 1);
+  assert.equal(OwnershipModel.records[0].state, "committed");
+});
+
 test("same-vendor completion retry accepts only the exact verified Coexistence identity", () => {
   const config = {
     connectionMode: "coexistence",
@@ -316,6 +330,10 @@ test("legacy conflict checks are read-only and credentials are not persisted aft
   const end = controller.indexOf("async function diagnoseMetaCoexistenceSignup", start);
   const completion = controller.slice(start, end);
   assert.ok(completion.indexOf("reserveMetaWhatsappAssets") < completion.indexOf("record.Model.updateOne"));
+  assert.ok(
+    completion.indexOf("commitMetaWhatsappAssetReservation") <
+      completion.indexOf("record.Model.updateOne")
+  );
   assert.match(completion, /releasePendingMetaWhatsappAssetReservation/);
 });
 

@@ -20,6 +20,7 @@ async function completeCoexistenceOnboarding(input = {}, dependencies = {}) {
   const validateConnection =
     dependencies.validateConnection || validateCoexistenceConnection;
   const subscribeWaba = dependencies.subscribeWaba || subscribeAppToWaba;
+  const beforeWabaSubscription = dependencies.beforeWabaSubscription;
   const now = dependencies.now || (() => new Date());
   const config = dependencies.config || getMetaWhatsAppConfig();
   const code = String(input.code || "").trim();
@@ -54,6 +55,13 @@ async function completeCoexistenceOnboarding(input = {}, dependencies = {}) {
     const error = new Error("Meta Coexistence identity verification failed");
     error.code = "meta_coexistence_identity_unverified";
     throw error;
+  }
+
+  if (typeof beforeWabaSubscription === "function") {
+    await beforeWabaSubscription({
+      wabaId: resolvedWabaId,
+      phoneNumberId: resolvedPhoneNumberId,
+    });
   }
 
   const subscription = await subscribeWaba({

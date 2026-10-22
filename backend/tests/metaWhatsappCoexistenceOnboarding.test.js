@@ -222,6 +222,90 @@ test("token exchange failure stops before validation and subscription", async ()
   assert.equal(subscriptionCalls, 0);
 });
 
+test("verified asset ownership is established before WABA subscription", async () => {
+  const calls = [];
+  await completeCoexistenceOnboarding(
+    {
+      code: "one-time-code",
+      wabaId: "waba-1",
+      phoneNumberId: "phone-1",
+      eventType: COEXISTENCE_FINISH_EVENT,
+    },
+    orchestrationDeps({
+      validateConnection: async ({ wabaId, phoneNumberId }) => {
+        calls.push("validate");
+        return {
+          account: account(wabaId),
+          selectedPhone: coexistencePhone(phoneNumberId),
+        };
+      },
+      beforeWabaSubscription: async ({ wabaId, phoneNumberId }) => {
+        calls.push(`reserve:${wabaId}:${phoneNumberId}`);
+      },
+      subscribeWaba: async () => {
+        calls.push("subscribe");
+        return { success: true, verified: true };
+      },
+    })
+  );
+
+  assert.deepEqual(calls, ["validate", "reserve:waba-1:phone-1", "subscribe"]);
+});
+
+test("ownership conflict prevents any WABA subscription attempt", async () => {
+  let subscriptionCalls = 0;
+  await assert.rejects(
+    completeCoexistenceOnboarding(
+      {
+        code: "one-time-code",
+        wabaId: "waba-1",
+        phoneNumberId: "phone-1",
+        eventType: COEXISTENCE_FINISH_EVENT,
+      },
+      orchestrationDeps({
+        beforeWabaSubscription: async () => {
+          throw Object.assign(new Error("already owned"), {
+            code: "meta_asset_ownership_conflict",
+          });
+        },
+        subscribeWaba: async () => {
+          subscriptionCalls += 1;
+          return { success: true, verified: true };
+        },
+      })
+    ),
+    { code: "meta_asset_ownership_conflict" }
+  );
+  assert.equal(subscriptionCalls, 0);
+});
+
+test("Meta subscription failure occurs only after ownership protection", async () => {
+  const calls = [];
+  await assert.rejects(
+    completeCoexistenceOnboarding(
+      {
+        code: "one-time-code",
+        wabaId: "waba-1",
+        phoneNumberId: "phone-1",
+        eventType: COEXISTENCE_FINISH_EVENT,
+      },
+      orchestrationDeps({
+        beforeWabaSubscription: async () => {
+          calls.push("reserve");
+        },
+        subscribeWaba: async () => {
+          calls.push("subscribe");
+          throw Object.assign(new Error("Meta unavailable"), {
+            code: "meta_waba_subscription_failed",
+          });
+        },
+      })
+    ),
+    { code: "meta_waba_subscription_failed" }
+  );
+  assert.deepEqual(calls, ["reserve", "subscribe"]);
+});
+
 test("WABA subscription must be confirmed and verified", async (t) => {
   const originalPost = axios.post;
   const originalGet = axios.get;
@@ -301,6 +385,17 @@ test("controller prevents overwrite and persists only disabled verified Coexiste
     /metaRegistration:\s*\{\s*pinEncrypted:\s*""\s*\}/
   );
   assert.match(controllerSource, /writeResult\?\.matchedCount !== 1/);
+  const completion = controllerSource.slice(
+    controllerSource.indexOf("async function completeMetaWhatsappCoexistenceConnection"),
+    controllerSource.indexOf("async function diagnoseMetaCoexistenceSignup")
+  );
+  assert.match(
+    completion,
+    /beforeWabaSubscription:[\s\S]*reserveMetaWhatsappAssets[\s\S]*commitMetaWhatsappAssetReservation/
+  );
+  assert.ok(
+    completion.indexOf("beforeWabaSubscription") < completion.indexOf("record.Model.updateOne")
+  );
 });
 
 test("verified Coexistence is guarded from every controller /register call", () => {

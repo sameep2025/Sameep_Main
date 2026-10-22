@@ -100,6 +100,22 @@ async function parseApiResponse(res, fallbackMessage) {
   return json;
 }
 
+async function fetchWhatsappBusinessConfig(vendorId) {
+  const response = await fetch(
+    `${API_BASE_URL}/api/vendor/whatsapp-business?vendorId=${encodeURIComponent(vendorId)}`,
+    {
+      cache: "no-store",
+      headers: getAuthHeaders(vendorId),
+    }
+  );
+  const json = await parseApiResponse(
+    response,
+    "Unable to load WhatsApp Business settings"
+  );
+
+  return json.data || null;
+}
+
 function formatStatus(value) {
   return String(value || "not_connected")
     .replace(/_/g, " ")
@@ -261,21 +277,10 @@ export default function WhatsappBusinessDashboard({ vendorId }) {
         setLoading(true);
         setError("");
 
-        const configRes = await fetch(
-          `${API_BASE_URL}/api/vendor/whatsapp-business?vendorId=${encodeURIComponent(vendorId)}`,
-          {
-            cache: "no-store",
-            headers: getAuthHeaders(vendorId),
-          }
-        );
-
-        const json = await parseApiResponse(
-          configRes,
-          "Unable to load WhatsApp Business settings"
-        );
+        const refreshedConfig = await fetchWhatsappBusinessConfig(vendorId);
 
         if (!cancelled) {
-          setConfig(json.data || null);
+          setConfig(refreshedConfig);
         }
       } catch (err) {
         if (!cancelled) {
@@ -488,10 +493,21 @@ export default function WhatsappBusinessDashboard({ vendorId }) {
       });
       const json = await parseApiResponse(res, "Unable to send WhatsApp test message");
 
-      if (json.data) {
-        setConfig(json.data);
-      }
       setTestResult(json.message || "Test message submitted successfully.");
+
+      try {
+        setConfig(await fetchWhatsappBusinessConfig(vendorId));
+      } catch (refreshError) {
+        console.error("WhatsApp settings refresh after test message failed", refreshError);
+        if (json.data) {
+          setConfig((current) => ({
+            ...(current || {}),
+            displayNameReadiness:
+              json.data.displayNameReadiness || current?.displayNameReadiness,
+            testMessage: json.data.testMessage || current?.testMessage,
+          }));
+        }
+      }
     } catch (err) {
       console.error("WhatsApp test message failed", err);
       if (err.data) {
@@ -617,6 +633,15 @@ export default function WhatsappBusinessDashboard({ vendorId }) {
   const testMessageStatus = config?.testMessage?.status || "not_tested";
   const activationEligibility = config?.activationEligibility || {};
   const activationChecks = activationEligibility.checks || {};
+  const isCoexistenceConnection = config?.connectionMode === "coexistence";
+  const phoneRegistrationReady = isCoexistenceConnection
+    ? activationChecks.phoneRegistrationReady === true
+    : isPhoneRegistrationReady(phoneRegistrationStatus);
+  const phoneRegistrationStatusLabel = isCoexistenceConnection
+    ? phoneRegistrationReady
+      ? "Ready"
+      : "Verification Pending"
+    : getPhoneRegistrationStatusLabel(phoneRegistrationStatus);
   const activationState = config?.activationState || {};
   const activationStateStatus =
     activationState.status ||
@@ -632,9 +657,9 @@ export default function WhatsappBusinessDashboard({ vendorId }) {
     "141006"
   );
   const shouldShowPhoneRegistration =
-    isConnected && !isPhoneRegistrationReady(phoneRegistrationStatus);
+    isConnected && !phoneRegistrationReady;
   const shouldShowPhoneRegistrationAction =
-    isConnected && canRegisterPhoneNumber(phoneRegistrationStatus);
+    isConnected && !isCoexistenceConnection && canRegisterPhoneNumber(phoneRegistrationStatus);
   const selectedTemplateStatus =
     selectedTemplate?.vendorTemplate?.status || "not_configured";
   const canSubmitSelectedTemplate = selectedTemplateStatus === "not_configured";
@@ -674,7 +699,9 @@ export default function WhatsappBusinessDashboard({ vendorId }) {
           )}
           {shouldShowPhoneRegistration && (
             <div className="whatsapp-business-alert warning">
-              WhatsApp number registration is not ready yet.
+              {isCoexistenceConnection
+                ? "WhatsApp Business App connection verification is not ready yet."
+                : "WhatsApp number registration is not ready yet."}
             </div>
           )}
 
@@ -702,7 +729,7 @@ export default function WhatsappBusinessDashboard({ vendorId }) {
               </div>
               <div className="whatsapp-business-card">
                 <span>Phone Registration</span>
-                <strong>{getPhoneRegistrationStatusLabel(phoneRegistrationStatus)}</strong>
+                <strong>{phoneRegistrationStatusLabel}</strong>
               </div>
               <div className="whatsapp-business-card">
                 <span>Messaging</span>

@@ -190,6 +190,7 @@ function sanitizeWhatsappBusinessConfig(config, { vendorId, env = process.env } 
       deactivatedAt: normalized.activation?.deactivatedAt || null,
     },
     provider: normalized.provider === "meta" ? "meta" : "msg91",
+    connectionMode: normalized.connectionMode || "legacy_unknown",
     connectionStatus: normalized.connectionStatus || "not_connected",
     displayPhoneNumber: normalized.displayPhoneNumber || "",
     displayName: normalized.displayName || "",
@@ -1809,6 +1810,7 @@ async function completeMetaWhatsappConnection(req, res) {
 
 async function completeMetaWhatsappCoexistenceConnection(req, res) {
   let ownershipReservation = null;
+  let ownershipReservationCommitted = false;
   let coexistenceCredentialsPersisted = false;
   try {
     if (!isCoexistenceOnboardingEnabled()) {
@@ -1884,18 +1886,27 @@ async function completeMetaWhatsappCoexistenceConnection(req, res) {
       });
     }
 
-    const completion = await completeCoexistenceOnboarding({
-      code,
-      wabaId: requestedWabaId,
-      phoneNumberId: requestedPhoneNumberId,
-      eventType,
-    });
-    ownershipReservation = await reserveMetaWhatsappAssets({
-      vendorId: record.vendor._id,
-      vendorCollection: record.Model.modelName,
-      wabaId: completion.evidence.wabaId,
-      phoneNumberId: completion.evidence.phoneNumberId,
-    });
+    const completion = await completeCoexistenceOnboarding(
+      {
+        code,
+        wabaId: requestedWabaId,
+        phoneNumberId: requestedPhoneNumberId,
+        eventType,
+      },
+      {
+        beforeWabaSubscription: async ({ wabaId, phoneNumberId }) => {
+          ownershipReservation = await reserveMetaWhatsappAssets({
+            vendorId: record.vendor._id,
+            vendorCollection: record.Model.modelName,
+            wabaId,
+            phoneNumberId,
+          });
+          // Retain the verified owner if the following Meta mutation has an uncertain outcome.
+          await commitMetaWhatsappAssetReservation(ownershipReservation);
+          ownershipReservationCommitted = true;
+        },
+      }
+    );
     const defaultWhatsappBusiness = getDefaultWhatsappBusinessConfig();
     const verifiedAt = completion.evidence.verifiedAt;
     const whatsappBusiness = {
@@ -1948,7 +1959,6 @@ async function completeMetaWhatsappCoexistenceConnection(req, res) {
       throw error;
     }
     coexistenceCredentialsPersisted = true;
-    await commitMetaWhatsappAssetReservation(ownershipReservation);
 
     return res.json({
       success: true,
@@ -1973,7 +1983,11 @@ async function completeMetaWhatsappCoexistenceConnection(req, res) {
       message: "WhatsApp Business App Coexistence connection verified and saved.",
     });
   } catch (error) {
-    if (ownershipReservation?.created && !coexistenceCredentialsPersisted) {
+    if (
+      ownershipReservation?.created &&
+      !ownershipReservationCommitted &&
+      !coexistenceCredentialsPersisted
+    ) {
       await releasePendingMetaWhatsappAssetReservation(ownershipReservation).catch(
         (releaseError) => {
           console.error("[Meta Coexistence Ownership Cleanup Error]", {
