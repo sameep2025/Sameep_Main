@@ -221,3 +221,57 @@ test("Options 2 and 3 remain isolated from standard completion", () => {
   assert.match(wabaHandler, /No backend call was made/);
   assert.match(wabaHandler, /return;/);
 });
+
+test("TEST-only Coexistence inspection can launch without enabling backend onboarding", () => {
+  assert.match(
+    connectPageSource,
+    /NEXT_PUBLIC_META_WHATSAPP_COEXISTENCE_INSPECTION_ENABLED === "true"/
+  );
+  assert.match(
+    connectPageSource,
+    /API_BASE_URL === TEST_BACKEND_API_URL[\s\S]*?isSameepTestEnvironment\(\)/
+  );
+  assert.match(
+    connectPageSource,
+    /!metaConfig\?\.isCoexistenceOnboardingEnabled && !coexistenceInspectionEnabled/
+  );
+});
+
+test("Coexistence inspection never submits completion data", () => {
+  const coexistenceCompletion = sourceBetween(
+    connectPageSource,
+    "async function runCoexistenceDiagnostic()",
+    "runCoexistenceDiagnostic();"
+  );
+  const callback = sourceBetween(
+    connectPageSource,
+    "fb.login(",
+    "loginOptions\n      );"
+  );
+
+  assert.match(
+    coexistenceCompletion,
+    /if \(coexistenceInspectionEnabled\) return;[\s\S]*?\/meta\/coexistence\/complete/
+  );
+  assert.match(
+    callback,
+    /if \(code && !coexistenceInspectionEnabled\) \{\s*setCoexistenceAuthCode\(code\);/
+  );
+  assert.match(
+    callback,
+    /Authorization and completion data will not be submitted to YNOT/
+  );
+});
+
+test("Coexistence inspection preserves Meta Business App launch parameters", () => {
+  const loginOptions = sourceBetween(
+    connectPageSource,
+    "const loginOptions =",
+    "logMetaEmbeddedSignupDiagnostic"
+  );
+
+  assert.match(loginOptions, /config_id:\s*metaConfig\.coexistenceEmbeddedSignupConfigId/);
+  assert.match(loginOptions, /version:\s*"v4"/);
+  assert.match(loginOptions, /sessionInfoVersion:\s*"3"/);
+  assert.match(loginOptions, /featureType:\s*"whatsapp_business_app_onboarding"/);
+});
