@@ -2000,6 +2000,7 @@ async function completeMetaWhatsappCoexistenceConnection(req, res) {
       code: error.code || "meta_coexistence_completion_failed",
       metaCode: error.metaError?.code || "",
       metaSubcode: error.metaError?.subcode || "",
+      subscriptionVerification: error.verification || null,
     });
     const status =
       error.code === "meta_not_configured" ? 503

@@ -14,6 +14,7 @@ const {
   isCoexistenceOnboardingEnabled,
 } = require("../services/metaWhatsappCoexistenceOnboarding");
 const {
+  getSubscribedAppIds,
   subscribeAppToWaba,
   validateCoexistenceConnection,
 } = require("../services/metaWhatsAppService");
@@ -306,7 +307,7 @@ test("Meta subscription failure occurs only after ownership protection", async (
   assert.deepEqual(calls, ["reserve", "subscribe"]);
 });
 
-test("WABA subscription must be confirmed and verified", async (t) => {
+test("WABA subscription rejects an incorrect direct App ID", async (t) => {
   const originalPost = axios.post;
   const originalGet = axios.get;
   t.after(() => {
@@ -317,16 +318,22 @@ test("WABA subscription must be confirmed and verified", async (t) => {
   axios.get = async () => ({ data: { data: [{ id: "another-app" }] } });
 
   await assert.rejects(
-    subscribeAppToWaba({
-      wabaId: "waba-1",
-      accessToken: "mock-access-token",
-      appId: "app-1",
-    }),
+    subscribeAppToWaba(
+      {
+        wabaId: "waba-1",
+        accessToken: "mock-access-token",
+        appId: "app-1",
+      },
+      {
+        verificationAttempts: 1,
+        sleep: async () => {},
+      }
+    ),
     { code: "meta_waba_subscription_verification_failed" }
   );
 });
 
-test("WABA subscription uses the verified subscribed_apps POST and GET contract", async (t) => {
+test("WABA subscription verifies a direct App ID", async (t) => {
   const originalPost = axios.post;
   const originalGet = axios.get;
   const calls = [];
@@ -353,6 +360,140 @@ test("WABA subscription uses the verified subscribed_apps POST and GET contract"
   assert.deepEqual(calls.map((call) => call.method), ["POST", "GET"]);
   assert.equal(calls.every((call) => call.url.endsWith("/waba-1/subscribed_apps")), true);
   assert.deepEqual(calls[0].body, {});
+  assert.equal(calls[1].options.params, undefined);
+});
+
+test("WABA subscription verifies Meta's nested WhatsApp app identity envelope", async () => {
+  let postCalls = 0;
+  let getCalls = 0;
+  const httpClient = {
+    post: async () => {
+      postCalls += 1;
+      return { status: 200, data: { success: true } };
+    },
+    get: async () => {
+      getCalls += 1;
+      return {
+        status: 200,
+        data: {
+          data: [
+            {
+              whatsapp_business_api_data: {
+                id: "app-1",
+                name: "YNOT",
+              },
+            },
+          ],
+        },
+      };
+    },
+  };
+
+  const result = await subscribeAppToWaba(
+    {
+      wabaId: "waba-1",
+      accessToken: "mock-access-token",
+      appId: "app-1",
+    },
+    { httpClient }
+  );
+
+  assert.equal(result.verified, true);
+  assert.equal(postCalls, 1);
+  assert.equal(getCalls, 1);
+  assert.deepEqual(
+    getSubscribedAppIds({
+      id: "direct",
+      whatsapp_business_api_data: { id: "nested" },
+    }),
+    ["direct", "nested"]
+  );
+});
+
+test("WABA subscription retries GET-only verification for delayed visibility", async () => {
+  let postCalls = 0;
+  let getCalls = 0;
+  const delays = [];
+  const httpClient = {
+    post: async () => {
+      postCalls += 1;
+      return { data: { success: true } };
+    },
+    get: async () => {
+      getCalls += 1;
+      return getCalls < 3
+        ? { data: { data: [] } }
+        : { data: { data: [{ whatsapp_business_api_data: { id: "app-1" } }] } };
+    },
+  };
+
+  const result = await subscribeAppToWaba(
+    {
+      wabaId: "waba-1",
+      accessToken: "mock-access-token",
+      appId: "app-1",
+    },
+    {
+      httpClient,
+      verificationAttempts: 3,
+      verificationDelayMs: 10,
+      sleep: async (delay) => delays.push(delay),
+    }
+  );
+
+  assert.equal(result.verified, true);
+  assert.equal(postCalls, 1);
+  assert.equal(getCalls, 3);
+  assert.deepEqual(delays, [10, 20]);
+});
+
+test("WABA subscription fails closed after bounded verification without retrying POST", async () => {
+  let postCalls = 0;
+  let getCalls = 0;
+  const httpClient = {
+    post: async () => {
+      postCalls += 1;
+      return { data: { success: true } };
+    },
+    get: async () => {
+      getCalls += 1;
+      return {
+        data: {
+          data: [
+            { id: "wrong-direct-app" },
+            { whatsapp_business_api_data: { id: "wrong-nested-app" } },
+          ],
+        },
+      };
+    },
+  };
+
+  await assert.rejects(
+    subscribeAppToWaba(
+      {
+        wabaId: "waba-1",
+        accessToken: "mock-access-token",
+        appId: "app-1",
+      },
+      {
+        httpClient,
+        verificationAttempts: 2,
+        sleep: async () => {},
+      }
+    ),
+    (error) => {
+      assert.equal(error.code, "meta_waba_subscription_verification_failed");
+      assert.deepEqual(error.verification, {
+        attempts: 2,
+        entryCount: 2,
+        directIdEntries: 1,
+        nestedIdEntries: 1,
+      });
+      return true;
+    }
+  );
+  assert.equal(postCalls, 1);
+  assert.equal(getCalls, 2);
 });
 
 test("dedicated completion route is authenticated and separate from standard", () => {

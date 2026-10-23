@@ -573,7 +573,33 @@ async function disconnectAuthorization() {
   return { revoked: false, reason: "not_implemented" };
 }
 
-async function subscribeAppToWaba({ wabaId, accessToken, appId } = {}) {
+function getSubscribedAppIds(entry) {
+  return [entry?.id, entry?.whatsapp_business_api_data?.id]
+    .map((value) => String(value || "").trim())
+    .filter(Boolean);
+}
+
+function summarizeSubscriptionVerification(subscriptions, attempts) {
+  return {
+    attempts,
+    entryCount: subscriptions.length,
+    directIdEntries: subscriptions.filter((entry) => Boolean(String(entry?.id || "").trim()))
+      .length,
+    nestedIdEntries: subscriptions.filter((entry) =>
+      Boolean(String(entry?.whatsapp_business_api_data?.id || "").trim())
+    ).length,
+  };
+}
+
+async function subscribeAppToWaba(
+  { wabaId, accessToken, appId } = {},
+  {
+    httpClient = axios,
+    verificationAttempts = 3,
+    verificationDelayMs = 250,
+    sleep = (delayMs) => new Promise((resolve) => setTimeout(resolve, delayMs)),
+  } = {}
+) {
   const id = String(wabaId || "").trim();
   const expectedAppId = String(appId || "").trim();
   if (!id || !accessToken || !expectedAppId) {
@@ -585,30 +611,37 @@ async function subscribeAppToWaba({ wabaId, accessToken, appId } = {}) {
   try {
     const endpoint = graphUrl(`${id}/subscribed_apps`);
     const headers = { Authorization: `Bearer ${accessToken}` };
-    const subscription = await axios.post(endpoint, {}, { headers });
+    const subscription = await httpClient.post(endpoint, {}, { headers });
     if (subscription?.data?.success !== true) {
       const error = new Error("Meta did not confirm the WABA subscription");
       error.code = "meta_waba_subscription_unconfirmed";
       throw error;
     }
 
-    const verification = await axios.get(endpoint, {
-      headers,
-      params: { fields: "id,name" },
-    });
-    const subscriptions = Array.isArray(verification?.data?.data)
-      ? verification.data.data
-      : [];
-    const verified = subscriptions.some(
-      (app) => String(app?.id || "").trim() === expectedAppId
-    );
-    if (!verified) {
-      const error = new Error("YNOT app subscription could not be verified on the WABA");
-      error.code = "meta_waba_subscription_verification_failed";
-      throw error;
+    const maxAttempts = Math.max(1, Math.min(5, Number(verificationAttempts) || 1));
+    let verificationSummary = null;
+    for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+      const verification = await httpClient.get(endpoint, { headers });
+      const subscriptions = Array.isArray(verification?.data?.data)
+        ? verification.data.data
+        : [];
+      const verified = subscriptions.some((app) =>
+        getSubscribedAppIds(app).includes(expectedAppId)
+      );
+      if (verified) {
+        return { success: true, verified: true, appId: expectedAppId };
+      }
+
+      verificationSummary = summarizeSubscriptionVerification(subscriptions, attempt);
+      if (attempt < maxAttempts) {
+        await sleep(Math.max(0, Number(verificationDelayMs) || 0) * attempt);
+      }
     }
 
-    return { success: true, verified: true, appId: expectedAppId };
+    const error = new Error("YNOT app subscription could not be verified on the WABA");
+    error.code = "meta_waba_subscription_verification_failed";
+    error.verification = verificationSummary;
+    throw error;
   } catch (error) {
     if (
       error.code === "meta_waba_subscription_unconfirmed" ||
@@ -971,6 +1004,7 @@ module.exports = {
   sendMetaTemplateMessage,
   sendTemplateMessage,
   setTwoStepVerificationPinWithSystemUserToken,
+  getSubscribedAppIds,
   subscribeAppToWaba,
   validateCoexistenceConnection,
   validateConnection,
