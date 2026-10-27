@@ -33,6 +33,7 @@ const helperNames = [
   "buildQuickBillingServiceIndex",
   "buildQuickBillingCategoryTree",
   "findQuickBillingCategory",
+  "sortQuickBillingSubcategories",
   "findDefaultQuickBillingCategoryKey",
   "filterQuickBillingServices",
   "getQuickBillingInitialQuantity",
@@ -50,6 +51,7 @@ const {
   buildQuickBillingServiceIndex,
   buildQuickBillingCategoryTree,
   findQuickBillingCategory,
+  sortQuickBillingSubcategories,
   findDefaultQuickBillingCategoryKey,
   filterQuickBillingServices,
   getQuickBillingInitialQuantity,
@@ -189,6 +191,36 @@ test("persistent category UI keeps top-level, sibling and child switching availa
   assert.doesNotMatch(exploreSource, />\s*All\s*</);
   assert.doesNotMatch(exploreSource, />\s*Browse Categories\s*</);
   assert.doesNotMatch(exploreSource, /quick-billing-category-back/);
+});
+
+test("subcategory chips sort case-insensitively without changing stored order", () => {
+  const subcategories = [
+    { key: "spa", name: "spa" },
+    { key: "cuts", name: "Cuts" },
+    { key: "colour", name: "colour" },
+  ];
+
+  const sorted = sortQuickBillingSubcategories(subcategories);
+
+  assert.deepEqual(Array.from(sorted, (category) => category.key), [
+    "colour",
+    "cuts",
+    "spa",
+  ]);
+  assert.deepEqual(Array.from(subcategories, (category) => category.key), [
+    "spa",
+    "cuts",
+    "colour",
+  ]);
+  assert.match(exploreSource, /quickBillingCategoryTree\.map/);
+  assert.match(
+    exploreSource,
+    /sortQuickBillingSubcategories\(\s*quickBillingParentCategory\?\.children\s*\)/
+  );
+  assert.match(
+    exploreSource,
+    /sortQuickBillingSubcategories\(\s*selectedQuickBillingCategory\?\.children\s*\)/
+  );
 });
 
 test("default category follows menu order and selects a billable child", () => {

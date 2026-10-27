@@ -129,6 +129,14 @@ function findQuickBillingCategory(categories, categoryKey) {
   return null;
 }
 
+function sortQuickBillingSubcategories(categories) {
+  return [...(Array.isArray(categories) ? categories : [])].sort((left, right) =>
+    String(left?.name || "").localeCompare(String(right?.name || ""), undefined, {
+      sensitivity: "base",
+    })
+  );
+}
+
 function findDefaultQuickBillingCategoryKey(categories, services) {
   const availableServices = Array.isArray(services) ? services : [];
 
@@ -4649,8 +4657,12 @@ function ExploreContent({ onReady, onOpenServices }) {
         selectedQuickBillingCategory.parentKey
       )
     : null;
-  const quickBillingSiblingCategories = quickBillingParentCategory?.children || [];
-  const quickBillingChildCategories = selectedQuickBillingCategory?.children || [];
+  const quickBillingSiblingCategories = sortQuickBillingSubcategories(
+    quickBillingParentCategory?.children
+  );
+  const quickBillingChildCategories = sortQuickBillingSubcategories(
+    selectedQuickBillingCategory?.children
+  );
 
   const normalizedMenuSearch = menuSearch.trim();
   const quickBillingSearchResults = useMemo(
