@@ -45,6 +45,139 @@ import { getVendorAuthHeaders } from "../utils/vendorAuth";
 const FOOTER_GALLERY_OPEN_EVENT = "ynot-footer-open-gallery";
 const CART_ORIGIN_PUBLIC = "PUBLIC_ENQUIRY";
 const CART_ORIGIN_BILLING = "VENDOR_BILLING";
+const QUICK_BILLING_INITIAL_LIMIT = 30;
+
+function buildQuickBillingServiceIndex(nodes, initialPath = [], initialPathIds = []) {
+  const services = [];
+
+  function walk(currentNodes, path, pathIds, category, categoryKeys) {
+    if (!Array.isArray(currentNodes)) return;
+
+    currentNodes.forEach((node) => {
+      if (!node || typeof node !== "object") return;
+
+      const name = String(node.name || node.title || "Untitled").trim() || "Untitled";
+      const nodeId = node.categoryId || node._id || node.id || null;
+      const nodePath = [...path, name];
+      const categoryPathIds = nodeId ? [...pathIds, nodeId] : [...pathIds];
+      const children = Array.isArray(node.children) ? node.children : [];
+      const nodeKey = String(nodeId || nodePath.join("/"));
+      const nextCategoryKeys =
+        children.length > 0 ? [...categoryKeys, nodeKey] : categoryKeys;
+      const resolvedCategory =
+        category ||
+        (children.length === 0
+          ? { key: "root-services", name: "Other services" }
+          : { key: nodeKey, name });
+
+      if (children.length === 0 && node.price !== undefined && node.price !== null) {
+        services.push({
+          node,
+          nodePath,
+          categoryPathIds,
+          serviceName: name,
+          categoryPath: nodePath.slice(0, -1).join(" / "),
+          categoryKey: resolvedCategory.key,
+          categoryName: resolvedCategory.name,
+          categoryKeys: nextCategoryKeys,
+          searchText: nodePath.join(" ").toLowerCase(),
+        });
+        return;
+      }
+
+      walk(children, nodePath, categoryPathIds, resolvedCategory, nextCategoryKeys);
+    });
+  }
+
+  walk(nodes, initialPath, initialPathIds, null, []);
+  return services;
+}
+
+function buildQuickBillingCategoryTree(nodes, parentKey = null, parentPath = []) {
+  if (!Array.isArray(nodes)) return [];
+
+  return nodes.reduce((categories, node) => {
+    if (!node || typeof node !== "object") return categories;
+
+    const children = Array.isArray(node.children) ? node.children : [];
+    if (children.length === 0) return categories;
+
+    const name = String(node.name || node.title || "Untitled").trim() || "Untitled";
+    const nodeId = node.categoryId || node._id || node.id || null;
+    const key = String(nodeId || [...parentPath.map((entry) => entry.name), name].join("/"));
+    const path = [...parentPath, { key, name }];
+
+    categories.push({
+      key,
+      name,
+      parentKey,
+      path,
+      children: buildQuickBillingCategoryTree(children, key, path),
+    });
+    return categories;
+  }, []);
+}
+
+function findQuickBillingCategory(categories, categoryKey) {
+  if (!categoryKey || categoryKey === "all" || !Array.isArray(categories)) return null;
+
+  for (const category of categories) {
+    if (category.key === categoryKey) return category;
+    const nestedMatch = findQuickBillingCategory(category.children, categoryKey);
+    if (nestedMatch) return nestedMatch;
+  }
+  return null;
+}
+
+function findDefaultQuickBillingCategoryKey(categories, services) {
+  const availableServices = Array.isArray(services) ? services : [];
+
+  for (const category of Array.isArray(categories) ? categories : []) {
+    const categoryServices = availableServices.filter((service) =>
+      service.categoryKeys.includes(category.key)
+    );
+    if (categoryServices.length === 0) continue;
+
+    const hasDirectServices = categoryServices.some(
+      (service) => service.categoryKeys[service.categoryKeys.length - 1] === category.key
+    );
+    if (hasDirectServices) return category.key;
+
+    const firstBillableChild = category.children.find((child) =>
+      availableServices.some((service) => service.categoryKeys.includes(child.key))
+    );
+    return firstBillableChild?.key || category.key;
+  }
+
+  return availableServices.some((service) => service.categoryKey === "root-services")
+    ? "root-services"
+    : "none";
+}
+
+function filterQuickBillingServices(services, query) {
+  const normalizedQuery = String(query || "").trim().toLowerCase();
+  if (!normalizedQuery) return Array.isArray(services) ? services : [];
+
+  return (Array.isArray(services) ? services : []).filter((service) =>
+    String(service?.searchText || service?.serviceName || "")
+      .toLowerCase()
+      .includes(normalizedQuery)
+  );
+}
+
+function getQuickBillingInitialQuantity(minQty) {
+  return Math.max(1, Number(minQty) || 1);
+}
+
+function getQuickBillingIncrementedQuantity(quantity, stepQty) {
+  return Number(quantity || 0) + Math.max(1, Number(stepQty) || 1);
+}
+
+function getQuickBillingDecrementedQuantity(quantity, minQty, stepQty) {
+  const safeMinimum = getQuickBillingInitialQuantity(minQty);
+  if (Number(quantity || 0) <= safeMinimum) return null;
+  return Math.max(safeMinimum, Number(quantity || 0) - Math.max(1, Number(stepQty) || 1));
+}
 
 function normalizePreviewTemplateKey(value) {
   const normalized = String(value || "").trim().toLowerCase();
@@ -2113,7 +2246,6 @@ function ExploreContent({ onReady, onOpenServices }) {
   };
   // ================= MENU TREE (TEMP SAFE STATE) =================
   const [menuTree, setMenuTree] = useState([]);
-  const [expandedMenuNodes, setExpandedMenuNodes] = useState({});
 
 
   const [selectedServiceName, setSelectedServiceName] = useState("");
@@ -2124,6 +2256,11 @@ function ExploreContent({ onReady, onOpenServices }) {
   const [selectedCategoryIds, setSelectedCategoryIds] = useState([]);
   const [activeClassicCategory, setActiveClassicCategory] = useState("");
   const [menuSearch, setMenuSearch] = useState("");
+  const quickBillingSearchInputRef = useRef(null);
+  const [quickBillingCategory, setQuickBillingCategory] = useState("none");
+  const [quickBillingVisibleCount, setQuickBillingVisibleCount] = useState(
+    QUICK_BILLING_INITIAL_LIMIT
+  );
   const [pricingRefreshNonce, setPricingRefreshNonce] = useState(0);
   // ================= MOBILE DETECTION =================
   const [isMobile, setIsMobile] = useState(false);
@@ -3644,14 +3781,13 @@ function ExploreContent({ onReady, onOpenServices }) {
         : Array.isArray(node.nodePath)
           ? node.nodePath
           : [];
-      const minQty = Math.max(1, Number(node.minQty) || 1);
+      const minQty = getQuickBillingInitialQuantity(node.minQty);
       const stepQty = Math.max(1, Number(node.stepQty) || 1);
       const existing = sourceItems.find(i => (i.cartKey || i.itemId) === cartKey);
       if (existing) {
         return sourceItems.map(i => {
           if ((i.cartKey || i.itemId) !== cartKey) return i;
-          const incrementBy = Math.max(1, Number(i.stepQty) || 1);
-          const qty = i.qty + incrementBy;
+          const qty = getQuickBillingIncrementedQuantity(i.qty, i.stepQty);
           return { ...i, qty, total: i.price * qty };
         });
       }
@@ -3983,8 +4119,7 @@ function ExploreContent({ onReady, onOpenServices }) {
     setCartItems(prev =>
       prev.map(i => {
         if ((i.cartKey || i.itemId) !== cartKey) return i;
-        const incrementBy = Math.max(1, Number(i.stepQty) || 1);
-        const qty = i.qty + incrementBy;
+        const qty = getQuickBillingIncrementedQuantity(i.qty, i.stepQty);
         return { ...i, qty, total: i.price * qty };
       })
     );
@@ -4097,13 +4232,15 @@ function ExploreContent({ onReady, onOpenServices }) {
     setCartItems(prev => {
       const item = prev.find(i => (i.cartKey || i.itemId) === cartKey);
       if (!item) return prev;
-      const minQty = Math.max(1, Number(item.minQty) || 1);
-      const stepQty = Math.max(1, Number(item.stepQty) || 1);
-      if (item.qty > minQty) {
+      const nextQuantity = getQuickBillingDecrementedQuantity(
+        item.qty,
+        item.minQty,
+        item.stepQty
+      );
+      if (nextQuantity !== null) {
         return prev.map(i => {
           if ((i.cartKey || i.itemId) !== cartKey) return i;
-          const qty = Math.max(minQty, i.qty - stepQty);
-          return { ...i, qty, total: i.price * qty };
+          return { ...i, qty: nextQuantity, total: i.price * nextQuantity };
         });
       }
       return prev.filter(i => (i.cartKey || i.itemId) !== cartKey);
@@ -4225,13 +4362,6 @@ function ExploreContent({ onReady, onOpenServices }) {
     }
     setActiveClassicCategory(orderedCategories[0]?.sectionName || "");
   }, [activeClassicCategory, orderedCategories]);
-
-  const menuClassForDepth = (depth, isLeaf = false) => {
-    if (isLeaf) return "menu-leaf";
-    if (depth === 0) return "menu-root";
-    if (depth === 1) return "menu-category";
-    return "menu-sub";
-  };
 
   const filterActiveMenuTree = (nodes) => {
     if (!Array.isArray(nodes)) return [];
@@ -4469,147 +4599,146 @@ function ExploreContent({ onReady, onOpenServices }) {
     };
   };
 
-  const filterMenuNodes = (nodes, query) => {
-    if (!Array.isArray(nodes)) return [];
-
-    const normalizedQuery = query.trim().toLowerCase();
-    if (!normalizedQuery) return nodes;
-
-    return nodes.reduce((acc, node) => {
-      if (!node || typeof node !== "object") return acc;
-
-      const name = String(node.name || node.title || "").toLowerCase();
-      const hasChildren = Array.isArray(node.children) && node.children.length > 0;
-
-      const matchesSelf = name.includes(normalizedQuery);
-
-      // 🔥 If parent matches → return FULL subtree (no filtering)
-      if (matchesSelf) {
-        acc.push(node);
-        return acc;
-      }
-
-      // 🔍 Otherwise check children
-      if (hasChildren) {
-        const filteredChildren = filterMenuNodes(node.children, normalizedQuery);
-
-        if (filteredChildren.length > 0) {
-          acc.push({
-            ...node,
-            children: filteredChildren,
-          });
-        }
-      }
-
-      return acc;
-    }, []);
-  };
-
-  const filteredMenuTree = useMemo(
-    () => filterMenuNodes(menuTree, menuSearch),
-    [menuTree, menuSearch]
+  const quickBillingServices = useMemo(
+    () =>
+      buildQuickBillingServiceIndex(
+        menuTree,
+        [],
+        rootCategoryId ? [rootCategoryId] : []
+      ),
+    [menuTree, rootCategoryId]
   );
 
-  const countLeafNodes = (nodes) => {
-    if (!Array.isArray(nodes) || nodes.length === 0) return 0;
+  const quickBillingCategoryTree = useMemo(
+    () => buildQuickBillingCategoryTree(menuTree),
+    [menuTree]
+  );
 
-    return nodes.reduce((count, node) => {
-      if (!node || typeof node !== "object") return count;
-      const children = Array.isArray(node.children) ? node.children : [];
+  const requestedQuickBillingCategory = useMemo(
+    () => findQuickBillingCategory(quickBillingCategoryTree, quickBillingCategory),
+    [quickBillingCategory, quickBillingCategoryTree]
+  );
+  const requestedCategoryHasServices = requestedQuickBillingCategory
+    ? quickBillingServices.some((service) =>
+        service.categoryKeys.includes(requestedQuickBillingCategory.key)
+      )
+    : quickBillingCategory === "root-services" &&
+      quickBillingServices.some((service) => service.categoryKey === "root-services");
+  const defaultQuickBillingCategory = useMemo(
+    () =>
+      findDefaultQuickBillingCategoryKey(
+        quickBillingCategoryTree,
+        quickBillingServices
+      ),
+    [quickBillingCategoryTree, quickBillingServices]
+  );
+  const effectiveQuickBillingCategory = requestedCategoryHasServices
+    ? quickBillingCategory
+    : defaultQuickBillingCategory;
+  const selectedQuickBillingCategory = useMemo(
+    () =>
+      findQuickBillingCategory(
+        quickBillingCategoryTree,
+        effectiveQuickBillingCategory
+      ),
+    [effectiveQuickBillingCategory, quickBillingCategoryTree]
+  );
+  const quickBillingParentCategory = selectedQuickBillingCategory?.parentKey
+    ? findQuickBillingCategory(
+        quickBillingCategoryTree,
+        selectedQuickBillingCategory.parentKey
+      )
+    : null;
+  const quickBillingSiblingCategories = quickBillingParentCategory?.children || [];
+  const quickBillingChildCategories = selectedQuickBillingCategory?.children || [];
 
-      if (children.length === 0 && node.price !== undefined && node.price !== null) {
-        return count + 1;
-      }
+  const normalizedMenuSearch = menuSearch.trim();
+  const quickBillingSearchResults = useMemo(
+    () => filterQuickBillingServices(quickBillingServices, menuSearch),
+    [quickBillingServices, menuSearch]
+  );
 
-      return count + countLeafNodes(children);
-    }, 0);
+  const quickBillingCategoryServices = useMemo(
+    () =>
+      effectiveQuickBillingCategory === "none"
+        ? []
+        : effectiveQuickBillingCategory === "root-services"
+        ? quickBillingServices.filter(
+            (service) => service.categoryKey === "root-services"
+          )
+        : quickBillingServices.filter(
+            (service) => service.categoryKeys.includes(effectiveQuickBillingCategory)
+          ),
+    [effectiveQuickBillingCategory, quickBillingServices]
+  );
+
+  const displayedQuickBillingServices = normalizedMenuSearch
+    ? quickBillingSearchResults
+    : quickBillingCategoryServices.slice(0, quickBillingVisibleCount);
+
+  const clearQuickBillingSearch = () => {
+    setMenuSearch("");
+    setQuickBillingVisibleCount(QUICK_BILLING_INITIAL_LIMIT);
+    quickBillingSearchInputRef.current?.focus();
   };
 
-  const isMenuNodeExpanded = (nodeKey, depth) => {
-    if (menuSearch.trim()) return true;
-    if (expandedMenuNodes[nodeKey] !== undefined) return expandedMenuNodes[nodeKey];
-    return depth < 2;
-  };
+  const renderQuickBillingServiceRows = (services) => (
+    <div className="quick-billing-service-list" data-testid="quick-billing-service-list">
+      {services.map((service, index) => {
+        const itemId = service.node._id || service.node.id || service.node.categoryId;
+        const cartKey = service.node.cartKey || itemId;
+        const cartItem = cartItems.find(
+          (item) => (item.cartKey || item.itemId) === cartKey
+        );
+        const rowKey = `${service.categoryPathIds.map(String).join("_")}-${String(itemId || index)}`;
 
-  const toggleMenuNode = (nodeKey, depth) => {
-    setExpandedMenuNodes((prev) => ({
-      ...prev,
-      [nodeKey]: !(prev[nodeKey] ?? (depth < 2)),
-    }));
-  };
-
-  const renderMenuNodes = (nodes, depth = 0, path = [], pathIds = []) => {
-    if (!Array.isArray(nodes) || nodes.length === 0) return null;
-
-    return nodes.map((node, idx) => {
-      if (!node || typeof node !== "object") return null;
-
-      const name = node.name || node.title || "Untitled";
-      const newPath = [...path, name];
-      const newPathIds = [...pathIds, node.categoryId || node._id];
-      const nodeKey = newPathIds.filter(Boolean).join("_") || `${depth}-${name}-${idx}`;
-
-      const hasChildren = Array.isArray(node.children) && node.children.length > 0;
-      const hasPrice = node.price !== undefined && node.price !== null;
-
-      // Only render prices on leaf nodes
-      if (!hasChildren && hasPrice) {
-        const cls = menuClassForDepth(depth, true);
         return (
-          <div
-            key={`${depth}-leaf-${name}-${idx}`}
-            className={`menu-tree-leaf-row menu-depth-indent-${Math.min(depth, 6)} ${cls}`}
-          >
-            <div className="menu-tree-leaf-copy">
-              <div className="menu-tree-leaf-name">{name}</div>
-              <div className="menu-tree-leaf-meta">
-                {newPath.slice(0, -1).join(" / ")}
+          <div className="quick-billing-service-row" key={rowKey}>
+            <div className="quick-billing-service-copy">
+              <div className="quick-billing-service-name">{service.serviceName}</div>
+              <div className="quick-billing-service-path">
+                {service.categoryPath || "Service"}
               </div>
             </div>
-            <span className="menu-tree-leaf-price">₹ {node.price}</span>
-            <button
-              className="menu-tree-add-btn"
-              type="button"
-              onClick={() => addVendorBillingItem(node, newPath, newPathIds)}
-            >
-              Add
-            </button>
+            <div className="quick-billing-service-price">₹ {service.node.price}</div>
+            {cartItem ? (
+              <div className="quick-billing-quantity" aria-label={`${service.serviceName} quantity`}>
+                <button
+                  type="button"
+                  onClick={() => decreaseQty(cartItem.cartKey || cartItem.itemId)}
+                  aria-label={`Decrease ${service.serviceName}`}
+                >
+                  −
+                </button>
+                <span>{cartItem.qty}</span>
+                <button
+                  type="button"
+                  onClick={() => increaseQty(cartItem.cartKey || cartItem.itemId)}
+                  aria-label={`Increase ${service.serviceName}`}
+                >
+                  +
+                </button>
+              </div>
+            ) : (
+              <button
+                className="quick-billing-add-btn"
+                type="button"
+                onClick={() =>
+                  addVendorBillingItem(
+                    service.node,
+                    service.nodePath,
+                    service.categoryPathIds
+                  )
+                }
+              >
+                Add
+              </button>
+            )}
           </div>
         );
-      }
-
-      // Skip non-leaf nodes with no children
-      if (!hasChildren) return null;
-
-      const cls = menuClassForDepth(depth, false);
-      const leafCount = countLeafNodes(node.children);
-      const isExpanded = isMenuNodeExpanded(nodeKey, depth);
-
-      return (
-        <div
-          key={`${depth}-node-${name}-${idx}`}
-          className="menu-tree-node-block"
-        >
-          <button
-            type="button"
-            className={`menu-tree-heading menu-depth-heading-${Math.min(depth, 6)} ${cls} ${isExpanded ? "expanded" : "collapsed"}`}
-            onClick={() => toggleMenuNode(nodeKey, depth)}
-          >
-            <span className="menu-tree-heading-copy">
-              <span className="menu-tree-heading-title">{name}</span>
-              <span className="menu-tree-heading-meta">
-                {leafCount} service{leafCount === 1 ? "" : "s"}
-              </span>
-            </span>
-            <span className="menu-tree-heading-toggle">{isExpanded ? "−" : "+"}</span>
-          </button>
-          {isExpanded ? (
-            <div>{renderMenuNodes(node.children, depth + 1, newPath, newPathIds)}</div>
-          ) : null}
-        </div>
-      );
-    });
-  };
+      })}
+    </div>
+  );
   const [verifyingOtp, setVerifyingOtp] = useState(false);
   const previewCategory = useMemo(() => {
     if (!category && !hrCategory) return null;
@@ -5325,38 +5454,157 @@ function ExploreContent({ onReady, onOpenServices }) {
                 <div className={`menu-overlay-main ${isMobile ? "mobile" : "desktop"}`}>
                   <div className="menu-search-wrap">
                     <input
+                      ref={quickBillingSearchInputRef}
                       className="menu-search-input"
                       type="text"
                       value={menuSearch}
-                      onChange={(e) => setMenuSearch(e.target.value)}
-                      placeholder="Search services..."
+                      onChange={(e) => {
+                        setMenuSearch(e.target.value);
+                        setQuickBillingVisibleCount(QUICK_BILLING_INITIAL_LIMIT);
+                      }}
+                      onKeyDown={(event) => {
+                        if (event.key === "Escape" && menuSearch) {
+                          event.preventDefault();
+                          clearQuickBillingSearch();
+                        }
+                      }}
+                      placeholder="Search any service..."
+                      aria-label="Search billing services"
                     />
+                    {menuSearch && (
+                      <button
+                        type="button"
+                        className="quick-billing-search-clear"
+                        onClick={clearQuickBillingSearch}
+                        aria-label="Clear service search"
+                        title="Clear search"
+                      >
+                        ×
+                      </button>
+                    )}
                   </div>
-                  <div className="menu-toolbar">
-                    <div className="menu-toolbar-copy">
-                      <div className="menu-toolbar-title">Quick Billing Menu</div>
-                      <div className="menu-toolbar-subtitle">
-                        Search a service, open the matching section, and add it directly to cart.
+                  {!normalizedMenuSearch && quickBillingCategoryTree.length > 0 && (
+                    <div className="quick-billing-category-nav">
+                      <div
+                        className="quick-billing-category-strip quick-billing-top-categories"
+                        aria-label="Top-level service categories"
+                      >
+                        {quickBillingCategoryTree.map((category) => (
+                          <button
+                            type="button"
+                            key={category.key}
+                            className={
+                              selectedQuickBillingCategory?.path[0]?.key === category.key
+                                ? "active"
+                                : ""
+                            }
+                            onClick={() => {
+                              setQuickBillingCategory(category.key);
+                              setQuickBillingVisibleCount(QUICK_BILLING_INITIAL_LIMIT);
+                            }}
+                          >
+                            {category.name}
+                          </button>
+                        ))}
                       </div>
-                    </div>
-                    <div className="menu-toolbar-summary">
-                      <span>{countLeafNodes(filteredMenuTree)} services</span>
-                      <span>{cartItems.length} in cart</span>
-                    </div>
-                  </div>
-                  {filteredMenuTree.length === 0 ? (
-                    <div className="menu-empty-search">
-                      {menuSearch ? "No matching services found." : "No services available"}
-                    </div>
-                  ) : (
-                    <div className="menu-tree-wrap">
-                      {renderMenuNodes(
-                        filteredMenuTree,
-                        0,
-                        [],
-                        rootCategoryId ? [rootCategoryId] : []
+                      {selectedQuickBillingCategory?.path.length > 1 && (
+                        <div className="quick-billing-breadcrumbs" aria-label="Selected category path">
+                          {selectedQuickBillingCategory.path.map((category, index) => (
+                            <span key={category.key} className="quick-billing-breadcrumb-step">
+                              {index > 0 && <span aria-hidden="true">/</span>}
+                              <button
+                                type="button"
+                                className={
+                                  index === selectedQuickBillingCategory.path.length - 1
+                                    ? "current"
+                                    : ""
+                                }
+                                onClick={() => {
+                                  setQuickBillingCategory(category.key);
+                                  setQuickBillingVisibleCount(QUICK_BILLING_INITIAL_LIMIT);
+                                }}
+                              >
+                                {category.name}
+                              </button>
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                      {quickBillingSiblingCategories.length > 0 && (
+                        <div
+                          className="quick-billing-category-strip"
+                          aria-label="Sibling service categories"
+                        >
+                          {quickBillingSiblingCategories.map((category) => (
+                            <button
+                              type="button"
+                              key={category.key}
+                              className={
+                                effectiveQuickBillingCategory === category.key ? "active" : ""
+                              }
+                              onClick={() => {
+                                setQuickBillingCategory(category.key);
+                                setQuickBillingVisibleCount(QUICK_BILLING_INITIAL_LIMIT);
+                              }}
+                            >
+                              {category.name}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                      {quickBillingChildCategories.length > 0 && (
+                        <div
+                          className="quick-billing-category-strip"
+                          aria-label="Child service categories"
+                        >
+                          {quickBillingChildCategories.map((category) => (
+                            <button
+                              type="button"
+                              key={category.key}
+                              onClick={() => {
+                                setQuickBillingCategory(category.key);
+                                setQuickBillingVisibleCount(QUICK_BILLING_INITIAL_LIMIT);
+                              }}
+                            >
+                              {category.name}
+                            </button>
+                          ))}
+                        </div>
                       )}
                     </div>
+                  )}
+                  {normalizedMenuSearch && displayedQuickBillingServices.length === 0 ? (
+                    <div className="menu-empty-search">
+                      {`No services found for “${normalizedMenuSearch}”.`}
+                    </div>
+                  ) : !normalizedMenuSearch && effectiveQuickBillingCategory === "none" ? (
+                    <div className="menu-empty-search">No services available.</div>
+                  ) : displayedQuickBillingServices.length === 0 ? (
+                    <div className="menu-empty-search">No services available in this category.</div>
+                  ) : (
+                    <>
+                      {normalizedMenuSearch && (
+                        <div className="quick-billing-results-label">
+                          {quickBillingSearchResults.length} result
+                          {quickBillingSearchResults.length === 1 ? "" : "s"}
+                        </div>
+                      )}
+                      {renderQuickBillingServiceRows(displayedQuickBillingServices)}
+                      {!normalizedMenuSearch &&
+                        quickBillingVisibleCount < quickBillingCategoryServices.length && (
+                          <button
+                            className="quick-billing-show-more"
+                            type="button"
+                            onClick={() =>
+                              setQuickBillingVisibleCount(
+                                (count) => count + QUICK_BILLING_INITIAL_LIMIT
+                              )
+                            }
+                          >
+                            Show More
+                          </button>
+                        )}
+                    </>
                   )}
                 </div>
                 {!isMobile && (
@@ -5829,25 +6077,16 @@ function ExploreContent({ onReady, onOpenServices }) {
 
               {isMobile && (
                 <>
-                  <div
+                  <button
+                    type="button"
                     className="menu-mobile-cart-pill"
                     onClick={() => setCartOpen(true)}
-                    style={{
-                      position: "fixed",
-                      bottom: "20px",
-                      left: "50%",
-                      transform: "translateX(-50%)",
-                      background: "#e6c37a",
-                      color: "#000",
-                      padding: "12px 20px",
-                      borderRadius: "30px",
-                      fontWeight: "600",
-                      zIndex: 3000,
-                      cursor: "pointer",
-                    }}
+                    aria-label={`View cart with ${cartItems.length} items, total ₹${cartTotal}`}
                   >
-                    Cart ({cartItems.length}) ₹{cartTotal}
-                  </div>
+                    <span>Cart ({cartItems.length})</span>
+                    <span className="menu-mobile-cart-total">₹{cartTotal}</span>
+                    <span className="menu-mobile-cart-view">View Cart</span>
+                  </button>
 
                   {cartOpen && (
                     <div
@@ -5875,7 +6114,6 @@ function ExploreContent({ onReady, onOpenServices }) {
                           type="button"
                           onClick={() => {
                             setCartOpen(false);
-                            setMenuSearch("");
                           }}
                           style={{
                             marginLeft: "auto",
