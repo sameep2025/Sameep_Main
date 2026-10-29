@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import "./PackagesPortal.css";
 import { useVendor } from "../context/VendorContext";
+import ItemGstConfiguration from "./ItemGstConfiguration";
 function fetchWithAuth(url, options = {}) {
   const sessionVendorId = localStorage.getItem("vendorSessionVendorId");
   const vendorToken = sessionVendorId ? localStorage.getItem(`vendorToken:${sessionVendorId}`) : "";
@@ -2500,6 +2501,12 @@ async function updateService(service, status) {
                 <img src={modalImageUrl} alt={`${editCategoryName || "Service"} preview`} />
               </div>
             ) : null}
+            <ItemGstConfiguration
+              vendorId={vendorId}
+              itemId={editingService._id}
+              itemSource={isSelfManagedVendor ? "vendor_menu_node" : "vendor_price_node"}
+              suggestedItemType="SERVICE"
+            />
             <button
               className="btn-primary edit-service-save-btn"
               onClick={async () => {
@@ -3366,6 +3373,15 @@ async function updateService(service, status) {
                       onChange={e => updateVariant(index, "price", e.target.value)}
                     />
 
+                    {customModalMode === "edit" && variant.id ? (
+                      <ItemGstConfiguration
+                        vendorId={vendorId}
+                        itemId={variant.id}
+                        itemSource="custom_package"
+                        suggestedItemType="SERVICE"
+                      />
+                    ) : null}
+
                     {customTypeConfig.supportsPackagesIncludes ? (
                       <>
                         <label className="modal-label">Package Includes</label>
@@ -3421,6 +3437,15 @@ async function updateService(service, status) {
               </div>
             )}
           </div>
+
+          {customModalMode === "edit" && customForm.id && customForm.packageType === "single" ? (
+            <ItemGstConfiguration
+              vendorId={vendorId}
+              itemId={customForm.id}
+              itemSource="custom_package"
+              suggestedItemType="SERVICE"
+            />
+          ) : null}
 
           <button
             className="btn-primary custom-modal-create-btn"

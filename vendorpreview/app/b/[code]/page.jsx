@@ -1,4 +1,5 @@
 import { API_BASE_URL } from "../../../config";
+import GstInvoiceDetails from "../../components/billing/GstInvoiceDetails";
 
 function formatCurrency(value) {
   const amount = Number(value || 0);
@@ -172,6 +173,8 @@ function BillView({ data, error }) {
               </section>
             </div>
 
+            <GstInvoiceDetails invoice={data?.gstInvoice} />
+
             <div style={styles.itemsBlock}>
               <div style={styles.itemsHeader}>
                 <span>Items</span>
@@ -265,7 +268,8 @@ async function getBillData(code) {
 }
 
 export default async function BillCodePage({ params }) {
-  const code = params?.code ? String(params.code) : "";
+  const resolvedParams = await params;
+  const code = resolvedParams?.code ? String(resolvedParams.code) : "";
   const { data, error } = await getBillData(code);
 
   return <BillView data={data} error={error} />;

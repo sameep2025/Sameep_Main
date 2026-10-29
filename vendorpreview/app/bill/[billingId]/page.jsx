@@ -1,4 +1,5 @@
 import { API_BASE_URL } from "../../../config";
+import GstInvoiceDetails from "../../components/billing/GstInvoiceDetails";
 
 function formatCurrency(value) {
   const amount = Number(value || 0);
@@ -172,6 +173,8 @@ function BillView({ data, error }) {
               </section>
             </div>
 
+            <GstInvoiceDetails invoice={data?.gstInvoice} />
+
             <div style={styles.itemsBlock}>
               <div style={styles.itemsHeader}>
                 <span>Items</span>
@@ -267,8 +270,9 @@ async function getBillData(billingId, token) {
 }
 
 export default async function BillPage({ params, searchParams }) {
-  const billingId = params?.billingId ? String(params.billingId) : "";
-  const token = searchParams?.token ? String(searchParams.token) : "";
+  const [resolvedParams, resolvedSearchParams] = await Promise.all([params, searchParams]);
+  const billingId = resolvedParams?.billingId ? String(resolvedParams.billingId) : "";
+  const token = resolvedSearchParams?.token ? String(resolvedSearchParams.token) : "";
   const { data, error } = await getBillData(billingId, token);
 
   return <BillView data={data} error={error} />;

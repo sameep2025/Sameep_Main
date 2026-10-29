@@ -925,6 +925,64 @@ test("billing cart update stores no-discount financial snapshot", async () => {
   assert.equal(updatePayload.discountAmount, 0);
 });
 
+test("billing cart update normalizes serialized quantity 1", async () => {
+  const originalFindByIdAndUpdate = BillingSession.findByIdAndUpdate;
+  let updatePayload = null;
+  BillingSession.findByIdAndUpdate = async (_id, update) => {
+    updatePayload = update;
+    return { _id, ...update };
+  };
+  const req = {
+    body: {
+      billingId: COMPLETED_BILL_ID,
+      grossAmount: 500,
+      discountAmount: 0,
+      cartItems: [{ name: "Hair Spa", price: 500, qty: "1" }],
+    },
+  };
+  const res = {
+    statusCode: 200,
+    payload: null,
+    status(code) { this.statusCode = code; return this; },
+    json(payload) { this.payload = payload; return this; },
+  };
+  try {
+    await billingController.updateBillingCart(req, res);
+  } finally {
+    BillingSession.findByIdAndUpdate = originalFindByIdAndUpdate;
+  }
+  assert.equal(res.statusCode, 200);
+  assert.equal(updatePayload.cartItems[0].qty, 1);
+  assert.equal(updatePayload.cartItems[0].total, 500);
+});
+
+test("billing cart update rejects invalid quantities before persistence", async () => {
+  const originalFindByIdAndUpdate = BillingSession.findByIdAndUpdate;
+  let updateCalled = false;
+  BillingSession.findByIdAndUpdate = async () => {
+    updateCalled = true;
+  };
+  const req = {
+    body: {
+      billingId: COMPLETED_BILL_ID,
+      cartItems: [{ name: "Hair Spa", price: 500, qty: 0 }],
+    },
+  };
+  const res = {
+    statusCode: 200,
+    payload: null,
+    status(code) { this.statusCode = code; return this; },
+    json(payload) { this.payload = payload; return this; },
+  };
+  try {
+    await billingController.updateBillingCart(req, res);
+  } finally {
+    BillingSession.findByIdAndUpdate = originalFindByIdAndUpdate;
+  }
+  assert.equal(res.statusCode, 400);
+  assert.equal(updateCalled, false);
+});
+
 test("billing cart update stores manual discount percent metadata", async () => {
   const originalFindByIdAndUpdate = BillingSession.findByIdAndUpdate;
   let updatePayload = null;

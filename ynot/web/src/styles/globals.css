@@ -1072,6 +1072,65 @@ button {
   border-top: 1px solid rgba(16, 26, 52, 0.07);
 }
 
+.portalGstInvoice {
+  margin-top: 20px;
+  padding: 16px;
+  border: 1px solid rgba(170, 113, 0, 0.28);
+  border-radius: 20px;
+  background: rgba(255, 244, 215, 0.55);
+}
+
+.portalGstTestWatermark {
+  margin-bottom: 14px;
+  padding: 10px;
+  border: 2px solid #a63e2f;
+  color: #a63e2f;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  text-align: center;
+}
+
+.portalGstInvoiceHeading,
+.portalGstTotals > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.portalGstInvoiceHeading > div,
+.portalGstSupplier,
+.portalGstItems > div {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.portalGstInvoiceHeading > div > span,
+.portalGstSupplier span,
+.portalGstItems span {
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+
+.portalGstSupplier,
+.portalGstItems,
+.portalGstTotals {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid rgba(170, 113, 0, 0.18);
+}
+
+.portalGstItems > div + div,
+.portalGstTotals > div + div {
+  margin-top: 8px;
+}
+
+.portalGstPayable {
+  padding-top: 8px;
+  border-top: 1px solid rgba(170, 113, 0, 0.28);
+  color: #6f4900;
+}
+
 .portalMembershipStack {
   gap: 18px;
 }

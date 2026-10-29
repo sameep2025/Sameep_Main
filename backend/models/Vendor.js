@@ -3,6 +3,7 @@ const {
   getDefaultWhatsappBusinessConfig,
   whatsappBusinessConfigSchema,
 } = require("./whatsappBusinessConfigSchema");
+const { getDefaultGstSettings, gstSettingsSchema } = require("./gstSettingsSchema");
 
 const vendorSchema = new mongoose.Schema({
   customerId: { type: mongoose.Schema.Types.ObjectId, ref: "Customer", required: true },
@@ -49,6 +50,11 @@ const vendorSchema = new mongoose.Schema({
   whatsappBusiness: {
     type: whatsappBusinessConfigSchema,
     default: getDefaultWhatsappBusinessConfig,
+  },
+
+  gstSettings: {
+    type: gstSettingsSchema,
+    default: getDefaultGstSettings,
   },
 
   // Custom fields for preview Home section (Add-On Text)

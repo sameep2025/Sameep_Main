@@ -72,6 +72,33 @@ function hasCoexistenceWebhookEvents(payload) {
   );
 }
 
+function sanitizeWebhookLogValue(value, maxLength = 200) {
+  return String(value ?? "")
+    .replace(/[\r\n\t\0]/g, " ")
+    .trim()
+    .slice(0, maxLength);
+}
+
+function extractDeliveryStatusLogs(item) {
+  const statuses = Array.isArray(item?.value?.statuses) ? item.value.statuses : [];
+  return statuses.map((status) => {
+    const normalizedStatus = sanitizeWebhookLogValue(status?.status, 32).toLowerCase();
+    const entry = {
+      wamid: sanitizeWebhookLogValue(status?.id, 256),
+      status: normalizedStatus,
+      phoneNumberId: sanitizeWebhookLogValue(item?.phoneNumberId, 64),
+    };
+
+    if (normalizedStatus === "failed") {
+      const error = Array.isArray(status?.errors) ? status.errors[0] : null;
+      entry.errorCode = sanitizeWebhookLogValue(error?.code, 64);
+      entry.errorTitle = sanitizeWebhookLogValue(error?.title, 200);
+    }
+
+    return entry;
+  });
+}
+
 function collectIdentifiers(value, phoneIds, wabaIds, depth = 0) {
   if (!value || typeof value !== "object" || depth > 8) return;
 
@@ -305,6 +332,10 @@ async function processMetaWhatsappWebhook(payload, options = {}) {
       continue;
     }
 
+    for (const deliveryStatus of extractDeliveryStatusLogs(item)) {
+      logger.info("Meta WhatsApp delivery status", deliveryStatus);
+    }
+
     if (process.env.NODE_ENV !== "production") {
       logger.info("Meta WhatsApp webhook received", {
         vendorId: String(vendorMatch.vendor._id),
@@ -323,6 +354,7 @@ module.exports = {
   COEXISTENCE_EVENT_FIELDS,
   buildCoexistenceDeduplicationKey,
   extractCoexistenceIdentity,
+  extractDeliveryStatusLogs,
   extractWebhookMetadata,
   findVendorByMetaIdentifiers,
   hasCoexistenceWebhookEvents,

@@ -7,6 +7,12 @@ export function getReceiptDisplayBillId(value) {
   return String(value || "").slice(-8).toUpperCase();
 }
 
+export function formatReceiptPaise(value) {
+  const paise = Number(value);
+  if (!Number.isSafeInteger(paise) || paise < 0) return "";
+  return formatReceiptCurrency(paise / 100);
+}
+
 export function printReceiptSnapshot(receiptSnapshot) {
   if (!receiptSnapshot || typeof window === "undefined") return false;
 
@@ -63,6 +69,15 @@ export function printReceiptSnapshot(receiptSnapshot) {
             text-align: center;
             letter-spacing: 0.12em;
           }
+          .sample-watermark {
+            margin: 8px 0;
+            padding: 7px 4px;
+            border: 2px solid #000;
+            font-size: 13px;
+            font-weight: 900;
+            letter-spacing: 0.08em;
+            text-align: center;
+          }
           .meta-row,
           .total-row {
             display: flex;
@@ -80,6 +95,20 @@ export function printReceiptSnapshot(receiptSnapshot) {
             border-bottom: 1px dashed #000;
             padding: 6px 0;
           }
+          .gst-meta,
+          .gst-totals {
+            margin-top: 10px;
+            border-top: 1px dashed #000;
+            padding-top: 7px;
+          }
+          .gst-item {
+            margin: 7px 0;
+            padding-bottom: 7px;
+            border-bottom: 1px dotted #777;
+          }
+          .gst-item:last-child { border-bottom: 0; }
+          .gst-item strong,
+          .gst-item span { display: block; }
           .item-header,
           .item-row {
             display: grid;
@@ -137,11 +166,11 @@ export function printReceiptSnapshot(receiptSnapshot) {
   doc.close();
 
   const root = doc.getElementById("receipt-root");
-  const addText = (text, className = "") => {
+  const addText = (text, className = "", parent = root) => {
     const el = doc.createElement("div");
     if (className) el.className = className;
     el.textContent = text;
-    root.appendChild(el);
+    parent.appendChild(el);
     return el;
   };
   const addRow = (label, value, className = "meta-row", parent = root) => {
@@ -178,7 +207,18 @@ export function printReceiptSnapshot(receiptSnapshot) {
     header.appendChild(address);
   }
 
-  addText("BILL", "title center");
+  const gstInvoice = receiptSnapshot.gstInvoice || null;
+  const isNonTaxGstDocument = gstInvoice?.documentMode === "NON_TAX_INVOICE";
+  if (receiptSnapshot.isSampleGstInvoice === true || gstInvoice?.documentMode === "TEST") {
+    addText("TEST — NOT A TAX INVOICE", "sample-watermark");
+  }
+  if (isNonTaxGstDocument) {
+    addText("NOT A TAX INVOICE — TAX CLASSIFICATION REQUIRED", "sample-watermark");
+  }
+  addText(
+    gstInvoice ? (isNonTaxGstDocument ? "GST CALCULATION STATEMENT" : "GST TAX INVOICE") : "BILL",
+    "title center"
+  );
   if (receiptSnapshot.status === "CANCELLED") {
     addText("CANCELLED", "cancelled");
   }
@@ -193,6 +233,40 @@ export function printReceiptSnapshot(receiptSnapshot) {
     addRow("Bill ID", getReceiptDisplayBillId(receiptSnapshot.billingSessionId));
   }
   addRow("Customer", receiptSnapshot.customerLabel);
+
+  if (gstInvoice) {
+    const issueDate = new Date(gstInvoice.invoiceIssueDate);
+    const gstMeta = doc.createElement("section");
+    gstMeta.className = "gst-meta";
+    root.appendChild(gstMeta);
+    addRow(
+      isNonTaxGstDocument ? "Document Ref." : "Invoice No.",
+      String(gstInvoice.invoiceNumber || ""),
+      "meta-row",
+      gstMeta
+    );
+    if (!Number.isNaN(issueDate.getTime())) {
+      addRow(
+        isNonTaxGstDocument ? "Document Date" : "Invoice Date",
+        new Intl.DateTimeFormat("en-IN", {
+          dateStyle: "medium",
+          timeStyle: "short",
+          timeZone: "Asia/Kolkata",
+        }).format(issueDate),
+        "meta-row",
+        gstMeta
+      );
+    }
+    addRow("Legal Name", String(gstInvoice.supplier?.legalName || ""), "meta-row", gstMeta);
+    addRow("GSTIN", String(gstInvoice.supplier?.gstin || ""), "meta-row", gstMeta);
+    addRow("Registered Address", String(gstInvoice.supplier?.registeredAddress || ""), "meta-row", gstMeta);
+    addRow(
+      "Place of Supply",
+      `State code ${String(gstInvoice.placeOfSupply?.stateCode || "")}`,
+      "meta-row",
+      gstMeta
+    );
+  }
 
   const itemsBlock = doc.createElement("section");
   itemsBlock.className = "items";
@@ -227,6 +301,32 @@ export function printReceiptSnapshot(receiptSnapshot) {
     row.append(name, qty, total);
     itemsBlock.appendChild(row);
   });
+
+  if (gstInvoice) {
+    const gstItems = doc.createElement("section");
+    gstItems.className = "gst-meta";
+    root.appendChild(gstItems);
+    addText("GST ITEM DETAILS", "center", gstItems);
+    (gstInvoice.items || []).forEach((item) => {
+      const row = doc.createElement("div");
+      row.className = "gst-item";
+      const name = doc.createElement("strong");
+      name.textContent = `${String(item.name || "Item")} × ${Number(item.quantity || 0)}`;
+      const classification = doc.createElement("span");
+      classification.textContent = `${String(item.classificationType || "")} ${String(item.classificationCode || "not provided")} · ${Number(item.gstRateBps || 0) / 100}% GST`;
+      const amounts = doc.createElement("span");
+      amounts.textContent = `Taxable ${formatReceiptPaise(item.taxableValuePaise)} · GST ${formatReceiptPaise(item.totalGstPaise)} · Total ${formatReceiptPaise(item.invoiceTotalPaise)}`;
+      row.append(name, classification, amounts);
+      gstItems.appendChild(row);
+    });
+    if ((gstInvoice.complianceWarnings || []).length) {
+      addText(
+        "Tax classification needs to be completed before issuing a GST tax invoice.",
+        "cancelled",
+        gstItems
+      );
+    }
+  }
 
   const totals = doc.createElement("section");
   totals.className = "totals";
@@ -263,13 +363,28 @@ export function printReceiptSnapshot(receiptSnapshot) {
   if (showSplitDiscounts && Number(receiptSnapshot.discountAmount || 0) > 0) {
     addRow("Total Savings", formatReceiptCurrency(receiptSnapshot.discountAmount), "total-row", totals);
   }
-  if (Number(receiptSnapshot.rewardsRedeemed || 0) > 0) {
+  if (!gstInvoice && Number(receiptSnapshot.rewardsRedeemed || 0) > 0) {
     addRow("Rewards Redeemed", `-${formatReceiptCurrency(receiptSnapshot.rewardsRedeemed)}`, "total-row", totals);
   }
   if (Number(receiptSnapshot.pointsEarned || 0) > 0) {
     addRow("Loyalty Points Earned", String(Number(receiptSnapshot.pointsEarned || 0)), "total-row", totals);
   }
-  addRow("NET COLLECTED", formatReceiptCurrency(receiptSnapshot.netCollected), "total-row net", totals);
+  if (gstInvoice) {
+    const gstTotals = gstInvoice.totals || {};
+    addRow("Taxable Value", formatReceiptPaise(gstTotals.taxableValuePaise), "total-row", totals);
+    if (Number(gstTotals.cgstPaise) > 0) addRow("CGST", formatReceiptPaise(gstTotals.cgstPaise), "total-row", totals);
+    if (Number(gstTotals.sgstPaise) > 0) addRow("SGST", formatReceiptPaise(gstTotals.sgstPaise), "total-row", totals);
+    if (Number(gstTotals.utgstPaise) > 0) addRow("UTGST", formatReceiptPaise(gstTotals.utgstPaise), "total-row", totals);
+    if (Number(gstTotals.igstPaise) > 0) addRow("IGST", formatReceiptPaise(gstTotals.igstPaise), "total-row", totals);
+    addRow("Total GST", formatReceiptPaise(gstTotals.totalGstPaise), "total-row", totals);
+    addRow("Invoice Total", formatReceiptPaise(gstTotals.invoiceTotalPaise), "total-row", totals);
+    if (Number(gstTotals.loyaltyRedemptionPaise) > 0) {
+      addRow("Loyalty Redemption", `-${formatReceiptPaise(gstTotals.loyaltyRedemptionPaise)}`, "total-row", totals);
+    }
+    addRow("CUSTOMER PAYABLE", formatReceiptPaise(gstTotals.customerPayablePaise), "total-row net", totals);
+  } else {
+    addRow("NET COLLECTED", formatReceiptCurrency(receiptSnapshot.netCollected), "total-row net", totals);
+  }
   addRow(
     "Payment Mode",
     receiptSnapshot.paymentMode === "CASH" ? "Cash" : "Online",

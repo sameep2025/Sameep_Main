@@ -11,6 +11,7 @@ const connectDB = require("./config/db");
 
 // 🔹 IMPORTANT: load model ONCE before routes
 require("./models/VendorPriceNode");
+require("./models/VendorServiceTaxOverride");
 
 // --------------------
 // Route imports
@@ -55,6 +56,9 @@ const adminWhatsappIntegrationRoutes = require("./routes/adminWhatsappIntegratio
 const paymentRoutes = require("./routes/paymentRoutes");
 const vendorPaymentConfigRoutes = require("./routes/vendorPaymentConfigRoutes");
 const vendorBillingPreferencesRoutes = require("./routes/vendorBillingPreferencesRoutes");
+const vendorGstSettingsRoutes = require("./routes/vendorGstSettingsRoutes");
+const vendorItemGstOverrideRoutes = require("./routes/vendorItemGstOverrideRoutes");
+const vendorGstPreviewRoutes = require("./routes/vendorGstPreviewRoutes");
 const vendorMembershipPlanRoutes = require("./routes/vendorMembershipPlanRoutes");
 const vendorCustomerMembershipRoutes = require("./routes/vendorCustomerMembershipRoutes");
 const vendorWhatsappBusinessRoutes = require("./routes/vendorWhatsappBusinessRoutes");
@@ -124,12 +128,6 @@ app.set("trust proxy", 1);
 connectDB();
 
 // --------------------
-// Body parsing
-// --------------------
-app.use(express.json({ limit: "8mb" }));
-app.use(express.urlencoded({ limit: "8mb", extended: true }));
-
-// --------------------
 // Logger
 // --------------------
 app.use((req, res, next) => {
@@ -142,15 +140,21 @@ app.use((req, res, next) => {
   next();
 });
 
+// Meta must receive the untouched bytes before the universal JSON parser.
+app.use("/api/webhooks/meta", metaWhatsappWebhookRoutes);
+
+// --------------------
+// Body parsing
+// --------------------
+app.use(express.json({ limit: "8mb" }));
+app.use(express.urlencoded({ limit: "8mb", extended: true }));
+
 // --------------------
 // Static uploads
 // --------------------
 const uploadsDir = path.join(process.cwd(), "uploads");
 if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir);
 app.use("/uploads", express.static(uploadsDir));
-
-// Meta webhooks need access to the raw request body for signature validation.
-app.use("/api/webhooks/meta", metaWhatsappWebhookRoutes);
 
 // --------------------
 // Health
@@ -204,6 +208,9 @@ app.use("/api/digital-score", digitalScoreRoutes);
 app.use("/api/payments", paymentRoutes);
 app.use("/api/vendor-payment-config", vendorPaymentConfigRoutes);
 app.use("/api/vendor-billing-preferences", vendorBillingPreferencesRoutes);
+app.use("/api/vendor/gst-settings", vendorGstSettingsRoutes);
+app.use("/api/vendor/gst-item-overrides", vendorItemGstOverrideRoutes);
+app.use("/api/vendor/gst-preview", vendorGstPreviewRoutes);
 app.use("/api/vendor/membership-plans", vendorMembershipPlanRoutes);
 app.use("/api/vendor/customer-memberships", vendorCustomerMembershipRoutes);
 // Vendor Dashboard APIs

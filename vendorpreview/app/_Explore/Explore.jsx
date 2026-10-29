@@ -42,6 +42,11 @@ import {
   ADMIN_OPEN_MENU_EVENT,
 } from "../utils/adminQuickActions";
 import { getVendorAuthHeaders } from "../utils/vendorAuth";
+import { getGstSummaryPercentages } from "./gstPreviewDisplay.mjs";
+import {
+  hasEnabledGstBilling,
+  isGstPreviewAvailable,
+} from "./gstPreviewVisibility.mjs";
 const FOOTER_GALLERY_OPEN_EVENT = "ynot-footer-open-gallery";
 const CART_ORIGIN_PUBLIC = "PUBLIC_ENQUIRY";
 const CART_ORIGIN_BILLING = "VENDOR_BILLING";
@@ -1341,6 +1346,13 @@ function ExploreContent({ onReady, onOpenServices }) {
   const [membershipPreviewError, setMembershipPreviewError] = useState("");
   const [membershipPreviewRetryNonce, setMembershipPreviewRetryNonce] = useState(0);
   const membershipPreviewRequestRef = useRef(0);
+  const [gstPreview, setGstPreview] = useState(null);
+  const [gstPreviewLoading, setGstPreviewLoading] = useState(false);
+  const [gstPreviewError, setGstPreviewError] = useState("");
+  const [gstDraftStatus, setGstDraftStatus] = useState("loading");
+  const [gstDraftVendorId, setGstDraftVendorId] = useState("");
+  const [gstPreviewRetryNonce, setGstPreviewRetryNonce] = useState(0);
+  const gstPreviewRequestRef = useRef(0);
   const customerSearchRequestRef = useRef(0);
   const selectedBillingCustomerLabelRef = useRef("");
 
@@ -1556,6 +1568,13 @@ function ExploreContent({ onReady, onOpenServices }) {
       nodePath: item.nodePath || [],
       categoryPathIds: item.categoryPathIds || [],
     }));
+
+  const gstPreviewItems = useMemo(() =>
+    cartItems.map((item) => ({
+      itemId: item.itemId,
+      itemSource: item.itemSource,
+      qty: Number(item.qty) || 1,
+    })), [cartItems]);
 
   const formatMembershipPreviewAmount = (value) =>
     `₹${Number(value || 0).toLocaleString("en-IN")}`;
@@ -1914,6 +1933,80 @@ function ExploreContent({ onReady, onOpenServices }) {
     );
   };
 
+  const formatGstPreviewAmount = (paise) =>
+    `₹${(Number(paise || 0) / 100).toLocaleString("en-IN", {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    })}`;
+
+  const renderGstPreviewCard = () => {
+    const totals = gstPreview?.totals;
+    const summaryRates = totals
+      ? getGstSummaryPercentages(gstPreview?.lines, totals)
+      : null;
+    return (
+      <details className="gst-bill-preview-card">
+        <summary>
+          <span>GST Bill Summary</span>
+        </summary>
+        <div className="gst-bill-preview-body">
+          <p>Current bill tax summary based on the saved GST settings.</p>
+          {gstPreviewLoading ? <p>Calculating server-verified GST preview...</p> : null}
+          {gstPreviewError ? (
+            <div className="gst-bill-preview-error" role="alert">
+              <p>{gstPreviewError}</p>
+              <button
+                type="button"
+                onClick={() => setGstPreviewRetryNonce((value) => value + 1)}
+              >
+                Retry GST preview
+              </button>
+            </div>
+          ) : null}
+          {totals && !gstPreviewLoading ? (
+            <>
+              {(gstPreview.warnings || []).some(
+                (warning) => warning.code === "classification_missing"
+              ) ? (
+                <small className="gst-bill-preview-warning">
+                  SAC/HSN is not provided. GST remains calculated; the completed bill will use the appropriate document label.
+                </small>
+              ) : null}
+              <div className="gst-bill-preview-lines">
+                <div><span>Subtotal</span><strong>{formatGstPreviewAmount(totals.grossAmountPaise)}</strong></div>
+                <div><span>Manual discount</span><strong>-{formatGstPreviewAmount(totals.manualDiscountPaise)}</strong></div>
+                <div><span>Membership discount</span><strong>-{formatGstPreviewAmount(totals.membershipDiscountPaise)}</strong></div>
+                <div><span>Taxable amount</span><strong>{formatGstPreviewAmount(totals.taxableValuePaise)}</strong></div>
+                {totals.cgstPaise > 0 ? <div><span>CGST{summaryRates?.cgst ? ` (${summaryRates.cgst})` : ""}</span><strong>{formatGstPreviewAmount(totals.cgstPaise)}</strong></div> : null}
+                {totals.sgstPaise > 0 ? <div><span>SGST{summaryRates?.sgst ? ` (${summaryRates.sgst})` : ""}</span><strong>{formatGstPreviewAmount(totals.sgstPaise)}</strong></div> : null}
+                {totals.utgstPaise > 0 ? <div><span>UTGST{summaryRates?.utgst ? ` (${summaryRates.utgst})` : ""}</span><strong>{formatGstPreviewAmount(totals.utgstPaise)}</strong></div> : null}
+                {totals.igstPaise > 0 ? <div><span>IGST{summaryRates?.igst ? ` (${summaryRates.igst})` : ""}</span><strong>{formatGstPreviewAmount(totals.igstPaise)}</strong></div> : null}
+                <div><span>Total GST{summaryRates?.total ? ` (${summaryRates.total})` : ""}</span><strong>{formatGstPreviewAmount(totals.totalTaxPaise)}</strong></div>
+                <div><span>Invoice total</span><strong>{formatGstPreviewAmount(totals.invoiceAmountPaise)}</strong></div>
+                <div><span>Loyalty redemption</span><strong>-{formatGstPreviewAmount(totals.loyaltyRedemptionPaise)}</strong></div>
+                <div className="gst-preview-payable"><span>Final payable</span><strong>{formatGstPreviewAmount(totals.estimatedCustomerPayablePaise)}</strong></div>
+              </div>
+              <details className="gst-bill-preview-items">
+                <summary>Item tax details</summary>
+                {(gstPreview.lines || []).map((line) => (
+                  <div key={`${line.itemSource}:${line.itemId}`} className="gst-bill-preview-item">
+                    <strong>{line.name} × {line.quantity}</strong>
+                    <span>
+                      {line.itemType} · {line.classificationCode
+                        ? `${line.itemType === "PRODUCT" ? "HSN" : "SAC"} ${line.classificationCode}`
+                        : "Classification pending"} · {line.gstRateBps / 100}% GST
+                    </span>
+                    <span>Taxable {formatGstPreviewAmount(line.taxableValuePaise)} · GST {formatGstPreviewAmount(line.totalGstPaise)}</span>
+                  </div>
+                ))}
+              </details>
+            </>
+          ) : null}
+        </div>
+      </details>
+    );
+  };
+
   const buildReceiptSnapshot = ({ billingSessionId, billingItems, completeData }) => {
     const transaction = completeData?.transaction || {};
     const redeemedValue =
@@ -1950,6 +2043,7 @@ function ExploreContent({ onReady, onOpenServices }) {
       pointsEarned: Number(completeData?.billing?.pointsEarned ?? transaction.pointsEarned ?? getAuthoritativeEarnPoints()),
       netCollected: Number(netCollected || 0),
       paymentMode: String(transaction.paymentMode || paymentMode || "ONLINE"),
+      gstInvoice: completeData?.gstInvoice || null,
     };
   };
 
@@ -2366,6 +2460,13 @@ function ExploreContent({ onReady, onOpenServices }) {
     vendorInfo?._id ||
     vendorInfo?.vendor?._id ||
     null;
+  const gstPreviewAvailable = isGstPreviewAvailable({
+    status: gstDraftStatus,
+    loadedVendorId: gstDraftVendorId,
+    currentVendorId: vendorId,
+    hasActiveVendorSession,
+    viewMode,
+  });
   const galleryRowId =
     vendorInfo?.galleryRowId ||
     vendorInfo?.rowId ||
@@ -3628,6 +3729,115 @@ function ExploreContent({ onReady, onOpenServices }) {
     membershipPreviewRetryNonce,
   ]);
 
+  useEffect(() => {
+    let cancelled = false;
+    setGstDraftStatus("loading");
+    setGstDraftVendorId("");
+
+    if (!vendorId || !hasActiveVendorSession || viewMode !== "menu") {
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    const loadGstDraftStatus = async () => {
+      try {
+        const response = await fetch(
+          `${API_BASE_URL}/api/vendor/gst-settings/${encodeURIComponent(vendorId)}`,
+          {
+            cache: "no-store",
+            headers: getVendorAuthHeaders(vendorId),
+          }
+        );
+        const payload = await response.json().catch(() => null);
+        if (!cancelled) {
+          setGstDraftVendorId(String(vendorId));
+          setGstDraftStatus(
+            response.ok && hasEnabledGstBilling(payload) ? "configured" : "unconfigured"
+          );
+        }
+      } catch {
+        if (!cancelled) {
+          setGstDraftVendorId(String(vendorId));
+          setGstDraftStatus("unconfigured");
+        }
+      }
+    };
+
+    loadGstDraftStatus();
+    return () => {
+      cancelled = true;
+    };
+  }, [vendorId, hasActiveVendorSession, viewMode]);
+
+  useEffect(() => {
+    const requestId = gstPreviewRequestRef.current + 1;
+    gstPreviewRequestRef.current = requestId;
+    if (!vendorId || cartItems.length === 0 || !gstPreviewAvailable) {
+      setGstPreview(null);
+      setGstPreviewError("");
+      setGstPreviewLoading(false);
+      return undefined;
+    }
+    const vendorToken = localStorage.getItem(`vendorToken:${vendorId}`);
+    if (!vendorToken) return undefined;
+
+    setGstPreviewLoading(true);
+    setGstPreviewError("");
+    const controller = new AbortController();
+    const handle = setTimeout(async () => {
+      try {
+        const response = await fetch(`${API_BASE_URL}/api/vendor/gst-preview/${vendorId}`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${vendorToken}`,
+          },
+          signal: controller.signal,
+          body: JSON.stringify({
+            customerMobile,
+            items: gstPreviewItems,
+            manualDiscount: {
+              mode: discountMode,
+              amount: appliedDiscount,
+              percent: discountPercent,
+            },
+            redemption: { amount: redeemPoints },
+          }),
+        });
+        const payload = await response.json().catch(() => null);
+        if (!response.ok || !payload?.success) {
+          throw new Error(payload?.message || "GST preview is unavailable");
+        }
+        if (gstPreviewRequestRef.current === requestId) setGstPreview(payload.data);
+      } catch (error) {
+        if (error?.name === "AbortError" || gstPreviewRequestRef.current !== requestId) return;
+        setGstPreview(null);
+        setGstPreviewError(error?.message || "GST preview is unavailable");
+      } finally {
+        if (!controller.signal.aborted && gstPreviewRequestRef.current === requestId) {
+          setGstPreviewLoading(false);
+        }
+      }
+    }, 500);
+
+    return () => {
+      clearTimeout(handle);
+      controller.abort();
+    };
+  }, [
+    vendorId,
+    gstPreviewAvailable,
+    cartItems.length,
+    gstPreviewItems,
+    customerMobile,
+    discountMode,
+    appliedDiscount,
+    discountPercent,
+    redeemPoints,
+    gstPreviewRetryNonce,
+  ]);
+
   /*
   const saveLoyaltyRule = async () => {
     if (!vendorId) return;
@@ -3804,6 +4014,12 @@ function ExploreContent({ onReady, onOpenServices }) {
         {
           cartKey,
           itemId,
+          itemSource:
+            node.sourceType === "custom_package"
+              ? "custom_package"
+              : vendorInfo?.pricingSource === "self_managed"
+                ? "vendor_menu_node"
+                : "vendor_price_node",
           categoryId,
 
           name: node.displayName || node.name,
@@ -3846,6 +4062,7 @@ function ExploreContent({ onReady, onOpenServices }) {
     customerVerificationRequestRef.current += 1;
     customerNameRequestRef.current += 1;
     membershipPreviewRequestRef.current += 1;
+    gstPreviewRequestRef.current += 1;
     loyaltyWalletRequestRef.current += 1;
     setCartItems([]);
     setTrackedCartOrigin(nextCartOrigin);
@@ -3875,6 +4092,9 @@ function ExploreContent({ onReady, onOpenServices }) {
     setMembershipPreview(null);
     setMembershipPreviewLoading(false);
     setMembershipPreviewError("");
+    setGstPreview(null);
+    setGstPreviewLoading(false);
+    setGstPreviewError("");
     setBillingId(null);
     setShowOtpInput(false);
     setOtp("");
@@ -5882,6 +6102,7 @@ function ExploreContent({ onReady, onOpenServices }) {
                                   </div>
                                 )}
                                 {renderMembershipPreviewCard()}
+                                {gstPreviewAvailable ? renderGstPreviewCard() : null}
                                 {loyaltyEnabled && (
                                   <>
                                     {!customerMobile && (
@@ -6395,6 +6616,7 @@ function ExploreContent({ onReady, onOpenServices }) {
                                     </div>
                                   )}
                                   {renderMembershipPreviewCard()}
+                                  {gstPreviewAvailable ? renderGstPreviewCard() : null}
                                   {loyaltyEnabled && (
                                     <>
                                       {!customerMobile && (

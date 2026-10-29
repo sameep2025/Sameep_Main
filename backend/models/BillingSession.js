@@ -1,4 +1,5 @@
 const mongoose = require("mongoose");
+const GstInvoiceSnapshotSchema = require("./gstInvoiceSnapshotSchema");
 
 const BillingItemSchema = new mongoose.Schema(
   {
@@ -95,6 +96,13 @@ const BillingSessionSchema = new mongoose.Schema(
       type: String,
       enum: ["LOYALTY", "WALK_IN"],
       default: "WALK_IN",
+    },
+
+    gstInvoiceMode: {
+      type: String,
+      enum: ["NONE", "TEST", "LIVE"],
+      default: "NONE",
+      immutable: true,
     },
 
     cartItems: [BillingItemSchema],
@@ -306,6 +314,12 @@ const BillingSessionSchema = new mongoose.Schema(
       type: Date,
       default: null,
     },
+
+    gstInvoiceSnapshot: {
+      type: GstInvoiceSnapshotSchema,
+      default: undefined,
+      immutable: true,
+    },
   },
   { timestamps: true }
 );
@@ -313,5 +327,13 @@ const BillingSessionSchema = new mongoose.Schema(
 BillingSessionSchema.index({ vendorId: 1, createdAt: -1 });
 BillingSessionSchema.index({ customerId: 1 });
 BillingSessionSchema.index({ publicAccessCode: 1 }, { unique: true, sparse: true });
+BillingSessionSchema.index(
+  { vendorId: 1, "gstInvoiceSnapshot.invoiceNumber": 1 },
+  {
+    unique: true,
+    partialFilterExpression: { "gstInvoiceSnapshot.invoiceNumber": { $type: "string" } },
+    name: "gst_invoice_number_per_vendor_unique",
+  }
+);
 
 module.exports = mongoose.model("BillingSession", BillingSessionSchema);

@@ -76,6 +76,68 @@ function isVendorConfirmCancellationBill(bill) {
   return bill?.requiresOtp === false || bill?.cancellationMethod === "VENDOR_CONFIRM";
 }
 
+function formatPaise(value) {
+  const paise = Number(value);
+  return Number.isSafeInteger(paise) && paise >= 0
+    ? currencyFmt.format(paise / 100)
+    : "-";
+}
+
+function GstInvoiceDetail({ invoice }) {
+  if (!invoice) return null;
+  const totals = invoice.totals || {};
+  const isNonTaxDocument = invoice.documentMode === "NON_TAX_INVOICE";
+
+  return (
+    <section className="revenue-panel-gst-invoice">
+      {invoice.documentMode === "TEST" ? (
+        <div className="revenue-panel-gst-test-watermark">TEST — NOT A TAX INVOICE</div>
+      ) : null}
+      {isNonTaxDocument ? (
+        <div className="revenue-panel-gst-test-watermark">NOT A TAX INVOICE — TAX CLASSIFICATION REQUIRED</div>
+      ) : null}
+      <div className="revenue-panel-gst-heading">
+        <div>
+          <span>{isNonTaxDocument ? "GST Calculation Statement" : "GST Tax Invoice"}</span>
+          <strong>{invoice.invoiceNumber}</strong>
+        </div>
+        <span>{formatDateTime(invoice.invoiceIssueDate)}</span>
+      </div>
+      <div className="revenue-panel-gst-supplier">
+        <strong>{invoice.supplier?.legalName}</strong>
+        <span>GSTIN: {invoice.supplier?.gstin}</span>
+        <span>{invoice.supplier?.registeredAddress}</span>
+        <span>Place of supply: State code {invoice.placeOfSupply?.stateCode}</span>
+      </div>
+      <div className="revenue-panel-gst-items">
+        {(invoice.items || []).map((item, index) => (
+          <div key={`${invoice.invoiceNumber}-tax-${index}`}>
+            <strong>{item.name} × {item.quantity}</strong>
+            <span>{item.classificationType} {item.classificationCode || "not provided"} · {Number(item.gstRateBps) / 100}% GST</span>
+            <span>Taxable {formatPaise(item.taxableValuePaise)} · GST {formatPaise(item.totalGstPaise)} · Total {formatPaise(item.invoiceTotalPaise)}</span>
+          </div>
+        ))}
+      </div>
+      {(invoice.complianceWarnings || []).length ? (
+        <div className="revenue-panel-gst-test-watermark">
+          Tax classification needs to be completed before issuing a GST tax invoice.
+        </div>
+      ) : null}
+      <div className="revenue-panel-gst-totals">
+        <div><span>Taxable Value</span><strong>{formatPaise(totals.taxableValuePaise)}</strong></div>
+        {Number(totals.cgstPaise) > 0 ? <div><span>CGST</span><strong>{formatPaise(totals.cgstPaise)}</strong></div> : null}
+        {Number(totals.sgstPaise) > 0 ? <div><span>SGST</span><strong>{formatPaise(totals.sgstPaise)}</strong></div> : null}
+        {Number(totals.utgstPaise) > 0 ? <div><span>UTGST</span><strong>{formatPaise(totals.utgstPaise)}</strong></div> : null}
+        {Number(totals.igstPaise) > 0 ? <div><span>IGST</span><strong>{formatPaise(totals.igstPaise)}</strong></div> : null}
+        <div><span>Total GST</span><strong>{formatPaise(totals.totalGstPaise)}</strong></div>
+        <div><span>Invoice Total</span><strong>{formatPaise(totals.invoiceTotalPaise)}</strong></div>
+        {Number(totals.loyaltyRedemptionPaise) > 0 ? <div><span>Loyalty Redemption</span><strong>-{formatPaise(totals.loyaltyRedemptionPaise)}</strong></div> : null}
+        <div className="revenue-panel-gst-payable"><span>Customer Payable</span><strong>{formatPaise(totals.customerPayablePaise)}</strong></div>
+      </div>
+    </section>
+  );
+}
+
 function buildReceiptSnapshotFromBillDetail(detail) {
   const totals = detail?.totals || {};
   return {
@@ -103,6 +165,7 @@ function buildReceiptSnapshotFromBillDetail(detail) {
     pointsEarned: Number(totals.pointsEarned || 0),
     netCollected: Number(totals.netCollected || 0),
     paymentMode: String(detail?.paymentMode || "ONLINE"),
+    gstInvoice: detail?.gstInvoice || null,
   };
 }
 
@@ -1186,6 +1249,8 @@ export default function CustomerSearch({ vendorId, initialCustomer = null }) {
                 </div>
               ))}
             </div>
+
+            <GstInvoiceDetail invoice={billDetail.gstInvoice} />
 
             <div className="revenue-panel-bill-totals">
               <div>

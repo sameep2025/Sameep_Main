@@ -2,6 +2,9 @@ const mongoose = require("mongoose");
 const BillingSession = require("../models/BillingSession");
 const Transaction = require("../models/Transaction");
 const Vendor = require("../models/DummyVendor");
+const {
+  buildGstInvoicePresentation,
+} = require("../services/gstInvoicePresentationService");
 
 const DEFAULT_BILL_LIMIT = 20;
 const MAX_BILL_LIMIT = 50;
@@ -241,6 +244,11 @@ function buildBillListItem(bill, { transaction = null, vendor = null } = {}) {
     financialSnapshotAvailable: financials.financialSnapshotAvailable,
   };
   if (customerNameSnapshot) item.customerNameSnapshot = customerNameSnapshot;
+  const gstInvoice = buildGstInvoicePresentation(bill.gstInvoiceSnapshot);
+  if (gstInvoice) {
+    item.gstInvoiceNumber = gstInvoice.invoiceNumber;
+    item.gstInvoiceDocumentMode = gstInvoice.documentMode;
+  }
   return item;
 }
 
@@ -254,7 +262,7 @@ function buildBillDetail(bill, { transaction = null, vendor = null } = {}) {
   };
   if (customerNameSnapshot) customer.name = customerNameSnapshot;
 
-  return {
+  const detail = {
     billId: String(bill._id),
     date: bill.createdAt || null,
     status: bill.status || "COMPLETED",
@@ -284,6 +292,9 @@ function buildBillDetail(bill, { transaction = null, vendor = null } = {}) {
     financialSnapshotAvailable: financials.financialSnapshotAvailable,
     transactionMissing: financials.transactionMissing,
   };
+  const gstInvoice = buildGstInvoicePresentation(bill.gstInvoiceSnapshot);
+  if (gstInvoice) detail.gstInvoice = gstInvoice;
+  return detail;
 }
 
 function applyCursorFilter(query, cursor) {

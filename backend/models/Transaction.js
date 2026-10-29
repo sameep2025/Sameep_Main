@@ -127,6 +127,13 @@ const TransactionSchema = new mongoose.Schema(
       default: "POS_OFFLINE",
     },
 
+    recordMode: {
+      type: String,
+      enum: ["NORMAL", "GST_TEST"],
+      default: "NORMAL",
+      index: true,
+    },
+
     status: {
       type: String,
       enum: ["COMPLETED", "CANCELLED", "SUPERSEDED"],

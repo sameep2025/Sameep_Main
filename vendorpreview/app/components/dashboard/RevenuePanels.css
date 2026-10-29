@@ -1256,3 +1256,60 @@ button.revenue-panel-list-item:focus-visible {
     text-align: left;
   }
 }
+.revenue-panel-gst-invoice {
+  margin-top: 18px;
+  padding: 16px;
+  border: 1px solid rgba(209, 169, 82, 0.45);
+  border-radius: 14px;
+  background: rgba(209, 169, 82, 0.08);
+}
+
+.revenue-panel-gst-heading,
+.revenue-panel-gst-totals > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.revenue-panel-gst-heading > div,
+.revenue-panel-gst-supplier,
+.revenue-panel-gst-items > div {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.revenue-panel-gst-heading > div > span,
+.revenue-panel-gst-supplier span,
+.revenue-panel-gst-items span {
+  color: rgba(255, 255, 255, 0.72);
+  font-size: 12px;
+}
+
+.revenue-panel-gst-supplier,
+.revenue-panel-gst-items,
+.revenue-panel-gst-totals {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid rgba(209, 169, 82, 0.24);
+}
+
+.revenue-panel-gst-items > div + div,
+.revenue-panel-gst-totals > div + div {
+  margin-top: 8px;
+}
+
+.revenue-panel-gst-payable {
+  padding-top: 8px;
+  border-top: 1px solid rgba(209, 169, 82, 0.35);
+  color: #f1cf78;
+}
+.revenue-panel-gst-test-watermark {
+  margin-bottom: 12px;
+  padding: 9px;
+  border: 2px solid #a63e2f;
+  color: #a63e2f;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  text-align: center;
+}

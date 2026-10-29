@@ -1,0 +1,77 @@
+.item-gst-settings {
+  margin: 18px 0;
+  border: 1px solid rgba(212, 175, 55, 0.35);
+  border-radius: 12px;
+  background: rgba(212, 175, 55, 0.05);
+}
+
+.item-gst-settings summary {
+  padding: 13px 14px;
+  color: #f4d77c;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.item-gst-settings summary span {
+  margin-left: 8px;
+  color: #aaa;
+  font-size: 0.78rem;
+  font-weight: 500;
+}
+
+.item-gst-settings-body { padding: 0 14px 14px; }
+.item-gst-choice {
+  display: flex;
+  gap: 9px;
+  align-items: center;
+  margin: 9px 0;
+  color: #f5f1e7;
+  font-weight: 600;
+  line-height: 1.4;
+}
+.item-gst-choice input { accent-color: #d4af37; }
+
+.item-gst-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin: 13px 0;
+}
+
+.item-gst-grid label { display: grid; gap: 6px; color: #ddd; font-size: 0.84rem; }
+.item-gst-grid input,
+.item-gst-grid select {
+  min-height: 42px;
+  border: 1px solid #4a4a4a;
+  border-radius: 8px;
+  padding: 8px 10px;
+  background: #171717;
+  color: #fff;
+}
+
+.item-gst-effective {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 16px;
+  margin: 12px 0;
+  color: #ccc;
+  font-size: 0.85rem;
+}
+
+.item-gst-message { margin: 8px 0; color: #f4d77c; font-size: 0.85rem; }
+.item-gst-message.success { color: #8fdaa2; }
+.item-gst-message.error { color: #ff9b9b; }
+.item-gst-save {
+  min-height: 42px;
+  border: 1px solid #d4af37;
+  border-radius: 9px;
+  padding: 8px 14px;
+  background: transparent;
+  color: #f4d77c;
+  font-weight: 700;
+}
+
+@media (max-width: 640px) {
+  .item-gst-grid { grid-template-columns: 1fr; }
+  .item-gst-save { width: 100%; }
+}

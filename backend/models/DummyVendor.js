@@ -3,6 +3,7 @@ const {
   getDefaultWhatsappBusinessConfig,
   whatsappBusinessConfigSchema,
 } = require("./whatsappBusinessConfigSchema");
+const { getDefaultGstSettings, gstSettingsSchema } = require("./gstSettingsSchema");
 
 /**
  * Google Place metadata (read-only)
@@ -185,6 +186,11 @@ trustSummary: {
       type: Boolean,
       default: true,
     },
+  },
+
+  gstSettings: {
+    type: gstSettingsSchema,
+    default: getDefaultGstSettings,
   },
 
   vendorLogin: {

@@ -70,6 +70,66 @@ function buildTransaction(overrides = {}) {
   };
 }
 
+function buildGstSnapshot(documentMode = "TEST") {
+  const nonTax = documentMode === "NON_TAX_INVOICE";
+  return {
+    schemaVersion: 1,
+    documentMode,
+    invoiceNumber: nonTax ? "NTI/dac53725ac82" : "GST/26-27/00001",
+    financialYear: "26-27",
+    invoiceIssueDate: new Date("2026-10-29T06:23:33.373Z"),
+    supplier: {
+      gstin: "36ABCDE1234F1Z5",
+      legalName: "Test Salon Legal Name",
+      registeredAddress: "Hyderabad, Telangana",
+      registeredStateCode: "36",
+    },
+    placeOfSupply: { stateCode: "36", supplyType: "intrastate" },
+    pricingMode: "inclusive",
+    complianceWarnings: nonTax ? [{
+      code: "classification_missing",
+      message: "Add a valid SAC before issuing a GST tax invoice.",
+      itemName: "Boy Hair Cut",
+      classificationType: "SAC",
+    }] : [],
+    items: [{
+      name: "Boy Hair Cut",
+      quantity: 1,
+      itemType: "SERVICE",
+      sac: nonTax ? "" : "999723",
+      hsn: "",
+      gstRateBps: 500,
+      unitPricePaise: 10000,
+      grossAmountPaise: 10000,
+      membershipDiscountPaise: 0,
+      manualDiscountPaise: 0,
+      totalDiscountPaise: 0,
+      taxableValuePaise: 9524,
+      cgstPaise: 238,
+      sgstPaise: 238,
+      utgstPaise: 0,
+      igstPaise: 0,
+      totalGstPaise: 476,
+      invoiceTotalPaise: 10000,
+    }],
+    totals: {
+      grossAmountPaise: 10000,
+      membershipDiscountPaise: 0,
+      manualDiscountPaise: 0,
+      totalDiscountPaise: 0,
+      taxableValuePaise: 9524,
+      cgstPaise: 238,
+      sgstPaise: 238,
+      utgstPaise: 0,
+      igstPaise: 0,
+      totalGstPaise: 476,
+      invoiceTotalPaise: 10000,
+      loyaltyRedemptionPaise: 0,
+      customerPayablePaise: 10000,
+    },
+  };
+}
+
 function installPublicBillMocks({ bill, transaction = null, code = "" }) {
   BillingSession.findById = (id) => ({
     lean: async () => (String(id) === String(bill._id) ? bill : null),
@@ -396,4 +456,43 @@ test("short-code public bill link returns the same financial totals", async () =
     assert.equal(res.payload.data.vendor.businessName, "Test Salon");
     assert.equal(res.payload.data.items[0].name, "Hair Cut");
   });
+});
+
+test("token and short-code public links expose the same immutable GST snapshot", async () => {
+  for (const documentMode of ["TEST", "TAX_INVOICE", "NON_TAX_INVOICE"]) {
+    const bill = buildBill({
+      totalAmount: 100,
+      grossAmount: 100,
+      discountAmount: 0,
+      pointsEarned: 5,
+      gstInvoiceSnapshot: buildGstSnapshot(documentMode),
+    });
+    const transaction = buildTransaction({
+      totalAmount: 100,
+      grossAmount: 100,
+      discountAmount: 0,
+      finalPaidAmount: 100,
+    });
+    await withMockedPublicBillModels({ bill, transaction, code: "gst123" }, async () => {
+      const tokenResponse = mockRes();
+      await billingController.getPublicBillDetails(
+        mockReq({ params: { id: BILL_ID }, query: { token: publicBillToken() } }),
+        tokenResponse
+      );
+      const codeResponse = mockRes();
+      await billingController.getPublicBillDetailsByCode(
+        mockReq({ params: { code: "gst123" } }),
+        codeResponse
+      );
+      for (const response of [tokenResponse, codeResponse]) {
+        assert.equal(response.statusCode, 200);
+        assert.equal(response.payload.data.gstInvoice.documentMode, documentMode);
+        assert.equal(response.payload.data.gstInvoice.totals.taxableValuePaise, 9524);
+        assert.equal(response.payload.data.gstInvoice.totals.cgstPaise, 238);
+        assert.equal(response.payload.data.gstInvoice.totals.sgstPaise, 238);
+        assert.equal(response.payload.data.gstInvoice.totals.totalGstPaise, 476);
+        assert.equal(response.payload.data.gstInvoice.totals.customerPayablePaise, 10000);
+      }
+    });
+  }
 });

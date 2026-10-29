@@ -14,6 +14,7 @@ import WhyUsModal from "../../Profile/WhyUsModal";
 import AboutFounderModal from "../../Profile/AboutFounderModal";
 import ShowcaseSectionModal from "../../Profile/ShowcaseSectionModal";
 import PaymentSettingsModal from "../../Profile/PaymentSettingsModal";
+import GstSettings from "./GstSettings";
 
 function ProfileDashboard({
   vendorInfo,
@@ -173,6 +174,7 @@ const cardHandlers = {
   showcaseSection: () => setShowShowcaseSection(true),
   websiteTemplate: () => setShowTemplateSelection(true),
   paymentSettings: () => setShowPaymentSettings(true),
+  gstSettings: () => setActivePanel("gst-settings"),
   gallery: () => openService("gallery"),
   locations: () => setShowHomeLocation(true),
   targetedLocations: () => setShowBusinessLocations(true),
@@ -223,6 +225,11 @@ const cardHandlers = {
       key: "social-panel",
       title: "My Social Handles",
       description: `Add Instagram, Facebook, LinkedIn etc. ${socialCount} handle${socialCount === 1 ? "" : "s"} linked.`,
+    },
+    {
+      key: "gstSettings",
+      title: "GST Settings",
+      description: "Prepare GSTIN, registered business details, tax rate, SAC, and pricing preference. GST billing remains inactive.",
     },
     {
       key: "gallery",
@@ -522,6 +529,10 @@ const cardHandlers = {
             />
           )}
         </div>
+      )}
+
+      {activePanel === "gst-settings" && (
+        <GstSettings vendorId={vendorId} onBack={() => setActivePanel("home")} />
       )}
     </div>
   );

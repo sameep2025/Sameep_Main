@@ -35,6 +35,19 @@ const {
 } = require("../services/vendorBillingPreferences");
 const { normalizeCustomerName } = require("../utils/customerName");
 const {
+  normalizeBillingQuantity,
+  toPlainBillingItem,
+} = require("../utils/billingItemQuantity");
+const {
+  GstInvoiceError,
+  persistInitialGstInvoiceSnapshot,
+  prepareGstInvoiceForCompletion,
+} = require("../services/gstInvoiceService");
+const {
+  buildGstInvoicePresentation,
+} = require("../services/gstInvoicePresentationService");
+const { resolveGstInvoiceMode } = require("../services/gstActivationService");
+const {
   sendCompletedBillWhatsApp,
 } = require("../services/billingWhatsappSender");
 const {
@@ -205,9 +218,10 @@ function normalizeBillingItemsForMembership(cartItems = []) {
 
 function mergeMembershipItemBreakdown(cartItems = [], calculationItems = []) {
   return (Array.isArray(cartItems) ? cartItems : []).map((item, index) => {
+    const plainItem = toPlainBillingItem(item);
     const breakdown = calculationItems[index] || {};
     return {
-      ...item,
+      ...plainItem,
       membershipEligible: breakdown.membershipEligible === true,
       membershipDiscountApplied: breakdown.membershipDiscountApplied === true,
       membershipDiscountAmount: roundMoney(breakdown.membershipDiscountAmount),
@@ -1042,6 +1056,7 @@ async function buildPublicBillResponse(bill) {
 
   const items = Array.isArray(bill.cartItems) ? bill.cartItems : [];
   const customerNameSnapshot = normalizeCustomerName(bill.customerNameSnapshot || "");
+  const gstInvoice = buildGstInvoicePresentation(bill.gstInvoiceSnapshot);
 
   return {
     billId: String(bill._id),
@@ -1085,6 +1100,7 @@ async function buildPublicBillResponse(bill) {
       balance: Number(balance || 0),
     },
     membership: financials.membership,
+    ...(gstInvoice ? { gstInvoice } : {}),
   };
 }
 
@@ -1209,6 +1225,7 @@ async function buildVendorHistoricalBillResponse(bill) {
     : customerPhone
       ? `+${customerPhone}`
       : "Walk-in";
+  const gstInvoice = buildGstInvoicePresentation(bill.gstInvoiceSnapshot);
 
   return {
     billId: String(bill._id),
@@ -1248,6 +1265,7 @@ async function buildVendorHistoricalBillResponse(bill) {
     paymentMode: ["ONLINE", "CASH"].includes(bill.paymentMode || transaction?.paymentMode)
       ? (bill.paymentMode || transaction?.paymentMode)
       : "",
+    ...(gstInvoice ? { gstInvoice } : {}),
   };
 }
 
@@ -1332,12 +1350,16 @@ exports.createBillingSession = async (req, res) => {
       });
     }
 
+    const vendor = await Vendor.findById(vendorId).select("gstSettings.enabled").lean();
+    const gstInvoiceMode = resolveGstInvoiceMode(vendor);
+
     const billing = await BillingSession.create({
       vendorId,
       customerId: customerId || null,
       billingMode: customerId ? "LOYALTY" : "WALK_IN",
       cartItems: [],
       totalAmount: 0,
+      gstInvoiceMode,
     });
 
     res.status(200).json({
@@ -1363,17 +1385,30 @@ exports.updateBillingCart = async (req, res) => {
       manualDiscountPercent,
     } = req.body;
 
+    if (!Array.isArray(cartItems)) {
+      return res.status(400).json({ success: false, message: "Invalid billing cart" });
+    }
+
     let cartSubtotal = 0;
+    const normalizedCartItems = [];
 
     cartItems.forEach((item) => {
-      item.total = item.price * item.qty;
-      cartSubtotal += item.total;
+      const qty = normalizeBillingQuantity(item?.qty);
+      const price = Number(item?.price);
+      if (qty === null || !Number.isFinite(price) || price < 0) return;
+      const total = price * qty;
+      normalizedCartItems.push({ ...item, price, qty, total });
+      cartSubtotal += total;
     });
+
+    if (normalizedCartItems.length !== cartItems.length) {
+      return res.status(400).json({ success: false, message: "Invalid billing item quantity or price" });
+    }
 
     const hasFinancialSnapshot =
       grossAmount !== undefined || discountAmount !== undefined;
     const update = {
-      cartItems,
+      cartItems: normalizedCartItems,
       totalAmount: cartSubtotal,
     };
 
@@ -1389,7 +1424,7 @@ exports.updateBillingCart = async (req, res) => {
       }
 
       const expectedTotal = sanitizedGrossAmount - sanitizedDiscountAmount;
-      const tolerance = getCartRoundingTolerance(cartItems);
+      const tolerance = getCartRoundingTolerance(normalizedCartItems);
 
       if (
         expectedTotal < 0 ||
@@ -2218,6 +2253,8 @@ exports.completeBillingSession = async (req, res) => {
       }
 
       const isWalkIn = !billing.customerId;
+      const isGstInvoice = ["TEST", "LIVE"].includes(billing.gstInvoiceMode);
+      const isGstTestInvoice = billing.gstInvoiceMode === "TEST";
 
       // 🔐 OTP SAFETY CHECK
       if (!isWalkIn && billing.pointsRedeemed > 0 && !billing.otpVerified) {
@@ -2268,7 +2305,7 @@ exports.completeBillingSession = async (req, res) => {
         now,
         session,
       });
-      const finalPaidAmount = Math.max(
+      let finalPaidAmount = Math.max(
         roundMoney(authoritativeFinancials.totalAmount - effectiveRedeemPoints),
         0
       );
@@ -2323,11 +2360,27 @@ exports.completeBillingSession = async (req, res) => {
       // 🔒 Atomic completion ownership. Side effects run only for the request
       // that wins this ACTIVE -> COMPLETED transition.
       const completedAt = new Date();
+      const gstInvoiceSnapshot = isGstInvoice
+        ? await prepareGstInvoiceForCompletion({
+            billing,
+            authoritativeFinancials,
+            effectiveRedeemPoints,
+            issueDate: completedAt,
+            session,
+            documentMode: isGstTestInvoice ? "TEST" : "TAX_INVOICE",
+            requireCurrentlyEnabled: false,
+          })
+        : null;
+      if (gstInvoiceSnapshot) {
+        finalPaidAmount = gstInvoiceSnapshot.totals.customerPayablePaise / 100;
+      }
       const billingUpdate = {
         status: "COMPLETED",
         completedAt,
         paymentMode: normalizedPaymentMode,
-        totalAmount: authoritativeFinancials.totalAmount,
+        totalAmount: gstInvoiceSnapshot
+          ? gstInvoiceSnapshot.totals.invoiceTotalPaise / 100
+          : authoritativeFinancials.totalAmount,
         grossAmount: authoritativeFinancials.grossAmount,
         discountAmount: authoritativeFinancials.discountAmount,
         membershipDiscountAmount: authoritativeFinancials.membershipDiscountAmount,
@@ -2345,7 +2398,7 @@ exports.completeBillingSession = async (req, res) => {
         billingUpdate.pointsRedeemed = 0;
       }
 
-      const closed = await BillingSession.findOneAndUpdate(
+      let closed = await BillingSession.findOneAndUpdate(
         { _id: billingId, status: "ACTIVE" },
         { $set: billingUpdate },
         { new: true, session }
@@ -2358,6 +2411,23 @@ exports.completeBillingSession = async (req, res) => {
         throw error;
       }
 
+      if (gstInvoiceSnapshot) {
+        await persistInitialGstInvoiceSnapshot({
+          BillingSessionModel: BillingSession,
+          billingId: billing._id,
+          snapshot: gstInvoiceSnapshot,
+          session,
+        });
+        closed = await findBillingSessionById(billing._id, session);
+        if (!closed?.gstInvoiceSnapshot) {
+          throw new GstInvoiceError(
+            "GST invoice snapshot could not be verified",
+            "gst_invoice_snapshot_verification_failed",
+            500
+          );
+        }
+      }
+
       billing.status = "COMPLETED";
       billing.completedAt = completedAt;
       billing.paymentMode = normalizedPaymentMode;
@@ -2367,6 +2437,9 @@ exports.completeBillingSession = async (req, res) => {
       billing.membershipDiscountAmount = billingUpdate.membershipDiscountAmount;
       billing.additionalManualDiscountAmount = billingUpdate.additionalManualDiscountAmount;
       billing.cartItems = billingUpdate.cartItems;
+      if (gstInvoiceSnapshot) {
+        billing.gstInvoiceSnapshot = gstInvoiceSnapshot;
+      }
       if (billingUpdate.membershipBillingSnapshot) {
         billing.membershipBillingSnapshot = billingUpdate.membershipBillingSnapshot;
       }
@@ -2398,6 +2471,7 @@ exports.completeBillingSession = async (req, res) => {
         paymentStatus: "OFFLINE_PAID",
         billingSource: "POS_OFFLINE",
         status: "COMPLETED",
+        recordMode: isGstTestInvoice ? "GST_TEST" : "NORMAL",
       }, session);
 
       // -------------------------
@@ -2466,6 +2540,7 @@ exports.completeBillingSession = async (req, res) => {
 
     const { billing, closed, isWalkIn, transaction } = completionResult;
     const whatsapp = await buildWhatsAppCompletionStatus(closed);
+    const gstInvoice = buildGstInvoicePresentation(closed.gstInvoiceSnapshot);
 
     setImmediate(async () => {
       try {
@@ -2491,10 +2566,18 @@ exports.completeBillingSession = async (req, res) => {
       type: isWalkIn ? "WALK_IN" : "CUSTOMER",
       message: isWalkIn ? "Walk-in bill generated" : "Bill generated",
       transaction,
+      ...(gstInvoice ? { gstInvoice } : {}),
       ...(whatsapp ? { whatsapp } : {}),
     });
 
   } catch (err) {
+    if (err instanceof GstInvoiceError) {
+      return res.status(err.status || 400).json({
+        success: false,
+        code: err.code,
+        message: err.message,
+      });
+    }
     if (err?.statusCode) {
       return res.status(err.statusCode).json({
         success: false,

@@ -8,6 +8,7 @@ const MetaWhatsappCoexistenceEvent = require("../models/MetaWhatsappCoexistenceE
 const {
   buildCoexistenceDeduplicationKey,
   extractCoexistenceIdentity,
+  extractDeliveryStatusLogs,
   hasCoexistenceWebhookEvents,
   processCoexistenceWebhookItem,
   processMetaWhatsappWebhook,
@@ -22,6 +23,10 @@ const routeSource = fs.readFileSync(
   path.join(__dirname, "../routes/metaWhatsappWebhookRoutes.js"),
   "utf8"
 );
+const serverSource = fs.readFileSync(path.join(__dirname, "../server.js"), "utf8");
+const {
+  handleMetaWhatsappWebhookPost,
+} = require("../routes/metaWhatsappWebhookRoutes");
 const standardBaselineSource = fs.readFileSync(
   path.join(__dirname, "../../vendorpreview/app/whatsapp-connect/page.js"),
   "utf8"
@@ -91,6 +96,85 @@ test("valid and invalid webhook signatures are distinguished in constant-time fo
   assert.equal(verifyWebhookSignature({ rawBody, signature: "invalid" }).verified, false);
 });
 
+function responseRecorder() {
+  return {
+    statusCode: null,
+    sendStatus(statusCode) {
+      this.statusCode = statusCode;
+      return this;
+    },
+  };
+}
+
+test("webhook route is mounted before universal JSON parsing", () => {
+  const webhookMount = serverSource.indexOf(
+    'app.use("/api/webhooks/meta", metaWhatsappWebhookRoutes)'
+  );
+  const universalParser = serverSource.indexOf('app.use(express.json({ limit: "8mb" }))');
+
+  assert.notEqual(webhookMount, -1);
+  assert.notEqual(universalParser, -1);
+  assert.ok(webhookMount < universalParser);
+  assert.match(routeSource, /req\.rawBody = Buffer\.from\(buf\)/);
+});
+
+test("webhook POST accepts valid signatures only after successful processing", async (t) => {
+  const previous = process.env.META_APP_SECRET;
+  t.after(() => {
+    if (previous === undefined) delete process.env.META_APP_SECRET;
+    else process.env.META_APP_SECRET = previous;
+  });
+  process.env.META_APP_SECRET = "test-app-secret";
+
+  const rawBody = Buffer.from('{"object":"whatsapp_business_account"}');
+  const signature = `sha256=${crypto
+    .createHmac("sha256", "test-app-secret")
+    .update(rawBody)
+    .digest("hex")}`;
+  const response = responseRecorder();
+  let processed = false;
+
+  await handleMetaWhatsappWebhookPost(
+    {
+      rawBody,
+      body: { object: "whatsapp_business_account" },
+      headers: { "x-hub-signature-256": signature },
+    },
+    response,
+    {
+      processWebhook: async () => {
+        processed = true;
+      },
+    }
+  );
+
+  assert.equal(processed, true);
+  assert.equal(response.statusCode, 200);
+});
+
+test("webhook POST rejects invalid and missing signatures without processing", async () => {
+  for (const signature of [`sha256=${"0".repeat(64)}`, undefined]) {
+    const response = responseRecorder();
+    let processed = false;
+    await handleMetaWhatsappWebhookPost(
+      {
+        rawBody: Buffer.from("{}"),
+        body: {},
+        headers: { "x-hub-signature-256": signature },
+      },
+      response,
+      {
+        processWebhook: async () => {
+          processed = true;
+        },
+      }
+    );
+
+    assert.equal(processed, false);
+    assert.equal(response.statusCode, 403);
+  }
+});
+
 test("only the three supported Coexistence fields enter the strict route", () => {
   for (const field of ["history", "smb_app_state_sync", "smb_message_echoes"]) {
     assert.equal(
@@ -102,8 +186,77 @@ test("only the three supported Coexistence fields enter the strict route", () =>
     hasCoexistenceWebhookEvents({ entry: [{ id: "waba-1", changes: [{ field: "messages" }] }] }),
     false
   );
-  assert.match(routeSource, /hasCoexistenceEvents && !signatureResult\.verified/);
-  assert.match(routeSource, /Meta WhatsApp Coexistence webhook processing failed/);
+  assert.match(routeSource, /if \(!signatureResult\.verified\) return res\.sendStatus\(403\)/);
+  assert.match(routeSource, /Meta WhatsApp webhook processing failed/);
+});
+
+test("delivery status logging contains only approved identifiers and failure details", async () => {
+  const infoLogs = [];
+  const payload = {
+    entry: [
+      {
+        id: "waba-1",
+        changes: [
+          {
+            field: "messages",
+            value: {
+              metadata: { phone_number_id: "phone-1" },
+              statuses: [
+                { id: "wamid.sent", status: "sent", recipient_id: "private-recipient" },
+                {
+                  id: "wamid.failed",
+                  status: "failed",
+                  recipient_id: "private-recipient",
+                  errors: [
+                    {
+                      code: 131026,
+                      title: "Message undeliverable",
+                      error_data: { details: "private details" },
+                    },
+                  ],
+                },
+              ],
+            },
+          },
+        ],
+      },
+    ],
+  };
+
+  await processMetaWhatsappWebhook(payload, {
+    signatureVerified: true,
+    findStandardVendor: async () => ({
+      collection: "DummyVendor",
+      vendor: { _id: "vendor-1" },
+    }),
+    logger: {
+      info: (message, metadata) => infoLogs.push({ message, metadata }),
+      warn: () => {},
+    },
+  });
+
+  const deliveryLogs = infoLogs.filter(
+    ({ message }) => message === "Meta WhatsApp delivery status"
+  );
+  assert.deepEqual(deliveryLogs, [
+    {
+      message: "Meta WhatsApp delivery status",
+      metadata: { wamid: "wamid.sent", status: "sent", phoneNumberId: "phone-1" },
+    },
+    {
+      message: "Meta WhatsApp delivery status",
+      metadata: {
+        wamid: "wamid.failed",
+        status: "failed",
+        phoneNumberId: "phone-1",
+        errorCode: "131026",
+        errorTitle: "Message undeliverable",
+      },
+    },
+  ]);
+  assert.equal(JSON.stringify(deliveryLogs).includes("private-recipient"), false);
+  assert.equal(JSON.stringify(deliveryLogs).includes("private details"), false);
+  assert.deepEqual(extractDeliveryStatusLogs({ value: {} }), []);
 });
 
 test("verified Coexistence events persist only sanitized identity and tracking metadata", async () => {
