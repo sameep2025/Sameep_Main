@@ -1,0 +1,166 @@
+.page {
+  min-height: 100vh;
+  padding: 24px 12px 48px;
+  background: #f3f4f2;
+  color: #20211f;
+}
+
+.invoice {
+  width: min(100%, 820px);
+  margin: 0 auto;
+  padding: clamp(20px, 5vw, 42px);
+  background: #fff;
+  border: 1px solid #dedfdc;
+  box-shadow: 0 18px 50px rgba(20, 24, 20, 0.08);
+}
+
+.businessHeader,
+.documentHeader,
+.footer {
+  display: flex;
+  justify-content: space-between;
+  gap: 24px;
+}
+
+.businessHeader h1 {
+  margin: 0;
+  color: #171815;
+  font-size: clamp(1.55rem, 5vw, 2.15rem);
+  line-height: 1.08;
+}
+
+.tradeName,
+.businessMeta span,
+.documentMeta span,
+.customer span,
+.itemDescription span,
+.pricingNote,
+.loyalty,
+.footer {
+  color: #666a63;
+}
+
+.tradeName { margin: 6px 0 0; }
+.businessMeta,
+.documentMeta {
+  display: grid;
+  gap: 4px;
+  max-width: 330px;
+  text-align: right;
+  font-size: 0.88rem;
+}
+
+.documentHeader {
+  align-items: end;
+  margin-top: 24px;
+  padding: 18px 0;
+  border-top: 2px solid #20211f;
+  border-bottom: 1px solid #d9dad7;
+}
+
+.documentTitle,
+.label {
+  margin: 0 0 5px;
+  color: #777a74;
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.invoiceNumber { font-size: 1.05rem; }
+.documentNotice {
+  display: inline-flex;
+  margin-top: 12px;
+  padding: 5px 9px;
+  border: 1px solid #9b5b49;
+  color: #7f3f30;
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+}
+
+.customer { display: grid; gap: 3px; margin: 20px 0; }
+.itemTable { border-top: 1px solid #cfd1cc; }
+.itemHeader,
+.itemRow {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) 48px repeat(3, minmax(92px, auto));
+  gap: 12px;
+  align-items: start;
+}
+.itemHeader {
+  padding: 9px 0;
+  color: #777a74;
+  font-size: 0.7rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.itemHeader span:not(:first-child), .amount, .quantity { text-align: right; }
+.itemRow {
+  padding: 13px 0;
+  border-top: 1px solid #e7e8e5;
+  font-size: 0.88rem;
+}
+.itemDescription { display: grid; gap: 3px; min-width: 0; }
+.itemDescription strong { overflow-wrap: anywhere; }
+.itemDescription span { font-size: 0.76rem; }
+.pricingNote { margin: 8px 0 20px; font-size: 0.78rem; }
+
+.summary {
+  width: min(100%, 390px);
+  margin-left: auto;
+  padding-top: 8px;
+  border-top: 1px solid #cfd1cc;
+}
+.totalRow {
+  display: flex;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 4px 0;
+  font-size: 0.88rem;
+}
+.strongRow { margin-top: 5px; padding-top: 9px; border-top: 1px solid #d9dad7; }
+.payable {
+  margin-top: 8px;
+  padding-top: 12px;
+  border-top: 2px solid #20211f;
+  color: #171815;
+  font-size: 1.12rem;
+}
+.loyalty {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px 18px;
+  margin-top: 24px;
+  padding: 10px 0;
+  border-top: 1px solid #e2e3df;
+  border-bottom: 1px solid #e2e3df;
+  font-size: 0.78rem;
+}
+.footer { margin-top: 18px; font-size: 0.74rem; }
+.footer a { color: inherit; text-decoration: none; }
+
+@media (max-width: 620px) {
+  .page { padding: 0; background: #fff; }
+  .invoice { padding: 22px 16px 30px; border: 0; box-shadow: none; }
+  .businessHeader, .documentHeader { align-items: start; flex-direction: column; gap: 12px; }
+  .businessMeta, .documentMeta { max-width: none; text-align: left; }
+  .documentHeader { margin-top: 18px; }
+  .itemHeader { display: none; }
+  .itemRow { grid-template-columns: 1fr auto; gap: 7px 14px; }
+  .itemDescription { grid-column: 1 / -1; }
+  .quantity, .amount { display: flex; justify-content: space-between; gap: 20px; grid-column: 1 / -1; }
+  .quantity::before, .amount::before { content: attr(data-label); color: #777a74; font-weight: 400; }
+  .summary { width: 100%; }
+  .footer { align-items: flex-start; flex-direction: column; gap: 5px; }
+}
+
+@media print {
+  @page { margin: 10mm; }
+  .page { min-height: auto; padding: 0; background: #fff; }
+  .invoice { width: 100%; padding: 0; border: 0; box-shadow: none; }
+  .itemRow, .summary, .customer, .documentHeader { break-inside: avoid; }
+  .footer a { color: #000; }
+}

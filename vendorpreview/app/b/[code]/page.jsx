@@ -69,6 +69,10 @@ function BillView({ data, error }) {
       : "";
   const showSplitDiscounts = membershipDiscountAmount > 0;
 
+  if (!error && data?.gstInvoice) {
+    return <GstInvoiceDetails data={data} poweredByUrl={poweredByUrl} />;
+  }
+
   return (
     <main style={styles.page}>
       <section style={styles.card}>
@@ -172,8 +176,6 @@ function BillView({ data, error }) {
                 </div>
               </section>
             </div>
-
-            <GstInvoiceDetails invoice={data?.gstInvoice} />
 
             <div style={styles.itemsBlock}>
               <div style={styles.itemsHeader}>
