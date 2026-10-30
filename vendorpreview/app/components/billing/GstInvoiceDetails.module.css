@@ -44,7 +44,6 @@
   border-radius: 12px;
 }
 
-.tradeName,
 .businessMeta span,
 .documentMeta span,
 .customer span,
@@ -55,7 +54,6 @@
   color: #666a63;
 }
 
-.tradeName { margin: 6px 0 0; }
 .businessMeta,
 .documentMeta {
   display: grid;

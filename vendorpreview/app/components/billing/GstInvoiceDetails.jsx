@@ -81,6 +81,13 @@ export default function GstInvoiceDetails({ data, invoice: providedInvoice, samp
   const vendorLogoUrl = String(data?.vendor?.logoUrl || "").trim();
   const vendorWebsiteUrl = normalizeWebsite(data?.vendor?.websiteUrl);
   const vendorWebsiteLabel = displayWebsite(vendorWebsiteUrl);
+  const publishedBusinessName = String(data?.vendor?.businessName || "").trim();
+  const legalBusinessName = String(invoice.supplier?.legalName || "").trim();
+  const primaryBusinessName = publishedBusinessName || legalBusinessName || "Business";
+  const showLegalBusinessName = Boolean(
+    legalBusinessName &&
+    legalBusinessName.localeCompare(primaryBusinessName, undefined, { sensitivity: "base" }) !== 0
+  );
   const membershipPlanName = String(data?.membership?.planName || "").trim();
   const pointsEarned = Number(data?.totals?.pointsEarned || 0);
   const pointsRedeemed = Number(data?.totals?.pointsRedeemed || 0);
@@ -97,17 +104,15 @@ export default function GstInvoiceDetails({ data, invoice: providedInvoice, samp
               <img
                 className={styles.businessLogo}
                 src={vendorLogoUrl}
-                alt={`${data?.vendor?.businessName || invoice.supplier?.legalName || "Business"} logo`}
+                alt={`${primaryBusinessName} logo`}
               />
             ) : null}
             <div>
-              <h1>{invoice.supplier?.legalName || data?.vendor?.businessName || "Business"}</h1>
-              {data?.vendor?.businessName && data.vendor.businessName !== invoice.supplier?.legalName ? (
-                <p className={styles.tradeName}>{data.vendor.businessName}</p>
-              ) : null}
+              <h1>{primaryBusinessName}</h1>
             </div>
           </div>
           <div className={styles.businessMeta}>
+            {showLegalBusinessName ? <span>Legal name: {legalBusinessName}</span> : null}
             <span>{invoice.supplier?.registeredAddress}</span>
             {vendorPhone ? <a href={`tel:${vendorPhone}`}>{vendorPhone}</a> : null}
             {vendorWebsiteUrl ? (

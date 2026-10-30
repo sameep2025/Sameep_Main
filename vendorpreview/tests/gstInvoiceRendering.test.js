@@ -177,3 +177,15 @@ test("GST header reuses the public vendor logo and published business website", 
   assert.match(component, /\["http:", "https:"\]\.includes\(url\.protocol\)/);
   assert.doesNotMatch(component, /reelookbeautysaloon|sameep\.app|ynot\.co\.in/i);
 });
+
+test("GST header uses one published business heading and labels a distinct legal name", () => {
+  const component = read("app/components/billing/GstInvoiceDetails.jsx");
+
+  assert.match(component, /publishedBusinessName = String\(data\?\.vendor\?\.businessName/);
+  assert.match(component, /legalBusinessName = String\(invoice\.supplier\?\.legalName/);
+  assert.match(component, /primaryBusinessName = publishedBusinessName \|\| legalBusinessName/);
+  assert.match(component, /localeCompare\(primaryBusinessName[\s\S]*sensitivity: "base"/);
+  assert.match(component, /<h1>\{primaryBusinessName\}<\/h1>/);
+  assert.match(component, /Legal name: \{legalBusinessName\}/);
+  assert.doesNotMatch(component, /styles\.tradeName/);
+});
