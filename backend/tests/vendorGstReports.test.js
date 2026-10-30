@@ -13,6 +13,7 @@ const {
 } = require("../services/gstReportService");
 const {
   buildGstReportWorkbook,
+  formatIstDateTime,
   invoiceExportRows,
   protectSpreadsheetText,
   rowsToCsv,
@@ -167,12 +168,52 @@ test("Excel contains all three sheets and CSV neutralizes spreadsheet formulas",
     summary: summarizeInvoices([invoice]),
     taxRateBreakup: buildTaxRateBreakup([invoice]),
   };
-  const workbook = XLSX.read(buildGstReportWorkbook(report), { type: "buffer" });
+  const exportedWorkbook = buildGstReportWorkbook(report);
+  const workbook = XLSX.read(exportedWorkbook, {
+    type: "buffer",
+    cellNF: true,
+    cellStyles: true,
+  });
   assert.deepEqual(workbook.SheetNames, ["Summary", "Invoice Details", "GST Rate Breakup"]);
+  const invoiceSheet = workbook.Sheets["Invoice Details"];
+  const taxRateSheet = workbook.Sheets["GST Rate Breakup"];
+  assert.equal(invoiceSheet.A2.v, "15-Oct-2026");
+  assert.equal(invoiceSheet.B2.v, "12:00:00");
+  assert.equal(invoiceSheet.I2.v, 100);
+  assert.equal(invoiceSheet.I2.z, '"₹"#,##0.00');
+  assert.equal(taxRateSheet.B2.v, "15-Oct-2026");
+  assert.equal(taxRateSheet.C2.v, "12:00:00");
+  assert.equal(taxRateSheet.G2.v, 88.1);
+  assert.equal(taxRateSheet.G2.z, '"₹"#,##0.00');
+
+  const container = XLSX.CFB.read(exportedWorkbook, { type: "buffer" });
+  for (const sheetNumber of [2, 3]) {
+    const xml = XLSX.CFB.find(
+      container,
+      `/xl/worksheets/sheet${sheetNumber}.xml`
+    ).content.toString();
+    assert.match(xml, /<pane[^>]+state="frozen"/);
+    assert.match(xml, /<autoFilter ref=/);
+    assert.match(xml, /<row r="1"[^>]*>[\s\S]*?<c r="A1"[^>]* s="\d+"/);
+  }
   assert.equal(protectSpreadsheetText("=SUM(A1:A2)"), "'=SUM(A1:A2)");
-  const csv = rowsToCsv(invoiceExportRows([invoice]));
+  const csvRows = invoiceExportRows([invoice]);
+  assert.equal(csvRows[0]["Invoice Date"], "2026-10-15T06:30:00.000Z");
+  assert.equal(csvRows[0]["Gross Amount"], 100);
+  const csv = rowsToCsv(csvRows);
   assert.match(csv, /'=HYPERLINK/);
   assert.doesNotMatch(csv, /,=HYPERLINK/);
+});
+
+test("Excel invoice dates and times cross UTC midnight using Asia/Kolkata", () => {
+  assert.deepEqual(formatIstDateTime("2026-10-31T18:29:59.000Z"), {
+    date: "31-Oct-2026",
+    time: "23:59:59",
+  });
+  assert.deepEqual(formatIstDateTime("2026-10-31T18:30:00.000Z"), {
+    date: "01-Nov-2026",
+    time: "00:00:00",
+  });
 });
 
 test("GST report routes require vendor ownership middleware and server mounts them", () => {

@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { API_BASE_URL } from "../../../config";
 import RevenueSnapshot from "./RevenueSnapshot";
+import StaffPerformanceMetrics from "./StaffPerformanceMetrics";
 import "./RevenuePanels.css";
 
 const currencyFmt = new Intl.NumberFormat("en-IN", {
@@ -779,17 +780,11 @@ export default function YearRevenue({
           ) : (
             <div className="revenue-panel-list">
               {stylists.map((row, index) => (
-                <div
+                <StaffPerformanceMetrics
                   key={row._id || row.stylist || index}
-                  className="revenue-panel-list-item"
-                >
-                  <div className="revenue-panel-list-main">
-                    {row.stylist || `${hrLabelSingular} ${index + 1}`}
-                  </div>
-                  <div className="revenue-panel-list-value">
-                    {currencyFmt.format(Number(row.revenue || 0))}
-                  </div>
-                </div>
+                  row={row}
+                  fallbackName={`${hrLabelSingular} ${index + 1}`}
+                />
               ))}
             </div>
           )}

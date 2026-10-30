@@ -1,0 +1,66 @@
+.staff-performance-row {
+  display: grid;
+  grid-template-columns: minmax(140px, 1fr) minmax(0, 2fr);
+  align-items: center;
+  gap: 18px;
+  padding: 14px 16px;
+  border: 1px solid rgba(230, 195, 122, 0.14);
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.staff-performance-name {
+  min-width: 0;
+  color: #f8f1dc;
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
+.staff-performance-metrics {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  min-width: 0;
+}
+
+.staff-performance-metric {
+  min-width: 0;
+  text-align: right;
+}
+
+.staff-performance-metric span {
+  display: block;
+  color: rgba(245, 242, 234, 0.58);
+  font-size: 11px;
+  line-height: 1.25;
+}
+
+.staff-performance-metric strong {
+  display: block;
+  margin-top: 4px;
+  color: #e6c37a;
+  font-size: 14px;
+  font-weight: 800;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 640px) {
+  .staff-performance-row {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 11px;
+    padding: 13px;
+  }
+
+  .staff-performance-metric {
+    text-align: left;
+  }
+
+  .staff-performance-metric span {
+    font-size: 10px;
+  }
+
+  .staff-performance-metric strong {
+    font-size: 13px;
+  }
+}

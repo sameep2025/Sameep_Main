@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { API_BASE_URL } from "../../../config";
 import RevenueSnapshot from "./RevenueSnapshot";
+import StaffPerformanceMetrics from "./StaffPerformanceMetrics";
 import "./TodayRevenue.css";
 
 const currencyFmt = new Intl.NumberFormat("en-IN", {
@@ -532,17 +533,11 @@ function TodayRevenue({
             ) : (
               <div className="today-revenue-stylist-list">
                 {stylists.map((row, index) => (
-                  <div
+                  <StaffPerformanceMetrics
                     key={row._id || row.stylist || index}
-                    className="today-revenue-stylist-row"
-                  >
-                    <div className="today-revenue-stylist-name">
-                      {row.stylist || `${hrLabelSingular} ${index + 1}`}
-                    </div>
-                    <div className="today-revenue-stylist-value">
-                      {currencyFmt.format(Number(row.revenue || 0))}
-                    </div>
-                  </div>
+                    row={row}
+                    fallbackName={`${hrLabelSingular} ${index + 1}`}
+                  />
                 ))}
               </div>
             )}
