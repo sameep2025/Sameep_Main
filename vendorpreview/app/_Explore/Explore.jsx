@@ -7243,7 +7243,7 @@ function ExploreContent({ onReady, onOpenServices }) {
       )}
 
       {viewMode === "revenue-dashboard" && (
-        <div className="new-dashboard-overlay">
+        <div className="new-dashboard-overlay revenue-dashboard-overlay">
           <div className="new-dashboard-shell">
             {renderDashboardHeader("Revenue Dashboard", () => setViewMode("new-dashboard"))}
 

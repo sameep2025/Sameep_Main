@@ -1794,6 +1794,27 @@
   color: #fff;
 }
 
+.revenue-dashboard-overlay {
+  z-index: 10010;
+  box-sizing: border-box;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  background: #080808;
+  isolation: isolate;
+}
+
+.revenue-dashboard-overlay .new-dashboard-shell {
+  min-height: 100%;
+}
+
+@media (max-width: 768px) {
+  .revenue-dashboard-overlay {
+    padding: max(16px, env(safe-area-inset-top)) 16px
+      max(20px, env(safe-area-inset-bottom));
+  }
+}
+
 .new-dashboard-shell {
   max-width: 1100px;
   margin: 0 auto;
