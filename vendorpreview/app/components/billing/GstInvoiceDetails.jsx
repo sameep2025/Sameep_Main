@@ -53,7 +53,7 @@ export default function GstInvoiceDetails({ data, invoice: providedInvoice, samp
   const isTestDocument = sample || invoice.documentMode === "TEST";
   const isNonTaxDocument = invoice.documentMode === "NON_TAX_INVOICE";
   const documentTitle = isTestDocument
-    ? "GST Test Invoice"
+    ? "GST Test Record"
     : isNonTaxDocument
       ? "GST Calculation Statement"
       : "GST Tax Invoice";

@@ -18,6 +18,8 @@ const MONEY_FIELDS = [
   "invoiceTotalPaise",
 ];
 
+const ITEM_MONEY_FIELDS = ["unitPricePaise", ...MONEY_FIELDS];
+
 const TOTAL_MONEY_FIELDS = [
   ...MONEY_FIELDS,
   "loyaltyRedemptionPaise",
@@ -58,7 +60,7 @@ function buildItem(item, { allowMissingClassification = false } = {}) {
     : null;
   const quantity = Number(source.quantity);
   const gstRateBps = nonNegativeInteger(source.gstRateBps);
-  const amounts = copyMoneyFields(source, MONEY_FIELDS);
+  const amounts = copyMoneyFields(source, ITEM_MONEY_FIELDS);
   const classificationCode = itemType === "PRODUCT"
     ? requiredText(source.hsn, 8)
     : requiredText(source.sac, 8);

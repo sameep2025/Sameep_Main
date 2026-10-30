@@ -62,7 +62,7 @@ test("GST TEST invoices remain visibly non-tax across bill links, history and pr
   const receipt = read("app/utils/receiptPrint.js");
   const portal = read("../ynot/web/src/app/mybills/page.js");
   assert.match(component, /invoice\.documentMode === "TEST"/);
-  assert.match(component, /GST Test Invoice/);
+  assert.match(component, /GST Test Record/);
   assert.match(component, /Non-production test record · Not a tax invoice/);
   assert.match(receipt, /gstInvoice\.documentMode === "TEST"/);
   assert.match(receipt, /GST TEST RECORD/);
@@ -161,4 +161,6 @@ test("public GST invoices retain the global Discover More section", () => {
   assert.match(layout, /<ServerSeoContentSection vendorInfo=\{vendorContext\} \/>/);
   assert.match(layout, /\{children\}[\s\S]*<ServerSeoContentSection/);
   assert.match(seo, /Discover More/);
+  const css = read("app/components/SeoContentSection.css");
+  assert.match(css, /@media print[\s\S]*\.seo-content-section[\s\S]*display: none/);
 });

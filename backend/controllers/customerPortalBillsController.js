@@ -131,6 +131,9 @@ function buildSafeItem(item = {}) {
     ? toSafeNumber(item.total)
     : unitPrice * quantity;
   const staffName = typeof item.resourceName === "string" ? item.resourceName.trim() : "";
+  const hierarchy = Array.isArray(item.nodePath)
+    ? item.nodePath.filter(Boolean).join(" / ")
+    : "";
 
   return {
     name: item.name || "Item",
@@ -143,6 +146,7 @@ function buildSafeItem(item = {}) {
     membershipDiscountAmount: toSafeNumber(item.membershipDiscountAmount),
     manualDiscountAmount: toSafeNumber(item.manualDiscountAmount),
     membershipDiscountApplied: Boolean(item.membershipDiscountApplied),
+    ...(hierarchy ? { hierarchy } : {}),
     ...(staffName ? { staffName } : {}),
   };
 }

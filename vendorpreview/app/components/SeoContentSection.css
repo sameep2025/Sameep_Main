@@ -93,3 +93,9 @@
     padding: 24px 18px;
   }
 }
+
+@media print {
+  .seo-content-section {
+    display: none !important;
+  }
+}

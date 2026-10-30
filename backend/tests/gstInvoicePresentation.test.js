@@ -89,6 +89,7 @@ test("GST presentation preserves immutable snapshot values and mixed item rates"
   assert.equal(result.supplier.gstin, "36ABCDE1234F1Z5");
   assert.equal(result.pricingMode, "exclusive");
   assert.deepEqual(result.items.map((item) => item.gstRateBps), [1800, 500]);
+  assert.deepEqual(result.items.map((item) => item.unitPricePaise), [11800, 11800]);
   assert.deepEqual(result.items.map((item) => item.classificationType), ["SAC", "HSN"]);
   assert.equal(result.totals.taxableValuePaise, 10000);
   assert.equal(result.totals.cgstPaise, 900);
@@ -131,6 +132,20 @@ test("GST presentation preserves CGST, SGST, UTGST and IGST without recalculatio
   }
 });
 
+test("GST presentation preserves quantity, unit price and line total for multi-quantity items", () => {
+  const result = buildGstInvoicePresentation(gstSnapshot({
+    items: [gstItem({
+      quantity: 3,
+      unitPricePaise: 5000,
+      grossAmountPaise: 15000,
+    })],
+  }));
+
+  assert.equal(result.items[0].quantity, 3);
+  assert.equal(result.items[0].unitPricePaise, 5000);
+  assert.equal(result.items[0].grossAmountPaise, 15000);
+});
+
 test("missing and malformed GST snapshots are omitted instead of inventing tax data", () => {
   assert.equal(buildGstInvoicePresentation(null), null);
   assert.equal(buildGstInvoicePresentation(gstSnapshot({ invoiceNumber: "frontend-value" })), null);
@@ -170,13 +185,23 @@ test("customer portal detail and list expose GST only from the bill snapshot", (
     vendorId: "692403a24d4d3a1b6a7f0ae6",
     status: "COMPLETED",
     createdAt: new Date("2026-10-29T10:00:00.000Z"),
-    cartItems: [],
+    cartItems: [{
+      name: "Hair Spa",
+      qty: 1,
+      price: 118,
+      total: 118,
+      nodePath: ["Hair", "Treatments", "Hair Spa"],
+      resourceName: "Asha",
+    }],
     totalAmount: 118,
     gstInvoiceSnapshot: gstSnapshot(),
   };
   const detail = buildBillDetail(bill);
   const listItem = buildBillListItem(bill);
   assert.equal(detail.gstInvoice.invoiceNumber, "GST/26-27/00001");
+  assert.equal(detail.gstInvoice.items[0].unitPricePaise, 11800);
+  assert.equal(detail.items[0].hierarchy, "Hair / Treatments / Hair Spa");
+  assert.equal(detail.items[0].staffName, "Asha");
   assert.equal(listItem.gstInvoiceNumber, "GST/26-27/00001");
   assert.equal(listItem.gstInvoiceDocumentMode, "TAX_INVOICE");
 

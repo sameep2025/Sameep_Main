@@ -1562,6 +1562,7 @@ function GstInvoicePanel({ invoice, bill }) {
             <div>
               <strong>{item.name}</strong>
               <span>{Number(item.gstRateBps) / 100}% GST</span>
+              {bill.items?.[index]?.hierarchy ? <span>{bill.items[index].hierarchy}</span> : null}
               {bill.items?.[index]?.staffName ? <span>Staff: {bill.items[index].staffName}</span> : null}
             </div>
             <span data-label="Qty">{item.quantity}</span>

@@ -187,7 +187,7 @@ test("sample preview uses authenticated catalog identities and never submits pri
 
 test("screen and print layouts prominently identify the sample as non-tax", () => {
   assert.match(samplePreviewSource, /<GstInvoiceDetails invoice=\{preview\.invoice\} sample/);
-  assert.match(invoiceDetailsSource, /GST Test Invoice/);
+  assert.match(invoiceDetailsSource, /GST Test Record/);
   assert.match(invoiceDetailsSource, /Non-production test record · Not a tax invoice/);
   assert.match(receiptPrintSource, /isSampleGstInvoice === true/);
   assert.match(receiptPrintSource, /GST TEST RECORD/);
