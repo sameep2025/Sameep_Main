@@ -22,6 +22,24 @@ function formatInvoiceDate(value) {
   }).format(date);
 }
 
+function normalizeWebsite(value) {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+
+  try {
+    const url = new URL(/^https?:\/\//i.test(raw) ? raw : `https://${raw}`);
+    return ["http:", "https:"].includes(url.protocol) ? url.toString() : "";
+  } catch {
+    return "";
+  }
+}
+
+function displayWebsite(value) {
+  return String(value || "")
+    .replace(/^https?:\/\//i, "")
+    .replace(/\/$/, "");
+}
+
 function TaxRow({ label, value, strong = false, negative = false, hideWhenZero = false }) {
   const amount = Number(value);
   if (!Number.isSafeInteger(amount) || amount < 0 || (hideWhenZero && amount === 0)) return null;
@@ -60,6 +78,9 @@ export default function GstInvoiceDetails({ data, invoice: providedInvoice, samp
   const customerName = String(data?.customer?.name || "Customer").trim();
   const customerPhone = String(data?.customer?.phone || "").trim();
   const vendorPhone = String(data?.vendor?.phone || "").trim();
+  const vendorLogoUrl = String(data?.vendor?.logoUrl || "").trim();
+  const vendorWebsiteUrl = normalizeWebsite(data?.vendor?.websiteUrl);
+  const vendorWebsiteLabel = displayWebsite(vendorWebsiteUrl);
   const membershipPlanName = String(data?.membership?.planName || "").trim();
   const pointsEarned = Number(data?.totals?.pointsEarned || 0);
   const pointsRedeemed = Number(data?.totals?.pointsRedeemed || 0);
@@ -69,15 +90,31 @@ export default function GstInvoiceDetails({ data, invoice: providedInvoice, samp
     <main className={styles.page}>
       <article className={styles.invoice} aria-label="GST invoice details">
         <header className={styles.businessHeader}>
-          <div>
-            <h1>{invoice.supplier?.legalName || data?.vendor?.businessName || "Business"}</h1>
-            {data?.vendor?.businessName && data.vendor.businessName !== invoice.supplier?.legalName ? (
-              <p className={styles.tradeName}>{data.vendor.businessName}</p>
+          <div className={styles.businessIdentity}>
+            {vendorLogoUrl ? (
+              // Vendor logos can be hosted on vendor-configured external domains.
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                className={styles.businessLogo}
+                src={vendorLogoUrl}
+                alt={`${data?.vendor?.businessName || invoice.supplier?.legalName || "Business"} logo`}
+              />
             ) : null}
+            <div>
+              <h1>{invoice.supplier?.legalName || data?.vendor?.businessName || "Business"}</h1>
+              {data?.vendor?.businessName && data.vendor.businessName !== invoice.supplier?.legalName ? (
+                <p className={styles.tradeName}>{data.vendor.businessName}</p>
+              ) : null}
+            </div>
           </div>
           <div className={styles.businessMeta}>
             <span>{invoice.supplier?.registeredAddress}</span>
-            {vendorPhone ? <span>{vendorPhone}</span> : null}
+            {vendorPhone ? <a href={`tel:${vendorPhone}`}>{vendorPhone}</a> : null}
+            {vendorWebsiteUrl ? (
+              <a href={vendorWebsiteUrl} target="_blank" rel="noreferrer">
+                {vendorWebsiteLabel}
+              </a>
+            ) : null}
             <strong>GSTIN: {invoice.supplier?.gstin}</strong>
           </div>
         </header>

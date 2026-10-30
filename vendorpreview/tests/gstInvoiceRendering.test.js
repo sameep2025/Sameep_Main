@@ -164,3 +164,16 @@ test("public GST invoices retain the global Discover More section", () => {
   const css = read("app/components/SeoContentSection.css");
   assert.match(css, /@media print[\s\S]*\.seo-content-section[\s\S]*display: none/);
 });
+
+test("GST header reuses the public vendor logo and published business website", () => {
+  const component = read("app/components/billing/GstInvoiceDetails.jsx");
+
+  assert.match(component, /data\?\.vendor\?\.logoUrl/);
+  assert.match(component, /data\?\.vendor\?\.websiteUrl/);
+  assert.match(component, /vendorLogoUrl \? \(/);
+  assert.match(component, /className=\{styles\.businessLogo\}/);
+  assert.match(component, /href=\{vendorWebsiteUrl\}/);
+  assert.match(component, /target="_blank" rel="noreferrer"/);
+  assert.match(component, /\["http:", "https:"\]\.includes\(url\.protocol\)/);
+  assert.doesNotMatch(component, /reelookbeautysaloon|sameep\.app|ynot\.co\.in/i);
+});
