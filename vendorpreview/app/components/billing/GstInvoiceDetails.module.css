@@ -69,23 +69,12 @@
 }
 
 .invoiceNumber { font-size: 1.05rem; }
-.documentNotice {
-  display: inline-flex;
-  margin-top: 12px;
-  padding: 5px 9px;
-  border: 1px solid #9b5b49;
-  color: #7f3f30;
-  font-size: 0.72rem;
-  font-weight: 800;
-  letter-spacing: 0.08em;
-}
-
 .customer { display: grid; gap: 3px; margin: 20px 0; }
 .itemTable { border-top: 1px solid #cfd1cc; }
 .itemHeader,
 .itemRow {
   display: grid;
-  grid-template-columns: minmax(180px, 1fr) 48px repeat(3, minmax(92px, auto));
+  grid-template-columns: minmax(180px, 1fr) 48px repeat(2, minmax(96px, auto));
   gap: 12px;
   align-items: start;
 }

@@ -1522,44 +1522,64 @@ function BillRows({ bill, showAmountPaid = true, detailed = false }) {
   );
 }
 
-function GstInvoicePanel({ invoice }) {
+function GstInvoicePanel({ invoice, bill }) {
   if (!invoice) return null;
   const totals = invoice.totals || {};
+  const isTestDocument = invoice.documentMode === "TEST";
   const isNonTaxDocument = invoice.documentMode === "NON_TAX_INVOICE";
+  const documentTitle = isTestDocument
+    ? "GST Test Record"
+    : isNonTaxDocument
+      ? "GST Calculation Statement"
+      : "GST Tax Invoice";
 
   return (
-    <section className="portalGstInvoice" aria-label="GST invoice details">
-      {invoice.documentMode === "TEST" ? (
-        <div className="portalGstTestWatermark">TEST — NOT A TAX INVOICE</div>
-      ) : null}
-      {isNonTaxDocument ? (
-        <div className="portalGstTestWatermark">NOT A TAX INVOICE — TAX CLASSIFICATION REQUIRED</div>
-      ) : null}
-      <div className="portalGstInvoiceHeading">
-        <div><span>{isNonTaxDocument ? "GST Calculation Statement" : "GST Tax Invoice"}</span><strong>{invoice.invoiceNumber}</strong></div>
-        <span>{formatDateTime(invoice.invoiceIssueDate)}</span>
-      </div>
+    <section className="portalGstInvoice portalGstInvoiceUnified" aria-label="GST invoice details">
       <div className="portalGstSupplier">
-        <strong>{invoice.supplier?.legalName}</strong>
-        <span>GSTIN: {invoice.supplier?.gstin}</span>
+        <strong>{invoice.supplier?.legalName || bill.vendor?.businessName || "Business"}</strong>
         <span>{invoice.supplier?.registeredAddress}</span>
-        <span>Place of supply: State code {invoice.placeOfSupply?.stateCode}</span>
+        <span>GSTIN: {invoice.supplier?.gstin}</span>
       </div>
-      <div className="portalGstItems">
+      <div className="portalGstInvoiceHeading">
+        <div><span>{documentTitle}</span><strong>{invoice.invoiceNumber}</strong></div>
+        <div>
+          <span>{formatDateTime(invoice.invoiceIssueDate)}</span>
+          <span>Place of supply: State code {invoice.placeOfSupply?.stateCode}</span>
+          {isTestDocument ? <strong>Non-production test record · Not a tax invoice</strong> : null}
+          {isNonTaxDocument ? <strong>Not a tax invoice</strong> : null}
+        </div>
+      </div>
+      <div className="portalGstCustomer">
+        <span>Bill to</span>
+        <strong>{bill.customer?.name || "Customer"}</strong>
+      </div>
+      <div className="portalGstItems portalGstItemTable">
+        <div className="portalGstItemHeader">
+          <span>Description</span><span>Qty</span><span>Unit price</span><span>Line total</span>
+        </div>
         {(invoice.items || []).map((item, index) => (
-          <div key={`${invoice.invoiceNumber}-${index}`}>
-            <strong>{item.name} × {item.quantity}</strong>
-            <span>{item.classificationType} {item.classificationCode || "not provided"} · {Number(item.gstRateBps) / 100}% GST</span>
-            <span>Taxable {formatPaise(item.taxableValuePaise)} · GST {formatPaise(item.totalGstPaise)} · Total {formatPaise(item.invoiceTotalPaise)}</span>
+          <div className="portalGstItemRow" key={`${invoice.invoiceNumber}-${index}`}>
+            <div>
+              <strong>{item.name}</strong>
+              <span>{Number(item.gstRateBps) / 100}% GST</span>
+              {bill.items?.[index]?.staffName ? <span>Staff: {bill.items[index].staffName}</span> : null}
+            </div>
+            <span data-label="Qty">{item.quantity}</span>
+            <span data-label="Unit price">{formatPaise(item.unitPricePaise)}</span>
+            <strong data-label="Line total">{formatPaise(item.grossAmountPaise)}</strong>
           </div>
         ))}
       </div>
-      {(invoice.complianceWarnings || []).length ? (
-        <div className="portalGstTestWatermark">
-          Tax classification needs to be completed before issuing a GST tax invoice.
-        </div>
-      ) : null}
+      <div className="portalGstPricingNote">
+        {invoice.pricingMode === "inclusive"
+          ? "GST is included in the item prices."
+          : "GST is added to the taxable item prices."}
+      </div>
       <div className="portalGstTotals">
+        <div><span>Services subtotal</span><strong>{formatPaise(totals.grossAmountPaise)}</strong></div>
+        {Number(totals.membershipDiscountPaise) > 0 ? <div><span>{bill.membership?.planName ? `Membership discount · ${bill.membership.planName}` : "Membership discount"}</span><strong>-{formatPaise(totals.membershipDiscountPaise)}</strong></div> : null}
+        {Number(totals.manualDiscountPaise) > 0 ? <div><span>Manual discount</span><strong>-{formatPaise(totals.manualDiscountPaise)}</strong></div> : null}
+        {Number(totals.loyaltyRedemptionPaise) > 0 ? <div><span>Loyalty redemption</span><strong>-{formatPaise(totals.loyaltyRedemptionPaise)}</strong></div> : null}
         <div><span>Taxable Value</span><strong>{formatPaise(totals.taxableValuePaise)}</strong></div>
         {Number(totals.cgstPaise) > 0 ? <div><span>CGST</span><strong>{formatPaise(totals.cgstPaise)}</strong></div> : null}
         {Number(totals.sgstPaise) > 0 ? <div><span>SGST</span><strong>{formatPaise(totals.sgstPaise)}</strong></div> : null}
@@ -1567,8 +1587,11 @@ function GstInvoicePanel({ invoice }) {
         {Number(totals.igstPaise) > 0 ? <div><span>IGST</span><strong>{formatPaise(totals.igstPaise)}</strong></div> : null}
         <div><span>Total GST</span><strong>{formatPaise(totals.totalGstPaise)}</strong></div>
         <div><span>Invoice Total</span><strong>{formatPaise(totals.invoiceTotalPaise)}</strong></div>
-        {Number(totals.loyaltyRedemptionPaise) > 0 ? <div><span>Loyalty Redemption</span><strong>-{formatPaise(totals.loyaltyRedemptionPaise)}</strong></div> : null}
-        <div className="portalGstPayable"><span>Customer Payable</span><strong>{formatPaise(totals.customerPayablePaise)}</strong></div>
+        <div className="portalGstPayable"><span>Final amount paid</span><strong>{formatPaise(totals.customerPayablePaise)}</strong></div>
+      </div>
+      <div className="portalGstLoyalty">
+        <span>Points earned: <strong>{Number(bill.pointsEarned || 0)}</strong></span>
+        {Number(bill.pointsRedeemed || 0) > 0 ? <span>Points redeemed: <strong>{Number(bill.pointsRedeemed)}</strong></span> : null}
       </div>
     </section>
   );
@@ -1609,42 +1632,44 @@ function BillDetailPanel({ bill, loading, error, onClose }) {
         {error ? <div className="portalStateCard">{error}</div> : null}
         {bill ? (
           <>
-            <div className="portalDetailTitle">
-              <p>Bill detail</p>
-              <h2>{bill.vendor?.businessName || "Business"}</h2>
-              {bill.customer?.name ? <strong>{bill.customer.name}</strong> : null}
-              <span>{formatDateTime(bill.date)}</span>
-              {bill.status === "CANCELLED" ? (
-                <strong className="portalCancelledPill">CANCELLED</strong>
-              ) : null}
-            </div>
-
-            <div className="portalItemsTable">
-              <div className="portalItemsHeader">
-                <span>Item</span>
-                <span>Qty</span>
-                <span>Total</span>
-              </div>
-              {(bill.items || []).map((item, index) => (
-                <div className="portalItemRow" key={`${item.name || "item"}-${index}`}>
-                  <div>
-                    <strong>{item.name || "Item"}</strong>
-                    {Number(item.unitPrice || 0) > 0 ? (
-                      <span>{formatCurrency(item.unitPrice)} each</span>
-                    ) : null}
-                    {item.staffName ? (
-                      <span>Stylist: {item.staffName}</span>
-                    ) : null}
-                  </div>
-                  <span>{Number(item.quantity || 0).toLocaleString("en-IN")}</span>
-                  <strong>{formatCurrency(item.itemTotal)}</strong>
+            {bill.gstInvoice ? (
+              <GstInvoicePanel invoice={bill.gstInvoice} bill={bill} />
+            ) : (
+              <>
+                <div className="portalDetailTitle">
+                  <p>Bill detail</p>
+                  <h2>{bill.vendor?.businessName || "Business"}</h2>
+                  {bill.customer?.name ? <strong>{bill.customer.name}</strong> : null}
+                  <span>{formatDateTime(bill.date)}</span>
+                  {bill.status === "CANCELLED" ? (
+                    <strong className="portalCancelledPill">CANCELLED</strong>
+                  ) : null}
                 </div>
-              ))}
-            </div>
 
-            <GstInvoicePanel invoice={bill.gstInvoice} />
+                <div className="portalItemsTable">
+                  <div className="portalItemsHeader">
+                    <span>Item</span>
+                    <span>Qty</span>
+                    <span>Total</span>
+                  </div>
+                  {(bill.items || []).map((item, index) => (
+                    <div className="portalItemRow" key={`${item.name || "item"}-${index}`}>
+                      <div>
+                        <strong>{item.name || "Item"}</strong>
+                        {Number(item.unitPrice || 0) > 0 ? (
+                          <span>{formatCurrency(item.unitPrice)} each</span>
+                        ) : null}
+                        {item.staffName ? <span>Stylist: {item.staffName}</span> : null}
+                      </div>
+                      <span>{Number(item.quantity || 0).toLocaleString("en-IN")}</span>
+                      <strong>{formatCurrency(item.itemTotal)}</strong>
+                    </div>
+                  ))}
+                </div>
 
-            <BillRows bill={bill} detailed />
+                <BillRows bill={bill} detailed />
+              </>
+            )}
 
             {bill.paymentMode ? (
               <p className="portalPaymentPill">{bill.paymentMode}</p>

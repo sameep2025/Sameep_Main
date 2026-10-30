@@ -22,27 +22,48 @@ function formatInvoiceDate(value) {
   }).format(date);
 }
 
-function TaxRow({ label, value, strong = false, negative = false }) {
-  if (!Number(value)) return null;
+function TaxRow({ label, value, strong = false, negative = false, hideWhenZero = false }) {
+  const amount = Number(value);
+  if (!Number.isSafeInteger(amount) || amount < 0 || (hideWhenZero && amount === 0)) return null;
   return (
     <div className={`${styles.totalRow} ${strong ? styles.strongRow : ""}`}>
       <span>{label}</span>
-      <strong>{negative ? "-" : ""}{formatPaise(value)}</strong>
+      <strong>{negative ? "-" : ""}{formatPaise(amount)}</strong>
     </div>
   );
 }
 
-export default function GstInvoiceDetails({ data, poweredByUrl = "" }) {
-  const invoice = data?.gstInvoice;
+function getItemMetadata(data, index) {
+  const item = Array.isArray(data?.items) ? data.items[index] : null;
+  if (!item) return [];
+
+  const metadata = [];
+  const hierarchy = String(item.hierarchy || "").trim();
+  const staffName = String(item.resourceName || item.staffName || "").trim();
+  if (hierarchy && hierarchy !== String(item.name || "").trim()) metadata.push(hierarchy);
+  if (staffName) metadata.push(`Staff: ${staffName}`);
+  return metadata;
+}
+
+export default function GstInvoiceDetails({ data, invoice: providedInvoice, sample = false, poweredByUrl = "" }) {
+  const invoice = data?.gstInvoice || providedInvoice;
   if (!invoice) return null;
 
   const totals = invoice.totals || {};
-  const isTestDocument = invoice.documentMode === "TEST";
+  const isTestDocument = sample || invoice.documentMode === "TEST";
   const isNonTaxDocument = invoice.documentMode === "NON_TAX_INVOICE";
-  const documentTitle = isNonTaxDocument ? "GST Calculation Statement" : "GST Tax Invoice";
+  const documentTitle = isTestDocument
+    ? "GST Test Invoice"
+    : isNonTaxDocument
+      ? "GST Calculation Statement"
+      : "GST Tax Invoice";
   const customerName = String(data?.customer?.name || "Customer").trim();
   const customerPhone = String(data?.customer?.phone || "").trim();
   const vendorPhone = String(data?.vendor?.phone || "").trim();
+  const membershipPlanName = String(data?.membership?.planName || "").trim();
+  const pointsEarned = Number(data?.totals?.pointsEarned || 0);
+  const pointsRedeemed = Number(data?.totals?.pointsRedeemed || 0);
+  const loyaltyBalance = Number(data?.totals?.balance);
 
   return (
     <main className={styles.page}>
@@ -69,14 +90,10 @@ export default function GstInvoiceDetails({ data, poweredByUrl = "" }) {
           <div className={styles.documentMeta}>
             <span>{formatInvoiceDate(invoice.invoiceIssueDate)}</span>
             <span>Place of supply: State code {invoice.placeOfSupply?.stateCode}</span>
+            {isTestDocument ? <strong>Non-production test record · Not a tax invoice</strong> : null}
+            {isNonTaxDocument ? <strong>Not a tax invoice</strong> : null}
           </div>
         </section>
-
-        {isTestDocument || isNonTaxDocument ? (
-          <div className={styles.documentNotice}>
-            {isTestDocument ? "TEST · NOT A TAX INVOICE" : "NOT A TAX INVOICE"}
-          </div>
-        ) : null}
 
         <section className={styles.customer}>
           <span className={styles.label}>Bill to</span>
@@ -86,25 +103,23 @@ export default function GstInvoiceDetails({ data, poweredByUrl = "" }) {
 
         <section className={styles.itemTable} aria-label="Invoice items">
           <div className={styles.itemHeader}>
-            <span>Description</span><span>Qty</span><span>Taxable</span><span>GST</span><span>Total</span>
+            <span>Description</span><span>Qty</span><span>Unit price</span><span>Line total</span>
           </div>
-          {(invoice.items || []).map((item, index) => (
-            <div className={styles.itemRow} key={`${invoice.invoiceNumber}-${index}`}>
-              <div className={styles.itemDescription}>
-                <strong>{item.name}</strong>
-                <span>
-                  {Number(item.gstRateBps) / 100}% GST
-                  {item.classificationCode
-                    ? ` · ${item.classificationType} ${item.classificationCode}`
-                    : ""}
-                </span>
+          {(invoice.items || []).map((item, index) => {
+            const metadata = getItemMetadata(data, index);
+            return (
+              <div className={styles.itemRow} key={`${invoice.invoiceNumber}-${index}`}>
+                <div className={styles.itemDescription}>
+                  <strong>{item.name}</strong>
+                  <span>{Number(item.gstRateBps) / 100}% GST</span>
+                  {metadata.map((value) => <span key={value}>{value}</span>)}
+                </div>
+                <span className={styles.quantity} data-label="Qty">{item.quantity}</span>
+                <span className={styles.amount} data-label="Unit price">{formatPaise(item.unitPricePaise)}</span>
+                <strong className={styles.amount} data-label="Line total">{formatPaise(item.grossAmountPaise)}</strong>
               </div>
-              <span className={styles.quantity} data-label="Qty">{item.quantity}</span>
-              <span className={styles.amount} data-label="Taxable">{formatPaise(item.taxableValuePaise)}</span>
-              <span className={styles.amount} data-label="GST">{formatPaise(item.totalGstPaise)}</span>
-              <strong className={styles.amount} data-label="Total">{formatPaise(item.invoiceTotalPaise)}</strong>
-            </div>
-          ))}
+            );
+          })}
         </section>
 
         <div className={styles.pricingNote}>
@@ -114,28 +129,36 @@ export default function GstInvoiceDetails({ data, poweredByUrl = "" }) {
         </div>
 
         <section className={styles.summary}>
-          <TaxRow label="Membership discount" value={totals.membershipDiscountPaise} negative />
-          <TaxRow label="Additional discount" value={totals.manualDiscountPaise} negative />
+          <TaxRow label="Services subtotal" value={totals.grossAmountPaise} />
+          <TaxRow
+            label={membershipPlanName ? `Membership discount · ${membershipPlanName}` : "Membership discount"}
+            value={totals.membershipDiscountPaise}
+            negative
+            hideWhenZero
+          />
+          <TaxRow label="Manual discount" value={totals.manualDiscountPaise} negative hideWhenZero />
+          <TaxRow label="Loyalty redemption" value={totals.loyaltyRedemptionPaise} negative hideWhenZero />
           <TaxRow label="Taxable value" value={totals.taxableValuePaise} />
-          <TaxRow label="CGST" value={totals.cgstPaise} />
-          <TaxRow label="SGST" value={totals.sgstPaise} />
-          <TaxRow label="UTGST" value={totals.utgstPaise} />
-          <TaxRow label="IGST" value={totals.igstPaise} />
+          <TaxRow label="CGST" value={totals.cgstPaise} hideWhenZero />
+          <TaxRow label="SGST" value={totals.sgstPaise} hideWhenZero />
+          <TaxRow label="UTGST" value={totals.utgstPaise} hideWhenZero />
+          <TaxRow label="IGST" value={totals.igstPaise} hideWhenZero />
           <TaxRow label="Total GST" value={totals.totalGstPaise} />
           <TaxRow label="Invoice total" value={totals.invoiceTotalPaise} strong />
-          <TaxRow label="Rewards redeemed" value={totals.loyaltyRedemptionPaise} negative />
           <div className={`${styles.totalRow} ${styles.payable}`}>
-            <span>Amount paid</span>
+            <span>Final amount paid</span>
             <strong>{formatPaise(totals.customerPayablePaise)}</strong>
           </div>
         </section>
 
         <section className={styles.loyalty}>
-          <span>Points earned: <strong>{Number(data?.totals?.pointsEarned || 0)}</strong></span>
-          {Number(data?.totals?.pointsRedeemed || 0) > 0 ? (
-            <span>Points redeemed: <strong>{Number(data.totals.pointsRedeemed)}</strong></span>
+          <span>Points earned: <strong>{pointsEarned}</strong></span>
+          {pointsRedeemed > 0 ? (
+            <span>Points redeemed: <strong>{pointsRedeemed}</strong></span>
           ) : null}
-          <span>Balance: <strong>{Number(data?.totals?.balance || 0)} points</strong></span>
+          {Number.isFinite(loyaltyBalance) ? (
+            <span>Current balance: <strong>{loyaltyBalance} points</strong></span>
+          ) : null}
         </section>
 
         <footer className={styles.footer}>

@@ -1080,6 +1080,13 @@ button {
   background: rgba(255, 244, 215, 0.55);
 }
 
+.portalGstInvoiceUnified {
+  clear: both;
+  margin-top: 42px;
+  border-color: rgba(16, 26, 52, 0.12);
+  background: #fff;
+}
+
 .portalGstTestWatermark {
   margin-bottom: 14px;
   padding: 10px;
@@ -1118,6 +1125,67 @@ button {
   margin-top: 12px;
   padding-top: 12px;
   border-top: 1px solid rgba(170, 113, 0, 0.18);
+}
+
+.portalGstCustomer {
+  display: grid;
+  gap: 3px;
+  margin-top: 14px;
+}
+
+.portalGstCustomer > span,
+.portalGstPricingNote,
+.portalGstLoyalty {
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+
+.portalGstItemTable {
+  overflow: hidden;
+}
+
+.portalGstItemHeader,
+.portalGstItemRow {
+  display: grid;
+  grid-template-columns: minmax(150px, 1fr) 42px repeat(2, minmax(82px, auto));
+  gap: 10px;
+  align-items: start;
+}
+
+.portalGstItemHeader {
+  padding-bottom: 8px;
+  color: var(--muted);
+  font-size: 0.7rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.portalGstItemHeader > span:not(:first-child),
+.portalGstItemRow > span,
+.portalGstItemRow > strong {
+  text-align: right;
+}
+
+.portalGstItemRow {
+  padding: 10px 0;
+  border-top: 1px solid rgba(16, 26, 52, 0.08);
+  font-size: 0.82rem;
+}
+
+.portalGstItemRow > div {
+  display: grid;
+  gap: 3px;
+}
+
+.portalGstPricingNote { margin-top: 9px; }
+
+.portalGstLoyalty {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 18px;
+  margin-top: 14px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(16, 26, 52, 0.1);
 }
 
 .portalGstItems > div + div,
@@ -4379,6 +4447,30 @@ button {
     grid-template-columns: minmax(0, 1fr) 42px minmax(72px, auto);
     padding: 11px 10px;
     gap: 10px;
+  }
+
+  .portalGstItemHeader {
+    display: none;
+  }
+
+  .portalGstItemRow {
+    grid-template-columns: 1fr;
+    gap: 6px;
+  }
+
+  .portalGstItemRow > span,
+  .portalGstItemRow > strong {
+    display: flex;
+    justify-content: space-between;
+    gap: 16px;
+    text-align: right;
+  }
+
+  .portalGstItemRow > span::before,
+  .portalGstItemRow > strong::before {
+    content: attr(data-label);
+    color: var(--muted);
+    font-weight: 400;
   }
 
   .portalDetailOverlay {
