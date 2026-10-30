@@ -335,5 +335,17 @@ BillingSessionSchema.index(
     name: "gst_invoice_number_per_vendor_unique",
   }
 );
+BillingSessionSchema.index(
+  {
+    vendorId: 1,
+    "gstInvoiceSnapshot.documentMode": 1,
+    "gstInvoiceSnapshot.invoiceIssueDate": -1,
+    status: 1,
+  },
+  {
+    partialFilterExpression: { "gstInvoiceSnapshot.invoiceNumber": { $type: "string" } },
+    name: "gst_report_vendor_mode_date_status",
+  }
+);
 
 module.exports = mongoose.model("BillingSession", BillingSessionSchema);

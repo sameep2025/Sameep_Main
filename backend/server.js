@@ -59,6 +59,7 @@ const vendorBillingPreferencesRoutes = require("./routes/vendorBillingPreference
 const vendorGstSettingsRoutes = require("./routes/vendorGstSettingsRoutes");
 const vendorItemGstOverrideRoutes = require("./routes/vendorItemGstOverrideRoutes");
 const vendorGstPreviewRoutes = require("./routes/vendorGstPreviewRoutes");
+const vendorGstReportRoutes = require("./routes/vendorGstReportRoutes");
 const vendorMembershipPlanRoutes = require("./routes/vendorMembershipPlanRoutes");
 const vendorCustomerMembershipRoutes = require("./routes/vendorCustomerMembershipRoutes");
 const vendorWhatsappBusinessRoutes = require("./routes/vendorWhatsappBusinessRoutes");
@@ -211,6 +212,7 @@ app.use("/api/vendor-billing-preferences", vendorBillingPreferencesRoutes);
 app.use("/api/vendor/gst-settings", vendorGstSettingsRoutes);
 app.use("/api/vendor/gst-item-overrides", vendorItemGstOverrideRoutes);
 app.use("/api/vendor/gst-preview", vendorGstPreviewRoutes);
+app.use("/api/vendor/gst-reports", vendorGstReportRoutes);
 app.use("/api/vendor/membership-plans", vendorMembershipPlanRoutes);
 app.use("/api/vendor/customer-memberships", vendorCustomerMembershipRoutes);
 // Vendor Dashboard APIs

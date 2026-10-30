@@ -25,6 +25,7 @@ import WebsiteAnalyticsDashboard from "../components/dashboard/WebsiteAnalyticsD
 import CustomerAnalyticsDashboard from "../components/dashboard/CustomerAnalyticsDashboard";
 import WhatsappBusinessDashboard from "../components/dashboard/WhatsappBusinessDashboard";
 import MembershipPlansDashboard from "../components/dashboard/MembershipPlansDashboard";
+import GstReports from "../components/dashboard/GstReports";
 import { useSearchParams } from "next/navigation";
 import { useSessionGuard } from "../Login/useSessionGuard";
 import ModernPreviewTemplate from "./templates/ModernPreviewTemplate";
@@ -7008,6 +7009,13 @@ function ExploreContent({ onReady, onOpenServices }) {
                   },
                 },
                 {
+                  title: "GST Reports",
+                  description: "Reconcile GST invoices and download accountant-ready reports.",
+                  onClick: () => {
+                    setViewMode("gst-reports-dashboard");
+                  },
+                },
+                {
                   title: "Memberships",
                   description: "Create discount membership plans for selected services.",
                   onClick: () => {
@@ -7328,6 +7336,15 @@ function ExploreContent({ onReady, onOpenServices }) {
                 )}
               </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {viewMode === "gst-reports-dashboard" && (
+        <div className="new-dashboard-overlay">
+          <div className="new-dashboard-shell">
+            {renderDashboardHeader("GST Reports", () => setViewMode("new-dashboard"))}
+            <GstReports vendorId={vendorId} />
           </div>
         </div>
       )}
