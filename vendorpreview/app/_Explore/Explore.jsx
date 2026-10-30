@@ -7247,32 +7247,40 @@ function ExploreContent({ onReady, onOpenServices }) {
           <div className="new-dashboard-shell">
             {renderDashboardHeader("Revenue Dashboard", () => setViewMode("new-dashboard"))}
 
-            <div className="new-dashboard-grid">
+            <div className="new-dashboard-grid revenue-dashboard-grid">
               {[
                 {
                   title: "Today's Revenue",
                   description: "Check the total revenue collected for today.",
+                  mobileTitle: "Today's Revenue",
+                  mobileDescription: "Daily sales",
                   key: "today",
                 },
                 {
                   title: "This Month Revenue",
                   description: "Review the running revenue total for this month.",
+                  mobileTitle: "This Month",
+                  mobileDescription: "Monthly sales",
                   key: "month",
                 },
                 {
                   title: "Last 12 Months Revenue",
                   description: "Track rolling monthly revenue trends.",
+                  mobileTitle: "Last 12 Months",
+                  mobileDescription: "Revenue trends",
                   key: "year",
                 },
                 {
                   title: "Customer Search",
                   description: "Find customers and inspect their billing history.",
+                  mobileTitle: "Customer Search",
+                  mobileDescription: "Billing history",
                   key: "customer",
                 },
               ].map((card) => (
                 <div
                   key={card.title}
-                  className={`new-dashboard-card new-dashboard-card-action ${activeRevenueTab === card.key ? "active" : ""
+                  className={`new-dashboard-card new-dashboard-card-action revenue-dashboard-card ${activeRevenueTab === card.key ? "active" : ""
                     }`}
                   onClick={() => {
                     if (card.key === "customer") setSelectedRevenueCustomer(null);
@@ -7288,11 +7296,13 @@ function ExploreContent({ onReady, onOpenServices }) {
                     }
                   }}
                 >
-                  <div className="new-dashboard-card-title">
-                    {card.title}
+                  <div className="new-dashboard-card-title revenue-dashboard-card-title">
+                    <span className="revenue-card-copy-desktop">{card.title}</span>
+                    <span className="revenue-card-copy-mobile">{card.mobileTitle}</span>
                   </div>
-                  <div className="new-dashboard-card-desc">
-                    {card.description}
+                  <div className="new-dashboard-card-desc revenue-dashboard-card-desc">
+                    <span className="revenue-card-copy-desktop">{card.description}</span>
+                    <span className="revenue-card-copy-mobile">{card.mobileDescription}</span>
                   </div>
                 </div>
               ))}

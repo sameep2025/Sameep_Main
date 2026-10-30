@@ -32,3 +32,33 @@ test("Today, Month and Year Revenue views remain mounted inside the overlay", ()
   }
   assert.match(explore, /<div className="revenue-data-container">/);
 });
+
+test("mobile Revenue navigation uses a compact two-column grid", () => {
+  assert.match(explore, /className="new-dashboard-grid revenue-dashboard-grid"/);
+  assert.match(
+    css,
+    /@media \(max-width: 768px\)[\s\S]*?\.revenue-dashboard-grid\s*\{[\s\S]*?grid-template-columns:\s*repeat\(2, minmax\(0, 1fr\)\)/
+  );
+  assert.match(css, /\.revenue-dashboard-card\s*\{[\s\S]*?min-height:\s*110px/);
+  assert.match(css, /\.revenue-dashboard-card\s*\{[\s\S]*?min-width:\s*0/);
+  assert.match(css, /\.revenue-dashboard-card-title\s*\{[\s\S]*?overflow-wrap:\s*anywhere/);
+});
+
+test("mobile Revenue cards use concise copy and preserve existing tab navigation", () => {
+  for (const [key, title, description] of [
+    ["today", "Today's Revenue", "Daily sales"],
+    ["month", "This Month", "Monthly sales"],
+    ["year", "Last 12 Months", "Revenue trends"],
+    ["customer", "Customer Search", "Billing history"],
+  ]) {
+    assert.match(
+      explore,
+      new RegExp(
+        `mobileTitle: "${title.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}"[\\s\\S]*?mobileDescription: "${description}"[\\s\\S]*?key: "${key}"`
+      )
+    );
+  }
+
+  assert.match(explore, /setActiveRevenueTab\(card\.key\)/);
+  assert.match(explore, /activeRevenueTab === "customer"[\s\S]*?<CustomerSearch/);
+});
