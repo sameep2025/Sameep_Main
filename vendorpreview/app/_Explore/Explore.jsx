@@ -7252,7 +7252,7 @@ function ExploreContent({ onReady, onOpenServices }) {
                 {
                   title: "Today's Revenue",
                   description: "Check the total revenue collected for today.",
-                  mobileTitle: "Today's Revenue",
+                  mobileTitle: "Today",
                   mobileDescription: "Daily sales",
                   key: "today",
                 },
@@ -7273,7 +7273,7 @@ function ExploreContent({ onReady, onOpenServices }) {
                 {
                   title: "Customer Search",
                   description: "Find customers and inspect their billing history.",
-                  mobileTitle: "Customer Search",
+                  mobileTitle: "Customers",
                   mobileDescription: "Billing history",
                   key: "customer",
                 },
