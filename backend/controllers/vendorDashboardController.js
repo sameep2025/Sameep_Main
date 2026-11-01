@@ -5,6 +5,7 @@ const LoyaltyLedger = require("../models/LoyaltyLedger");
 const Transaction = require("../models/Transaction");
 const VendorCustomerProfile = require("../models/VendorCustomerProfile");
 const { calculateMembershipBillingPreview } = require("../utils/membershipBillingCalculator");
+const { getStoredPaymentAllocation } = require("../services/paymentAllocationService");
 const mongoose = require("mongoose");
 
 const NO_STYLIST_SELECTED_ID = "NO_STYLIST_SELECTED";
@@ -189,11 +190,12 @@ function buildBillFinancials(bill = {}, transaction = null) {
 function getPaymentModeLabel(paymentMode) {
   if (paymentMode === "ONLINE") return "Online";
   if (paymentMode === "CASH") return "Cash";
+  if (paymentMode === "SPLIT") return "Cash + Online";
   return "Not Recorded";
 }
 
 function getNormalizedPaymentMode(paymentMode) {
-  return ["ONLINE", "CASH"].includes(paymentMode) ? paymentMode : null;
+  return ["ONLINE", "CASH", "SPLIT"].includes(paymentMode) ? paymentMode : null;
 }
 
 function getCartItemNetRevenueExpression() {
@@ -335,6 +337,20 @@ function getStylistRowLabel(item = {}) {
   return resourceName || NO_STYLIST_SELECTED_LABEL;
 }
 
+function getNormalizedCustomerPhone(bill = {}) {
+  const digits = String(bill.customerPhoneSnapshot || "").replace(/\D/g, "");
+  if (digits.length < 10) return "";
+  return digits.slice(-10);
+}
+
+function getBillCustomerIdentity(bill = {}, customerIdentityByPhone = new Map()) {
+  if (bill.customerId) return `customer:${String(bill.customerId)}`;
+
+  const phone = getNormalizedCustomerPhone(bill);
+  if (!phone) return "";
+  return customerIdentityByPhone.get(phone) || `phone:${phone}`;
+}
+
 function getFinancialAccumulatorStage() {
   const rewardsExpression = {
     $ifNull: ["$transaction.redeemValue", { $ifNull: ["$pointsRedeemed", 0] }],
@@ -350,6 +366,29 @@ function getFinancialAccumulatorStage() {
       0,
     ],
   };
+  const netCollectedPaiseExpression = {
+    $round: [{ $multiply: [netCollectedExpression, 100] }, 0],
+  };
+  const validSplitExpression = {
+    $and: [
+      { $eq: ["$paymentMode", "SPLIT"] },
+      { $isNumber: "$paymentBreakdown.cashAmountPaise" },
+      { $isNumber: "$paymentBreakdown.onlineAmountPaise" },
+      { $gte: ["$paymentBreakdown.cashAmountPaise", 0] },
+      { $gte: ["$paymentBreakdown.onlineAmountPaise", 0] },
+      {
+        $eq: [
+          {
+            $add: [
+              "$paymentBreakdown.cashAmountPaise",
+              "$paymentBreakdown.onlineAmountPaise",
+            ],
+          },
+          netCollectedPaiseExpression,
+        ],
+      },
+    ],
+  };
 
   return {
     revenue: { $sum: { $ifNull: ["$totalAmount", 0] } },
@@ -362,18 +401,43 @@ function getFinancialAccumulatorStage() {
     },
     onlineCollected: {
       $sum: {
-        $cond: [{ $eq: ["$paymentMode", "ONLINE"] }, netCollectedExpression, 0],
+        $cond: [
+          { $eq: ["$paymentMode", "ONLINE"] },
+          netCollectedExpression,
+          {
+            $cond: [
+              validSplitExpression,
+              { $divide: ["$paymentBreakdown.onlineAmountPaise", 100] },
+              0,
+            ],
+          },
+        ],
       },
     },
     cashCollected: {
       $sum: {
-        $cond: [{ $eq: ["$paymentMode", "CASH"] }, netCollectedExpression, 0],
+        $cond: [
+          { $eq: ["$paymentMode", "CASH"] },
+          netCollectedExpression,
+          {
+            $cond: [
+              validSplitExpression,
+              { $divide: ["$paymentBreakdown.cashAmountPaise", 100] },
+              0,
+            ],
+          },
+        ],
       },
     },
     notRecordedCollected: {
       $sum: {
         $cond: [
-          { $in: ["$paymentMode", ["ONLINE", "CASH"]] },
+          {
+            $or: [
+              { $in: ["$paymentMode", ["ONLINE", "CASH"]] },
+              validSplitExpression,
+            ],
+          },
           0,
           netCollectedExpression,
         ],
@@ -760,7 +824,12 @@ exports.getBillsDrilldown = async (req, res) => {
       const customerDisplay = buildCustomerDisplayForBill(bill, customerMap, profileNameMap);
       const transaction = transactionMap.get(String(bill._id)) || null;
       const financials = buildBillFinancials(bill, transaction);
-      const normalizedPaymentMode = getNormalizedPaymentMode(bill.paymentMode);
+      const paymentAllocation = getStoredPaymentAllocation({
+        paymentMode: bill.paymentMode,
+        paymentBreakdown: bill.paymentBreakdown,
+        finalPaidAmount: financials.netCollected,
+      });
+      const normalizedPaymentMode = getNormalizedPaymentMode(paymentAllocation.paymentMode);
 
       return {
         billId: bill._id,
@@ -783,6 +852,7 @@ exports.getBillsDrilldown = async (req, res) => {
         redeemed: bill.pointsRedeemed || 0,
         paymentMode: normalizedPaymentMode,
         paymentModeLabel: getPaymentModeLabel(normalizedPaymentMode),
+        paymentBreakdown: paymentAllocation.paymentBreakdown,
         items: bill.items || bill.cartItems || [],
         createdAt: bill.createdAt,
         phone: customerDisplay.phone,
@@ -888,6 +958,8 @@ exports.getStylistPerformance = async (req, res) => {
     })
       .select({
         cartItems: 1,
+        customerId: 1,
+        customerPhoneSnapshot: 1,
         membershipDiscountAmount: 1,
         additionalManualDiscountAmount: 1,
         manualDiscountMode: 1,
@@ -911,9 +983,17 @@ exports.getStylistPerformance = async (req, res) => {
       String(membership._id),
       membership,
     ]));
+    const customerIdentityByPhone = new Map();
+    for (const bill of bills) {
+      const phone = getNormalizedCustomerPhone(bill);
+      if (phone && bill.customerId) {
+        customerIdentityByPhone.set(phone, `customer:${String(bill.customerId)}`);
+      }
+    }
     const grouped = new Map();
 
     for (const bill of bills) {
+      const performedStylistKeys = new Set();
       for (const { item, finalLineAmount } of buildReportItemBreakdown(bill, membershipMap)) {
         const key = getStylistRowKey(item);
         const existing = grouped.get(key) || {
@@ -921,17 +1001,35 @@ exports.getStylistPerformance = async (req, res) => {
           stylist: getStylistRowLabel(item),
           revenue: 0,
           services: 0,
+          customerIdentities: new Set(),
+          unidentifiedBillIds: new Set(),
         };
         existing.revenue += toSafeNumber(finalLineAmount);
         existing.services += toSafeNumber(item?.qty);
         grouped.set(key, existing);
+        performedStylistKeys.add(key);
+      }
+
+      const customerIdentity = getBillCustomerIdentity(bill, customerIdentityByPhone);
+      const billIdentity = String(bill._id || "");
+      for (const key of performedStylistKeys) {
+        const existing = grouped.get(key);
+        if (customerIdentity) {
+          existing.customerIdentities.add(customerIdentity);
+        } else if (billIdentity) {
+          existing.unidentifiedBillIds.add(billIdentity);
+        }
       }
     }
 
     const result = Array.from(grouped.values())
       .map((row) => ({
-        ...row,
+        _id: row._id,
+        stylist: row.stylist,
         revenue: Math.round(row.revenue * 100) / 100,
+        services: row.services,
+        customersAttended: row.customerIdentities.size,
+        unidentifiedCustomerBills: row.unidentifiedBillIds.size,
       }))
       .sort((left, right) => right.revenue - left.revenue);
 

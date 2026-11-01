@@ -3,6 +3,7 @@ import { useParams } from "react-router-dom";
 import axios from "axios";
 import API_BASE_URL, { PREVIEW_BASE_URL, NIKS_PREVIEW_BASE_URL } from "../config";
 import { openPreviewByCategoryId } from "../utils/preview";
+import { getToken } from "../utils/adminAuth";
 const normTermsKey = (s) => String(s || "").replace(/\s+/g, " ").trim();
 
 const norm = (s) => String(s || "").toLowerCase().replace(/[^a-z0-9]/g, "");
@@ -917,7 +918,10 @@ const [latestEditOfferText, setLatestEditOfferText] = useState("");
       const params = new URLSearchParams();
       params.set("vendorId", String(vendorId));
       if (categoryId) params.set("categoryId", String(categoryId));
-      const res = await axios.get(`${API_BASE_URL}/api/enquiries?${params.toString()}`);
+      const token = getToken();
+      const res = await axios.get(`${API_BASE_URL}/api/enquiries?${params.toString()}`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
       const list = Array.isArray(res.data) ? res.data : [];
       setEnquiries(list);
       setSelectedStatusFilter("All");

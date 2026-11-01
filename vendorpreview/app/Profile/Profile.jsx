@@ -7,6 +7,7 @@ import BusinessLocationsModal from "./BusinessLocationsModal";
 import BusinessHoursModal from "./BusinessHoursModal";
 import { SOCIAL_ICONS } from "../Icons/SocialIcons";
 import { useVendor } from "@/app/context/VendorContext";
+import { getVendorAuthHeaders } from "../utils/vendorAuth";
 
 export default function ProfileModal({ onClose, onOpenServices }) {
   const { vendorInfo } = useVendor();
@@ -46,7 +47,8 @@ const loadEnquiries = async () => {
     setLoadingEnquiries(true);
 
     const res = await fetch(
-      `${process.env.NEXT_PUBLIC_API_BASE_URL}/api/enquiries?vendorId=${vendorId}&categoryId=${rootCategoryId}`
+      `${process.env.NEXT_PUBLIC_API_BASE_URL}/api/enquiries?vendorId=${vendorId}&categoryId=${rootCategoryId}`,
+      { headers: getVendorAuthHeaders(vendorId) }
     );
 
     const data = await res.json();

@@ -1374,6 +1374,10 @@ const filteredChildren = Array.isArray(children) ? children : [];
         } catch {}
 
         const body = {
+          submissionKey:
+            typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+              ? crypto.randomUUID()
+              : `enquiry-${Date.now()}-${Math.random().toString(36).slice(2, 12)}`,
           vendorId: String(vendorId),
           categoryId: String(categoryId),
           customerId,
@@ -1428,6 +1432,12 @@ const filteredChildren = Array.isArray(children) ? children : [];
       return "previewToken:unknown:unknown";
     }
   }, []);
+
+  const getPreviewAuthHeaders = useCallback(() => {
+    if (typeof window === "undefined") return {};
+    const token = window.localStorage.getItem(makePreviewTokenKey(vendorId, categoryId));
+    return token ? { Authorization: `Bearer ${token}` } : {};
+  }, [categoryId, makePreviewTokenKey, vendorId]);
 
    const makePreviewIdentityKey = useCallback((venId, catId) => {
     try {
@@ -5697,7 +5707,7 @@ console.log("✅ Total dummy categories count:", list.length);
                                                             try {
                                                               await fetch(`${API_BASE_URL}/api/enquiries/${enq._id}/status`, {
                                                                 method: "PUT",
-                                                                headers: { "Content-Type": "application/json" },
+                                                                headers: { "Content-Type": "application/json", ...getPreviewAuthHeaders() },
                                                                 body: JSON.stringify({ status: nextLabel }),
                                                               });
                                                               try {
@@ -5706,6 +5716,7 @@ console.log("✅ Total dummy categories count:", list.length);
                                                                 params.set("categoryId", String(categoryId));
                                                                 const res = await fetch(`${API_BASE_URL}/api/enquiries?${params.toString()}`, {
                                                                   cache: "no-store",
+                                                                  headers: getPreviewAuthHeaders(),
                                                                 });
                                                                 const list = await res.json().catch(() => []);
                                                                 setMyEnquiries(Array.isArray(list) ? list : []);
@@ -5763,7 +5774,7 @@ console.log("✅ Total dummy categories count:", list.length);
                                                                       if (!enq._id) return;
                                                                       await fetch(`${API_BASE_URL}/api/enquiries/${enq._id}/status`, {
                                                                         method: "PUT",
-                                                                        headers: { "Content-Type": "application/json" },
+                                                                        headers: { "Content-Type": "application/json", ...getPreviewAuthHeaders() },
                                                                         body: JSON.stringify({ status: label }),
                                                                       });
                                                                       try {
@@ -5772,6 +5783,7 @@ console.log("✅ Total dummy categories count:", list.length);
                                                                         params.set("categoryId", String(categoryId));
                                                                         const res = await fetch(`${API_BASE_URL}/api/enquiries?${params.toString()}`, {
                                                                           cache: "no-store",
+                                                                          headers: getPreviewAuthHeaders(),
                                                                         });
                                                                         const list = await res.json().catch(() => []);
                                                                         setMyEnquiries(Array.isArray(list) ? list : []);
@@ -8460,6 +8472,7 @@ console.log("✅ Total dummy categories count:", list.length);
                 params.set("categoryId", String(categoryId));
                 const res = await fetch(`${API_BASE_URL}/api/enquiries?${params.toString()}`, {
                   cache: "no-store",
+                  headers: getPreviewAuthHeaders(),
                 });
                 const list = await res.json().catch(() => []);
                 setMyEnquiries(Array.isArray(list) ? list : []);
@@ -12720,7 +12733,7 @@ console.log(
                     try {
                       await fetch(`${API_BASE_URL}/api/enquiries/${enq._id}/status`, {
                         method: "PUT",
-                        headers: { "Content-Type": "application/json" },
+                        headers: { "Content-Type": "application/json", ...getPreviewAuthHeaders() },
                         body: JSON.stringify({ status: nextStatus }),
                       });
                     } catch {}
@@ -12731,6 +12744,7 @@ console.log(
                       params.set("categoryId", String(categoryId));
                       const res = await fetch(`${API_BASE_URL}/api/enquiries?${params.toString()}`, {
                         cache: "no-store",
+                        headers: getPreviewAuthHeaders(),
                       });
                       const list = await res.json().catch(() => []);
                       setMyEnquiries(Array.isArray(list) ? list : []);

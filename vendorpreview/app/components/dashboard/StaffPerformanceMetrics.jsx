@@ -9,6 +9,8 @@ const currencyFmt = new Intl.NumberFormat("en-IN", {
 
 export default function StaffPerformanceMetrics({ row, fallbackName }) {
   const averageServiceValue = getAverageServiceValue(row?.revenue, row?.services);
+  const hasCustomerCount = Number.isFinite(Number(row?.customersAttended));
+  const unidentifiedCustomerBills = Number(row?.unidentifiedCustomerBills || 0);
 
   return (
     <div className="staff-performance-row">
@@ -29,6 +31,13 @@ export default function StaffPerformanceMetrics({ row, fallbackName }) {
           <strong>
             {averageServiceValue === null ? "—" : currencyFmt.format(averageServiceValue)}
           </strong>
+        </div>
+        <div className="staff-performance-metric staff-performance-customers">
+          <span>Customers Attended</span>
+          <strong>{hasCustomerCount ? Number(row.customersAttended) : "—"}</strong>
+          {unidentifiedCustomerBills > 0 && (
+            <small>{unidentifiedCustomerBills} bill{unidentifiedCustomerBills === 1 ? "" : "s"} without customer identity</small>
+          )}
         </div>
       </div>
     </div>

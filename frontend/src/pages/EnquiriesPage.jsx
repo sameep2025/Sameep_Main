@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import axios from "axios";
+import API from "../api";
 import API_BASE_URL from "../config";
 
 function getItemHierarchyLabel(item) {
@@ -54,7 +55,7 @@ function EnquiriesPage() {
       try {
         setLoading(true);
         setError("");
-        const res = await axios.get(`${API_BASE_URL}/api/enquiries`);
+        const res = await API.get("/api/enquiries");
         const list = Array.isArray(res.data) ? res.data : [];
         setEnquiries(list);
       } catch (e) {

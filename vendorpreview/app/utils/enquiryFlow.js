@@ -3,6 +3,13 @@
 export const ENQUIRY_OPEN_EVENT = "ynot-open-enquiry";
 export const CART_UPDATED_EVENT = "ynot-cart-updated";
 
+export function createEnquirySubmissionKey() {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID();
+  }
+  return `enquiry-${Date.now()}-${Math.random().toString(36).slice(2, 12)}`;
+}
+
 export function getEnquiryFieldLabel(field) {
   const override = String(field?.labelOverride || "").trim();
   if (override) return override;

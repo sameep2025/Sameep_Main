@@ -1231,7 +1231,110 @@ test("stylist performance uses persisted net item revenue with allocation fallba
   assert.equal(res.payload[1].revenue, 475);
 });
 
-test("vendor revenue payment breakdown buckets net collected by BillingSession paymentMode only", () => {
+test("stylist performance counts distinct identifiable customers per performing stylist", async () => {
+  const originalFind = BillingSession.find;
+  const raviId = new mongoose.Types.ObjectId("652000000000000000000011");
+  const veenaId = new mongoose.Types.ObjectId("652000000000000000000012");
+  const customerId = new mongoose.Types.ObjectId("690d8bf7a6dc67fbf8757115");
+  const makeItem = (name, resourceId, resourceName, quantity = 1) => ({
+    itemId: new mongoose.Types.ObjectId(),
+    name,
+    price: 100,
+    qty: quantity,
+    total: 100 * quantity,
+    finalLineAmount: 100 * quantity,
+    resourceId,
+    resourceName,
+  });
+  const bills = [
+    {
+      _id: new mongoose.Types.ObjectId(),
+      customerId,
+      customerPhoneSnapshot: "919876543210",
+      cartItems: [
+        makeItem("Hair Cut", raviId, "Ravi"),
+        makeItem("Shave", raviId, "Ravi"),
+        makeItem("Facial", veenaId, "Veena"),
+      ],
+    },
+    {
+      _id: new mongoose.Types.ObjectId(),
+      customerId,
+      customerPhoneSnapshot: "9876543210",
+      cartItems: [makeItem("Hair Spa", raviId, "Ravi", 2)],
+    },
+    {
+      _id: new mongoose.Types.ObjectId(),
+      customerId: null,
+      customerPhoneSnapshot: "+91 98765 43210",
+      cartItems: [makeItem("Legacy phone-only visit", raviId, "Ravi")],
+    },
+    {
+      _id: new mongoose.Types.ObjectId(),
+      customerId: null,
+      customerPhoneSnapshot: "+91 99887 76655",
+      cartItems: [
+        makeItem("Trim", raviId, "Ravi"),
+        makeItem("Colour", veenaId, "Veena"),
+      ],
+    },
+    {
+      _id: new mongoose.Types.ObjectId(),
+      customerId: null,
+      customerPhoneSnapshot: "9988776655",
+      cartItems: [makeItem("Wash", raviId, "Ravi")],
+    },
+    {
+      _id: new mongoose.Types.ObjectId(),
+      customerId: null,
+      customerPhoneSnapshot: "",
+      cartItems: [
+        makeItem("Unknown customer service", raviId, "Ravi"),
+        makeItem("Unassigned service", null, ""),
+      ],
+    },
+  ];
+
+  BillingSession.find = (query) => {
+    assert.equal(query.status, "COMPLETED");
+    return {
+      select(fields) {
+        assert.equal(fields.customerId, 1);
+        assert.equal(fields.customerPhoneSnapshot, 1);
+        return this;
+      },
+      lean: async () => bills,
+    };
+  };
+
+  const req = { query: { vendorId: VENDOR_ID, range: "today" } };
+  const res = {
+    statusCode: 200,
+    payload: null,
+    status(code) { this.statusCode = code; return this; },
+    json(payload) { this.payload = payload; return this; },
+  };
+
+  try {
+    await vendorDashboardController.getStylistPerformance(req, res);
+  } finally {
+    BillingSession.find = originalFind;
+  }
+
+  const ravi = res.payload.find((row) => row.stylist === "Ravi");
+  const veena = res.payload.find((row) => row.stylist === "Veena");
+  const unassigned = res.payload.find((row) => row.stylist === "No Stylist Selected");
+
+  assert.equal(ravi.services, 8);
+  assert.equal(ravi.customersAttended, 2);
+  assert.equal(ravi.unidentifiedCustomerBills, 1);
+  assert.equal(veena.customersAttended, 2);
+  assert.equal(veena.unidentifiedCustomerBills, 0);
+  assert.equal(unassigned.customersAttended, 0);
+  assert.equal(unassigned.unidentifiedCustomerBills, 1);
+});
+
+test("vendor revenue payment breakdown reconciles legacy and split BillingSession payments", () => {
   const source = fs.readFileSync(
     path.join(__dirname, "../controllers/vendorDashboardController.js"),
     "utf8"
@@ -1250,9 +1353,13 @@ test("vendor revenue payment breakdown buckets net collected by BillingSession p
   assert.match(accumulatorSection, /notRecordedCollected/);
   assert.match(accumulatorSection, /\$eq:\s*\[\s*"\$paymentMode",\s*"ONLINE"\s*\]/);
   assert.match(accumulatorSection, /\$eq:\s*\[\s*"\$paymentMode",\s*"CASH"\s*\]/);
+  assert.match(accumulatorSection, /paymentBreakdown\.cashAmountPaise/);
+  assert.match(accumulatorSection, /paymentBreakdown\.onlineAmountPaise/);
+  assert.match(accumulatorSection, /\$divide/);
   assert.match(accumulatorSection, /netCollectedExpression/);
   assert.equal(accumulatorSection.includes("transaction.paymentMode"), false);
-  assert.match(drilldownSection, /getNormalizedPaymentMode\(bill\.paymentMode\)/);
+  assert.match(drilldownSection, /getStoredPaymentAllocation/);
+  assert.match(drilldownSection, /paymentBreakdown:\s*paymentAllocation\.paymentBreakdown/);
   assert.equal(drilldownSection.includes("transaction.paymentMode"), false);
 });
 
@@ -1544,6 +1651,54 @@ test("billing completion accepts ONLINE paymentMode without changing financials"
     assert.equal(state.closeUpdate.paymentMode, "ONLINE");
     assert.equal(state.transactionPayload.totalAmount, 800);
     assert.equal(state.transactionPayload.finalPaidAmount, 800);
+  });
+});
+
+test("billing completion derives SPLIT and persists the same allocation atomically", async () => {
+  const billing = buildCompletionBilling();
+
+  await withMockedCompletionFlow(billing, async (state) => {
+    const res = buildCompletionResponse();
+    await billingController.completeBillingSession(
+      {
+        body: {
+          billingId: COMPLETED_BILL_ID,
+          paymentBreakdown: { cashAmountPaise: 30000, onlineAmountPaise: 50000 },
+        },
+      },
+      res
+    );
+
+    assert.equal(res.statusCode, 200);
+    assert.equal(state.closeUpdate.paymentMode, "SPLIT");
+    assert.deepEqual(state.closeUpdate.paymentBreakdown, {
+      cashAmountPaise: 30000,
+      onlineAmountPaise: 50000,
+    });
+    assert.deepEqual(state.transactionPayload.paymentBreakdown, state.closeUpdate.paymentBreakdown);
+    assert.equal(state.transactionPayload.paymentMode, "SPLIT");
+  });
+});
+
+test("billing completion rejects a stale payment allocation before closing the bill", async () => {
+  const billing = buildCompletionBilling();
+
+  await withMockedCompletionFlow(billing, async (state) => {
+    const res = buildCompletionResponse();
+    await billingController.completeBillingSession(
+      {
+        body: {
+          billingId: COMPLETED_BILL_ID,
+          paymentBreakdown: { cashAmountPaise: 30000, onlineAmountPaise: 49999 },
+        },
+      },
+      res
+    );
+
+    assert.equal(res.statusCode, 400);
+    assert.match(res.payload.message, /current final payable amount/);
+    assert.equal(state.closeUpdate, null);
+    assert.equal(state.transactionPayload, null);
   });
 });
 
@@ -2227,6 +2382,14 @@ test("billing and transaction paymentMode schemas remain backward compatible", (
   );
   assert.equal(new BillingSession({ vendorId: VENDOR_ID, paymentMode: "ONLINE" }).validateSync(), undefined);
   assert.equal(new BillingSession({ vendorId: VENDOR_ID, paymentMode: "CASH" }).validateSync(), undefined);
+  assert.equal(
+    new BillingSession({
+      vendorId: VENDOR_ID,
+      paymentMode: "SPLIT",
+      paymentBreakdown: { cashAmountPaise: 2500, onlineAmountPaise: 7500 },
+    }).validateSync(),
+    undefined
+  );
   assert.equal(new BillingSession({ vendorId: VENDOR_ID, status: "SUPERSEDED" }).validateSync(), undefined);
   assert.equal(
     new BillingSession({
@@ -2243,7 +2406,7 @@ test("billing and transaction paymentMode schemas remain backward compatible", (
     undefined
   );
 
-  for (const paymentMode of ["CASH", "UPI", "CARD", "ONLINE"]) {
+  for (const paymentMode of ["CASH", "UPI", "CARD", "ONLINE", "SPLIT"]) {
     const transaction = new Transaction({
       vendorId: VENDOR_ID,
       paymentMode,

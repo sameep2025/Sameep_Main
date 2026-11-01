@@ -114,7 +114,12 @@ const TransactionSchema = new mongoose.Schema(
 
     paymentMode: {
       type: String,
-      enum: ["CASH", "UPI", "CARD", "ONLINE"],
+      enum: ["CASH", "UPI", "CARD", "ONLINE", "SPLIT"],
+    },
+
+    paymentBreakdown: {
+      cashAmountPaise: { type: Number, min: 0, default: undefined },
+      onlineAmountPaise: { type: Number, min: 0, default: undefined },
     },
 
     paymentStatus: {

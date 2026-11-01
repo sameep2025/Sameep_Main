@@ -13,6 +13,17 @@ export function formatReceiptPaise(value) {
   return formatReceiptCurrency(paise / 100);
 }
 
+export function formatReceiptPayment(receiptSnapshot = {}) {
+  const mode = receiptSnapshot.paymentMode;
+  const breakdown = receiptSnapshot.paymentBreakdown || {};
+  const cash = formatReceiptPaise(breakdown.cashAmountPaise);
+  const online = formatReceiptPaise(breakdown.onlineAmountPaise);
+  if (mode === "SPLIT" && cash && online) return `Cash ${cash} + Online ${online}`;
+  if (mode === "CASH") return cash ? `Cash ${cash}` : "Cash";
+  if (mode === "ONLINE") return online ? `Online ${online}` : "Online";
+  return "Not Recorded";
+}
+
 export function printReceiptSnapshot(receiptSnapshot) {
   if (!receiptSnapshot || typeof window === "undefined") return false;
 
@@ -339,7 +350,7 @@ export function printReceiptSnapshot(receiptSnapshot) {
     }
     addRow(
       "Payment Mode",
-      receiptSnapshot.paymentMode === "CASH" ? "Cash" : "Online",
+      formatReceiptPayment(receiptSnapshot),
       "total-row",
       totals
     );
@@ -453,7 +464,7 @@ export function printReceiptSnapshot(receiptSnapshot) {
   addRow("NET COLLECTED", formatReceiptCurrency(receiptSnapshot.netCollected), "total-row net", totals);
   addRow(
     "Payment Mode",
-    receiptSnapshot.paymentMode === "CASH" ? "Cash" : "Online",
+    formatReceiptPayment(receiptSnapshot),
     "total-row",
     totals
   );

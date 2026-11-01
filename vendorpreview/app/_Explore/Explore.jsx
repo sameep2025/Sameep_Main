@@ -26,6 +26,7 @@ import CustomerAnalyticsDashboard from "../components/dashboard/CustomerAnalytic
 import WhatsappBusinessDashboard from "../components/dashboard/WhatsappBusinessDashboard";
 import MembershipPlansDashboard from "../components/dashboard/MembershipPlansDashboard";
 import GstReports from "../components/dashboard/GstReports";
+import AppointmentCalendar, { TodayAppointmentsWidget } from "../components/dashboard/AppointmentCalendar";
 import { useSearchParams } from "next/navigation";
 import { useSessionGuard } from "../Login/useSessionGuard";
 import ModernPreviewTemplate from "./templates/ModernPreviewTemplate";
@@ -33,7 +34,7 @@ import CatalogPreviewTemplate from "./templates/CatalogPreviewTemplate";
 import NurseriesPreviewTemplate from "./templates/NurseriesPreviewTemplate";
 import EcommercePreviewTemplate from "./templates/EcommercePreviewTemplate";
 import PremiumLightPreviewTemplate from "./templates/PremiumLightPreviewTemplate";
-import { CART_UPDATED_EVENT, ENQUIRY_OPEN_EVENT } from "../utils/enquiryFlow";
+import { CART_UPDATED_EVENT, ENQUIRY_OPEN_EVENT, createEnquirySubmissionKey } from "../utils/enquiryFlow";
 import {
   formatReceiptCurrency,
   printReceiptSnapshot,
@@ -52,6 +53,47 @@ const FOOTER_GALLERY_OPEN_EVENT = "ynot-footer-open-gallery";
 const CART_ORIGIN_PUBLIC = "PUBLIC_ENQUIRY";
 const CART_ORIGIN_BILLING = "VENDOR_BILLING";
 const QUICK_BILLING_INITIAL_LIMIT = 30;
+
+function parsePaymentAmountToPaise(value) {
+  const text = String(value ?? "").trim();
+  if (!text) return { valid: false, empty: true, paise: null };
+  if (!/^\d+(?:\.\d{0,2})?$/.test(text)) {
+    return { valid: false, empty: false, paise: null };
+  }
+  const [rupees, fraction = ""] = text.split(".");
+  const paise = Number(rupees) * 100 + Number(fraction.padEnd(2, "0"));
+  return Number.isSafeInteger(paise)
+    ? { valid: true, empty: false, paise }
+    : { valid: false, empty: false, paise: null };
+}
+
+function formatPaymentPaiseInput(paise) {
+  const normalized = Math.max(Number(paise) || 0, 0);
+  return (normalized / 100).toFixed(2);
+}
+
+function getBalancedPaymentInputs({ editedField, value, totalPaise }) {
+  const parsed = parsePaymentAmountToPaise(value);
+  if (!parsed.valid) {
+    return {
+      valid: false,
+      error: parsed.empty
+        ? "Enter a payment amount."
+        : "Enter a valid amount with at most two decimal places.",
+    };
+  }
+  if (parsed.paise > totalPaise) {
+    return { valid: false, error: "Payment amount cannot exceed the final payable amount." };
+  }
+  const otherPaise = totalPaise - parsed.paise;
+  return {
+    valid: true,
+    cashInput: editedField === "cash" ? value : formatPaymentPaiseInput(otherPaise),
+    onlineInput: editedField === "online" ? value : formatPaymentPaiseInput(otherPaise),
+    cashAmountPaise: editedField === "cash" ? parsed.paise : otherPaise,
+    onlineAmountPaise: editedField === "online" ? parsed.paise : otherPaise,
+  };
+}
 
 function buildQuickBillingServiceIndex(nodes, initialPath = [], initialPathIds = []) {
   const services = [];
@@ -1299,7 +1341,13 @@ function ExploreContent({ onReady, onOpenServices }) {
   const [discountMode, setDiscountMode] = useState(null); // "amount" | "percent"
   const [appliedDiscount, setAppliedDiscount] = useState(0);
   const [showDiscountPopup, setShowDiscountPopup] = useState(false);
-  const [paymentMode, setPaymentMode] = useState("ONLINE");
+  const [cashAmountInput, setCashAmountInput] = useState("");
+  const [onlineAmountInput, setOnlineAmountInput] = useState("");
+  const [paymentAllocationError, setPaymentAllocationError] = useState("");
+  const cashAmountInputRef = useRef("");
+  const onlineAmountInputRef = useRef("");
+  const paymentHasUserEditedRef = useRef(false);
+  const lastEditedPaymentFieldRef = useRef("cash");
 
 
   const [resources, setResources] = useState([]);
@@ -1403,6 +1451,7 @@ function ExploreContent({ onReady, onOpenServices }) {
     return stored || "preview";
   };
   const [viewMode, setViewMode] = useState("preview");
+  const [appointmentCalendarInitialDate, setAppointmentCalendarInitialDate] = useState("");
   const previousViewModeRef = useRef("preview");
 
   useEffect(() => {
@@ -2046,7 +2095,8 @@ function ExploreContent({ onReady, onOpenServices }) {
       pointsEarned: Number(completeData?.billing?.pointsEarned ?? transaction.pointsEarned ?? getAuthoritativeEarnPoints()),
       pointsRedeemed: Number(redeemedValue || 0),
       netCollected: Number(netCollected || 0),
-      paymentMode: String(transaction.paymentMode || paymentMode || "ONLINE"),
+      paymentMode: String(transaction.paymentMode || "ONLINE"),
+      paymentBreakdown: transaction.paymentBreakdown || null,
       gstInvoice: completeData?.gstInvoice || null,
     };
   };
@@ -2471,6 +2521,87 @@ function ExploreContent({ onReady, onOpenServices }) {
     hasActiveVendorSession,
     viewMode,
   });
+  const paymentFinalPayablePaise = Math.max(
+    Number.isInteger(gstPreview?.totals?.estimatedCustomerPayablePaise) && gstPreviewAvailable
+      ? gstPreview.totals.estimatedCustomerPayablePaise
+      : Math.round((getAuthoritativeCartTotal() + Number.EPSILON) * 100),
+    0
+  );
+
+  useEffect(() => {
+    const editedField = paymentHasUserEditedRef.current
+      ? lastEditedPaymentFieldRef.current
+      : "cash";
+    const editedValue = paymentHasUserEditedRef.current
+      ? editedField === "cash"
+        ? cashAmountInputRef.current
+        : onlineAmountInputRef.current
+      : formatPaymentPaiseInput(paymentFinalPayablePaise);
+    const balanced = getBalancedPaymentInputs({
+      editedField,
+      value: editedValue || formatPaymentPaiseInput(paymentFinalPayablePaise),
+      totalPaise: paymentFinalPayablePaise,
+    });
+
+    if (!balanced.valid) {
+      setPaymentAllocationError(
+        "Final payable changed. Review the Cash and Online amounts before completing the bill."
+      );
+      return;
+    }
+    cashAmountInputRef.current = balanced.cashInput;
+    onlineAmountInputRef.current = balanced.onlineInput;
+    setCashAmountInput(balanced.cashInput);
+    setOnlineAmountInput(balanced.onlineInput);
+    setPaymentAllocationError("");
+  }, [paymentFinalPayablePaise]);
+
+  const handlePaymentAmountChange = (field, value) => {
+    paymentHasUserEditedRef.current = true;
+    lastEditedPaymentFieldRef.current = field;
+    if (field === "cash") {
+      cashAmountInputRef.current = value;
+      setCashAmountInput(value);
+    } else {
+      onlineAmountInputRef.current = value;
+      setOnlineAmountInput(value);
+    }
+
+    const balanced = getBalancedPaymentInputs({
+      editedField: field,
+      value,
+      totalPaise: paymentFinalPayablePaise,
+    });
+    if (!balanced.valid) {
+      setPaymentAllocationError(balanced.error);
+      return;
+    }
+    cashAmountInputRef.current = balanced.cashInput;
+    onlineAmountInputRef.current = balanced.onlineInput;
+    setCashAmountInput(balanced.cashInput);
+    setOnlineAmountInput(balanced.onlineInput);
+    setPaymentAllocationError("");
+  };
+
+  const getValidatedPaymentSubmission = () => {
+    const cash = parsePaymentAmountToPaise(cashAmountInput);
+    const online = parsePaymentAmountToPaise(onlineAmountInput);
+    if (!cash.valid || !online.valid) {
+      setPaymentAllocationError("Enter valid Cash and Online amounts with at most two decimal places.");
+      return null;
+    }
+    if (cash.paise + online.paise !== paymentFinalPayablePaise) {
+      setPaymentAllocationError("Cash and Online amounts must equal the final payable amount.");
+      return null;
+    }
+    setPaymentAllocationError("");
+    return {
+      paymentBreakdown: {
+        cashAmountPaise: cash.paise,
+        onlineAmountPaise: online.paise,
+      },
+    };
+  };
   const galleryRowId =
     vendorInfo?.galleryRowId ||
     vendorInfo?.rowId ||
@@ -2498,42 +2629,38 @@ function ExploreContent({ onReady, onOpenServices }) {
   const hrSelectorPlaceholder = `Select ${hrSingularLabel}`;
   const hrPerformanceTitle = `${hrSingularLabel} Performance`;
   const renderPaymentModeSelector = () => (
-    <div style={{ marginTop: 14 }}>
-      <div style={{ color: "#e6c37a", fontSize: 14, marginBottom: 8 }}>
-        Payment Mode
+    <div className="quick-billing-payment-allocation">
+      <div className="quick-billing-payment-payable">
+        <span>Final Payable Amount</span>
+        <strong>{formatPaymentPaiseInput(paymentFinalPayablePaise)}</strong>
       </div>
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-        {[
-          { value: "ONLINE", label: "Online" },
-          { value: "CASH", label: "Cash" },
-        ].map((option) => {
-          const selected = paymentMode === option.value;
-
-          return (
-            <button
-              key={option.value}
-              type="button"
-              onClick={() => setPaymentMode(option.value)}
-              aria-pressed={selected}
-              style={{
-                border: selected
-                  ? "1px solid #e6c37a"
-                  : "1px solid rgba(245, 217, 122, 0.25)",
-                background: selected
-                  ? "linear-gradient(135deg, rgba(245, 217, 122, 0.22), rgba(245, 217, 122, 0.08))"
-                  : "#111",
-                color: selected ? "#F5D97A" : "rgba(255,255,255,0.86)",
-                borderRadius: 10,
-                padding: "10px 12px",
-                fontWeight: 700,
-                cursor: "pointer",
-              }}
-            >
-              {option.label}
-            </button>
-          );
-        })}
+      <div className="quick-billing-payment-inputs">
+        <label>
+          <span>Cash Amount</span>
+          <input
+            type="text"
+            inputMode="decimal"
+            value={cashAmountInput}
+            onChange={(event) => handlePaymentAmountChange("cash", event.target.value)}
+            aria-invalid={Boolean(paymentAllocationError)}
+          />
+        </label>
+        <label>
+          <span>Online / UPI Amount</span>
+          <input
+            type="text"
+            inputMode="decimal"
+            value={onlineAmountInput}
+            onChange={(event) => handlePaymentAmountChange("online", event.target.value)}
+            aria-invalid={Boolean(paymentAllocationError)}
+          />
+        </label>
       </div>
+      {paymentAllocationError ? (
+        <div className="quick-billing-payment-error" role="alert">
+          {paymentAllocationError}
+        </div>
+      ) : null}
     </div>
   );
   useEffect(() => {
@@ -2650,6 +2777,7 @@ function ExploreContent({ onReady, onOpenServices }) {
       const enquiryPhone = mobile;
 
       const payload = {
+        submissionKey: createEnquirySubmissionKey(),
         vendorId: String(vendorId),
         categoryId: String(rootCategoryId),
         customerId,
@@ -2977,6 +3105,9 @@ function ExploreContent({ onReady, onOpenServices }) {
         return;
       }
 
+      const paymentSubmission = getValidatedPaymentSubmission();
+      if (!paymentSubmission) return;
+
       const completeRes = await fetch(`${API_BASE_URL}/api/billing/complete`, {
         method: "POST",
         headers: {
@@ -2985,7 +3116,7 @@ function ExploreContent({ onReady, onOpenServices }) {
         },
         body: JSON.stringify({
           billingId,
-          paymentMode,
+          ...paymentSubmission,
         }),
       });
 
@@ -4108,7 +4239,13 @@ function ExploreContent({ onReady, onOpenServices }) {
     setAppliedDiscount(0);
     setDiscountMode(null);
     setShowDiscountPopup(false);
-    setPaymentMode("ONLINE");
+    lastEditedPaymentFieldRef.current = "cash";
+    paymentHasUserEditedRef.current = false;
+    cashAmountInputRef.current = "";
+    onlineAmountInputRef.current = "";
+    setCashAmountInput("");
+    setOnlineAmountInput("");
+    setPaymentAllocationError("");
     setMenuSearch("");
 
     localStorage.removeItem("ynot_cart");
@@ -4305,6 +4442,9 @@ function ExploreContent({ onReady, onOpenServices }) {
       }
 
       // STEP 3 - Complete billing
+      const paymentSubmission = getValidatedPaymentSubmission();
+      if (!paymentSubmission) return;
+
       const completeRes = await fetch(`${API_BASE_URL}/api/billing/complete`, {
         method: "POST",
         headers: {
@@ -4313,7 +4453,7 @@ function ExploreContent({ onReady, onOpenServices }) {
         },
         body: JSON.stringify({
           billingId: newBillingId,
-          paymentMode,
+          ...paymentSubmission,
         }),
       });
 
@@ -5657,6 +5797,15 @@ function ExploreContent({ onReady, onOpenServices }) {
             </div>
           )}
         </>
+      )}
+      {hasActiveVendorSession && viewMode === "preview" && vendorId && (
+        <TodayAppointmentsWidget
+          vendorId={vendorId}
+          onOpen={(today) => {
+            setAppointmentCalendarInitialDate(today);
+            setViewMode("appointment-calendar");
+          }}
+        />
       )}
       {viewMode === "menu" && (
         <div>
@@ -7030,6 +7179,13 @@ function ExploreContent({ onReady, onOpenServices }) {
                   },
                 },
                 {
+                  title: "Calendar",
+                  description: "View and manage online and manual appointments by date.",
+                  onClick: () => {
+                    setViewMode("appointment-calendar");
+                  },
+                },
+                {
                   title: "Manage My WhatsApp Business",
                   description: "Manage WhatsApp Business setup, messaging, and customer communication.",
                   onClick: () => {
@@ -7739,6 +7895,20 @@ function ExploreContent({ onReady, onOpenServices }) {
                 OK
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {viewMode === "appointment-calendar" && (
+        <div className="new-dashboard-overlay appointment-calendar-dashboard-overlay">
+          <div className="new-dashboard-shell">
+            {renderDashboardHeader("Appointments", () => setViewMode("new-dashboard"))}
+            <AppointmentCalendar
+              vendorId={vendorId}
+              menuTree={menuTree}
+              resources={resources}
+              initialDate={appointmentCalendarInitialDate}
+            />
           </div>
         </div>
       )}

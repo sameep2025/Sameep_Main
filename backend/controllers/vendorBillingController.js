@@ -2,6 +2,7 @@ const BillingSession = require("../models/BillingSession");
 const Customer = require("../models/Customer");
 const Transaction = require("../models/Transaction");
 const mongoose = require("mongoose");
+const { getStoredPaymentAllocation } = require("../services/paymentAllocationService");
 
 function toSafeNumber(value, fallback = 0) {
   const number = Number(value);
@@ -85,6 +86,11 @@ exports.getVendorBills = async (req, res) => {
         }
         const transaction = transactionMap.get(String(bill._id)) || null;
         const financials = buildBillFinancials(bill, transaction);
+        const paymentAllocation = getStoredPaymentAllocation({
+          paymentMode: bill.paymentMode || transaction?.paymentMode,
+          paymentBreakdown: bill.paymentBreakdown || transaction?.paymentBreakdown,
+          finalPaidAmount: financials.netCollected,
+        });
 
         return {
           billId: bill._id,
@@ -97,6 +103,8 @@ exports.getVendorBills = async (req, res) => {
           netCollected: financials.netCollected,
           financialSnapshotAvailable: financials.financialSnapshotAvailable,
           transactionMissing: financials.transactionMissing,
+          paymentMode: paymentAllocation.paymentMode,
+          paymentBreakdown: paymentAllocation.paymentBreakdown,
           earned: bill.pointsEarned || 0,
           redeemed: bill.pointsRedeemed || 0,
           items: bill.items || bill.cartItems || [],

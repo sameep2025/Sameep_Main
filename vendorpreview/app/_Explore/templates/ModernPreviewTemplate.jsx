@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { LuLogOut } from "react-icons/lu";
 import { API_BASE_URL } from "../../../config";
 import { SOCIAL_ICONS } from "../../Icons/SocialIcons";
@@ -9,6 +9,7 @@ import {
   trackVendorPreviewEvent,
 } from "../../utils/siteAnalytics";
 import { openAdminDashboard, openAdminMenu } from "../../utils/adminQuickActions";
+import { createEnquirySubmissionKey } from "../../utils/enquiryFlow";
 import "./ModernPreviewTemplate.css";
 
 const DEFAULT_NAV = [
@@ -1172,6 +1173,7 @@ export default function ModernPreviewTemplate({
   const [dynamicInquiryValues, setDynamicInquiryValues] = useState({});
   const [isSubmittingInquiry, setIsSubmittingInquiry] = useState(false);
   const [inquiryFeedback, setInquiryFeedback] = useState("");
+  const submissionKeyRef = useRef(createEnquirySubmissionKey());
   const [translatedHeroCopy, setTranslatedHeroCopy] = useState(null);
   const [activeShowcaseItemIndex, setActiveShowcaseItemIndex] = useState(null);
   const [activeShowcaseImageIndex, setActiveShowcaseImageIndex] = useState(0);
@@ -1815,6 +1817,7 @@ export default function ModernPreviewTemplate({
     }
 
     const payload = {
+      submissionKey: submissionKeyRef.current,
       vendorId: String(vendorId),
       categoryId: String(rootCategoryId),
       customerId: storedUser?.customerId ? String(storedUser.customerId) : "",
@@ -1858,6 +1861,7 @@ export default function ModernPreviewTemplate({
       }
 
       setInquiryFeedback("Enquiry submitted successfully.");
+      submissionKeyRef.current = createEnquirySubmissionKey();
       trackVendorPreviewEvent(
         API_BASE_URL,
         buildVendorPreviewAnalyticsPayload({

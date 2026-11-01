@@ -11,6 +11,7 @@ import {
 } from "../utils/siteAnalytics";
 import {
   CART_UPDATED_EVENT,
+  createEnquirySubmissionKey,
   ENQUIRY_OPEN_EVENT,
   formatCurrency,
   getCommonPathPrefix,
@@ -71,6 +72,7 @@ export default function ContactSection({
   const { vendorInfo } = useVendor() || {};
   const formRef = useRef(null);
   const firstInputRef = useRef(null);
+  const submissionKeyRef = useRef(createEnquirySubmissionKey());
   const isInlineMode = mode === "inline";
 
   const rootCategoryId =
@@ -409,6 +411,7 @@ export default function ContactSection({
     }
 
     const payload = {
+      submissionKey: submissionKeyRef.current,
       vendorId: String(vendorId),
       categoryId: String(rootCategoryId),
       customerId: storedUser?.customerId ? String(storedUser.customerId) : "",
@@ -596,6 +599,7 @@ export default function ContactSection({
       }
 
       setFeedback(`${isEcommerceTemplate ? "Order" : "Enquiry"} submitted successfully.`);
+      submissionKeyRef.current = createEnquirySubmissionKey();
       trackVendorPreviewEvent(
         API_BASE_URL,
         buildVendorPreviewAnalyticsPayload({

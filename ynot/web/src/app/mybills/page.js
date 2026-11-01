@@ -44,6 +44,16 @@ function formatPaise(value) {
     : "-";
 }
 
+function formatPaymentAllocation(bill = {}) {
+  const breakdown = bill.paymentBreakdown || {};
+  if (bill.paymentMode === "SPLIT") {
+    return `Cash ${formatPaise(breakdown.cashAmountPaise)} + Online ${formatPaise(breakdown.onlineAmountPaise)}`;
+  }
+  if (bill.paymentMode === "CASH") return "Cash";
+  if (bill.paymentMode === "ONLINE") return "Online";
+  return "";
+}
+
 function formatDate(value, options = {}) {
   if (!value) return "";
   const date = new Date(value);
@@ -1672,8 +1682,8 @@ function BillDetailPanel({ bill, loading, error, onClose }) {
               </>
             )}
 
-            {bill.paymentMode ? (
-              <p className="portalPaymentPill">{bill.paymentMode}</p>
+            {formatPaymentAllocation(bill) ? (
+              <p className="portalPaymentPill">{formatPaymentAllocation(bill)}</p>
             ) : null}
             {bill.status === "CANCELLED" ? (
               <p className="portalCancelledNotice">
@@ -1801,7 +1811,9 @@ function BillsTab({ token, onAuthExpired }) {
               </div>
             </div>
             <BillRows bill={bill} />
-            {bill.paymentMode ? <p className="portalPaymentPill">{bill.paymentMode}</p> : null}
+            {formatPaymentAllocation(bill) ? (
+              <p className="portalPaymentPill">{formatPaymentAllocation(bill)}</p>
+            ) : null}
             <button
               className="portalSecondaryButton"
               type="button"

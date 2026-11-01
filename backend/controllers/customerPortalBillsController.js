@@ -5,6 +5,7 @@ const Vendor = require("../models/DummyVendor");
 const {
   buildGstInvoicePresentation,
 } = require("../services/gstInvoicePresentationService");
+const { getStoredPaymentAllocation } = require("../services/paymentAllocationService");
 
 const DEFAULT_BILL_LIMIT = 20;
 const MAX_BILL_LIMIT = 50;
@@ -19,7 +20,7 @@ function hasStoredNumber(value) {
 }
 
 function normalizePaymentMode(paymentMode) {
-  return ["ONLINE", "CASH"].includes(paymentMode) ? paymentMode : null;
+  return ["ONLINE", "CASH", "SPLIT"].includes(paymentMode) ? paymentMode : null;
 }
 
 function buildBillFinancials(bill = {}, transaction = null) {
@@ -221,7 +222,12 @@ async function getVendorMapForBills(bills = []) {
 
 function buildBillListItem(bill, { transaction = null, vendor = null } = {}) {
   const financials = buildBillFinancials(bill, transaction);
-  const paymentMode = normalizePaymentMode(bill.paymentMode || transaction?.paymentMode);
+  const paymentAllocation = getStoredPaymentAllocation({
+    paymentMode: bill.paymentMode || transaction?.paymentMode,
+    paymentBreakdown: bill.paymentBreakdown || transaction?.paymentBreakdown,
+    finalPaidAmount: financials.netCollected,
+  });
+  const paymentMode = normalizePaymentMode(paymentAllocation.paymentMode);
   const customerNameSnapshot = String(bill.customerNameSnapshot || "").trim();
 
   const item = {
@@ -245,6 +251,7 @@ function buildBillListItem(bill, { transaction = null, vendor = null } = {}) {
     manualDiscountPercent: financials.manualDiscountPercent,
     membership: financials.membership,
     paymentMode,
+    paymentBreakdown: paymentAllocation.paymentBreakdown,
     financialSnapshotAvailable: financials.financialSnapshotAvailable,
   };
   if (customerNameSnapshot) item.customerNameSnapshot = customerNameSnapshot;
@@ -258,7 +265,12 @@ function buildBillListItem(bill, { transaction = null, vendor = null } = {}) {
 
 function buildBillDetail(bill, { transaction = null, vendor = null } = {}) {
   const financials = buildBillFinancials(bill, transaction);
-  const paymentMode = normalizePaymentMode(bill.paymentMode || transaction?.paymentMode);
+  const paymentAllocation = getStoredPaymentAllocation({
+    paymentMode: bill.paymentMode || transaction?.paymentMode,
+    paymentBreakdown: bill.paymentBreakdown || transaction?.paymentBreakdown,
+    finalPaidAmount: financials.netCollected,
+  });
+  const paymentMode = normalizePaymentMode(paymentAllocation.paymentMode);
 
   const customerNameSnapshot = String(bill.customerNameSnapshot || "").trim();
   const customer = {
@@ -291,6 +303,7 @@ function buildBillDetail(bill, { transaction = null, vendor = null } = {}) {
     manualDiscountPercent: financials.manualDiscountPercent,
     membership: financials.membership,
     paymentMode,
+    paymentBreakdown: paymentAllocation.paymentBreakdown,
     pointsEarned: toSafeNumber(bill.pointsEarned),
     pointsRedeemed: toSafeNumber(bill.pointsRedeemed),
     financialSnapshotAvailable: financials.financialSnapshotAvailable,

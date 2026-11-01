@@ -51,6 +51,10 @@ const {
   sendCompletedBillWhatsApp,
 } = require("../services/billingWhatsappSender");
 const {
+  buildPaymentAllocation,
+  getStoredPaymentAllocation,
+} = require("../services/paymentAllocationService");
+const {
   buildPublicBillPath,
   buildPublicBillUrl,
   createBillAccessToken,
@@ -89,18 +93,6 @@ function getCartRoundingTolerance(cartItems = []) {
   }, 0);
 
   return Math.max(1, totalQuantity);
-}
-
-function normalizeBillingPaymentMode(value) {
-  if (value === undefined || value === null || value === "") {
-    return "ONLINE";
-  }
-
-  if (typeof value !== "string") {
-    return null;
-  }
-
-  return ["ONLINE", "CASH"].includes(value) ? value : null;
 }
 
 function normalizeManualDiscountMode(value) {
@@ -1226,6 +1218,11 @@ async function buildVendorHistoricalBillResponse(bill) {
       ? `+${customerPhone}`
       : "Walk-in";
   const gstInvoice = buildGstInvoicePresentation(bill.gstInvoiceSnapshot);
+  const paymentAllocation = getStoredPaymentAllocation({
+    paymentMode: bill.paymentMode || transaction?.paymentMode,
+    paymentBreakdown: bill.paymentBreakdown || transaction?.paymentBreakdown,
+    finalPaidAmount: financials.netCollected,
+  });
 
   return {
     billId: String(bill._id),
@@ -1262,15 +1259,19 @@ async function buildVendorHistoricalBillResponse(bill) {
       pointsRedeemed: toSafeNumber(bill.pointsRedeemed),
     },
     membership: financials.membership,
-    paymentMode: ["ONLINE", "CASH"].includes(bill.paymentMode || transaction?.paymentMode)
-      ? (bill.paymentMode || transaction?.paymentMode)
-      : "",
+    paymentMode: paymentAllocation.paymentMode || "",
+    paymentBreakdown: paymentAllocation.paymentBreakdown,
     ...(gstInvoice ? { gstInvoice } : {}),
   };
 }
 
 function buildVendorBillListItem({ bill, transaction = null, customerPhone = "" }) {
   const financials = buildHistoricalBillFinancials(bill, transaction);
+  const paymentAllocation = getStoredPaymentAllocation({
+    paymentMode: bill.paymentMode || transaction?.paymentMode,
+    paymentBreakdown: bill.paymentBreakdown || transaction?.paymentBreakdown,
+    finalPaidAmount: financials.netCollected,
+  });
   const effectiveCompletedAt = getEffectiveCompletedAt(bill, transaction);
   const canCancel =
     bill.status === "COMPLETED" &&
@@ -1302,9 +1303,8 @@ function buildVendorBillListItem({ bill, transaction = null, customerPhone = "" 
     cancellationReason: bill.cancellationReason || "",
     cancellationNote: bill.cancellationNote || "",
     cancelledAt: bill.cancelledAt || null,
-    paymentMode: ["ONLINE", "CASH"].includes(bill.paymentMode || transaction?.paymentMode)
-      ? (bill.paymentMode || transaction?.paymentMode)
-      : "",
+    paymentMode: paymentAllocation.paymentMode || "",
+    paymentBreakdown: paymentAllocation.paymentBreakdown,
     items: (bill.cartItems || []).map(buildPublicBillItem),
   };
 }
@@ -2232,15 +2232,7 @@ exports.verifyRedeemOTP = async (req, res) => {
 // ✅ Complete Billing WITH FIFO + OTP SAFETY
 exports.completeBillingSession = async (req, res) => {
   try {
-    const { billingId, paymentMode } = req.body;
-    const normalizedPaymentMode = normalizeBillingPaymentMode(paymentMode);
-
-    if (!normalizedPaymentMode) {
-      return res.status(400).json({
-        success: false,
-        message: "Invalid payment mode. Please choose Online or Cash.",
-      });
-    }
+    const { billingId, paymentMode, paymentBreakdown } = req.body;
 
     const completionResult = await runBillingCompletionAtomically(async (session) => {
       const billing = await findBillingSessionById(billingId, session);
@@ -2374,10 +2366,16 @@ exports.completeBillingSession = async (req, res) => {
       if (gstInvoiceSnapshot) {
         finalPaidAmount = gstInvoiceSnapshot.totals.customerPayablePaise / 100;
       }
+      const paymentAllocation = buildPaymentAllocation({
+        finalPaidAmount,
+        paymentMode,
+        paymentBreakdown,
+      });
       const billingUpdate = {
         status: "COMPLETED",
         completedAt,
-        paymentMode: normalizedPaymentMode,
+        paymentMode: paymentAllocation.paymentMode,
+        paymentBreakdown: paymentAllocation.paymentBreakdown,
         totalAmount: gstInvoiceSnapshot
           ? gstInvoiceSnapshot.totals.invoiceTotalPaise / 100
           : authoritativeFinancials.totalAmount,
@@ -2430,7 +2428,8 @@ exports.completeBillingSession = async (req, res) => {
 
       billing.status = "COMPLETED";
       billing.completedAt = completedAt;
-      billing.paymentMode = normalizedPaymentMode;
+      billing.paymentMode = paymentAllocation.paymentMode;
+      billing.paymentBreakdown = paymentAllocation.paymentBreakdown;
       billing.totalAmount = billingUpdate.totalAmount;
       billing.grossAmount = billingUpdate.grossAmount;
       billing.discountAmount = billingUpdate.discountAmount;
@@ -2467,7 +2466,8 @@ exports.completeBillingSession = async (req, res) => {
         redeemedPoints: effectiveRedeemPoints,
         redeemValue: effectiveRedeemPoints,
         finalPaidAmount,
-        paymentMode: normalizedPaymentMode,
+        paymentMode: paymentAllocation.paymentMode,
+        paymentBreakdown: paymentAllocation.paymentBreakdown,
         paymentStatus: "OFFLINE_PAID",
         billingSource: "POS_OFFLINE",
         status: "COMPLETED",

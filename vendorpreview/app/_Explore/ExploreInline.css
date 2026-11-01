@@ -2379,3 +2379,76 @@
   white-space: nowrap;
   text-align: center;
 }
+
+.quick-billing-payment-allocation {
+  margin-top: 14px;
+  padding: 12px;
+  border: 1px solid rgba(245, 217, 122, 0.3);
+  border-radius: 12px;
+  background: #111;
+}
+
+.quick-billing-payment-payable {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding-bottom: 10px;
+  color: #e6c37a;
+  font-size: 14px;
+}
+
+.quick-billing-payment-payable strong::before {
+  content: "₹";
+}
+
+.quick-billing-payment-inputs {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.quick-billing-payment-inputs label {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  color: rgba(255, 255, 255, 0.82);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.quick-billing-payment-inputs input {
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+  min-height: 44px;
+  padding: 10px;
+  border: 1px solid rgba(245, 217, 122, 0.3);
+  border-radius: 9px;
+  background: #080808;
+  color: #fff;
+  font: inherit;
+  font-size: 16px;
+}
+
+.quick-billing-payment-inputs input:focus {
+  border-color: #e6c37a;
+  outline: 2px solid rgba(230, 195, 122, 0.18);
+}
+
+.quick-billing-payment-inputs input[aria-invalid="true"] {
+  border-color: #e77b72;
+}
+
+.quick-billing-payment-error {
+  margin-top: 8px;
+  color: #ffaaa3;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+@media (max-width: 380px) {
+  .quick-billing-payment-inputs {
+    grid-template-columns: 1fr;
+  }
+}

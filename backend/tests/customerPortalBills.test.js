@@ -127,6 +127,29 @@ test("bill financials follow established revenue reconciliation semantics", () =
   assert.equal(financials.billValue - financials.discountAmount - financials.rewardsRedeemed, financials.netCollected);
 });
 
+test("customer bill detail exposes a validated split payment allocation", () => {
+  const bill = billsController.buildBillDetail(
+    {
+      _id: oid("692900000000000000000099"),
+      vendorId: oid("692900000000000000000098"),
+      status: "COMPLETED",
+      totalAmount: 500,
+      paymentMode: "SPLIT",
+      paymentBreakdown: { cashAmountPaise: 20000, onlineAmountPaise: 30000 },
+      cartItems: [],
+    },
+    {
+      transaction: { finalPaidAmount: 500 },
+    }
+  );
+
+  assert.equal(bill.paymentMode, "SPLIT");
+  assert.deepEqual(bill.paymentBreakdown, {
+    cashAmountPaise: 20000,
+    onlineAmountPaise: 30000,
+  });
+});
+
 test("historical bill without gross or discount falls back safely", () => {
   const financials = billsController.buildBillFinancials(
     {
@@ -325,6 +348,10 @@ test("bill list returns newest-first page with batched transaction and vendor en
     manualDiscountPercent: 0,
     membership: null,
     paymentMode: "CASH",
+    paymentBreakdown: {
+      cashAmountPaise: 85000,
+      onlineAmountPaise: 0,
+    },
     financialSnapshotAvailable: true,
   });
 }));
@@ -575,6 +602,10 @@ test("bill detail returns customer-safe completed bill data", withMockedBillMode
       membershipPlanId: "692900000000000000000063",
     },
     paymentMode: "ONLINE",
+    paymentBreakdown: {
+      cashAmountPaise: 0,
+      onlineAmountPaise: 70000,
+    },
     pointsEarned: 16,
     pointsRedeemed: 100,
     financialSnapshotAvailable: true,

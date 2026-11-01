@@ -83,6 +83,16 @@ function formatPaise(value) {
     : "-";
 }
 
+function formatPayment(detail = {}) {
+  const breakdown = detail.paymentBreakdown || {};
+  if (detail.paymentMode === "SPLIT") {
+    return `Cash ${formatPaise(breakdown.cashAmountPaise)} + Online ${formatPaise(breakdown.onlineAmountPaise)}`;
+  }
+  if (detail.paymentMode === "CASH") return "Cash";
+  if (detail.paymentMode === "ONLINE") return "Online";
+  return "Not Recorded";
+}
+
 function GstInvoiceDetail({ invoice }) {
   if (!invoice) return null;
   const totals = invoice.totals || {};
@@ -168,6 +178,7 @@ function buildReceiptSnapshotFromBillDetail(detail) {
     pointsRedeemed: Number(totals.pointsRedeemed || 0),
     netCollected: Number(totals.netCollected || 0),
     paymentMode: String(detail?.paymentMode || "ONLINE"),
+    paymentBreakdown: detail?.paymentBreakdown || null,
     gstInvoice: detail?.gstInvoice || null,
   };
 }
@@ -1201,7 +1212,7 @@ export default function CustomerSearch({ vendorId, initialCustomer = null }) {
               </div>
               <div>
                 <span>Payment</span>
-                <strong>{billDetail.paymentMode === "CASH" ? "Cash" : "Online"}</strong>
+                <strong>{formatPayment(billDetail)}</strong>
               </div>
               <div>
                 <span>Status</span>

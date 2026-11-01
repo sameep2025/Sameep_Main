@@ -18,7 +18,7 @@
 
 .staff-performance-metrics {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 10px;
   min-width: 0;
 }
@@ -45,6 +45,14 @@
   overflow-wrap: anywhere;
 }
 
+.staff-performance-metric small {
+  display: block;
+  margin-top: 3px;
+  color: rgba(245, 242, 234, 0.5);
+  font-size: 9px;
+  line-height: 1.25;
+}
+
 @media (max-width: 640px) {
   .staff-performance-row {
     grid-template-columns: minmax(0, 1fr);
@@ -54,6 +62,10 @@
 
   .staff-performance-metric {
     text-align: left;
+  }
+
+  .staff-performance-metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .staff-performance-metric span {

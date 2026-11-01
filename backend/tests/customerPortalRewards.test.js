@@ -1141,7 +1141,7 @@ test("valid customer can reveal own eligible reward and response uses authoritat
       type: "EARN",
       points: 100,
       remainingPoints: 0,
-      expiryDate: "2026-11-01T00:00:00.000Z",
+      expiryDate: "2099-11-01T00:00:00.000Z",
       createdAt: "2026-09-30T00:00:00.000Z",
     },
   ], state);
@@ -1155,7 +1155,7 @@ test("valid customer can reveal own eligible reward and response uses authoritat
       type: "EARN",
       points: 100,
       remainingPoints: 30,
-      expiryDate: "2026-11-01T00:00:00.000Z",
+      expiryDate: "2099-11-01T00:00:00.000Z",
     },
   ], state);
 

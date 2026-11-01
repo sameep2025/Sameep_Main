@@ -35,7 +35,10 @@ test("Clear Cart uses the complete billing reset and invalidates pending custome
     "setRedeemPoints(0)",
     "setMembershipPreview(null)",
     "setDiscountAmount(0)",
-    'setPaymentMode("ONLINE")',
+    'lastEditedPaymentFieldRef.current = "cash"',
+    'setCashAmountInput("")',
+    'setOnlineAmountInput("")',
+    'setPaymentAllocationError("")',
   ].forEach((expected) => assert.ok(resetSource.includes(expected), expected));
 });
 

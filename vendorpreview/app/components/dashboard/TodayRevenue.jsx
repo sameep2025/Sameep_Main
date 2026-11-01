@@ -91,9 +91,13 @@ function getBillFinancials(bill) {
 }
 
 function getPaymentModeLabel(bill) {
+  if (bill?.paymentMode === "SPLIT" && bill?.paymentBreakdown) {
+    return `Cash ${currencyFmt.format(Number(bill.paymentBreakdown.cashAmountPaise || 0) / 100)} + Online ${currencyFmt.format(Number(bill.paymentBreakdown.onlineAmountPaise || 0) / 100)}`;
+  }
   if (bill?.paymentModeLabel) return bill.paymentModeLabel;
   if (bill?.paymentMode === "ONLINE") return "Online";
   if (bill?.paymentMode === "CASH") return "Cash";
+  if (bill?.paymentMode === "SPLIT") return "Cash + Online";
   return "Not Recorded";
 }
 

@@ -212,8 +212,13 @@ const BillingSessionSchema = new mongoose.Schema(
 
     paymentMode: {
       type: String,
-      enum: ["ONLINE", "CASH"],
+      enum: ["ONLINE", "CASH", "SPLIT"],
       default: undefined,
+    },
+
+    paymentBreakdown: {
+      cashAmountPaise: { type: Number, min: 0, default: undefined },
+      onlineAmountPaise: { type: Number, min: 0, default: undefined },
     },
 
     otpVerified: {

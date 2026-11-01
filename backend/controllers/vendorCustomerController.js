@@ -11,6 +11,7 @@ const {
   normalizeCustomerName,
   validateOptionalCustomerName,
 } = require("../utils/customerName");
+const { getStoredPaymentAllocation } = require("../services/paymentAllocationService");
 
 function normalizePhoneQuery(phone = "") {
   return String(phone || "").replace(/\D/g, "");
@@ -245,7 +246,7 @@ exports.getVendorCustomer = async (req, res) => {
     const billIds = billsRaw.map((b) => b._id).filter(Boolean);
     const transactions = billIds.length
       ? await Transaction.find({ billingSessionId: { $in: billIds } })
-          .select("_id billingSessionId finalPaidAmount redeemValue paymentMode status createdAt")
+          .select("_id billingSessionId finalPaidAmount redeemValue paymentMode paymentBreakdown status createdAt")
           .lean()
       : [];
     const transactionMap = new Map(
@@ -293,6 +294,15 @@ exports.getVendorCustomer = async (req, res) => {
       const cancellationDeadline = effectiveCompletedAt
         ? new Date(new Date(effectiveCompletedAt).getTime() + 7 * 24 * 60 * 60 * 1000)
         : null;
+      const finalPaidAmount = transaction?.finalPaidAmount ?? Math.max(
+        Number(bill.totalAmount || 0) - Number(transaction?.redeemValue ?? redeemed),
+        0
+      );
+      const paymentAllocation = getStoredPaymentAllocation({
+        paymentMode: bill.paymentMode || transaction?.paymentMode,
+        paymentBreakdown: bill.paymentBreakdown || transaction?.paymentBreakdown,
+        finalPaidAmount,
+      });
 
       return {
         billId: bill._id,
@@ -315,7 +325,8 @@ exports.getVendorCustomer = async (req, res) => {
           cancellationDeadline &&
           new Date() <= cancellationDeadline,
         cancellationDeadline,
-        paymentMode: bill.paymentMode || transaction?.paymentMode || "",
+        paymentMode: paymentAllocation.paymentMode || "",
+        paymentBreakdown: paymentAllocation.paymentBreakdown,
         items: items.map((i) => ({
           itemId: i.itemId ? String(i.itemId) : "",
           name: i.name,

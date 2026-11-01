@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { API_BASE_URL } from "../../../config";
 import { useVendor } from "@/app/context/VendorContext";
+import { getVendorAuthHeaders } from "../../utils/vendorAuth";
 import "./EnquiriesDashboard.css";
 
 function formatDateTime(value) {
@@ -340,7 +341,8 @@ export default function EnquiriesDashboard({ vendorId, categoryId }) {
         setError("");
 
         const response = await fetch(
-          `${API_BASE_URL}/api/enquiries?vendorId=${encodeURIComponent(vendorId)}&categoryId=${encodeURIComponent(categoryId)}`
+          `${API_BASE_URL}/api/enquiries?vendorId=${encodeURIComponent(vendorId)}&categoryId=${encodeURIComponent(categoryId)}`,
+          { headers: getVendorAuthHeaders(vendorId) }
         );
         const data = await response.json().catch(() => []);
 
@@ -636,6 +638,7 @@ export default function EnquiriesDashboard({ vendorId, categoryId }) {
           method: "PUT",
           headers: {
             "Content-Type": "application/json",
+            ...getVendorAuthHeaders(vendorId),
           },
           body: JSON.stringify({ status: "Viewed" }),
         });
@@ -660,7 +663,7 @@ export default function EnquiriesDashboard({ vendorId, categoryId }) {
     return () => {
       cancelled = true;
     };
-  }, [selectedEnquiry, vendorInfo?.selectedTemplateKey]);
+  }, [selectedEnquiry, vendorId, vendorInfo?.selectedTemplateKey]);
 
   return (
     <div className="enquiries-dashboard">
