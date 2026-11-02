@@ -114,12 +114,39 @@ function getAppointmentDateField(category) {
   return candidates[0];
 }
 
-function getCustomerName(attributes = {}) {
-  const entry = Object.entries(attributes).find(([key]) => {
-    const normalized = String(key).trim().toLowerCase();
-    return normalized === 'name' || normalized.includes('customer name') || normalized.includes('full name');
+function normalizeFieldIdentity(value) {
+  return String(value || '').trim().toLowerCase().replace(/\s+/g, ' ');
+}
+
+function isCustomerNameField(field = {}) {
+  return [field.name, field.labelOverride].some((value) => {
+    const normalized = normalizeFieldIdentity(value);
+    return normalized === 'name' ||
+      normalized === 'your name' ||
+      normalized.includes('customer name') ||
+      normalized.includes('full name');
   });
-  return cleanText(entry?.[1], 120);
+}
+
+function getConfiguredCustomerNameField(category = {}) {
+  const fields = Array.isArray(category?.enquiryConfig?.fields)
+    ? category.enquiryConfig.fields
+    : [];
+  return fields.find((field) =>
+    field?.active !== false && field?.enabled !== false && isCustomerNameField(field)
+  ) || null;
+}
+
+function getConfiguredAttributeValue(attributes = {}, field = {}) {
+  const configuredKeys = [field.labelOverride, field.name]
+    .map(normalizeFieldIdentity)
+    .filter(Boolean);
+  if (!configuredKeys.length) return '';
+
+  const entry = Object.entries(attributes).find(([key]) =>
+    configuredKeys.includes(normalizeFieldIdentity(key))
+  );
+  return cleanText(entry?.[1], 500);
 }
 
 function sanitizeAttributes(value) {
@@ -206,11 +233,20 @@ async function buildPublicEnquiryPayload(body = {}) {
 
   if (isAppointmentEnquiryConfig(category)) {
     const dateField = getAppointmentDateField(category);
-    const startAt = parseIstLocalDateTime(attributes[dateField.name]);
-    const customerName = getCustomerName(attributes);
-    if (!customerName || phone.length !== 10) {
+    const startAt = parseIstLocalDateTime(getConfiguredAttributeValue(attributes, dateField));
+    const customerNameField = getConfiguredCustomerNameField(category);
+    const customerName = customerNameField
+      ? cleanText(getConfiguredAttributeValue(attributes, customerNameField), 120)
+      : '';
+    if (customerNameField?.required && !customerName) {
       throw new AppointmentValidationError(
-        'Customer name and 10-digit phone are required for appointments',
+        'Customer name is required for appointments',
+        'invalid_appointment_customer'
+      );
+    }
+    if (phone.length !== 10) {
+      throw new AppointmentValidationError(
+        'A valid 10-digit phone is required for appointments',
         'invalid_appointment_customer'
       );
     }

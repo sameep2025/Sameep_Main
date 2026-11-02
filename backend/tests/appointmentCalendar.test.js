@@ -45,6 +45,38 @@ async function runMiddleware(middleware, req) {
   return { res, nextCalled };
 }
 
+async function withPublicAppointmentConfig(fields, callback) {
+  const originals = [DummyVendor.findById, Vendor.findById, DummyCategory.findById, Category.findById];
+  DummyVendor.findById = () => queryResult({ _id: VENDOR_ID, categoryId: CATEGORY_ID });
+  Vendor.findById = () => queryResult(null);
+  DummyCategory.findById = () => queryResult({
+    _id: CATEGORY_ID,
+    enquiryConfig: { enquiryType: 'appointment', fields },
+  });
+  Category.findById = () => queryResult(null);
+
+  try {
+    return await callback();
+  } finally {
+    [DummyVendor.findById, Vendor.findById, DummyCategory.findById, Category.findById] = originals;
+  }
+}
+
+function publicAppointmentBody(overrides = {}) {
+  return {
+    vendorId: VENDOR_ID,
+    categoryId: CATEGORY_ID,
+    phone: '+91 99999 99999',
+    submissionKey: 'browser-submit-1',
+    attributes: { 'Appointment Time': '2026-11-01T09:30' },
+    meta: {
+      enquiryType: 'appointment',
+      cartItems: [{ itemId: 'service-1', name: 'Hair Cut', qty: 1 }],
+    },
+    ...overrides,
+  };
+}
+
 test('appointment timestamps and day boundaries are canonical Asia/Kolkata instants', () => {
   assert.equal(parseIstLocalDateTime('2026-11-01T09:30').toISOString(), '2026-11-01T04:00:00.000Z');
   const bounds = getIstDayBounds('2026-11-01');
@@ -95,7 +127,10 @@ test('public appointment submission ignores protected fields and creates normali
     _id: CATEGORY_ID,
     enquiryConfig: {
       enquiryType: 'appointment',
-      fields: [{ name: 'Appointment Time', fieldType: 'datetime-local', enabled: true }],
+      fields: [
+        { name: 'Name', labelOverride: 'Your Name', fieldType: 'text', required: true, enabled: true },
+        { name: 'Appointment Time', fieldType: 'datetime-local', enabled: true },
+      ],
     },
   });
   Category.findById = () => queryResult(null);
@@ -108,7 +143,7 @@ test('public appointment submission ignores protected fields and creates normali
       submissionKey: 'browser-submit-1',
       status: 'Completed',
       appointment: { status: 'COMPLETED', audit: 'client-controlled' },
-      attributes: { Name: '  Test Customer ', 'Appointment Time': '2026-11-01T09:30' },
+      attributes: { 'Your Name': '  Test Customer ', 'Appointment Time': '2026-11-01T09:30' },
       meta: { enquiryType: 'appointment', protected: true, cartItems: [
         { itemId: 'service-1', name: 'Hair Cut', qty: 1 },
         { itemId: 'service-2', name: 'Hair Spa', qty: 1 },
@@ -123,6 +158,105 @@ test('public appointment submission ignores protected fields and creates normali
     assert.equal(payload.appointment.history[0].actorType, 'PUBLIC');
   } finally {
     [DummyVendor.findById, Vendor.findById, DummyCategory.findById, Category.findById] = originals;
+  }
+});
+
+test('public appointment resolves custom labels from configured canonical fields', async () => {
+  await withPublicAppointmentConfig([
+    { name: 'Name', labelOverride: 'Preferred Guest', fieldType: 'text', required: true, enabled: true },
+    { name: 'Appointment Time', labelOverride: 'Preferred Time', fieldType: 'datetime-local', enabled: true },
+  ], async () => {
+    const payload = await buildPublicEnquiryPayload(publicAppointmentBody({
+      attributes: { 'Preferred Guest': '  Anu Rao ', 'Preferred Time': '2026-11-01T09:30' },
+    }));
+    assert.equal(payload.appointment.customerName, 'Anu Rao');
+    assert.equal(payload.appointment.startAt.toISOString(), '2026-11-01T04:00:00.000Z');
+  });
+});
+
+test('public appointment allows optional or unconfigured customer names', async () => {
+  const dateField = { name: 'Appointment Time', fieldType: 'datetime-local', enabled: true };
+  for (const fields of [
+    [{ name: 'Name', labelOverride: 'Your Name', fieldType: 'text', required: false, enabled: true }, dateField],
+    [dateField],
+  ]) {
+    await withPublicAppointmentConfig(fields, async () => {
+      const payload = await buildPublicEnquiryPayload(publicAppointmentBody());
+      assert.equal(payload.appointment.customerName, '');
+      assert.equal(payload.appointment.source, 'ONLINE');
+      assert.equal(payload.appointment.status, 'REQUESTED');
+    });
+  }
+});
+
+test('public appointment preserves required-name and valid-phone validation', async () => {
+  const fields = [
+    { name: 'Name', labelOverride: 'Your Name', fieldType: 'text', required: true, enabled: true },
+    { name: 'Appointment Time', fieldType: 'datetime-local', enabled: true },
+  ];
+  await withPublicAppointmentConfig(fields, async () => {
+    await assert.rejects(
+      buildPublicEnquiryPayload(publicAppointmentBody()),
+      (error) => error.code === 'invalid_appointment_customer' && /name is required/i.test(error.message)
+    );
+    await assert.rejects(
+      buildPublicEnquiryPayload(publicAppointmentBody({
+        phone: '12345',
+        attributes: { 'Your Name': 'Anu Rao', 'Appointment Time': '2026-11-01T09:30' },
+      })),
+      (error) => error.code === 'invalid_appointment_customer' && /10-digit phone/i.test(error.message)
+    );
+  });
+});
+
+test('new public ONLINE appointment remains visible through the vendor Calendar', async () => {
+  const originalFind = Enquiry.find;
+  await withPublicAppointmentConfig([
+    { name: 'Appointment Time', fieldType: 'datetime-local', enabled: true },
+  ], async () => {
+    const payload = await buildPublicEnquiryPayload(publicAppointmentBody());
+    const stored = new Enquiry(payload).toObject();
+    let calendarQuery;
+    Enquiry.find = (query) => {
+      calendarQuery = query;
+      return { sort() { return this; }, lean: async () => [stored] };
+    };
+    try {
+      const res = response();
+      await controller.listAppointments({
+        vendorWriteAuth: { vendorId: VENDOR_ID },
+        query: { vendorId: VENDOR_ID, date: '2026-11-01' },
+      }, res);
+      assert.equal(res.statusCode, 200);
+      assert.equal(calendarQuery.vendorId, VENDOR_ID);
+      assert.equal(res.payload.appointments[0].appointment.source, 'ONLINE');
+      assert.equal(res.payload.appointments[0].appointment.status, 'REQUESTED');
+    } finally {
+      Enquiry.find = originalFind;
+    }
+  });
+});
+
+test('authenticated vendor Calendar booking still requires a customer name', async () => {
+  const originals = [DummyVendor.findById, Enquiry.findOne];
+  DummyVendor.findById = () => queryResult({ _id: VENDOR_ID, categoryId: CATEGORY_ID });
+  Enquiry.findOne = () => ({ lean: async () => null });
+  try {
+    const res = response();
+    await controller.createManualAppointment({
+      vendorWriteAuth: { vendorId: VENDOR_ID },
+      body: {
+        submissionKey: 'manual-missing-name',
+        customerName: '',
+        phone: '9999999999',
+        startAt: '2026-11-01T09:30',
+        services: [{ itemId: '692403a24d4d3a1b6a7f0aeb', quantity: 1 }],
+      },
+    }, res);
+    assert.equal(res.statusCode, 400);
+    assert.equal(res.payload.code, 'invalid_appointment_customer');
+  } finally {
+    [DummyVendor.findById, Enquiry.findOne] = originals;
   }
 });
 

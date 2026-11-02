@@ -97,10 +97,9 @@
 .appointment-service-results button b { flex: 0 0 auto; color: #e6c37a; font-size: 12px; }
 .appointment-service-results button:disabled { cursor: default; opacity: .62; }
 
-.today-appointments-widget { position: fixed; right: 18px; bottom: 88px; z-index: 850; display: flex; align-items: center; gap: 14px; min-height: 54px; padding: 9px 12px 9px 14px; border: 1px solid rgba(230,195,122,.5); border-radius: 14px; background: #111; color: #f6e5b4; box-shadow: 0 10px 28px rgba(0,0,0,.42); cursor: pointer; }
+.today-appointments-widget { position: fixed; right: 18px; bottom: 88px; z-index: 850; display: flex; align-items: center; gap: 10px; min-height: 46px; padding: 7px 10px 7px 12px; border: 1px solid rgba(230,195,122,.5); border-radius: 14px; background: #111; color: #f6e5b4; box-shadow: 0 10px 28px rgba(0,0,0,.42); cursor: pointer; }
 .today-appointments-widget > span:first-child { display: grid; text-align: left; }
-.today-appointments-widget small { color: #aaa; }
-.today-appointments-count { display: grid; place-items: center; min-width: 34px; height: 34px; border-radius: 50%; background: #e6c37a; color: #111; font-weight: 900; }
+.today-appointments-count { display: grid; place-items: center; min-width: 30px; height: 30px; border-radius: 50%; background: #e6c37a; color: #111; font-weight: 900; }
 
 @media (max-width: 620px) {
   .appointment-calendar-dashboard-overlay { padding: max(12px, env(safe-area-inset-top)) 12px max(16px, env(safe-area-inset-bottom)); }

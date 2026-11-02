@@ -83,6 +83,9 @@ test('homepage widget explicitly opens Calendar on the current IST date', () => 
   assert.match(calendar, /onOpen\?\.\(istDateValue\(\)\)/);
   assert.match(explore, /setAppointmentCalendarInitialDate\(today\)/);
   assert.match(explore, /initialDate=\{appointmentCalendarInitialDate\}/);
+  assert.match(calendar, /Today&apos;s Appointments/);
+  assert.doesNotMatch(calendar, /Private vendor view/);
+  assert.match(css, /today-appointments-widget[^}]*min-height: 46px/);
 });
 
 test('booking uses separate date and time controls with the selected Calendar date', () => {

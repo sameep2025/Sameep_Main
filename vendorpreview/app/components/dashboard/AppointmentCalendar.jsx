@@ -203,7 +203,7 @@ export function TodayAppointmentsWidget({ vendorId, onOpen }) {
   }, [vendorId]);
   return (
     <button type="button" className="today-appointments-widget" onClick={() => onOpen?.(istDateValue())}>
-      <span><strong>Today&apos;s Appointments</strong><small>Private vendor view</small></span>
+      <span><strong>Today&apos;s Appointments</strong></span>
       <span className="today-appointments-count">{appointments.length}</span>
     </button>
   );
