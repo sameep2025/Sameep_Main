@@ -21,6 +21,8 @@ export function formatReceiptPayment(receiptSnapshot = {}) {
   if (mode === "SPLIT" && cash && online) return `Cash ${cash} + Online ${online}`;
   if (mode === "CASH") return cash ? `Cash ${cash}` : "Cash";
   if (mode === "ONLINE") return online ? `Online ${online}` : "Online";
+  if (mode === "PREPAID_VALUE" && receiptSnapshot.prepaidSettlement) return "Prepaid Wallet";
+  if (mode === "PREPAID_SESSIONS" && receiptSnapshot.prepaidSettlement) return "Prepaid Package";
   return "Not Recorded";
 }
 
@@ -461,7 +463,30 @@ export function printReceiptSnapshot(receiptSnapshot) {
   if (Number(receiptSnapshot.pointsEarned || 0) > 0) {
     addRow("Loyalty Points Earned", String(Number(receiptSnapshot.pointsEarned || 0)), "total-row", totals);
   }
-  addRow("NET COLLECTED", formatReceiptCurrency(receiptSnapshot.netCollected), "total-row net", totals);
+  const prepaidSettlement = receiptSnapshot.prepaidSettlement;
+  const prepaidAction = receiptSnapshot.status === "CANCELLED" ? "Restored" : "Redeemed";
+  if (prepaidSettlement?.paymentMode === "PREPAID_VALUE") {
+    addRow(
+      `Prepaid Wallet ${prepaidAction}`,
+      formatReceiptPaise(prepaidSettlement.redeemedAmountPaise),
+      "total-row",
+      totals
+    );
+    addRow("Balance Due", formatReceiptPaise(prepaidSettlement.balanceDuePaise), "total-row net", totals);
+  } else if (prepaidSettlement?.paymentMode === "PREPAID_SESSIONS") {
+    const itemLabel = prepaidSettlement.redeemedItemName
+      ? ` - ${prepaidSettlement.redeemedItemName}`
+      : "";
+    addRow(
+      `Prepaid Package ${prepaidAction}`,
+      `${Number(prepaidSettlement.redeemedQuantity)} session(s)${itemLabel}`,
+      "total-row",
+      totals
+    );
+    addRow("Balance Due", formatReceiptPaise(prepaidSettlement.balanceDuePaise), "total-row net", totals);
+  } else {
+    addRow("NET COLLECTED", formatReceiptCurrency(receiptSnapshot.netCollected), "total-row net", totals);
+  }
   addRow(
     "Payment Mode",
     formatReceiptPayment(receiptSnapshot),

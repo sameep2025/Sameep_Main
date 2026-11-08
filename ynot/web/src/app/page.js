@@ -17,6 +17,7 @@ import {
   trackSitePageView,
 } from "../utils/siteAnalytics";
 import { PREVIEW_BASE_URL } from "../utils/config";
+import { sortCategoriesByPopularity } from "../utils/categoryPopularity.mjs";
 
 function buildTrustedPartnerPreviewUrl(subdomain) {
   const normalized = String(subdomain || "").trim().toLowerCase();
@@ -132,12 +133,7 @@ export default function Home() {
   }, [trustedPartners.length]);
 
   const sortedCategories = useMemo(
-    () =>
-      [...categories].sort(
-        (a, b) =>
-          (b.vendorCount || b.totalVendors || 0) -
-          (a.vendorCount || a.totalVendors || 0)
-      ),
+    () => sortCategoriesByPopularity(categories),
     [categories]
   );
 

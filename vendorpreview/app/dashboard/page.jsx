@@ -117,7 +117,8 @@ export default function VendorDashboardPage() {
     const fetchSummary = async () => {
       try {
         const res = await fetch(
-          `${API_BASE_URL}/api/vendor/dashboard/summary?vendorId=${vendorId}`
+          `${API_BASE_URL}/api/vendor/dashboard/summary?vendorId=${vendorId}`,
+          { headers: getVendorAuthHeaders(vendorId) }
         );
 
         if (!res.ok) throw new Error("Failed to load dashboard");
@@ -127,7 +128,8 @@ export default function VendorDashboardPage() {
         setError(null);
 
         const fyRes = await fetch(
-          `${API_BASE_URL}/api/vendor/dashboard/fy-monthly?vendorId=${vendorId}`
+          `${API_BASE_URL}/api/vendor/dashboard/fy-monthly?vendorId=${vendorId}`,
+          { headers: getVendorAuthHeaders(vendorId) }
         );
         const fyJson = await fyRes.json();
         setFyData(fyJson.data || []);
@@ -166,7 +168,8 @@ export default function VendorDashboardPage() {
     async function fetchTopServices() {
       try {
         const res = await fetch(
-          `${API_BASE_URL}/api/vendor/dashboard/top-services?vendorId=${vendorId}`
+          `${API_BASE_URL}/api/vendor/dashboard/top-services?vendorId=${vendorId}`,
+          { headers: getVendorAuthHeaders(vendorId) }
         );
         const data = await res.json();
         if (data.success) setTopServices(data.data);
@@ -182,7 +185,8 @@ export default function VendorDashboardPage() {
     async function fetchTrend() {
       try {
         const res = await fetch(
-          `${API_BASE_URL}/api/vendor/dashboard/daily-trend?vendorId=${vendorId}`
+          `${API_BASE_URL}/api/vendor/dashboard/daily-trend?vendorId=${vendorId}`,
+          { headers: getVendorAuthHeaders(vendorId) }
         );
         const data = await res.json();
         if (data.success) setDailyTrend(data.data);
@@ -314,7 +318,8 @@ export default function VendorDashboardPage() {
       todayEnd.setHours(23, 59, 59, 999);
 
       const res = await fetch(
-        `${API_BASE_URL}/api/vendor/dashboard/bills?vendorId=${vendorId}&from=${todayStart.toISOString()}&to=${todayEnd.toISOString()}`
+        `${API_BASE_URL}/api/vendor/dashboard/bills?vendorId=${vendorId}&from=${todayStart.toISOString()}&to=${todayEnd.toISOString()}`,
+        { headers: getVendorAuthHeaders(vendorId) }
       );
 
       const data = await res.json();

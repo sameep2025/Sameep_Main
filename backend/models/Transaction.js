@@ -1,4 +1,5 @@
 const mongoose = require("mongoose");
+const PrepaidSettlementSnapshotSchema = require("./prepaidSettlementSnapshotSchema");
 
 const TransactionSchema = new mongoose.Schema(
   {
@@ -27,7 +28,6 @@ const TransactionSchema = new mongoose.Schema(
     billingSessionId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "BillingSession",
-      index: true,
     },
 
     totalAmount: Number,
@@ -114,12 +114,18 @@ const TransactionSchema = new mongoose.Schema(
 
     paymentMode: {
       type: String,
-      enum: ["CASH", "UPI", "CARD", "ONLINE", "SPLIT"],
+      enum: ["CASH", "UPI", "CARD", "ONLINE", "SPLIT", "PREPAID_VALUE", "PREPAID_SESSIONS"],
     },
 
     paymentBreakdown: {
       cashAmountPaise: { type: Number, min: 0, default: undefined },
       onlineAmountPaise: { type: Number, min: 0, default: undefined },
+    },
+
+    prepaidSettlementSnapshot: {
+      type: PrepaidSettlementSnapshotSchema,
+      default: undefined,
+      immutable: true,
     },
 
     paymentStatus: {
@@ -201,6 +207,7 @@ TransactionSchema.index(
     partialFilterExpression: {
       billingSessionId: { $exists: true, $type: "objectId" },
     },
+    name: "transaction_billing_session_unique",
   }
 );
 

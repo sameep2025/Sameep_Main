@@ -6,10 +6,105 @@ const Transaction = require("../models/Transaction");
 const VendorCustomerProfile = require("../models/VendorCustomerProfile");
 const { calculateMembershipBillingPreview } = require("../utils/membershipBillingCalculator");
 const { getStoredPaymentAllocation } = require("../services/paymentAllocationService");
+const {
+  getPrepaidRevenueDaily,
+  getPrepaidRevenueMonthly,
+  getPrepaidRevenueSummary,
+  normalizeReportingRows,
+} = require("../services/prepaidRevenueReportingService");
+const {
+  REPORTING_TIMEZONE,
+  getIstDayBounds,
+  getIstDayKeys,
+  getIstMonthBounds,
+  getIstMonthStart,
+  getIstRollingMonthWindow,
+  isIstCalendarBoundary,
+} = require("../services/revenueReportingTimezone");
 const mongoose = require("mongoose");
 
 const NO_STYLIST_SELECTED_ID = "NO_STYLIST_SELECTED";
 const NO_STYLIST_SELECTED_LABEL = "No Stylist Selected";
+const DEFAULT_BILL_PAGE_LIMIT = 100;
+const MAX_BILL_PAGE_LIMIT = 250;
+const MAX_DAILY_TREND_DAYS = 366;
+
+function parseReportingDate(value, field) {
+  if (!value) return null;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    const error = new Error(`${field} must be a valid ISO date`);
+    error.statusCode = 400;
+    throw error;
+  }
+  return date;
+}
+
+function resolveExclusiveEnd(rawTo, endMode = "auto") {
+  const to = parseReportingDate(rawTo, "to");
+  if (!to) return null;
+  const normalizedMode = String(endMode || "auto").trim().toLowerCase();
+  if (!["auto", "exclusive", "inclusive"].includes(normalizedMode)) {
+    const error = new Error("endMode must be auto, inclusive, or exclusive");
+    error.statusCode = 400;
+    throw error;
+  }
+  if (normalizedMode === "exclusive" || (normalizedMode === "auto" && isIstCalendarBoundary(to))) {
+    return to;
+  }
+  return new Date(to.getTime() + 1);
+}
+
+function resolveReportingRange(query = {}, { requireBounded = false } = {}) {
+  const from = parseReportingDate(query.from, "from");
+  const endExclusive = resolveExclusiveEnd(query.to, query.endMode);
+  if (requireBounded && (!from || !endExclusive)) {
+    const error = new Error("Both from and to are required for a custom reporting range");
+    error.statusCode = 400;
+    throw error;
+  }
+  if (from && endExclusive && from >= endExclusive) {
+    const error = new Error("Reporting range end must be after its start");
+    error.statusCode = 400;
+    throw error;
+  }
+  return { from, endExclusive };
+}
+
+function buildCreatedAtRange({ from, endExclusive }) {
+  if (!from && !endExclusive) return null;
+  return {
+    ...(from ? { $gte: from } : {}),
+    ...(endExclusive ? { $lt: endExclusive } : {}),
+  };
+}
+
+function parseBillPageLimit(value) {
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed < 1) return DEFAULT_BILL_PAGE_LIMIT;
+  return Math.min(parsed, MAX_BILL_PAGE_LIMIT);
+}
+
+function encodeBillCursor(bill) {
+  return Buffer.from(JSON.stringify({
+    createdAt: new Date(bill.createdAt).toISOString(),
+    id: String(bill._id),
+  })).toString("base64url");
+}
+
+function decodeBillCursor(value) {
+  if (!value) return null;
+  try {
+    const parsed = JSON.parse(Buffer.from(String(value), "base64url").toString("utf8"));
+    const createdAt = parseReportingDate(parsed.createdAt, "cursor.createdAt");
+    if (!createdAt || !mongoose.Types.ObjectId.isValid(parsed.id)) throw new Error("invalid cursor");
+    return { createdAt, id: new mongoose.Types.ObjectId(parsed.id) };
+  } catch (error) {
+    const cursorError = new Error("Invalid bill pagination cursor");
+    cursorError.statusCode = 400;
+    throw cursorError;
+  }
+}
 
 function toSafeNumber(value, fallback = 0) {
   const number = Number(value);
@@ -191,11 +286,15 @@ function getPaymentModeLabel(paymentMode) {
   if (paymentMode === "ONLINE") return "Online";
   if (paymentMode === "CASH") return "Cash";
   if (paymentMode === "SPLIT") return "Cash + Online";
+  if (paymentMode === "PREPAID_VALUE") return "Prepaid Value Wallet";
+  if (paymentMode === "PREPAID_SESSIONS") return "Prepaid Sessions Wallet";
   return "Not Recorded";
 }
 
 function getNormalizedPaymentMode(paymentMode) {
-  return ["ONLINE", "CASH", "SPLIT"].includes(paymentMode) ? paymentMode : null;
+  return ["ONLINE", "CASH", "SPLIT", "PREPAID_VALUE", "PREPAID_SESSIONS"].includes(paymentMode)
+    ? paymentMode
+    : null;
 }
 
 function getCartItemNetRevenueExpression() {
@@ -359,11 +458,16 @@ function getFinancialAccumulatorStage() {
     $ifNull: ["$grossAmount", { $ifNull: ["$totalAmount", 0] }],
   };
   const netCollectedExpression = {
-    $max: [
+    $ifNull: [
+      "$transaction.finalPaidAmount",
       {
-        $subtract: [{ $ifNull: ["$totalAmount", 0] }, rewardsExpression],
+        $max: [
+          {
+            $subtract: [{ $ifNull: ["$totalAmount", 0] }, rewardsExpression],
+          },
+          0,
+        ],
       },
-      0,
     ],
   };
   const netCollectedPaiseExpression = {
@@ -490,18 +594,9 @@ function buildFinancialSummary(row = {}) {
 }
 
 // Helper: start of day
-const startOfToday = () => {
-  const d = new Date();
-  d.setHours(0, 0, 0, 0);
-  return d;
-};
+const startOfToday = (now = new Date()) => getIstDayBounds(now).start;
 
-const startOfMonth = () => {
-  const d = new Date();
-  d.setDate(1);
-  d.setHours(0, 0, 0, 0);
-  return d;
-};
+const startOfMonth = (now = new Date()) => getIstMonthStart(now);
 
 exports.getDashboardSummary = async (req, res) => {
   try {
@@ -551,7 +646,8 @@ exports.getDashboardSummary = async (req, res) => {
     const monthAvgBill = monthOrders > 0 ? Math.round(monthRevenue / monthOrders) : 0;
     const monthFinancials = buildFinancialSummary(monthRow);
 
-    const loyaltyAgg = await LoyaltyLedger.aggregate([
+    const [loyaltyAgg, todayPrepaidReporting, monthPrepaidReporting] = await Promise.all([
+      LoyaltyLedger.aggregate([
       {
         $match: {
           vendorId: vendorObjectId,
@@ -576,6 +672,9 @@ exports.getDashboardSummary = async (req, res) => {
           },
         },
       },
+      ]),
+      getPrepaidRevenueSummary({ vendorId, from: today }),
+      getPrepaidRevenueSummary({ vendorId, from: monthStart }),
     ]);
 
     const loyaltyRow = loyaltyAgg?.[0] || {};
@@ -594,6 +693,7 @@ exports.getDashboardSummary = async (req, res) => {
         todayOnlineCollected: todayFinancials.onlineCollected,
         todayCashCollected: todayFinancials.cashCollected,
         todayNotRecordedCollected: todayFinancials.notRecordedCollected,
+        todayPrepaidReporting,
         monthRevenue,
         monthOrders,
         monthAvgBill,
@@ -605,6 +705,7 @@ exports.getDashboardSummary = async (req, res) => {
         monthOnlineCollected: monthFinancials.onlineCollected,
         monthCashCollected: monthFinancials.cashCollected,
         monthNotRecordedCollected: monthFinancials.notRecordedCollected,
+        monthPrepaidReporting,
         loyaltyEarned: loyaltyRow.earned || 0,
         loyaltyRedeemed: loyaltyRow.redeemed || 0,
       },
@@ -624,14 +725,12 @@ exports.getFinancialYearMonthly = async (req, res) => {
     }
 
     const now = new Date();
-    const currentMonthStart = new Date(now.getFullYear(), now.getMonth(), 1);
-    const rollingStart = new Date(currentMonthStart);
-    rollingStart.setMonth(rollingStart.getMonth() - 11);
+    const rollingWindow = getIstRollingMonthWindow(now, 12);
+    const rollingStart = rollingWindow.start;
+    const rollingEnd = rollingWindow.endExclusive;
 
-    const rollingEnd = new Date(currentMonthStart);
-    rollingEnd.setMonth(rollingEnd.getMonth() + 1);
-
-    const aggregationResult = await BillingSession.aggregate([
+    const [aggregationResult, prepaidMonthly] = await Promise.all([
+      BillingSession.aggregate([
       {
         $match: {
           vendorId: new mongoose.Types.ObjectId(vendorId),
@@ -643,13 +742,18 @@ exports.getFinancialYearMonthly = async (req, res) => {
       {
         $group: {
           _id: {
-            year: { $year: "$createdAt" },
-            month: { $month: "$createdAt" },
+            $dateToString: {
+              format: "%Y-%m",
+              date: "$createdAt",
+              timezone: REPORTING_TIMEZONE,
+            },
           },
           ...getFinancialAccumulatorStage(),
         },
       },
-      { $sort: { "_id.year": 1, "_id.month": 1 } },
+      { $sort: { _id: 1 } },
+      ]),
+      getPrepaidRevenueMonthly({ vendorId, from: rollingStart, to: rollingEnd }),
     ]);
 
     const MONTH_LABELS = [
@@ -660,11 +764,12 @@ exports.getFinancialYearMonthly = async (req, res) => {
     // Convert aggregation into lookup
     const monthMap = {};
     aggregationResult.forEach((m) => {
-      const monthKey = `${m._id.year}-${String(m._id.month).padStart(2, "0")}`;
-      const label = MONTH_LABELS[m._id.month - 1];
+      const monthKey = String(m._id || "");
+      const [year, monthNumber] = monthKey.split("-").map(Number);
+      const label = MONTH_LABELS[monthNumber - 1];
       monthMap[monthKey] = {
         month: label,
-        year: m._id.year,
+        year,
         revenue: m.revenue || 0,
         billValue: m.billValue || m.netBillValue || m.revenue || 0,
         netBillValue: m.netBillValue || m.revenue || 0,
@@ -680,13 +785,9 @@ exports.getFinancialYearMonthly = async (req, res) => {
       };
     });
 
-    const rollingYearData = Array.from({ length: 12 }, (_, index) => {
-      const date = new Date(rollingStart);
-      date.setMonth(rollingStart.getMonth() + index);
-      const year = date.getFullYear();
-      const monthNumber = date.getMonth() + 1;
-      const month = MONTH_LABELS[date.getMonth()];
-      const monthKey = `${year}-${String(monthNumber).padStart(2, "0")}`;
+    const rollingYearData = rollingWindow.months.map((calendarMonth) => {
+      const { year, month: monthIndex, monthKey } = calendarMonth;
+      const month = MONTH_LABELS[monthIndex];
       const row = monthMap[monthKey] || {};
 
       return {
@@ -694,10 +795,9 @@ exports.getFinancialYearMonthly = async (req, res) => {
         year,
         monthKey,
         label: `${month} ${year}`,
-        startDate: date.toISOString(),
-        endDate: new Date(year, monthNumber, 1).toISOString(),
-        isCurrentMonth:
-          year === now.getFullYear() && date.getMonth() === now.getMonth(),
+        startDate: calendarMonth.start.toISOString(),
+        endDate: calendarMonth.endExclusive.toISOString(),
+        isCurrentMonth: calendarMonth.isCurrentMonth,
         revenue: row.revenue || 0,
         billValue: row.billValue || row.netBillValue || row.revenue || 0,
         netBillValue: row.netBillValue || row.revenue || 0,
@@ -710,6 +810,7 @@ exports.getFinancialYearMonthly = async (req, res) => {
         totalBills: row.totalBills || row.orders || 0,
         orders: row.orders || 0,
         avgBill: row.avgBill || 0,
+        prepaidReporting: prepaidMonthly.get(monthKey) || {},
       };
     });
 
@@ -758,34 +859,112 @@ exports.getTopServices = async (req, res) => {
 
 exports.getDailyTrend = async (req, res) => {
   try {
-    const { vendorId } = req.query;
+    const { vendorId, month } = req.query;
     if (!vendorId) {
       return res.status(400).json({ success: false, message: "vendorId required" });
     }
+    if (!mongoose.Types.ObjectId.isValid(vendorId)) {
+      return res.status(400).json({ success: false, message: "Valid vendorId required" });
+    }
 
     const now = new Date();
-    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+    let range;
+    if (month) {
+      range = getIstMonthBounds(month);
+    } else if (req.query.from || req.query.to) {
+      range = resolveReportingRange(req.query, { requireBounded: true });
+    } else {
+      range = {
+        start: getIstMonthStart(now),
+        endExclusive: getIstDayBounds(now).endExclusive,
+      };
+    }
+    const from = range.from || range.start;
+    const endExclusive = range.endExclusive;
+    let dayKeys;
+    try {
+      dayKeys = getIstDayKeys(from, endExclusive, MAX_DAILY_TREND_DAYS);
+    } catch (error) {
+      if (error instanceof RangeError) {
+        return res.status(400).json({
+          success: false,
+          message: `Daily trend range cannot exceed ${MAX_DAILY_TREND_DAYS} days`,
+        });
+      }
+      throw error;
+    }
 
-    const trend = await BillingSession.aggregate([
-      {
-        $match: {
-          vendorId: new mongoose.Types.ObjectId(vendorId),
-          status: "COMPLETED",
-          createdAt: { $gte: startOfMonth },
+    const [trend, prepaidDaily] = await Promise.all([
+      BillingSession.aggregate([
+        {
+          $match: {
+            vendorId: new mongoose.Types.ObjectId(vendorId),
+            status: "COMPLETED",
+            createdAt: { $gte: from, $lt: endExclusive },
+          },
         },
-      },
-      {
-        $group: {
-          _id: { day: { $dayOfMonth: "$createdAt" } },
-          revenue: { $sum: "$totalAmount" },
-          orders: { $sum: 1 },
+        ...withTransactionLookupStages(),
+        {
+          $group: {
+            _id: {
+              $dateToString: {
+                format: "%Y-%m-%d",
+                date: "$createdAt",
+                timezone: REPORTING_TIMEZONE,
+              },
+            },
+            ...getFinancialAccumulatorStage(),
+          },
         },
-      },
-      { $sort: { "_id.day": 1 } },
+        { $sort: { _id: 1 } },
+      ]),
+      getPrepaidRevenueDaily({ vendorId, from, to: endExclusive }),
     ]);
+    const trendMap = new Map(trend.map((row) => [String(row._id), row]));
+    const data = dayKeys.map((date) => {
+      const row = trendMap.get(date) || {};
+      const summary = buildFinancialSummary(row);
+      const day = Number(date.slice(-2));
+      return {
+        _id: { day, date },
+        date,
+        revenue: row.revenue || 0,
+        orders: summary.totalBills,
+        completedBills: summary.totalBills,
+        grossBillValue: summary.billValue,
+        billValue: summary.billValue,
+        discountsGiven: summary.discountsGiven,
+        rewardsRedeemed: summary.rewardsRedeemed,
+        netCollected: summary.netCollected,
+        onlineCollected: summary.onlineCollected,
+        cashCollected: summary.cashCollected,
+        notRecordedCollected: summary.notRecordedCollected,
+        paymentBreakdown: {
+          onlineCollected: summary.onlineCollected,
+          cashCollected: summary.cashCollected,
+          notRecordedCollected: summary.notRecordedCollected,
+        },
+        prepaidReporting: prepaidDaily.get(date) || normalizeReportingRows(),
+      };
+    });
 
-    res.json({ success: true, data: trend });
+    res.json({
+      success: true,
+      data,
+      range: {
+        from: from.toISOString(),
+        endExclusive: endExclusive.toISOString(),
+        timezone: REPORTING_TIMEZONE,
+      },
+      legacyFields: {
+        revenue: "Completed bill value after discounts and before loyalty redemption",
+        orders: "Completed bill count",
+      },
+    });
   } catch (err) {
+    if (err?.statusCode === 400 || err instanceof TypeError) {
+      return res.status(400).json({ success: false, message: err.message });
+    }
     console.error("Daily trend error", err);
     res.status(500).json({ success: false });
   }
@@ -793,34 +972,46 @@ exports.getDailyTrend = async (req, res) => {
 
 exports.getBillsDrilldown = async (req, res) => {
   try {
-    const { vendorId, from, to, limit = 100 } = req.query;
+    const { vendorId } = req.query;
 
     if (!vendorId) {
       return res.status(400).json({ success: false, message: "vendorId required" });
     }
+    if (!mongoose.Types.ObjectId.isValid(vendorId)) {
+      return res.status(400).json({ success: false, message: "Valid vendorId required" });
+    }
+
+    const limit = parseBillPageLimit(req.query.limit);
+    const cursor = decodeBillCursor(req.query.cursor);
+    const range = resolveReportingRange(req.query);
 
     const query = {
       vendorId: new mongoose.Types.ObjectId(vendorId),
       status: "COMPLETED",
     };
 
-    if (from || to) {
-      query.createdAt = {};
-      if (from) query.createdAt.$gte = new Date(from);
-      if (to) query.createdAt.$lte = new Date(to);
+    const createdAtRange = buildCreatedAtRange(range);
+    if (createdAtRange) query.createdAt = createdAtRange;
+    if (cursor) {
+      query.$or = [
+        { createdAt: { $lt: cursor.createdAt } },
+        { createdAt: cursor.createdAt, _id: { $lt: cursor.id } },
+      ];
     }
 
     const bills = await BillingSession.find(query)
-      .sort({ createdAt: -1 })
-      .limit(Number(limit))
+      .sort({ createdAt: -1, _id: -1 })
+      .limit(limit + 1)
       .lean();
+    const hasMore = bills.length > limit;
+    const pageBills = bills.slice(0, limit);
     const [transactionMap, customerMap, profileNameMap] = await Promise.all([
-      getTransactionsForBills(bills),
-      getCustomerMapForBills(bills),
-      getVendorCustomerProfileNameMap(vendorId, bills),
+      getTransactionsForBills(pageBills),
+      getCustomerMapForBills(pageBills),
+      getVendorCustomerProfileNameMap(vendorId, pageBills),
     ]);
 
-    const formatted = bills.map((bill) => {
+    const formatted = pageBills.map((bill) => {
       const customerDisplay = buildCustomerDisplayForBill(bill, customerMap, profileNameMap);
       const transaction = transactionMap.get(String(bill._id)) || null;
       const financials = buildBillFinancials(bill, transaction);
@@ -829,7 +1020,9 @@ exports.getBillsDrilldown = async (req, res) => {
         paymentBreakdown: bill.paymentBreakdown,
         finalPaidAmount: financials.netCollected,
       });
-      const normalizedPaymentMode = getNormalizedPaymentMode(paymentAllocation.paymentMode);
+      const normalizedPaymentMode = getNormalizedPaymentMode(
+        bill.paymentMode || paymentAllocation.paymentMode
+      );
 
       return {
         billId: bill._id,
@@ -861,8 +1054,21 @@ exports.getBillsDrilldown = async (req, res) => {
       };
     });
 
-    res.json({ success: true, data: formatted });
+    res.json({
+      success: true,
+      data: formatted,
+      pagination: {
+        limit,
+        hasMore,
+        nextCursor: hasMore && pageBills.length
+          ? encodeBillCursor(pageBills[pageBills.length - 1])
+          : null,
+      },
+    });
   } catch (err) {
+    if (err?.statusCode === 400) {
+      return res.status(400).json({ success: false, message: err.message });
+    }
     console.error("getBillsDrilldown error", err);
     res.status(500).json({ success: false, message: "Server error" });
   }
@@ -870,27 +1076,36 @@ exports.getBillsDrilldown = async (req, res) => {
 
 exports.getBillsSummary = async (req, res) => {
   try {
-    const { vendorId, from, to } = req.query;
+    const { vendorId } = req.query;
 
     if (!vendorId) {
       return res.status(400).json({ success: false, message: "vendorId required" });
     }
+    if (!mongoose.Types.ObjectId.isValid(vendorId)) {
+      return res.status(400).json({ success: false, message: "Valid vendorId required" });
+    }
+
+    const range = resolveReportingRange(req.query);
 
     const match = {
       vendorId: new mongoose.Types.ObjectId(vendorId),
       status: "COMPLETED",
     };
 
-    if (from || to) {
-      match.createdAt = {};
-      if (from) match.createdAt.$gte = new Date(from);
-      if (to) match.createdAt.$lte = new Date(to);
-    }
+    const createdAtRange = buildCreatedAtRange(range);
+    if (createdAtRange) match.createdAt = createdAtRange;
 
-    const rows = await BillingSession.aggregate([
-      { $match: match },
-      ...withTransactionLookupStages(),
-      { $group: getFinancialGroupStage() },
+    const [rows, prepaidReporting] = await Promise.all([
+      BillingSession.aggregate([
+        { $match: match },
+        ...withTransactionLookupStages(),
+        { $group: getFinancialGroupStage() },
+      ]),
+      getPrepaidRevenueSummary({
+        vendorId,
+        from: range.from,
+        to: range.endExclusive,
+      }),
     ]);
 
     const summary = buildFinancialSummary(rows?.[0] || {});
@@ -907,9 +1122,13 @@ exports.getBillsSummary = async (req, res) => {
         onlineCollected: summary.onlineCollected,
         cashCollected: summary.cashCollected,
         notRecordedCollected: summary.notRecordedCollected,
+        prepaidReporting,
       },
     });
   } catch (err) {
+    if (err?.statusCode === 400) {
+      return res.status(400).json({ success: false, message: err.message });
+    }
     console.error("getBillsSummary error", err);
     res.status(500).json({ success: false, message: "Server error" });
   }
@@ -1038,4 +1257,15 @@ exports.getStylistPerformance = async (req, res) => {
     console.error("Stylist analytics error:", err);
     res.status(500).json({ message: "Server error" });
   }
+};
+
+exports._private = {
+  MAX_BILL_PAGE_LIMIT,
+  MAX_DAILY_TREND_DAYS,
+  buildCreatedAtRange,
+  decodeBillCursor,
+  encodeBillCursor,
+  parseBillPageLimit,
+  resolveExclusiveEnd,
+  resolveReportingRange,
 };

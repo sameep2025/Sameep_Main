@@ -5,13 +5,19 @@ const test = require("node:test");
 const mongoose = require("mongoose");
 
 const CustomerMembership = require("../models/CustomerMembership");
+const Transaction = require("../models/Transaction");
 const VendorMenuNode = require("../models/VendorMenuNode");
 const VendorPriceNode = require("../models/VendorPriceNode");
 const controller = require("../controllers/vendorCustomerMembershipController");
 
 test("customer membership schema snapshots purchased discount plan benefits", () => {
   const constants = CustomerMembership.constants;
-  assert.deepEqual(constants.MEMBERSHIP_TYPES, ["DISCOUNT", "SERVICE_QUOTA", "PREPAID_VALUE"]);
+  assert.deepEqual(constants.MEMBERSHIP_TYPES, [
+    "DISCOUNT",
+    "SERVICE_QUOTA",
+    "PREPAID_VALUE",
+    "PREPAID_SESSIONS",
+  ]);
   assert.deepEqual(constants.MEMBERSHIP_STATUSES, ["ACTIVE", "SCHEDULED", "EXPIRED", "CANCELLED"]);
   assert.deepEqual(constants.PAYMENT_METHODS, ["CASH", "UPI", "CARD", "ONLINE"]);
 
@@ -32,17 +38,103 @@ test("customer membership schema snapshots purchased discount plan benefits", ()
   assert.ok(CustomerMembership.schema.path("benefitRulesOverride.benefitSemanticsVersion"));
   assert.ok(CustomerMembership.schema.path("benefitRulesOverride.revisionId"));
   assert.ok(CustomerMembership.schema.path("payment.method"));
+  assert.ok(CustomerMembership.schema.path("prepaidSessionsSnapshot.eligibleItemSource"));
+  assert.ok(CustomerMembership.schema.path("prepaidValueSnapshot.creditedAmountPaise"));
 
   const indexes = CustomerMembership.schema.indexes();
-  assert.ok(
-    indexes.some(([fields, options]) => (
-      fields.vendorId === 1 &&
-      fields.customerId === 1 &&
-      options?.unique === true &&
-      options?.partialFilterExpression?.status === "ACTIVE"
-    )),
-    "active membership uniqueness index should prevent duplicate active memberships"
+  const discountIndex = indexes.find(([, options]) => (
+    options?.name === "customer_membership_active_discount_unique"
+  ));
+  const prepaidIndex = indexes.find(([, options]) => (
+    options?.name === "customer_membership_active_prepaid_unique"
+  ));
+  assert.equal(discountIndex?.[1].unique, true);
+  assert.deepEqual(discountIndex?.[1].partialFilterExpression, {
+    status: "ACTIVE",
+    membershipType: "DISCOUNT",
+  });
+  assert.equal(prepaidIndex?.[1].unique, true);
+  assert.deepEqual(prepaidIndex?.[1].partialFilterExpression, {
+    status: "ACTIVE",
+    membershipType: { $in: ["PREPAID_VALUE", "PREPAID_SESSIONS"] },
+  });
+});
+
+test("membership renewal and transaction indexes have one permanent unique definition", () => {
+  const membershipIndexes = CustomerMembership.schema.indexes();
+  const renewalIndexes = membershipIndexes.filter(([fields]) => (
+    Object.keys(fields).length === 1 && fields.renewedFromMembershipId === 1
+  ));
+  assert.equal(renewalIndexes.length, 1);
+  assert.equal(renewalIndexes[0][1].unique, true);
+  assert.equal(renewalIndexes[0][1].name, "customer_membership_renewal_lineage_unique");
+  assert.deepEqual(renewalIndexes[0][1].partialFilterExpression, {
+    renewedFromMembershipId: { $exists: true, $type: "objectId" },
+  });
+
+  const activeMembershipIndexes = membershipIndexes.filter(([fields, options]) => (
+    fields.vendorId === 1 &&
+    fields.customerId === 1 &&
+    options?.partialFilterExpression?.status === "ACTIVE"
+  ));
+  assert.deepEqual(
+    activeMembershipIndexes.map(([, options]) => options.name).sort(),
+    [
+      "customer_membership_active_discount_unique",
+      "customer_membership_active_prepaid_unique",
+    ]
   );
+
+  const enrollmentIndex = membershipIndexes.find(([, options]) => (
+    options?.name === "prepaid_membership_enrollment_idempotency_unique"
+  ));
+  assert.equal(enrollmentIndex?.[1].unique, true);
+  assert.deepEqual(enrollmentIndex?.[1].partialFilterExpression, {
+    enrollmentIdempotencyKey: { $gt: "" },
+  });
+
+  const transactionIndexes = Transaction.schema.indexes();
+  const billingSessionIndexes = transactionIndexes.filter(([fields]) => (
+    Object.keys(fields).length === 1 && fields.billingSessionId === 1
+  ));
+  assert.equal(billingSessionIndexes.length, 1);
+  assert.equal(billingSessionIndexes[0][1].unique, true);
+  assert.equal(billingSessionIndexes[0][1].name, "transaction_billing_session_unique");
+  assert.deepEqual(billingSessionIndexes[0][1].partialFilterExpression, {
+    billingSessionId: { $exists: true, $type: "objectId" },
+  });
+});
+
+test("legacy memberships and transactions may omit optional lineage references", async () => {
+  const vendorId = new mongoose.Types.ObjectId();
+  const customerId = new mongoose.Types.ObjectId();
+  const planId = new mongoose.Types.ObjectId();
+  const now = new Date("2026-11-06T00:00:00.000Z");
+
+  const membership = new CustomerMembership({
+    vendorId,
+    customerId,
+    customerMobileSnapshot: "919876543210",
+    membershipPlanId: planId,
+    membershipType: "DISCOUNT",
+    planSnapshot: {
+      planId,
+      name: "Legacy Discount",
+      duration: "MONTHLY",
+      sellingPrice: 100,
+    },
+    sellingPriceAtPurchase: 100,
+    activatedAt: now,
+    expiresAt: new Date("2026-12-06T00:00:00.000Z"),
+    status: "ACTIVE",
+    payment: { method: "CASH", amount: 100 },
+  });
+  const transaction = new Transaction({ vendorId, totalAmount: 100 });
+
+  await membership.validate();
+  await transaction.validate();
+  assert.equal(membership.renewedFromMembershipId, null);
+  assert.equal(transaction.billingSessionId, undefined);
 });
 
 test("membership lifecycle status is derived from effective timestamps", () => {

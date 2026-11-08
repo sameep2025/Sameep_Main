@@ -53,7 +53,19 @@ const {
 const {
   buildPaymentAllocation,
   getStoredPaymentAllocation,
+  moneyToPaise,
 } = require("../services/paymentAllocationService");
+const {
+  assertNoPrepaidDiscountsOrRewards,
+  assertPrepaidRequestContract,
+  consumePrepaidAuthorization,
+  isPrepaidPaymentMode,
+  persistInitialPrepaidSettlementSnapshot,
+  reversePrepaidSettlement,
+} = require("../services/prepaidWalletSettlementService");
+const {
+  buildPrepaidBillingPresentation,
+} = require("../services/prepaidBillingPresentation");
 const {
   buildPublicBillPath,
   buildPublicBillUrl,
@@ -228,6 +240,7 @@ function mergeMembershipItemBreakdown(cartItems = [], calculationItems = []) {
 async function calculateAuthoritativeBillingFinancials({
   billing,
   isWalkIn,
+  applyDiscountMembership = true,
   loyaltyRule,
   redeemedAmount = 0,
   now,
@@ -264,12 +277,14 @@ async function calculateAuthoritativeBillingFinancials({
     };
   }
 
-  const membership = await findEffectiveCustomerMembership({
-    vendorId: billing.vendorId,
-    customerId: billing.customerId,
-    now,
-    session,
-  });
+  const membership = applyDiscountMembership
+    ? await findEffectiveCustomerMembership({
+        vendorId: billing.vendorId,
+        customerId: billing.customerId,
+        now,
+        session,
+      })
+    : null;
   if (!membership) {
     return {
       totalAmount: currentTotalAmount,
@@ -993,6 +1008,13 @@ async function cancelCompletedBillAtomically({
       session,
     });
 
+    await reversePrepaidSettlement({
+      bill,
+      transaction,
+      session,
+      now: cancelledAt,
+    });
+
     return {
       alreadyCancelled: false,
       bill: closed,
@@ -1049,6 +1071,7 @@ async function buildPublicBillResponse(bill) {
   const items = Array.isArray(bill.cartItems) ? bill.cartItems : [];
   const customerNameSnapshot = normalizeCustomerName(bill.customerNameSnapshot || "");
   const gstInvoice = buildGstInvoicePresentation(bill.gstInvoiceSnapshot);
+  const prepaidSettlement = buildPrepaidBillingPresentation({ bill, transaction });
 
   return {
     billId: String(bill._id),
@@ -1092,6 +1115,8 @@ async function buildPublicBillResponse(bill) {
       balance: Number(balance || 0),
     },
     membership: financials.membership,
+    paymentMode: prepaidSettlement?.paymentMode || transaction?.paymentMode || bill.paymentMode || "",
+    ...(prepaidSettlement ? { prepaidSettlement } : {}),
     ...(gstInvoice ? { gstInvoice } : {}),
   };
 }
@@ -1223,6 +1248,7 @@ async function buildVendorHistoricalBillResponse(bill) {
     paymentBreakdown: bill.paymentBreakdown || transaction?.paymentBreakdown,
     finalPaidAmount: financials.netCollected,
   });
+  const prepaidSettlement = buildPrepaidBillingPresentation({ bill, transaction });
 
   return {
     billId: String(bill._id),
@@ -1259,8 +1285,9 @@ async function buildVendorHistoricalBillResponse(bill) {
       pointsRedeemed: toSafeNumber(bill.pointsRedeemed),
     },
     membership: financials.membership,
-    paymentMode: paymentAllocation.paymentMode || "",
+    paymentMode: prepaidSettlement?.paymentMode || paymentAllocation.paymentMode || "",
     paymentBreakdown: paymentAllocation.paymentBreakdown,
+    ...(prepaidSettlement ? { prepaidSettlement } : {}),
     ...(gstInvoice ? { gstInvoice } : {}),
   };
 }
@@ -1273,6 +1300,7 @@ function buildVendorBillListItem({ bill, transaction = null, customerPhone = "" 
     finalPaidAmount: financials.netCollected,
   });
   const effectiveCompletedAt = getEffectiveCompletedAt(bill, transaction);
+  const prepaidSettlement = buildPrepaidBillingPresentation({ bill, transaction });
   const canCancel =
     bill.status === "COMPLETED" &&
     isBillWithinCancellationWindow(effectiveCompletedAt) &&
@@ -1303,8 +1331,9 @@ function buildVendorBillListItem({ bill, transaction = null, customerPhone = "" 
     cancellationReason: bill.cancellationReason || "",
     cancellationNote: bill.cancellationNote || "",
     cancelledAt: bill.cancelledAt || null,
-    paymentMode: paymentAllocation.paymentMode || "",
+    paymentMode: prepaidSettlement?.paymentMode || paymentAllocation.paymentMode || "",
     paymentBreakdown: paymentAllocation.paymentBreakdown,
+    ...(prepaidSettlement ? { prepaidSettlement } : {}),
     items: (bill.cartItems || []).map(buildPublicBillItem),
   };
 }
@@ -1397,7 +1426,20 @@ exports.updateBillingCart = async (req, res) => {
       const price = Number(item?.price);
       if (qty === null || !Number.isFinite(price) || price < 0) return;
       const total = price * qty;
-      normalizedCartItems.push({ ...item, price, qty, total });
+      const itemSource = String(item?.itemSource || "").trim().toLowerCase();
+      const itemType = String(item?.itemType || "").trim().toUpperCase();
+      const canonicalItemSource = ["vendor_price_node", "vendor_menu_node", "custom_package"]
+        .includes(itemSource) ? itemSource : "";
+      const canonicalItemType = ["SERVICE", "PACKAGE", "PRODUCT"].includes(itemType)
+        ? itemType : "";
+      normalizedCartItems.push({
+        ...item,
+        itemSource: canonicalItemSource || undefined,
+        itemType: canonicalItemType || undefined,
+        price,
+        qty,
+        total,
+      });
       cartSubtotal += total;
     });
 
@@ -2232,7 +2274,7 @@ exports.verifyRedeemOTP = async (req, res) => {
 // ✅ Complete Billing WITH FIFO + OTP SAFETY
 exports.completeBillingSession = async (req, res) => {
   try {
-    const { billingId, paymentMode, paymentBreakdown } = req.body;
+    const { billingId, paymentMode, paymentBreakdown, prepaidAuthorizationId } = req.body;
 
     const completionResult = await runBillingCompletionAtomically(async (session) => {
       const billing = await findBillingSessionById(billingId, session);
@@ -2247,6 +2289,29 @@ exports.completeBillingSession = async (req, res) => {
       const isWalkIn = !billing.customerId;
       const isGstInvoice = ["TEST", "LIVE"].includes(billing.gstInvoiceMode);
       const isGstTestInvoice = billing.gstInvoiceMode === "TEST";
+      const isPrepaidPayment = isPrepaidPaymentMode(paymentMode);
+
+      if (isPrepaidPayment) {
+        assertPrepaidRequestContract({ paymentMode, paymentBreakdown, authorizationId: prepaidAuthorizationId });
+        if (!session) {
+          const error = new Error("Prepaid wallet settlement requires a database transaction");
+          error.statusCode = 503;
+          error.publicMessage = error.message;
+          throw error;
+        }
+        if (isWalkIn) {
+          const error = new Error("Prepaid wallet payment requires a registered customer");
+          error.statusCode = 400;
+          error.publicMessage = error.message;
+          throw error;
+        }
+        if (Number(billing.pointsRedeemed || 0) !== 0) {
+          const error = new Error("Prepaid wallet bills cannot redeem loyalty points");
+          error.statusCode = 400;
+          error.publicMessage = error.message;
+          throw error;
+        }
+      }
 
       // 🔐 OTP SAFETY CHECK
       if (!isWalkIn && billing.pointsRedeemed > 0 && !billing.otpVerified) {
@@ -2261,7 +2326,7 @@ exports.completeBillingSession = async (req, res) => {
       let rewardCreditBucketsForRedemption = [];
       const now = new Date();
 
-      if (effectiveRedeemPoints > 0) {
+      if (!isPrepaidPayment && effectiveRedeemPoints > 0) {
         const rewardBalance = await calculateRewardBalance({
           vendorId: billing.vendorId,
           customerId: billing.customerId,
@@ -2285,23 +2350,27 @@ exports.completeBillingSession = async (req, res) => {
       }
 
       let rule = null;
-      if (!isWalkIn) {
+      if (!isWalkIn && !isPrepaidPayment) {
         rule = await findLoyaltyRule(billing.vendorId, session);
       }
 
       const authoritativeFinancials = await calculateAuthoritativeBillingFinancials({
         billing,
         isWalkIn,
+        applyDiscountMembership: !isPrepaidPayment,
         loyaltyRule: rule,
         redeemedAmount: effectiveRedeemPoints,
         now,
         session,
       });
+      if (isPrepaidPayment) {
+        assertNoPrepaidDiscountsOrRewards({ billing, authoritativeFinancials });
+      }
       let finalPaidAmount = Math.max(
         roundMoney(authoritativeFinancials.totalAmount - effectiveRedeemPoints),
         0
       );
-      let pointsEarned = Number(billing.pointsEarned || 0);
+      let pointsEarned = isPrepaidPayment ? 0 : Number(billing.pointsEarned || 0);
       let earnExpiryDate = null;
       const customerForSnapshot = isWalkIn
         ? null
@@ -2322,7 +2391,7 @@ exports.completeBillingSession = async (req, res) => {
       // -------------------------
       // Earn Points
       // -------------------------
-      if (!isWalkIn && rule) {
+      if (!isWalkIn && rule && !isPrepaidPayment) {
         const earnPercent = rule?.earn?.percentPer100 ?? 0;
         let calculatedEarnedPoints = 0;
 
@@ -2366,11 +2435,25 @@ exports.completeBillingSession = async (req, res) => {
       if (gstInvoiceSnapshot) {
         finalPaidAmount = gstInvoiceSnapshot.totals.customerPayablePaise / 100;
       }
-      const paymentAllocation = buildPaymentAllocation({
-        finalPaidAmount,
-        paymentMode,
-        paymentBreakdown,
-      });
+      const paymentAllocation = isPrepaidPayment
+        ? {
+            paymentMode: String(paymentMode).trim().toUpperCase(),
+            paymentBreakdown: { cashAmountPaise: 0, onlineAmountPaise: 0 },
+            finalPayablePaise: moneyToPaise(finalPaidAmount),
+          }
+        : buildPaymentAllocation({ finalPaidAmount, paymentMode, paymentBreakdown });
+      const prepaidSettlementSnapshot = isPrepaidPayment
+        ? await consumePrepaidAuthorization({
+            authorizationId: prepaidAuthorizationId,
+            paymentMode: paymentAllocation.paymentMode,
+            billing,
+            cartItems: authoritativeFinancials.cartItems,
+            finalPayablePaise: paymentAllocation.finalPayablePaise,
+            operationalServiceValuePaise: moneyToPaise(authoritativeFinancials.totalAmount),
+            session,
+            now: completedAt,
+          })
+        : null;
       const billingUpdate = {
         status: "COMPLETED",
         completedAt,
@@ -2384,7 +2467,7 @@ exports.completeBillingSession = async (req, res) => {
         membershipDiscountAmount: authoritativeFinancials.membershipDiscountAmount,
         additionalManualDiscountAmount: authoritativeFinancials.additionalManualDiscountAmount,
         cartItems: authoritativeFinancials.cartItems,
-        pointsEarned: isWalkIn ? 0 : pointsEarned,
+        pointsEarned: isWalkIn || isPrepaidPayment ? 0 : pointsEarned,
         customerPhoneSnapshot: isWalkIn ? "" : customerPhoneSnapshot,
         customerNameSnapshot: isWalkIn ? "" : customerNameSnapshot,
       };
@@ -2426,6 +2509,22 @@ exports.completeBillingSession = async (req, res) => {
         }
       }
 
+      if (prepaidSettlementSnapshot) {
+        await persistInitialPrepaidSettlementSnapshot({
+          BillingSessionModel: BillingSession,
+          billingId: billing._id,
+          snapshot: prepaidSettlementSnapshot,
+          session,
+        });
+        closed = await findBillingSessionById(billing._id, session);
+        if (!closed?.prepaidSettlementSnapshot) {
+          const error = new Error("Prepaid settlement snapshot could not be verified");
+          error.statusCode = 500;
+          error.publicMessage = error.message;
+          throw error;
+        }
+      }
+
       billing.status = "COMPLETED";
       billing.completedAt = completedAt;
       billing.paymentMode = paymentAllocation.paymentMode;
@@ -2438,6 +2537,9 @@ exports.completeBillingSession = async (req, res) => {
       billing.cartItems = billingUpdate.cartItems;
       if (gstInvoiceSnapshot) {
         billing.gstInvoiceSnapshot = gstInvoiceSnapshot;
+      }
+      if (prepaidSettlementSnapshot) {
+        billing.prepaidSettlementSnapshot = prepaidSettlementSnapshot;
       }
       if (billingUpdate.membershipBillingSnapshot) {
         billing.membershipBillingSnapshot = billingUpdate.membershipBillingSnapshot;
@@ -2465,11 +2567,12 @@ exports.completeBillingSession = async (req, res) => {
         membershipBillingSnapshot: billing.membershipBillingSnapshot,
         redeemedPoints: effectiveRedeemPoints,
         redeemValue: effectiveRedeemPoints,
-        finalPaidAmount,
+        finalPaidAmount: isPrepaidPayment ? 0 : finalPaidAmount,
         paymentMode: paymentAllocation.paymentMode,
         paymentBreakdown: paymentAllocation.paymentBreakdown,
-        paymentStatus: "OFFLINE_PAID",
-        billingSource: "POS_OFFLINE",
+        ...(prepaidSettlementSnapshot ? { prepaidSettlementSnapshot } : {}),
+        paymentStatus: isPrepaidPayment ? "PREPAID_PAID" : "OFFLINE_PAID",
+        billingSource: isPrepaidPayment ? "PREPAID_WALLET" : "POS_OFFLINE",
         status: "COMPLETED",
         recordMode: isGstTestInvoice ? "GST_TEST" : "NORMAL",
       }, session);
@@ -2517,7 +2620,7 @@ exports.completeBillingSession = async (req, res) => {
         }, session);
       }
 
-      if (!isWalkIn && pointsEarned > 0) {
+      if (!isWalkIn && !isPrepaidPayment && pointsEarned > 0) {
         await createLoyaltyLedger({
           type: "EARN",
           vendorId: billing.vendorId,

@@ -49,6 +49,11 @@ import {
   hasEnabledGstBilling,
   isGstPreviewAvailable,
 } from "./gstPreviewVisibility.mjs";
+import {
+  buildPrepaidBillPresentation,
+  createPrepaidAuthorizationBinding,
+  getPrepaidWalletQuote,
+} from "./prepaidWalletUi.mjs";
 const FOOTER_GALLERY_OPEN_EVENT = "ynot-footer-open-gallery";
 const CART_ORIGIN_PUBLIC = "PUBLIC_ENQUIRY";
 const CART_ORIGIN_BILLING = "VENDOR_BILLING";
@@ -1348,6 +1353,19 @@ function ExploreContent({ onReady, onOpenServices }) {
   const onlineAmountInputRef = useRef("");
   const paymentHasUserEditedRef = useRef(false);
   const lastEditedPaymentFieldRef = useRef("cash");
+  const [selectedPaymentMode, setSelectedPaymentMode] = useState("STANDARD");
+  const [prepaidCapabilities, setPrepaidCapabilities] = useState(null);
+  const [prepaidWallet, setPrepaidWallet] = useState(null);
+  const [prepaidWalletStatus, setPrepaidWalletStatus] = useState("idle");
+  const [prepaidWalletError, setPrepaidWalletError] = useState("");
+  const [prepaidAuthorization, setPrepaidAuthorization] = useState(null);
+  const [prepaidOtp, setPrepaidOtp] = useState("");
+  const [prepaidOtpError, setPrepaidOtpError] = useState("");
+  const [prepaidOtpBusy, setPrepaidOtpBusy] = useState(false);
+  const [prepaidNow, setPrepaidNow] = useState(Date.now());
+  const prepaidCapabilitiesRequestRef = useRef(0);
+  const prepaidWalletRequestRef = useRef(0);
+  const prepaidAuthorizationBindingRef = useRef("");
 
 
   const [resources, setResources] = useState([]);
@@ -1592,6 +1610,8 @@ function ExploreContent({ onReady, onOpenServices }) {
   const buildBillingCartItemsSnapshot = () => {
     return cartItems.map((item) => ({
         itemId: item.itemId,
+        itemSource: item.itemSource,
+        itemType: item.itemType,
         categoryId: item.categoryId,
         name: item.name,
         price: Number(item.price) || 0,
@@ -1671,6 +1691,7 @@ function ExploreContent({ onReady, onOpenServices }) {
     customerVerificationRequestRef.current += 1;
     customerNameRequestRef.current += 1;
     loyaltyWalletRequestRef.current += 1;
+    prepaidWalletRequestRef.current += 1;
     selectedBillingCustomerLabelRef.current = "";
     setCustomerSearch(inputValue);
     setCustomerMobile(nextMobile);
@@ -1693,6 +1714,13 @@ function ExploreContent({ onReady, onOpenServices }) {
     setMembershipPreview(null);
     setMembershipPreviewError("");
     setMembershipPreviewLoading(false);
+    setSelectedPaymentMode("STANDARD");
+    setPrepaidWallet(null);
+    setPrepaidWalletStatus("idle");
+    setPrepaidWalletError("");
+    setPrepaidAuthorization(null);
+    setPrepaidOtp("");
+    setPrepaidOtpError("");
   };
 
   const fetchVendorCustomerName = async ({ mobile, customerId: resolvedCustomerId }) => {
@@ -1786,11 +1814,19 @@ function ExploreContent({ onReady, onOpenServices }) {
     setAvailablePoints(0);
     setRedeemPoints(0);
     loyaltyWalletRequestRef.current += 1;
+    prepaidWalletRequestRef.current += 1;
     setLoyaltyWalletStatus(result?.customerId ? "loading" : "idle");
     setLoyaltyWalletError("");
     if (result?.customerId) {
       fetchWallet(result.customerId, nextMobile);
     }
+    setSelectedPaymentMode("STANDARD");
+    setPrepaidWallet(null);
+    setPrepaidWalletStatus(result?.customerId ? "loading" : "idle");
+    setPrepaidWalletError("");
+    setPrepaidAuthorization(null);
+    setPrepaidOtp("");
+    setPrepaidOtpError("");
   };
 
   const renderBillingCustomerSearch = () => (
@@ -2059,6 +2095,11 @@ function ExploreContent({ onReady, onOpenServices }) {
 
   const buildReceiptSnapshot = ({ billingSessionId, billingItems, completeData }) => {
     const transaction = completeData?.transaction || {};
+    const prepaidSettlement = buildPrepaidBillPresentation({
+      paymentMode: transaction.paymentMode,
+      snapshot: transaction.prepaidSettlementSnapshot,
+      cartItems: billingItems,
+    });
     const redeemedValue =
       transaction.redeemValue ??
       transaction.redeemedPoints ??
@@ -2097,6 +2138,7 @@ function ExploreContent({ onReady, onOpenServices }) {
       netCollected: Number(netCollected || 0),
       paymentMode: String(transaction.paymentMode || "ONLINE"),
       paymentBreakdown: transaction.paymentBreakdown || null,
+      prepaidSettlement,
       gstInvoice: completeData?.gstInvoice || null,
     };
   };
@@ -2521,10 +2563,13 @@ function ExploreContent({ onReady, onOpenServices }) {
     hasActiveVendorSession,
     viewMode,
   });
+  const prepaidSelected = selectedPaymentMode !== "STANDARD";
   const paymentFinalPayablePaise = Math.max(
     Number.isInteger(gstPreview?.totals?.estimatedCustomerPayablePaise) && gstPreviewAvailable
       ? gstPreview.totals.estimatedCustomerPayablePaise
-      : Math.round((getAuthoritativeCartTotal() + Number.EPSILON) * 100),
+      : Math.round(
+          ((prepaidSelected ? cartTotal : getAuthoritativeCartTotal()) + Number.EPSILON) * 100
+        ),
     0
   );
 
@@ -2602,6 +2647,270 @@ function ExploreContent({ onReady, onOpenServices }) {
       },
     };
   };
+
+  const prepaidWalletPaymentAvailable = Boolean(
+    prepaidCapabilities?.walletPaymentAvailable
+  );
+  const prepaidWalletQuote = useMemo(
+    () =>
+      getPrepaidWalletQuote({
+        wallet: prepaidWallet,
+        cartItems,
+        finalPayablePaise: paymentFinalPayablePaise,
+        hasManualDiscount: prepaidSelected ? false : Number(appliedDiscount) > 0,
+        redeemPoints: prepaidSelected ? 0 : redeemPoints,
+      }),
+    [
+      prepaidWallet,
+      cartItems,
+      paymentFinalPayablePaise,
+      appliedDiscount,
+      redeemPoints,
+      prepaidSelected,
+    ]
+  );
+  const prepaidBinding = createPrepaidAuthorizationBinding({
+    walletId: prepaidWallet?.id,
+    customerId,
+    cartItems,
+    finalPayablePaise: paymentFinalPayablePaise,
+    amountPaise: prepaidWalletQuote.amountPaise,
+    quantity: prepaidWalletQuote.quantity,
+  });
+
+  const clearPrepaidAuthorization = (message = "") => {
+    setPrepaidAuthorization(null);
+    setPrepaidOtp("");
+    setPrepaidOtpError(message);
+    prepaidAuthorizationBindingRef.current = "";
+    setBillingId(null);
+  };
+
+  async function fetchPrepaidWallet(resolvedCustomerId) {
+    if (!vendorId || !resolvedCustomerId || !prepaidWalletPaymentAvailable) return null;
+    const requestId = prepaidWalletRequestRef.current + 1;
+    prepaidWalletRequestRef.current = requestId;
+    setPrepaidWalletStatus("loading");
+    setPrepaidWalletError("");
+    try {
+      const response = await fetch(
+        `${API_BASE_URL}/api/vendor/prepaid-wallets/${encodeURIComponent(vendorId)}/customer/${encodeURIComponent(resolvedCustomerId)}`,
+        { cache: "no-store", headers: getVendorAuthHeaders(vendorId) }
+      );
+      const payload = await response.json().catch(() => null);
+      if (prepaidWalletRequestRef.current !== requestId) return null;
+      if (response.status === 404) {
+        setPrepaidWallet(null);
+        setPrepaidWalletStatus("unavailable");
+        return null;
+      }
+      if (!response.ok || !payload?.success) {
+        throw new Error(payload?.message || "Unable to load prepaid wallet");
+      }
+      setPrepaidWallet(payload.wallet);
+      setPrepaidWalletStatus("ready");
+      return payload.wallet;
+    } catch (error) {
+      if (prepaidWalletRequestRef.current !== requestId) return null;
+      setPrepaidWallet(null);
+      setPrepaidWalletStatus("error");
+      setPrepaidWalletError(error?.message || "Unable to load prepaid wallet");
+      return null;
+    }
+  }
+
+  useEffect(() => {
+    const requestId = prepaidCapabilitiesRequestRef.current + 1;
+    prepaidCapabilitiesRequestRef.current = requestId;
+    setPrepaidCapabilities(null);
+    if (!vendorId || !hasActiveVendorSession || viewMode !== "menu") return undefined;
+
+    const controller = new AbortController();
+    fetch(
+      `${API_BASE_URL}/api/vendor/prepaid-wallets/${encodeURIComponent(vendorId)}/capabilities`,
+      {
+        cache: "no-store",
+        signal: controller.signal,
+        headers: getVendorAuthHeaders(vendorId),
+      }
+    )
+      .then(async (response) => ({ response, payload: await response.json().catch(() => null) }))
+      .then(({ response, payload }) => {
+        if (prepaidCapabilitiesRequestRef.current !== requestId) return;
+        setPrepaidCapabilities(
+          response.ok && payload?.success
+            ? payload.capabilities
+            : { walletPaymentAvailable: false }
+        );
+      })
+      .catch((error) => {
+        if (error?.name !== "AbortError" && prepaidCapabilitiesRequestRef.current === requestId) {
+          setPrepaidCapabilities({ walletPaymentAvailable: false });
+        }
+      });
+    return () => controller.abort();
+  }, [vendorId, hasActiveVendorSession, viewMode]);
+
+  useEffect(() => {
+    if (!prepaidWalletPaymentAvailable || !customerId) {
+      prepaidWalletRequestRef.current += 1;
+      setPrepaidWallet(null);
+      setPrepaidWalletStatus("idle");
+      setSelectedPaymentMode("STANDARD");
+      clearPrepaidAuthorization();
+      return;
+    }
+    fetchPrepaidWallet(customerId);
+  }, [prepaidWalletPaymentAvailable, customerId, vendorId]);
+
+  useEffect(() => {
+    if (!prepaidAuthorization) return;
+    if (prepaidAuthorizationBindingRef.current !== prepaidBinding) {
+      clearPrepaidAuthorization("Bill details changed. Request a new wallet OTP.");
+    }
+  }, [prepaidBinding, prepaidAuthorization]);
+
+  useEffect(() => {
+    if (!prepaidAuthorization) return undefined;
+    const timer = window.setInterval(() => setPrepaidNow(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, [prepaidAuthorization]);
+
+  async function preparePrepaidAuthorization({ billingSessionId, resend = false }) {
+    if (!prepaidWallet || !prepaidWalletQuote.eligible || !billingSessionId) return false;
+    setPrepaidOtpBusy(true);
+    setPrepaidOtpError("");
+    try {
+      const response = await fetch(
+        `${API_BASE_URL}/api/vendor/prepaid-wallets/${encodeURIComponent(vendorId)}/authorizations/prepare`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            ...getVendorAuthHeaders(vendorId),
+          },
+          body: JSON.stringify({
+            walletId: prepaidWallet.id,
+            billingSessionId,
+            ...(prepaidWallet.walletType === "PREPAID_VALUE"
+              ? { amountPaise: prepaidWalletQuote.amountPaise }
+              : { quantity: prepaidWalletQuote.quantity }),
+          }),
+        }
+      );
+      const payload = await response.json().catch(() => null);
+      if (
+        payload?.code === "prepaid_otp_delivery_uncertain" &&
+        payload?.authorization?.id
+      ) {
+        setPrepaidAuthorization(payload.authorization);
+        setPrepaidOtp("");
+        prepaidAuthorizationBindingRef.current = prepaidBinding;
+        setPrepaidNow(Date.now());
+        setPrepaidOtpError(payload.message || "OTP delivery could not be confirmed.");
+        return true;
+      }
+      if (!response.ok || !payload?.success) {
+        throw new Error(payload?.message || "Unable to send wallet OTP");
+      }
+      setPrepaidAuthorization(payload.authorization);
+      setPrepaidOtp("");
+      prepaidAuthorizationBindingRef.current = prepaidBinding;
+      setPrepaidNow(Date.now());
+      return true;
+    } catch (error) {
+      setPrepaidOtpError(error?.message || (resend ? "Unable to resend OTP" : "Unable to send OTP"));
+      return false;
+    } finally {
+      setPrepaidOtpBusy(false);
+    }
+  }
+
+  async function completePrepaidBilling(authorizationId) {
+    if (processingBillRef.current) return;
+    processingBillRef.current = true;
+    setProcessingBill(true);
+    try {
+      const completeRes = await fetch(`${API_BASE_URL}/api/billing/complete`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...getVendorAuthHeaders(vendorId),
+        },
+        body: JSON.stringify({
+          billingId,
+          paymentMode: prepaidWallet.walletType,
+          prepaidAuthorizationId: authorizationId,
+        }),
+      });
+      const completeData = await completeRes.json().catch(() => null);
+      if (!completeRes.ok || !completeData?.success) {
+        throw new Error(completeData?.message || "Wallet billing completion failed");
+      }
+      const billingItems = buildBillingCartItemsSnapshot();
+      const settlement = completeData?.transaction?.prepaidSettlementSnapshot;
+      const refreshedWallet = await fetchPrepaidWallet(customerId);
+      const consumedMessage = settlement?.walletType === "PREPAID_VALUE"
+        ? `Wallet payment of ₹${formatPaymentPaiseInput(settlement.authorizedAmountPaise)} completed.`
+        : `${Number(settlement?.authorizedQuantity || prepaidWalletQuote.quantity)} prepaid session credit(s) used.`;
+      const remainingMessage = refreshedWallet?.walletType === "PREPAID_VALUE"
+        ? ` Remaining balance: ₹${formatPaymentPaiseInput(refreshedWallet.remainingAmountPaise)}.`
+        : refreshedWallet?.walletType === "PREPAID_SESSIONS"
+          ? ` Remaining sessions: ${refreshedWallet.remainingQuantity}.`
+          : "";
+      setReceiptSnapshot(
+        buildReceiptSnapshot({ billingSessionId: billingId, billingItems, completeData })
+      );
+      setBillType("customer");
+      setBillSuccessMessage(
+        `${consumedMessage}${remainingMessage}${getWhatsAppBillingWarning(completeData) ? ` ${getWhatsAppBillingWarning(completeData)}` : ""}`
+      );
+      setShowBillSuccess(true);
+      resetBillingState();
+    } catch (error) {
+      setPrepaidOtpError(error?.message || "Wallet billing completion failed");
+    } finally {
+      processingBillRef.current = false;
+      setProcessingBill(false);
+    }
+  }
+
+  async function handleVerifyPrepaidOtp() {
+    if (!prepaidAuthorization?.id || !/^\d{6}$/.test(prepaidOtp)) {
+      setPrepaidOtpError("Enter the 6-digit OTP sent to the enrolled customer mobile.");
+      return;
+    }
+    setPrepaidOtpBusy(true);
+    setPrepaidOtpError("");
+    try {
+      const response = await fetch(
+        `${API_BASE_URL}/api/vendor/prepaid-wallets/${encodeURIComponent(vendorId)}/authorizations/${encodeURIComponent(prepaidAuthorization.id)}/verify`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            ...getVendorAuthHeaders(vendorId),
+          },
+          body: JSON.stringify({ otp: prepaidOtp }),
+        }
+      );
+      const payload = await response.json().catch(() => null);
+      if (!response.ok || !payload?.success) {
+        if (Number.isSafeInteger(payload?.remainingVerificationAttempts)) {
+          setPrepaidAuthorization((current) => current
+            ? { ...current, remainingVerificationAttempts: payload.remainingVerificationAttempts }
+            : current);
+        }
+        throw new Error(payload?.message || "Wallet OTP verification failed");
+      }
+      setPrepaidAuthorization((current) => ({ ...current, ...payload.authorization }));
+      setPrepaidOtpBusy(false);
+      await completePrepaidBilling(payload.authorization.id);
+    } catch (error) {
+      setPrepaidOtpError(error?.message || "Wallet OTP verification failed");
+      setPrepaidOtpBusy(false);
+    }
+  }
   const galleryRowId =
     vendorInfo?.galleryRowId ||
     vendorInfo?.rowId ||
@@ -2628,41 +2937,165 @@ function ExploreContent({ onReady, onOpenServices }) {
   const hrSelectorLabel = hrSingularLabel;
   const hrSelectorPlaceholder = `Select ${hrSingularLabel}`;
   const hrPerformanceTitle = `${hrSingularLabel} Performance`;
-  const renderPaymentModeSelector = () => (
+  const renderPaymentModeSelector = () => {
+    const otpExpiresIn = prepaidAuthorization?.expiresAt
+      ? Math.max(Math.ceil((new Date(prepaidAuthorization.expiresAt).getTime() - prepaidNow) / 1000), 0)
+      : 0;
+    const resendIn = prepaidAuthorization?.resendAvailableAt
+      ? Math.max(Math.ceil((new Date(prepaidAuthorization.resendAvailableAt).getTime() - prepaidNow) / 1000), 0)
+      : 0;
+    return (
     <div className="quick-billing-payment-allocation">
       <div className="quick-billing-payment-payable">
         <span>Final Payable Amount</span>
         <strong>{formatPaymentPaiseInput(paymentFinalPayablePaise)}</strong>
       </div>
-      <div className="quick-billing-payment-inputs">
-        <label>
-          <span>Cash Amount</span>
+      <div className="quick-billing-payment-options" role="radiogroup" aria-label="Payment method">
+        <label className={selectedPaymentMode === "STANDARD" ? "selected" : ""}>
           <input
-            type="text"
-            inputMode="decimal"
-            value={cashAmountInput}
-            onChange={(event) => handlePaymentAmountChange("cash", event.target.value)}
-            aria-invalid={Boolean(paymentAllocationError)}
+            type="radio"
+            name="quick-billing-payment-mode"
+            checked={selectedPaymentMode === "STANDARD"}
+            onChange={() => {
+              setSelectedPaymentMode("STANDARD");
+              clearPrepaidAuthorization();
+            }}
           />
+          Cash / Online / Split
         </label>
-        <label>
-          <span>Online / UPI Amount</span>
-          <input
-            type="text"
-            inputMode="decimal"
-            value={onlineAmountInput}
-            onChange={(event) => handlePaymentAmountChange("online", event.target.value)}
-            aria-invalid={Boolean(paymentAllocationError)}
-          />
-        </label>
+        {prepaidWalletPaymentAvailable && prepaidWallet ? (
+          <label className={selectedPaymentMode === prepaidWallet.walletType ? "selected" : ""}>
+            <input
+              type="radio"
+              name="quick-billing-payment-mode"
+              checked={selectedPaymentMode === prepaidWallet.walletType}
+              onChange={() => {
+                setSelectedPaymentMode(prepaidWallet.walletType);
+                clearPrepaidAuthorization();
+              }}
+            />
+            {prepaidWallet.walletType === "PREPAID_VALUE" ? "Prepaid Wallet" : "Prepaid Packages"}
+          </label>
+        ) : null}
       </div>
-      {paymentAllocationError ? (
-        <div className="quick-billing-payment-error" role="alert">
-          {paymentAllocationError}
+
+      {selectedPaymentMode === "STANDARD" ? (
+        <>
+          <div className="quick-billing-payment-inputs">
+            <label>
+              <span>Cash Amount</span>
+              <input
+                type="text"
+                inputMode="decimal"
+                value={cashAmountInput}
+                onChange={(event) => handlePaymentAmountChange("cash", event.target.value)}
+                aria-invalid={Boolean(paymentAllocationError)}
+              />
+            </label>
+            <label>
+              <span>Online / UPI Amount</span>
+              <input
+                type="text"
+                inputMode="decimal"
+                value={onlineAmountInput}
+                onChange={(event) => handlePaymentAmountChange("online", event.target.value)}
+                aria-invalid={Boolean(paymentAllocationError)}
+              />
+            </label>
+          </div>
+          {paymentAllocationError ? (
+            <div className="quick-billing-payment-error" role="alert">
+              {paymentAllocationError}
+            </div>
+          ) : null}
+        </>
+      ) : (
+        <div className="quick-billing-prepaid-card">
+          <div className="quick-billing-prepaid-heading">
+            <strong>{prepaidWallet?.walletType === "PREPAID_VALUE" ? "Prepaid Wallet" : "Prepaid Packages"}</strong>
+            <span>Expires {prepaidWallet?.expiresAt ? new Date(prepaidWallet.expiresAt).toLocaleDateString("en-IN") : "-"}</span>
+          </div>
+          {prepaidWallet?.walletType === "PREPAID_VALUE" ? (
+            <div className="quick-billing-prepaid-lines">
+              <div><span>Available</span><strong>₹{formatPaymentPaiseInput(prepaidWallet.remainingAmountPaise)}</strong></div>
+              <div><span>Wallet deduction</span><strong>₹{formatPaymentPaiseInput(prepaidWalletQuote.amountPaise)}</strong></div>
+              <div><span>Expected balance</span><strong>₹{formatPaymentPaiseInput(prepaidWalletQuote.expectedRemainingAmountPaise)}</strong></div>
+            </div>
+          ) : (
+            <>
+              <p className="quick-billing-prepaid-item">
+                {prepaidWallet?.eligibleItem?.itemName || "Eligible item"} · {prepaidWallet?.eligibleItem?.itemType || "Item"}
+              </p>
+              <div className="quick-billing-prepaid-lines">
+                <div><span>Available sessions</span><strong>{prepaidWallet?.remainingQuantity ?? 0}</strong></div>
+                <div><span>Credits consumed</span><strong>{prepaidWalletQuote.quantity ?? 0}</strong></div>
+                <div><span>Expected balance</span><strong>{prepaidWalletQuote.expectedRemainingQuantity ?? 0}</strong></div>
+              </div>
+            </>
+          )}
+          {membershipPreview?.hasEffectiveMembership ? (
+            <p className="quick-billing-prepaid-item">
+              Discount Membership benefits are not applied when prepaid payment is selected.
+            </p>
+          ) : null}
+          {!prepaidWalletQuote.eligible ? (
+            <div className="quick-billing-payment-error" role="alert">{prepaidWalletQuote.reason}</div>
+          ) : null}
+          {prepaidAuthorization ? (
+            <div className="quick-billing-prepaid-otp">
+              <p>
+                {prepaidAuthorization.deliveryStatus === "UNCERTAIN"
+                  ? `OTP delivery to ${prepaidAuthorization.maskedMobile || "the enrolled mobile"} could not be confirmed. Enter the code if it arrived.`
+                  : `OTP sent to ${prepaidAuthorization.maskedMobile || "the enrolled mobile"}.`}
+                {otpExpiresIn > 0 ? ` Expires in ${otpExpiresIn}s.` : " OTP expired."}
+              </p>
+              <input
+                type="text"
+                inputMode="numeric"
+                autoComplete="one-time-code"
+                maxLength={6}
+                value={prepaidOtp}
+                onChange={(event) => setPrepaidOtp(event.target.value.replace(/\D/g, "").slice(0, 6))}
+                placeholder="Enter 6-digit OTP"
+                aria-label="Prepaid wallet OTP"
+              />
+              <div className="quick-billing-prepaid-otp-actions">
+                <button type="button" onClick={handleVerifyPrepaidOtp} disabled={prepaidOtpBusy || otpExpiresIn === 0}>
+                  {prepaidOtpBusy ? "Please wait..." : "Verify OTP & Complete"}
+                </button>
+                <button
+                  type="button"
+                  className="secondary"
+                  disabled={prepaidOtpBusy || resendIn > 0}
+                  onClick={() => preparePrepaidAuthorization({ billingSessionId: billingId, resend: true })}
+                >
+                  {resendIn > 0 ? `Resend in ${resendIn}s` : "Resend OTP"}
+                </button>
+              </div>
+              {Number.isSafeInteger(prepaidAuthorization.remainingVerificationAttempts) ? (
+                <small>{prepaidAuthorization.remainingVerificationAttempts} verification attempt(s) remaining.</small>
+              ) : prepaidAuthorization.maxVerificationAttempts ? (
+                <small>Maximum {prepaidAuthorization.maxVerificationAttempts} verification attempts per OTP.</small>
+              ) : null}
+            </div>
+          ) : prepaidWalletQuote.eligible ? (
+            <p className="quick-billing-prepaid-help">Generate the bill to send customer OTP authorization. No Cash or Online amount will be recorded.</p>
+          ) : null}
+          {prepaidOtpError ? <div className="quick-billing-payment-error" role="alert">{prepaidOtpError}</div> : null}
         </div>
+      )}
+      {prepaidWalletPaymentAvailable && customerId && prepaidWalletStatus === "loading" ? (
+        <p className="quick-billing-prepaid-status">Checking prepaid wallet...</p>
+      ) : null}
+      {prepaidWalletPaymentAvailable && customerId && prepaidWalletStatus === "unavailable" ? (
+        <p className="quick-billing-prepaid-status">No active prepaid wallet is available for this customer.</p>
+      ) : null}
+      {prepaidWalletPaymentAvailable && prepaidWalletError ? (
+        <p className="quick-billing-payment-error" role="alert">{prepaidWalletError}</p>
       ) : null}
     </div>
-  );
+    );
+  };
   useEffect(() => {
     if (!hrEnabled && viewMode === "stylists-dashboard") {
       setViewMode("new-dashboard");
@@ -2672,6 +3105,7 @@ function ExploreContent({ onReady, onOpenServices }) {
     cartItems.length > 0 &&
     !!vendorId &&
     !showOtpInput &&
+    !prepaidAuthorization &&
     !processingBill;
   useEffect(() => {
     if (pendingAction === "GENERATE_BILL") return;
@@ -3930,14 +4364,14 @@ function ExploreContent({ onReady, onOpenServices }) {
           },
           signal: controller.signal,
           body: JSON.stringify({
-            customerMobile,
+            customerMobile: prepaidSelected ? "" : customerMobile,
             items: gstPreviewItems,
             manualDiscount: {
               mode: discountMode,
-              amount: appliedDiscount,
-              percent: discountPercent,
+              amount: prepaidSelected ? 0 : appliedDiscount,
+              percent: prepaidSelected ? 0 : discountPercent,
             },
-            redemption: { amount: redeemPoints },
+            redemption: { amount: prepaidSelected ? 0 : redeemPoints },
           }),
         });
         const payload = await response.json().catch(() => null);
@@ -3970,6 +4404,7 @@ function ExploreContent({ onReady, onOpenServices }) {
     appliedDiscount,
     discountPercent,
     redeemPoints,
+    prepaidSelected,
     gstPreviewRetryNonce,
   ]);
 
@@ -4155,6 +4590,9 @@ function ExploreContent({ onReady, onOpenServices }) {
               : vendorInfo?.pricingSource === "self_managed"
                 ? "vendor_menu_node"
                 : "vendor_price_node",
+          itemType:
+            node.itemType || node.itemKind ||
+            (node.sourceType === "custom_package" ? "PACKAGE" : undefined),
           categoryId,
 
           name: node.displayName || node.name,
@@ -4199,6 +4637,7 @@ function ExploreContent({ onReady, onOpenServices }) {
     membershipPreviewRequestRef.current += 1;
     gstPreviewRequestRef.current += 1;
     loyaltyWalletRequestRef.current += 1;
+    prepaidWalletRequestRef.current += 1;
     setCartItems([]);
     setTrackedCartOrigin(nextCartOrigin);
     setCartOpen(false);
@@ -4246,6 +4685,15 @@ function ExploreContent({ onReady, onOpenServices }) {
     setCashAmountInput("");
     setOnlineAmountInput("");
     setPaymentAllocationError("");
+    setSelectedPaymentMode("STANDARD");
+    setPrepaidWallet(null);
+    setPrepaidWalletStatus("idle");
+    setPrepaidWalletError("");
+    setPrepaidAuthorization(null);
+    setPrepaidOtp("");
+    setPrepaidOtpError("");
+    setPrepaidOtpBusy(false);
+    prepaidAuthorizationBindingRef.current = "";
     setMenuSearch("");
 
     localStorage.removeItem("ynot_cart");
@@ -4358,6 +4806,29 @@ function ExploreContent({ onReady, onOpenServices }) {
       }
     }
 
+    if (prepaidSelected) {
+      if (gstPreviewAvailable && gstPreviewLoading) {
+        alert("Please wait while the prepaid GST amount is calculated.");
+        return;
+      }
+      if (gstPreviewAvailable && gstPreviewError) {
+        alert("Resolve the GST preview error before using prepaid payment.");
+        return;
+      }
+      if (!prepaidWalletPaymentAvailable || !prepaidWallet) {
+        alert("Prepaid wallet payment is not available for this customer.");
+        return;
+      }
+      if (selectedPaymentMode !== prepaidWallet.walletType) {
+        alert("The selected prepaid payment option no longer matches the available wallet.");
+        return;
+      }
+      if (!prepaidWalletQuote.eligible) {
+        alert(prepaidWalletQuote.reason || "This bill is not eligible for prepaid wallet payment.");
+        return;
+      }
+    }
+
     processingBillRef.current = true;
     try {
       setProcessingBill(true);
@@ -4394,7 +4865,7 @@ function ExploreContent({ onReady, onOpenServices }) {
       // STEP 2 - Update cart with hierarchy fields
       const billingCartItems = buildBillingCartItemsSnapshot();
       const billingSubtotal = cartTotal;
-      const billingDiscount = appliedDiscount;
+      const billingDiscount = prepaidSelected ? 0 : appliedDiscount;
       const updateRes = await fetch(`${API_BASE_URL}/api/billing/update`, {
         method: "POST",
         headers: {
@@ -4406,14 +4877,20 @@ function ExploreContent({ onReady, onOpenServices }) {
           cartItems: billingCartItems,
           grossAmount: billingSubtotal,
           discountAmount: billingDiscount,
-          manualDiscountMode: discountMode,
-          manualDiscountPercent: discountMode === "percent" ? discountPercent : 0,
+          manualDiscountMode: prepaidSelected ? null : discountMode,
+          manualDiscountPercent:
+            !prepaidSelected && discountMode === "percent" ? discountPercent : 0,
         }),
       });
 
       const updateData = await updateRes.json().catch(() => null);
       if (!updateData?.success) {
         alert(updateData?.message || "Billing update failed");
+        return;
+      }
+
+      if (prepaidSelected) {
+        await preparePrepaidAuthorization({ billingSessionId: newBillingId });
         return;
       }
 

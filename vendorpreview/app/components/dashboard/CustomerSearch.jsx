@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import "./RevenuePanels.css";
 import { printReceiptSnapshot } from "../../utils/receiptPrint";
+import { buildReceiptSnapshotFromBillDetail } from "./billReceiptSnapshot.mjs";
 
 const CUSTOMER_SEARCH_API_BASE_URL =
   process.env.NEXT_PUBLIC_API_BASE_URL
@@ -84,6 +85,9 @@ function formatPaise(value) {
 }
 
 function formatPayment(detail = {}) {
+  if (detail.prepaidSettlement?.paymentMethodLabel) {
+    return detail.prepaidSettlement.paymentMethodLabel;
+  }
   const breakdown = detail.paymentBreakdown || {};
   if (detail.paymentMode === "SPLIT") {
     return `Cash ${formatPaise(breakdown.cashAmountPaise)} + Online ${formatPaise(breakdown.onlineAmountPaise)}`;
@@ -91,6 +95,20 @@ function formatPayment(detail = {}) {
   if (detail.paymentMode === "CASH") return "Cash";
   if (detail.paymentMode === "ONLINE") return "Online";
   return "Not Recorded";
+}
+
+function formatPrepaidSettlement(detail = {}) {
+  const settlement = detail.prepaidSettlement;
+  if (!settlement) return "";
+  if (settlement.paymentMode === "PREPAID_VALUE") {
+    return formatPaise(settlement.redeemedAmountPaise);
+  }
+  if (settlement.paymentMode === "PREPAID_SESSIONS") {
+    const quantity = Number(settlement.redeemedQuantity || 0);
+    const itemName = String(settlement.redeemedItemName || "service").trim();
+    return `${quantity} ${quantity === 1 ? "session" : "sessions"} - ${itemName}`;
+  }
+  return "";
 }
 
 function GstInvoiceDetail({ invoice }) {
@@ -146,41 +164,6 @@ function GstInvoiceDetail({ invoice }) {
       </div>
     </section>
   );
-}
-
-function buildReceiptSnapshotFromBillDetail(detail) {
-  const totals = detail?.totals || {};
-  return {
-    vendorName: String(detail?.vendor?.businessName || "YNOT Vendor").trim(),
-    vendorPhone: String(detail?.vendor?.phone || "").trim(),
-    vendorAddress: String(detail?.vendor?.address || "").trim(),
-    completedAt: detail?.completedAt || detail?.createdAt || new Date().toISOString(),
-    billingSessionId: String(detail?.billingSessionId || detail?.billId || ""),
-    status: String(detail?.status || "COMPLETED"),
-    cancelledAt: detail?.cancellation?.cancelledAt || "",
-    customerLabel: detail?.customer?.label || "Walk-in",
-    items: (detail?.items || []).map((item) => ({
-      name: String(item.name || "Item"),
-      qty: Number(item.qty || 0),
-      price: Number(item.price || 0),
-      total: Number(item.total || 0),
-      hierarchy: String(item.hierarchy || "").trim(),
-      resourceName: String(item.resourceName || "").trim(),
-    })),
-    grossAmount: Number(totals.grossAmount ?? totals.billValue ?? 0),
-    discountAmount: Number(totals.discountAmount || 0),
-    membershipDiscountAmount: Number(totals.membershipDiscountAmount || 0),
-    additionalManualDiscountAmount: Number(totals.additionalManualDiscountAmount || 0),
-    manualDiscountPercent: Number(totals.manualDiscountPercent || 0),
-    membershipPlanName: String(detail?.membership?.planName || totals.membership?.planName || ""),
-    rewardsRedeemed: Number(totals.rewardsRedeemed || 0),
-    pointsEarned: Number(totals.pointsEarned || 0),
-    pointsRedeemed: Number(totals.pointsRedeemed || 0),
-    netCollected: Number(totals.netCollected || 0),
-    paymentMode: String(detail?.paymentMode || "ONLINE"),
-    paymentBreakdown: detail?.paymentBreakdown || null,
-    gstInvoice: detail?.gstInvoice || null,
-  };
 }
 
 export default function CustomerSearch({ vendorId, initialCustomer = null }) {
@@ -1322,6 +1305,20 @@ export default function CustomerSearch({ vendorId, initialCustomer = null }) {
                   <span>Loyalty Points Earned</span>
                   <strong>{Number(billDetail.totals.pointsEarned || 0)}</strong>
                 </div>
+              ) : null}
+              {billDetail.prepaidSettlement ? (
+                <>
+                  <div>
+                    <span>
+                      {billDetail.status === "CANCELLED" ? "Prepaid Restored" : "Prepaid Redeemed"}
+                    </span>
+                    <strong>{formatPrepaidSettlement(billDetail)}</strong>
+                  </div>
+                  <div>
+                    <span>Balance Due</span>
+                    <strong>{formatPaise(billDetail.prepaidSettlement.balanceDuePaise)}</strong>
+                  </div>
+                </>
               ) : null}
               <div className="revenue-panel-bill-total-net">
                 <span>Net Collected</span>

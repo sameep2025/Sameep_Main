@@ -134,7 +134,7 @@ test("completion preserves customer, loyalty and WhatsApp paths for GST invoices
   assert.match(source, /requireCurrentlyEnabled: false/);
   assert.match(source, /const whatsapp = await buildWhatsAppCompletionStatus\(closed\)/);
   assert.match(source, /setImmediate\(async \(\) =>/);
-  assert.match(source, /if \(!isWalkIn && pointsEarned > 0\)/);
+  assert.match(source, /if \(!isWalkIn && !isPrepaidPayment && pointsEarned > 0\)/);
   assert.doesNotMatch(source, /GST TEST invoices must use a walk-in/);
 });
 

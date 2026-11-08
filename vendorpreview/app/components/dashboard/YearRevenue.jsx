@@ -4,6 +4,11 @@ import { useEffect, useMemo, useState } from "react";
 import { API_BASE_URL } from "../../../config";
 import RevenueSnapshot from "./RevenueSnapshot";
 import StaffPerformanceMetrics from "./StaffPerformanceMetrics";
+import PrepaidRevenueSummary, { addPrepaidReporting } from "./PrepaidRevenueSummary";
+import RevenuePeriodAnalytics from "./RevenuePeriodAnalytics";
+import RevenueTrendChart from "./RevenueTrendChart";
+import { calculateRevenueAverages } from "./revenueAnalytics.mjs";
+import { getVendorAuthHeaders } from "../../utils/vendorAuth";
 import "./RevenuePanels.css";
 
 const currencyFmt = new Intl.NumberFormat("en-IN", {
@@ -11,111 +16,20 @@ const currencyFmt = new Intl.NumberFormat("en-IN", {
   currency: "INR",
   maximumFractionDigits: 0,
 });
-
-function formatDateTime(value) {
-  if (!value) return "-";
-
-  return new Date(value).toLocaleString("en-IN", {
-    day: "2-digit",
-    month: "short",
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: true,
-  });
-}
-
-function formatItemMeta(item) {
-  const parts = [];
-
-  if (Number(item?.qty || 0) > 0) {
-    parts.push(`Qty ${item.qty}`);
-  }
-
-  if (Array.isArray(item?.nodePath) && item.nodePath.length > 0) {
-    parts.push(item.nodePath.join(" / "));
-  }
-
-  return parts.join(" • ");
-}
-
-function formatItemResource(item) {
-  return String(item?.resourceName || "").trim();
-}
+const averageCurrencyFmt = new Intl.NumberFormat("en-IN", {
+  style: "currency",
+  currency: "INR",
+  minimumFractionDigits: 2,
+  maximumFractionDigits: 2,
+});
 
 function getNumber(value, fallback = 0) {
   const number = Number(value);
   return Number.isFinite(number) ? number : fallback;
 }
 
-function hasAmount(value) {
-  return typeof value === "number" && Number.isFinite(value);
-}
-
-function getBillFinancials(bill) {
-  const billValue = getNumber(bill?.billValue ?? bill?.grossAmount ?? bill?.netBillValue ?? bill?.total);
-  const netBillValue = getNumber(bill?.netBillValue ?? bill?.total);
-  const rewardsRedeemedValue = getNumber(bill?.rewardsRedeemedValue ?? bill?.redeemed);
-  const netCollected = getNumber(
-    bill?.netCollected ?? Math.max(netBillValue - rewardsRedeemedValue, 0)
-  );
-
-  return {
-    discountAmount: hasAmount(bill?.discountAmount) ? getNumber(bill.discountAmount) : null,
-    billValue,
-    netBillValue,
-    rewardsRedeemedValue,
-    netCollected: Math.max(netCollected, 0),
-  };
-}
-
-function getPaymentModeLabel(bill) {
-  if (bill?.paymentMode === "SPLIT" && bill?.paymentBreakdown) {
-    return `Cash ${currencyFmt.format(Number(bill.paymentBreakdown.cashAmountPaise || 0) / 100)} + Online ${currencyFmt.format(Number(bill.paymentBreakdown.onlineAmountPaise || 0) / 100)}`;
-  }
-  if (bill?.paymentModeLabel) return bill.paymentModeLabel;
-  if (bill?.paymentMode === "ONLINE") return "Online";
-  if (bill?.paymentMode === "CASH") return "Cash";
-  if (bill?.paymentMode === "SPLIT") return "Cash + Online";
-  return "Not Recorded";
-}
-
-function createEmptyRevenueSummary() {
-  return {
-    billValue: 0,
-    discountsGiven: 0,
-    rewardsRedeemed: 0,
-    netCollected: 0,
-    totalBills: 0,
-    pointsDistributed: 0,
-    onlineCollected: 0,
-    cashCollected: 0,
-    notRecordedCollected: 0,
-  };
-}
-
-function normalizeRevenueSummary(source) {
-  const summary = source || {};
-  return {
-    billValue: getNumber(summary.billValue),
-    discountsGiven: getNumber(summary.discountsGiven),
-    rewardsRedeemed: getNumber(summary.rewardsRedeemed),
-    netCollected: getNumber(summary.netCollected),
-    totalBills: getNumber(summary.totalBills),
-    pointsDistributed: getNumber(summary.pointsDistributed),
-    onlineCollected: getNumber(summary.onlineCollected),
-    cashCollected: getNumber(summary.cashCollected),
-    notRecordedCollected: getNumber(summary.notRecordedCollected),
-  };
-}
-
 function getMonthlyCardNetCollected(month) {
   return getNumber(month?.netCollected);
-}
-
-function getMonthlyCardAverage(month) {
-  const orders = Number(month?.orders || month?.totalBills || 0);
-  if (!orders) return 0;
-  return Math.round(getMonthlyCardNetCollected(month) / orders);
 }
 
 function getRollingSnapshotFileName() {
@@ -140,12 +54,6 @@ export default function YearRevenue({
   const [loading, setLoading] = useState(true);
   const [stylists, setStylists] = useState([]);
   const [loadingStylists, setLoadingStylists] = useState(true);
-  const [selectedBills, setSelectedBills] = useState([]);
-  const [selectedMonthSummary, setSelectedMonthSummary] = useState(() =>
-    createEmptyRevenueSummary()
-  );
-  const [loadingBills, setLoadingBills] = useState(false);
-  const [expandedBills, setExpandedBills] = useState({});
   const [showSnapshot, setShowSnapshot] = useState(false);
 
   useEffect(() => {
@@ -174,9 +82,11 @@ export default function YearRevenue({
         const [summaryRes, fyRes] = await Promise.all([
           fetch(`${API_BASE_URL}/api/vendor/dashboard/summary?vendorId=${encodeURIComponent(vendorId)}`, {
             cache: "no-store",
+            headers: getVendorAuthHeaders(vendorId),
           }),
           fetch(`${API_BASE_URL}/api/vendor/dashboard/fy-monthly?vendorId=${encodeURIComponent(vendorId)}`, {
             cache: "no-store",
+            headers: getVendorAuthHeaders(vendorId),
           }),
         ]);
 
@@ -268,7 +178,7 @@ export default function YearRevenue({
         });
         const res = await fetch(
           `${API_BASE_URL}/api/vendor/dashboard/stylist-performance?${params.toString()}`,
-          { cache: "no-store" }
+          { cache: "no-store", headers: getVendorAuthHeaders(vendorId) }
         );
 
         if (!res.ok) {
@@ -303,78 +213,6 @@ export default function YearRevenue({
       cancelled = true;
     };
   }, [vendorId, hrEnabled, hrLabelSingular, selectedMonth]);
-
-  useEffect(() => {
-    if (!vendorId || !selectedMonth?.startDate || !selectedMonth?.endDate) {
-      setSelectedBills([]);
-      setSelectedMonthSummary(createEmptyRevenueSummary());
-      setExpandedBills({});
-      setLoadingBills(false);
-      return;
-    }
-
-    let cancelled = false;
-
-    const loadBills = async () => {
-      try {
-        setLoadingBills(true);
-        const params = new URLSearchParams({
-          vendorId,
-          from: selectedMonth.startDate,
-          to: selectedMonth.endDate,
-          limit: "250",
-        });
-        const summaryParams = new URLSearchParams({
-          vendorId,
-          from: selectedMonth.startDate,
-          to: selectedMonth.endDate,
-        });
-        const [summaryRes, billsRes] = await Promise.all([
-          fetch(`${API_BASE_URL}/api/vendor/dashboard/bills-summary?${summaryParams.toString()}`, {
-            cache: "no-store",
-          }),
-          fetch(`${API_BASE_URL}/api/vendor/dashboard/bills?${params.toString()}`, {
-            cache: "no-store",
-          }),
-        ]);
-
-        if (!summaryRes.ok || !billsRes.ok) {
-          throw new Error("Failed to load selected month bills");
-        }
-
-        const summaryJson = await summaryRes.json();
-        const billsJson = await billsRes.json();
-        const rawBills = Array.isArray(billsJson)
-          ? billsJson
-          : Array.isArray(billsJson?.data)
-            ? billsJson.data
-            : [];
-
-        if (!cancelled) {
-          setSelectedMonthSummary(normalizeRevenueSummary(summaryJson?.data));
-          setSelectedBills(rawBills.filter((bill) => Number(bill?.total || 0) > 0));
-          setExpandedBills({});
-        }
-      } catch (error) {
-        console.error("Failed to fetch selected month bills", error);
-        if (!cancelled) {
-          setSelectedMonthSummary(createEmptyRevenueSummary());
-          setSelectedBills([]);
-          setExpandedBills({});
-        }
-      } finally {
-        if (!cancelled) {
-          setLoadingBills(false);
-        }
-      }
-    };
-
-    loadBills();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [vendorId, selectedMonth]);
 
   const totals = useMemo(() => {
     const summaryRevenue = Number(
@@ -433,10 +271,25 @@ export default function YearRevenue({
         getNumber(month?.billValue ?? month?.netBillValue ?? month?.revenue) > 0
       ).length,
       bestMonth,
+      prepaidReporting: addPrepaidReporting(months.map((month) => month.prepaidReporting)),
     };
   }, [months, summary]);
 
   const selectedMonthLabel = selectedMonth?.label || selectedMonth?.month || "Selected Month";
+  const rollingAverages = calculateRevenueAverages({
+    grossBillValue: totals.billValue,
+    netCollected: totals.netCollected,
+    completedBills: totals.totalOrders,
+  });
+  const monthlyTrend = useMemo(
+    () => months.map((month) => ({
+      ...month,
+      label: month.month || month.label || month.monthKey,
+      netCollected: getMonthlyCardNetCollected(month),
+      completedBills: Number(month.orders || month.totalBills || 0),
+    })),
+    [months]
+  );
   const rollingPeriodLabel = useMemo(() => {
     if (months.length === 0) return "Rolling 12-month period";
 
@@ -449,13 +302,6 @@ export default function YearRevenue({
 
     return "Rolling 12-month period";
   }, [months]);
-  const toggleBill = (billKey) => {
-    setExpandedBills((prev) => ({
-      ...prev,
-      [billKey]: !prev[billKey],
-    }));
-  };
-
   return (
     <section className="revenue-panel">
       <RevenueSnapshot
@@ -520,7 +366,7 @@ export default function YearRevenue({
 
             <div className="revenue-panel-stat-grid">
               <div className="revenue-panel-stat-card">
-                <div className="revenue-panel-stat-label">Bill Value</div>
+                <div className="revenue-panel-stat-label">Gross Bill Value</div>
                 <div className="revenue-panel-stat-value">
                   {currencyFmt.format(totals.billValue || 0)}
                 </div>
@@ -549,7 +395,17 @@ export default function YearRevenue({
                   {totals.totalOrders}
                 </div>
               </div>
+              <div className="revenue-panel-stat-card">
+                <div className="revenue-panel-stat-label">Average Bill Value</div>
+                <div className="revenue-panel-stat-value">{averageCurrencyFmt.format(rollingAverages.averageBillValue)}</div>
+              </div>
+              <div className="revenue-panel-stat-card">
+                <div className="revenue-panel-stat-label">Average Collection</div>
+                <div className="revenue-panel-stat-value">{averageCurrencyFmt.format(rollingAverages.averageCollection)}</div>
+              </div>
             </div>
+
+            <PrepaidRevenueSummary reporting={totals.prepaidReporting} />
 
             <div className="revenue-panel-payment-breakdown">
               <div className="revenue-panel-payment-title">Payment Breakdown</div>
@@ -579,189 +435,29 @@ export default function YearRevenue({
               {months.length === 0 ? (
                 <div className="revenue-panel-empty">No revenue data found for the last 12 months.</div>
               ) : (
-                <div className="revenue-panel-month-grid">
-                  {months.map((month) => (
-                    <button
-                      type="button"
-                      key={month.monthKey || `${month.month}-${month.year || ""}`}
-                      className={`revenue-panel-month-card ${
-                        month.isCurrentMonth ? "active" : ""
-                      } ${
-                        month.monthKey === selectedMonth?.monthKey ? "selected" : ""
-                      }`}
-                      onClick={() => setSelectedMonthKey(month.monthKey)}
-                    >
-                      <div className="revenue-panel-month-name">{month.month}</div>
-                      {month.year ? (
-                        <div className="revenue-panel-month-year">{month.year}</div>
-                      ) : null}
-                      <div className="revenue-panel-month-revenue">
-                        {currencyFmt.format(getMonthlyCardNetCollected(month))}
-                      </div>
-                      <div className="revenue-panel-month-meta">
-                        {Number(month.orders || 0)} orders • Avg{" "}
-                        {currencyFmt.format(getMonthlyCardAverage(month))}
-                      </div>
-                    </button>
-                  ))}
-                </div>
+                <RevenueTrendChart
+                  points={monthlyTrend}
+                  selectedKey={selectedMonth?.monthKey || ""}
+                  onSelect={setSelectedMonthKey}
+                  keyField="monthKey"
+                  labelField="label"
+                  ariaLabel="Last 12 months net collection"
+                  defaultType="line"
+                />
               )}
             </div>
 
             <div className="revenue-panel-section">
-              <div className="revenue-panel-section-title">{selectedMonthLabel} Summary</div>
-              <div className="revenue-panel-stat-grid">
-                <div className="revenue-panel-stat-card">
-                  <div className="revenue-panel-stat-label">Bill Value</div>
-                  <div className="revenue-panel-stat-value">
-                    {currencyFmt.format(selectedMonthSummary.billValue || 0)}
-                  </div>
-                </div>
-                <div className="revenue-panel-stat-card">
-                  <div className="revenue-panel-stat-label">Discounts Given</div>
-                  <div className="revenue-panel-stat-value">
-                    {currencyFmt.format(selectedMonthSummary.discountsGiven || 0)}
-                  </div>
-                </div>
-                <div className="revenue-panel-stat-card">
-                  <div className="revenue-panel-stat-label">Rewards Redeemed</div>
-                  <div className="revenue-panel-stat-value">
-                    {currencyFmt.format(selectedMonthSummary.rewardsRedeemed || 0)}
-                  </div>
-                </div>
-                <div className="revenue-panel-stat-card">
-                  <div className="revenue-panel-stat-label">Net Collected</div>
-                  <div className="revenue-panel-stat-value">
-                    {currencyFmt.format(selectedMonthSummary.netCollected || 0)}
-                  </div>
-                </div>
-                <div className="revenue-panel-stat-card">
-                  <div className="revenue-panel-stat-label">Total Bills</div>
-                  <div className="revenue-panel-stat-value">{selectedMonthSummary.totalBills}</div>
-                </div>
-                <div className="revenue-panel-stat-card">
-                  <div className="revenue-panel-stat-label">Points Distributed</div>
-                  <div className="revenue-panel-stat-value">
-                    {selectedMonthSummary.pointsDistributed}
-                  </div>
-                </div>
-              </div>
-
-              <div className="revenue-panel-payment-breakdown">
-                <div className="revenue-panel-payment-title">Payment Breakdown</div>
-                <div className="revenue-panel-payment-row">
-                  <span>Online</span>
-                  <strong>{currencyFmt.format(selectedMonthSummary.onlineCollected || 0)}</strong>
-                </div>
-                <div className="revenue-panel-payment-row">
-                  <span>Cash</span>
-                  <strong>{currencyFmt.format(selectedMonthSummary.cashCollected || 0)}</strong>
-                </div>
-                <div className="revenue-panel-payment-row">
-                  <span>Not Recorded</span>
-                  <strong>{currencyFmt.format(selectedMonthSummary.notRecordedCollected || 0)}</strong>
-                </div>
-              </div>
-            </div>
-
-            <div className="revenue-panel-section">
-              <div className="revenue-panel-section-title">
-                {selectedMonthLabel} Bills
-                {selectedBills.length > 0 ? (
-                  <span className="revenue-panel-section-note">
-                    {selectedBills.length} bill{selectedBills.length === 1 ? "" : "s"}
-                  </span>
-                ) : null}
-              </div>
-              {loadingBills ? (
-                <div className="revenue-panel-loading">Loading selected month bills...</div>
-              ) : selectedBills.length === 0 ? (
-                <div className="revenue-panel-empty">No bill details found for {selectedMonthLabel}.</div>
-              ) : (
-                <div className="revenue-panel-list">
-                  {selectedBills.map((bill) => {
-                    const billKey = bill.billId || `${bill.phone}-${bill.createdAt}`;
-                    const isExpanded = expandedBills[billKey] === true;
-                    const billItems = Array.isArray(bill.items) ? bill.items : [];
-                    const financials = getBillFinancials(bill);
-
-                    return (
-                      <div key={billKey} className="revenue-panel-list-item">
-                        <div className="revenue-panel-bill-content">
-                          <div className="revenue-panel-list-main">
-                            Bill #{String(bill.billId || "").slice(0, 8)}
-                          </div>
-                          <div className="revenue-panel-list-sub">
-                            {bill.customerLabel || bill.phone || "Walk-in"} • {formatDateTime(bill.createdAt)}
-                          </div>
-                          <div className="revenue-panel-chip-row">
-                            <span className="revenue-panel-chip">
-                              Bill Value {currencyFmt.format(financials.billValue)}
-                            </span>
-                            {financials.discountAmount !== null ? (
-                              <span className="revenue-panel-chip">
-                                Discount {currencyFmt.format(financials.discountAmount)}
-                              </span>
-                            ) : null}
-                            <span className="revenue-panel-chip">
-                              Redeemed {currencyFmt.format(financials.rewardsRedeemedValue)}
-                            </span>
-                            <span className="revenue-panel-chip">
-                              Collected {currencyFmt.format(financials.netCollected)}
-                            </span>
-                            <span className="revenue-panel-chip">
-                              Payment {getPaymentModeLabel(bill)}
-                            </span>
-                            <span className="revenue-panel-chip">Earned {Number(bill.earned || 0)}</span>
-                            <span className="revenue-panel-chip">{billItems.length} item(s)</span>
-                          </div>
-                          <div className="revenue-panel-bill-meta">
-                            {isExpanded ? "Expanded item details" : "Tap to inspect bill items"}
-                          </div>
-
-                          {isExpanded && billItems.length > 0 ? (
-                            <div className="revenue-panel-items-list">
-                              {billItems.map((item, index) => (
-                                <div
-                                  key={`${billKey}-item-${item.itemId || item.name || index}`}
-                                  className="revenue-panel-item-row"
-                                >
-                                  <div>
-                                    <div className="revenue-panel-item-name">{item.name || "Unnamed Item"}</div>
-                                    <div className="revenue-panel-item-meta">{formatItemMeta(item)}</div>
-                                    {formatItemResource(item) ? (
-                                      <div className="revenue-panel-item-resource">
-                                        Handled by {formatItemResource(item)}
-                                      </div>
-                                    ) : null}
-                                  </div>
-                                  <div className="revenue-panel-item-value">
-                                    {currencyFmt.format(Number(item.total || item.price || 0))}
-                                  </div>
-                                </div>
-                              ))}
-                            </div>
-                          ) : null}
-                        </div>
-                        <div className="revenue-panel-bill-actions">
-                          <div className="revenue-panel-list-value">
-                            {currencyFmt.format(financials.netCollected)}
-                          </div>
-                          {billItems.length > 0 ? (
-                            <button
-                              type="button"
-                              className="revenue-panel-expand-btn"
-                              onClick={() => toggleBill(billKey)}
-                            >
-                              {isExpanded ? "Hide items" : "View items"}
-                            </button>
-                          ) : null}
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
+              {selectedMonth ? (
+                <RevenuePeriodAnalytics
+                  vendorId={vendorId}
+                  monthKey={selectedMonth.monthKey}
+                  periodLabel={selectedMonthLabel}
+                  periodFrom={selectedMonth.startDate}
+                  periodTo={selectedMonth.endDate}
+                  showPeriodSummary
+                />
+              ) : null}
             </div>
           </>
         )

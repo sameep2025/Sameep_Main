@@ -358,7 +358,7 @@ test("preview route is vendor-authorized and implementation contains no billing 
   assert.match(route, /test-invoice/);
   assert.doesNotMatch(service, /\.save\(|create\(|findByIdAndUpdate|updateOne|insertMany|deleteOne/);
   assert.doesNotMatch(service, /GstInvoiceCounter|Transaction\.create|BillingSession\.create/);
-  assert.match(billingRoutes, /router\.post\("\/create", billingController\.createBillingSession\)/);
-  assert.match(billingRoutes, /router\.post\("\/update", billingController\.updateBillingCart\)/);
-  assert.match(billingRoutes, /router\.post\("\/complete", billingController\.completeBillingSession\)/);
+  assert.match(billingRoutes, /"\/create",\s*requireVendorAccessFromExistingAuth/);
+  assert.match(billingRoutes, /"\/update",\s*requireVendorAccessFromExistingAuth/);
+  assert.match(billingRoutes, /"\/complete",\s*requireVendorAccessFromExistingAuth/);
 });

@@ -1,9 +1,22 @@
 const mongoose = require("mongoose");
+const crypto = require("crypto");
 const BillingSession = require("../models/BillingSession");
 const Customer = require("../models/Customer");
 const CustomerMembership = require("../models/CustomerMembership");
 const MembershipPlan = require("../models/MembershipPlan");
+const PrepaidMembershipWallet = require("../models/PrepaidMembershipWallet");
+const PrepaidWalletLedger = require("../models/PrepaidWalletLedger");
 const VendorCustomerProfile = require("../models/VendorCustomerProfile");
+const {
+  resolveCanonicalMembershipMenuItem,
+} = require("../services/canonicalMembershipMenuItem");
+const {
+  assertPrepaidMembershipWalletEnabled,
+} = require("../services/prepaidMembershipCapability");
+const {
+  getMembershipEntitlementFilter,
+  refreshLifecycleForCustomer,
+} = require("../services/prepaidMembershipLifecycleService");
 const {
   getEffectiveEligibleMenuItemIds,
   getEligibleServicesForMembership,
@@ -53,6 +66,28 @@ function normalizeMoney(value, fallback = 0) {
   return Math.round(number * 100) / 100;
 }
 
+function moneyToPaise(value) {
+  const amount = normalizeMoney(value, NaN);
+  const paise = Math.round(amount * 100);
+  return Number.isSafeInteger(paise) && paise >= 0 ? paise : NaN;
+}
+
+function normalizeIdempotencyKey(value) {
+  return String(value || "").trim().slice(0, 160);
+}
+
+function buildEnrollmentFingerprint({ vendorId, membershipPlanId, mobile, payment, renewalOf = "" }) {
+  return crypto.createHash("sha256").update(JSON.stringify({
+    vendorId: String(vendorId),
+    membershipPlanId: String(membershipPlanId),
+    mobile,
+    paymentMethod: payment.method,
+    paymentAmountPaise: moneyToPaise(payment.amount),
+    paymentReference: payment.reference,
+    renewalOf: String(renewalOf || ""),
+  })).digest("hex");
+}
+
 function addCalendarMonths(date, months) {
   const source = new Date(date);
   const target = new Date(source.getTime());
@@ -94,6 +129,117 @@ function buildPlanSnapshot(plan) {
     benefitSemanticsVersion: plan.benefitSemanticsVersion || "MEMBERSHIP_ITEM_FLAGS_V1",
     serviceQuotaConfig: plan.serviceQuotaConfig || { benefits: [] },
     prepaidValueConfig: plan.prepaidValueConfig || { prepaidValue: 0, bonusValue: 0 },
+    prepaidSessionsConfig: plan.prepaidSessionsConfig || undefined,
+  };
+}
+
+async function buildPrepaidEnrollmentData({ plan, vendorId, enrolledAt, expiresAt, session }) {
+  if (plan.planType === "PREPAID_VALUE") {
+    const paidAmountPaise = moneyToPaise(plan.sellingPrice);
+    const creditedAmountPaise = moneyToPaise(plan.prepaidValueConfig?.prepaidValue);
+    const bonusAmountPaise = creditedAmountPaise - paidAmountPaise;
+    if (
+      !Number.isSafeInteger(paidAmountPaise) ||
+      paidAmountPaise < 1 ||
+      !Number.isSafeInteger(creditedAmountPaise) ||
+      creditedAmountPaise < paidAmountPaise ||
+      moneyToPaise(plan.prepaidValueConfig?.bonusValue) !== bonusAmountPaise
+    ) {
+      const error = new Error("Prepaid value plan configuration is invalid");
+      error.statusCode = 400;
+      throw error;
+    }
+    return {
+      snapshotField: "prepaidValueSnapshot",
+      snapshot: { paidAmountPaise, creditedAmountPaise, bonusAmountPaise, enrolledAt, expiresAt },
+      wallet: {
+        walletType: "PREPAID_VALUE",
+        creditedAmountPaise,
+        consumedAmountPaise: 0,
+        remainingAmountPaise: creditedAmountPaise,
+      },
+      ledger: { walletType: "PREPAID_VALUE", amountPaise: creditedAmountPaise },
+    };
+  }
+
+  const config = plan.prepaidSessionsConfig || {};
+  const item = await resolveCanonicalMembershipMenuItem({
+    vendorId,
+    itemId: config.eligibleItemId,
+    itemSource: config.eligibleItemSource,
+    session,
+  });
+  if (item.itemKind !== config.eligibleItemKind) {
+    const error = new Error("Eligible membership item classification has changed");
+    error.statusCode = 409;
+    throw error;
+  }
+  const paidQuantity = Number(config.paidQuantity);
+  const creditedQuantity = Number(config.creditedQuantity);
+  if (
+    !Number.isSafeInteger(paidQuantity) ||
+    paidQuantity < 1 ||
+    !Number.isSafeInteger(creditedQuantity) ||
+    creditedQuantity < paidQuantity
+  ) {
+    const error = new Error("Prepaid session plan quantities are invalid");
+    error.statusCode = 400;
+    throw error;
+  }
+  return {
+    snapshotField: "prepaidSessionsSnapshot",
+    snapshot: {
+      eligibleItemId: new mongoose.Types.ObjectId(item.itemId),
+      eligibleItemSource: item.itemSource,
+      eligibleItemKind: item.itemKind,
+      itemName: item.name,
+      unitPricePaise: item.pricePaise,
+      categoryPath: item.categoryPath,
+      packageIncludes: item.packageIncludes,
+      terms: item.terms,
+      paidQuantity,
+      creditedQuantity,
+      enrolledAt,
+      expiresAt,
+    },
+    wallet: {
+      walletType: "PREPAID_SESSIONS",
+      creditedQuantity,
+      consumedQuantity: 0,
+      remainingQuantity: creditedQuantity,
+    },
+    ledger: { walletType: "PREPAID_SESSIONS", quantity: creditedQuantity },
+  };
+}
+
+function serializeWallet(wallet) {
+  if (!wallet) return null;
+  return {
+    id: String(wallet._id),
+    customerMembershipId: String(wallet.customerMembershipId),
+    walletType: wallet.walletType,
+    creditedAmountPaise: wallet.creditedAmountPaise,
+    consumedAmountPaise: wallet.consumedAmountPaise,
+    remainingAmountPaise: wallet.remainingAmountPaise,
+    creditedQuantity: wallet.creditedQuantity,
+    consumedQuantity: wallet.consumedQuantity,
+    remainingQuantity: wallet.remainingQuantity,
+    activatesAt: wallet.activatesAt,
+    expiresAt: wallet.expiresAt,
+    status: wallet.status,
+  };
+}
+
+function serializeWalletLedger(row) {
+  if (!row) return null;
+  return {
+    id: String(row._id),
+    walletId: String(row.walletId),
+    eventType: row.eventType,
+    walletType: row.walletType,
+    amountPaise: row.amountPaise,
+    quantity: row.quantity,
+    occurredAt: row.occurredAt,
   };
 }
 
@@ -135,31 +281,6 @@ function getEffectiveMembershipStatus(membership, now = new Date()) {
   if (expiryTime && expiryTime <= nowTime) return "EXPIRED";
   if (startTime && startTime > nowTime) return "SCHEDULED";
   return "ACTIVE";
-}
-
-async function refreshLifecycleForCustomer({ vendorId, customerId, session, now = new Date() }) {
-  await CustomerMembership.updateMany(
-    {
-      vendorId,
-      customerId,
-      status: "ACTIVE",
-      expiresAt: { $lte: now },
-    },
-    { $set: { status: "EXPIRED" } },
-    { session }
-  );
-
-  await CustomerMembership.updateMany(
-    {
-      vendorId,
-      customerId,
-      status: "SCHEDULED",
-      activatedAt: { $lte: now },
-      expiresAt: { $gt: now },
-    },
-    { $set: { status: "ACTIVE" } },
-    { session }
-  );
 }
 
 function escapeRegExp(value) {
@@ -215,6 +336,19 @@ function serializeMembership(membership, nameMap = new Map(), serviceMap = null)
       planId: planSnapshot.planId ? String(planSnapshot.planId) : String(membership.membershipPlanId),
       eligibleMenuItemIds: (planSnapshot.eligibleMenuItemIds || []).map((id) => String(id)),
     },
+    ...(membership.membershipType === "PREPAID_VALUE"
+      ? { prepaidValueSnapshot: membership.prepaidValueSnapshot || null }
+      : {}),
+    ...(membership.membershipType === "PREPAID_SESSIONS"
+      ? {
+          prepaidSessionsSnapshot: membership.prepaidSessionsSnapshot
+            ? {
+                ...membership.prepaidSessionsSnapshot,
+                eligibleItemId: String(membership.prepaidSessionsSnapshot.eligibleItemId || ""),
+              }
+            : null,
+        }
+      : {}),
     serviceEligibilityOverride: serviceEligibilityOverride?.eligibleMenuItemIds
       ? {
           eligibleMenuItemIds: (serviceEligibilityOverride.eligibleMenuItemIds || []).map((id) => String(id)),
@@ -323,6 +457,7 @@ async function lookupCustomer(req, res) {
 
 async function activateMembership(req, res) {
   const session = await mongoose.startSession();
+  let retryContext = null;
 
   try {
     const vendorId = getAuthorizedVendorId(req);
@@ -330,6 +465,8 @@ async function activateMembership(req, res) {
     const fullNumber = normalizeMobileInput(req.body?.customerMobile || req.body?.mobile);
     const now = new Date();
     let createdMembership = null;
+    let createdWallet = null;
+    let replayed = false;
 
     if (!isCanonicalObjectId(vendorId) || !isCanonicalObjectId(membershipPlanId)) {
       return res.status(400).json({ success: false, message: "Valid vendorId and membershipPlanId required" });
@@ -342,23 +479,70 @@ async function activateMembership(req, res) {
       const plan = await MembershipPlan.findOne({
         _id: membershipPlanId,
         vendorId,
-        planType: "DISCOUNT",
         status: "ACTIVE",
       })
         .session(session)
         .lean();
 
       if (!plan) {
-        const error = new Error("Only active DISCOUNT membership plans can be activated");
+        const error = new Error("An active membership plan is required");
         error.statusCode = 400;
         throw error;
       }
+      if (!["DISCOUNT", "PREPAID_VALUE", "PREPAID_SESSIONS"].includes(plan.planType)) {
+        const error = new Error("This membership type is not available for enrollment");
+        error.statusCode = 400;
+        throw error;
+      }
+      if (plan.planType !== "DISCOUNT") assertPrepaidMembershipWalletEnabled();
 
       const paymentValidation = validatePaymentInput(req.body, plan.sellingPrice);
       if (!paymentValidation.ok) {
         const error = new Error(paymentValidation.message);
         error.statusCode = 400;
         throw error;
+      }
+
+      const idempotencyKey = plan.planType === "DISCOUNT"
+        ? ""
+        : normalizeIdempotencyKey(req.body?.idempotencyKey);
+      if (plan.planType !== "DISCOUNT" && !idempotencyKey) {
+        const error = new Error("Idempotency key is required for prepaid enrollment");
+        error.statusCode = 400;
+        throw error;
+      }
+      const fingerprint = plan.planType === "DISCOUNT"
+        ? ""
+        : buildEnrollmentFingerprint({
+            vendorId,
+            membershipPlanId,
+            mobile: fullNumber,
+            payment: paymentValidation.payment,
+          });
+      retryContext = { vendorId, idempotencyKey, fingerprint };
+
+      if (idempotencyKey) {
+        const existingRetry = await CustomerMembership.findOne({
+          vendorId,
+          enrollmentIdempotencyKey: idempotencyKey,
+        })
+          .select("+enrollmentRequestFingerprint")
+          .session(session)
+          .lean();
+        if (existingRetry) {
+          if (existingRetry.enrollmentRequestFingerprint !== fingerprint) {
+            const error = new Error("Idempotency key was already used for another enrollment");
+            error.statusCode = 409;
+            throw error;
+          }
+          createdMembership = existingRetry;
+          createdWallet = await PrepaidMembershipWallet.findOne({
+            customerMembershipId: existingRetry._id,
+            vendorId,
+          }).session(session).lean();
+          replayed = true;
+          return;
+        }
       }
 
       const expiresAt = calculateExpiry(now, plan.duration);
@@ -375,6 +559,7 @@ async function activateMembership(req, res) {
       const existingActive = await CustomerMembership.findOne({
         vendorId,
         customerId: customer._id,
+        ...getMembershipEntitlementFilter(plan.planType),
         status: "ACTIVE",
         expiresAt: { $gt: now },
       })
@@ -387,6 +572,17 @@ async function activateMembership(req, res) {
         throw error;
       }
 
+
+      const prepaidData = plan.planType === "DISCOUNT"
+        ? null
+        : await buildPrepaidEnrollmentData({
+            plan,
+            vendorId,
+            enrolledAt: now,
+            expiresAt,
+            session,
+          });
+
       const created = await CustomerMembership.create(
         [
           {
@@ -394,8 +590,11 @@ async function activateMembership(req, res) {
             customerId: customer._id,
             customerMobileSnapshot: fullNumber,
             membershipPlanId: plan._id,
-            membershipType: "DISCOUNT",
+            membershipType: plan.planType,
+            enrollmentIdempotencyKey: idempotencyKey,
+            enrollmentRequestFingerprint: fingerprint,
             planSnapshot: buildPlanSnapshot(plan),
+            ...(prepaidData ? { [prepaidData.snapshotField]: prepaidData.snapshot } : {}),
             sellingPriceAtPurchase: normalizeMoney(plan.sellingPrice),
             activatedAt: now,
             expiresAt,
@@ -411,13 +610,78 @@ async function activateMembership(req, res) {
         { session }
       );
       createdMembership = created[0];
+
+      if (prepaidData) {
+        const wallets = await PrepaidMembershipWallet.create(
+          [{
+            vendorId,
+            customerId: customer._id,
+            customerMembershipId: createdMembership._id,
+            ...prepaidData.wallet,
+            activatesAt: now,
+            expiresAt,
+            status: "ACTIVE",
+          }],
+          { session }
+        );
+        createdWallet = wallets[0];
+        await PrepaidWalletLedger.create(
+          [{
+            vendorId,
+            customerId: customer._id,
+            customerMembershipId: createdMembership._id,
+            walletId: createdWallet._id,
+            ...prepaidData.ledger,
+            eventType: "CREDIT",
+            occurredAt: now,
+            idempotencyKey: `enrollment:${idempotencyKey}`,
+            audit: { source: "MEMBERSHIP_ENROLLMENT" },
+          }],
+          { session }
+        );
+      }
     });
 
-    return res.status(201).json({
+    const membershipObject = typeof createdMembership?.toObject === "function"
+      ? createdMembership.toObject()
+      : createdMembership;
+    const walletObject = typeof createdWallet?.toObject === "function"
+      ? createdWallet.toObject()
+      : createdWallet;
+    if (membershipObject.membershipType === "DISCOUNT") {
+      return res.status(201).json({
+        success: true,
+        data: serializeMembership(membershipObject),
+      });
+    }
+    return res.status(replayed ? 200 : 201).json({
       success: true,
-      data: serializeMembership(createdMembership.toObject()),
+      replayed,
+      data: serializeMembership(membershipObject),
+      wallet: serializeWallet(walletObject),
     });
   } catch (error) {
+    if (error?.code === 11000 && retryContext?.idempotencyKey) {
+      const existingRetry = await CustomerMembership.findOne({
+        vendorId: retryContext.vendorId,
+        enrollmentIdempotencyKey: retryContext.idempotencyKey,
+      }).select("+enrollmentRequestFingerprint").lean();
+      if (
+        existingRetry &&
+        existingRetry.enrollmentRequestFingerprint === retryContext.fingerprint
+      ) {
+        const wallet = await PrepaidMembershipWallet.findOne({
+          customerMembershipId: existingRetry._id,
+          vendorId: retryContext.vendorId,
+        }).lean();
+        return res.status(200).json({
+          success: true,
+          replayed: true,
+          data: serializeMembership(existingRetry),
+          wallet: serializeWallet(wallet),
+        });
+      }
+    }
     const duplicateActive = error?.code === 11000;
     const status = duplicateActive ? 409 : error?.statusCode || 500;
     const message = duplicateActive
@@ -428,7 +692,7 @@ async function activateMembership(req, res) {
     if (!error?.statusCode && !duplicateActive) {
       console.error("Customer membership activation error:", error?.message || error);
     }
-    return res.status(status).json({ success: false, message });
+    return res.status(status).json({ success: false, message, code: error?.code || undefined });
   } finally {
     await session.endSession();
   }
@@ -533,17 +797,36 @@ async function getMembership(req, res) {
       .sort({ activatedAt: 1, createdAt: 1, _id: 1 })
       .lean();
 
-    const [nameMap, serviceMap] = await Promise.all([
+    const isPrepaid = ["PREPAID_VALUE", "PREPAID_SESSIONS"].includes(membership.membershipType);
+    if (isPrepaid) assertPrepaidMembershipWalletEnabled();
+    const [nameMap, serviceMap, wallet] = await Promise.all([
       getVendorCustomerNameMap(vendorId, [membership, ...history]),
       loadMembershipEligibleServiceMap([membership, ...history]),
+      isPrepaid
+        ? PrepaidMembershipWallet.findOne({ vendorId, customerMembershipId: membership._id }).lean()
+        : null,
     ]);
+    const walletLedger = wallet
+      ? await PrepaidWalletLedger.find({ vendorId, walletId: wallet._id })
+          .sort({ occurredAt: -1, _id: -1 })
+          .lean()
+      : [];
 
     return res.json({
       success: true,
       data: serializeMembership(membership, nameMap, serviceMap),
       history: history.map((row) => serializeMembership(row, nameMap, serviceMap)),
+      wallet: serializeWallet(wallet),
+      walletLedger: walletLedger.map(serializeWalletLedger),
     });
   } catch (error) {
+    if (error?.statusCode) {
+      return res.status(error.statusCode).json({
+        success: false,
+        message: error.message,
+        code: error.code || undefined,
+      });
+    }
     console.error("Customer membership detail error:", error?.message || error);
     return res.status(500).json({ success: false, message: "Failed to load customer membership" });
   }
@@ -551,12 +834,15 @@ async function getMembership(req, res) {
 
 async function renewMembership(req, res) {
   const session = await mongoose.startSession();
+  let retryContext = null;
 
   try {
     const vendorId = getAuthorizedVendorId(req);
     const membershipId = normalizeId(req.params?.membershipId);
     const now = new Date();
     let renewalMembership = null;
+    let renewalWallet = null;
+    let replayed = false;
 
     if (!isCanonicalObjectId(vendorId) || !isCanonicalObjectId(membershipId)) {
       return res.status(400).json({ success: false, message: "Valid vendorId and membershipId required" });
@@ -572,11 +858,12 @@ async function renewMembership(req, res) {
         error.statusCode = 404;
         throw error;
       }
-      if (existing.membershipType !== "DISCOUNT") {
-        const error = new Error("Only DISCOUNT memberships can be renewed in this phase");
+      if (!["DISCOUNT", "PREPAID_VALUE", "PREPAID_SESSIONS"].includes(existing.membershipType)) {
+        const error = new Error("This membership type cannot be renewed");
         error.statusCode = 400;
         throw error;
       }
+      if (existing.membershipType !== "DISCOUNT") assertPrepaidMembershipWalletEnabled();
       if (getEffectiveMembershipStatus(existing, now) === "CANCELLED") {
         const error = new Error("Cancelled memberships cannot be renewed");
         error.statusCode = 400;
@@ -600,25 +887,10 @@ async function renewMembership(req, res) {
         throw error;
       }
 
-      const pendingRenewal = await CustomerMembership.findOne({
-        vendorId,
-        customerId: refreshedExisting.customerId,
-        membershipPlanId: refreshedExisting.membershipPlanId,
-        status: "SCHEDULED",
-        expiresAt: { $gt: now },
-      })
-        .session(session)
-        .lean();
-      if (pendingRenewal) {
-        const error = new Error("A scheduled renewal already exists for this membership");
-        error.statusCode = 409;
-        throw error;
-      }
-
       const plan = await MembershipPlan.findOne({
         _id: refreshedExisting.membershipPlanId,
         vendorId,
-        planType: "DISCOUNT",
+        planType: refreshedExisting.membershipType,
         status: "ACTIVE",
       })
         .session(session)
@@ -636,6 +908,63 @@ async function renewMembership(req, res) {
         throw error;
       }
 
+      const idempotencyKey = plan.planType === "DISCOUNT"
+        ? ""
+        : normalizeIdempotencyKey(req.body?.idempotencyKey);
+      if (plan.planType !== "DISCOUNT" && !idempotencyKey) {
+        const error = new Error("Idempotency key is required for prepaid renewal");
+        error.statusCode = 400;
+        throw error;
+      }
+      const fingerprint = plan.planType === "DISCOUNT"
+        ? ""
+        : buildEnrollmentFingerprint({
+            vendorId,
+            membershipPlanId: plan._id,
+            mobile: refreshedExisting.customerMobileSnapshot,
+            payment: paymentValidation.payment,
+            renewalOf: refreshedExisting._id,
+          });
+      retryContext = { vendorId, idempotencyKey, fingerprint };
+      if (idempotencyKey) {
+        const existingRetry = await CustomerMembership.findOne({
+          vendorId,
+          enrollmentIdempotencyKey: idempotencyKey,
+        })
+          .select("+enrollmentRequestFingerprint")
+          .session(session)
+          .lean();
+        if (existingRetry) {
+          if (existingRetry.enrollmentRequestFingerprint !== fingerprint) {
+            const error = new Error("Idempotency key was already used for another enrollment");
+            error.statusCode = 409;
+            throw error;
+          }
+          renewalMembership = existingRetry;
+          renewalWallet = await PrepaidMembershipWallet.findOne({
+            customerMembershipId: existingRetry._id,
+            vendorId,
+          }).session(session).lean();
+          replayed = true;
+          return;
+        }
+      }
+
+      const pendingRenewal = await CustomerMembership.findOne({
+        vendorId,
+        customerId: refreshedExisting.customerId,
+        membershipPlanId: refreshedExisting.membershipPlanId,
+        status: "SCHEDULED",
+        expiresAt: { $gt: now },
+      })
+        .session(session)
+        .lean();
+      if (pendingRenewal) {
+        const error = new Error("A scheduled renewal already exists for this membership");
+        error.statusCode = 409;
+        throw error;
+      }
+
       const renewalStartsAt =
         effectiveStatus === "ACTIVE" && refreshedExisting.expiresAt
           ? new Date(refreshedExisting.expiresAt)
@@ -647,6 +976,7 @@ async function renewMembership(req, res) {
         const overlappingActive = await CustomerMembership.findOne({
           vendorId,
           customerId: refreshedExisting.customerId,
+          ...getMembershipEntitlementFilter(refreshedExisting.membershipType),
           status: "ACTIVE",
           expiresAt: { $gt: now },
         })
@@ -659,6 +989,16 @@ async function renewMembership(req, res) {
         }
       }
 
+      const prepaidData = plan.planType === "DISCOUNT"
+        ? null
+        : await buildPrepaidEnrollmentData({
+            plan,
+            vendorId,
+            enrolledAt: now,
+            expiresAt,
+            session,
+          });
+
       const created = await CustomerMembership.create(
         [
           {
@@ -668,8 +1008,11 @@ async function renewMembership(req, res) {
             membershipPlanId: plan._id,
             renewedFromMembershipId: refreshedExisting._id,
             renewalRecordedAt: now,
-            membershipType: "DISCOUNT",
+            membershipType: plan.planType,
+            enrollmentIdempotencyKey: idempotencyKey,
+            enrollmentRequestFingerprint: fingerprint,
             planSnapshot: buildPlanSnapshot(plan),
+            ...(prepaidData ? { [prepaidData.snapshotField]: prepaidData.snapshot } : {}),
             sellingPriceAtPurchase: normalizeMoney(plan.sellingPrice),
             activatedAt: renewalStartsAt,
             expiresAt,
@@ -685,13 +1028,78 @@ async function renewMembership(req, res) {
         { session }
       );
       renewalMembership = created[0];
+
+      if (prepaidData) {
+        const wallets = await PrepaidMembershipWallet.create(
+          [{
+            vendorId,
+            customerId: refreshedExisting.customerId,
+            customerMembershipId: renewalMembership._id,
+            ...prepaidData.wallet,
+            activatesAt: renewalStartsAt,
+            expiresAt,
+            status: renewalStatus,
+          }],
+          { session }
+        );
+        renewalWallet = wallets[0];
+        await PrepaidWalletLedger.create(
+          [{
+            vendorId,
+            customerId: refreshedExisting.customerId,
+            customerMembershipId: renewalMembership._id,
+            walletId: renewalWallet._id,
+            ...prepaidData.ledger,
+            eventType: "CREDIT",
+            occurredAt: now,
+            idempotencyKey: `renewal:${idempotencyKey}`,
+            audit: { source: "MEMBERSHIP_RENEWAL", renewedFromMembershipId: refreshedExisting._id },
+          }],
+          { session }
+        );
+      }
     });
 
-    return res.status(201).json({
+    const membershipObject = typeof renewalMembership?.toObject === "function"
+      ? renewalMembership.toObject()
+      : renewalMembership;
+    const walletObject = typeof renewalWallet?.toObject === "function"
+      ? renewalWallet.toObject()
+      : renewalWallet;
+    if (membershipObject.membershipType === "DISCOUNT") {
+      return res.status(201).json({
+        success: true,
+        data: serializeMembership(membershipObject),
+      });
+    }
+    return res.status(replayed ? 200 : 201).json({
       success: true,
-      data: serializeMembership(renewalMembership.toObject()),
+      replayed,
+      data: serializeMembership(membershipObject),
+      wallet: serializeWallet(walletObject),
     });
   } catch (error) {
+    if (error?.code === 11000 && retryContext?.idempotencyKey) {
+      const existingRetry = await CustomerMembership.findOne({
+        vendorId: retryContext.vendorId,
+        enrollmentIdempotencyKey: retryContext.idempotencyKey,
+      }).select("+enrollmentRequestFingerprint").lean();
+      if (
+        existingRetry &&
+        existingRetry.enrollmentRequestFingerprint === retryContext.fingerprint
+      ) {
+        const wallet = await PrepaidMembershipWallet.findOne({
+          customerMembershipId: existingRetry._id,
+          vendorId: retryContext.vendorId,
+        }).lean();
+        return res.status(200).json({
+          success: true,
+          replayed: true,
+          data: serializeMembership(existingRetry),
+          wallet: serializeWallet(wallet),
+        });
+      }
+    }
     const duplicateRenewal = error?.code === 11000;
     const status = duplicateRenewal ? 409 : error?.statusCode || 500;
     const message = duplicateRenewal
@@ -702,7 +1110,7 @@ async function renewMembership(req, res) {
     if (!error?.statusCode && !duplicateRenewal) {
       console.error("Customer membership renewal error:", error?.message || error);
     }
-    return res.status(status).json({ success: false, message });
+    return res.status(status).json({ success: false, message, code: error?.code || undefined });
   } finally {
     await session.endSession();
   }
@@ -720,6 +1128,12 @@ module.exports = {
     calculateExpiry,
     buildPlanSnapshot,
     validatePaymentInput,
+    moneyToPaise,
+    normalizeIdempotencyKey,
+    buildEnrollmentFingerprint,
+    buildPrepaidEnrollmentData,
+    serializeWallet,
+    serializeWalletLedger,
     serializeMembership,
     getEffectiveMembershipStatus,
     refreshLifecycleForCustomer,

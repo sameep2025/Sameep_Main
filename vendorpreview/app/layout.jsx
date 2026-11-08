@@ -2,7 +2,6 @@ import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import BootstrapClient from "./BootstrapClient";
 import VendorClientShell from "./VendorClientShell";
-import ServerSeoContentSection from "./components/ServerSeoContentSection";
 import { VendorProvider } from "./context/VendorContext";
 import { resolveVendorRequestContext } from "./utils/vendorRequestContext.server";
 import {
@@ -99,7 +98,6 @@ export default async function RootLayout({ children }) {
           <BootstrapClient />
           <VendorClientShell>
             {children}
-            <ServerSeoContentSection vendorInfo={vendorContext} />
           </VendorClientShell>
         </VendorProvider>
       </body>

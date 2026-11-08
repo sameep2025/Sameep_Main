@@ -1306,6 +1306,16 @@ button {
   color: #4b5563;
 }
 
+.portalMembershipStatus.exhausted {
+  background: #e5e7eb;
+  color: #374151;
+}
+
+.portalMembershipStatus.cancelled {
+  background: #fee2e2;
+  color: #991b1b;
+}
+
 .portalMembershipFacts,
 .portalMembershipBenefits {
   display: grid;
@@ -1394,6 +1404,144 @@ button {
 
 .portalMembershipServicesEmpty {
   padding: 14px 0 4px;
+}
+
+.portalPrepaidMembershipCard {
+  overflow: hidden;
+}
+
+.portalMembershipType {
+  color: #875400 !important;
+  font-size: 0.7rem;
+  font-weight: 950 !important;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.portalPrepaidBalance {
+  display: grid;
+  gap: 3px;
+  margin-top: 14px;
+  padding: 14px 16px;
+  border: 1px solid rgba(196, 131, 0, 0.2);
+  border-radius: 18px;
+  background: linear-gradient(135deg, #101a34, #182545);
+  color: #fff;
+}
+
+.portalPrepaidBalance span {
+  color: #f3c14b;
+  font-size: 0.7rem;
+  font-weight: 950;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.portalPrepaidBalance strong {
+  font-size: clamp(1.45rem, 5vw, 2rem);
+  line-height: 1.15;
+  overflow-wrap: anywhere;
+}
+
+.portalPrepaidFacts small {
+  display: block;
+  margin-top: 4px;
+  color: var(--muted);
+  line-height: 1.35;
+}
+
+.portalPrepaidPackage {
+  margin-top: 12px;
+  border-radius: 14px;
+  background: rgba(243, 193, 75, 0.12);
+  padding: 10px 12px;
+}
+
+.portalPrepaidPackage summary {
+  cursor: pointer;
+  color: #6f4900;
+  font-weight: 900;
+}
+
+.portalPrepaidPackage p {
+  margin: 8px 0 0;
+  color: var(--muted);
+  line-height: 1.55;
+  white-space: pre-wrap;
+}
+
+.portalPrepaidActivityToggle {
+  margin-top: 12px;
+}
+
+.portalPrepaidActivity {
+  margin-top: 10px;
+  border-top: 1px solid rgba(16, 26, 52, 0.08);
+  padding-top: 10px;
+}
+
+.portalPrepaidActivity > p,
+.portalPrepaidActivityState p {
+  color: var(--muted);
+  font-weight: 700;
+}
+
+.portalPrepaidActivity ul {
+  display: grid;
+  gap: 7px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.portalPrepaidActivity li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  border-radius: 12px;
+  background: rgba(16, 26, 52, 0.04);
+  padding: 9px 11px;
+}
+
+.portalPrepaidActivity li div {
+  min-width: 0;
+}
+
+.portalPrepaidActivity li span {
+  display: block;
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
+.portalPrepaidActivity li > strong {
+  color: var(--ink);
+  text-align: right;
+  white-space: nowrap;
+}
+
+.portalPrepaidActivityAmount.incoming {
+  color: #287a4b;
+}
+
+.portalPrepaidActivityAmount.redeemed,
+.portalPrepaidActivityAmount.neutral {
+  color: var(--ink);
+}
+
+.portalPrepaidActivityState button,
+.portalPrepaidLoadMore {
+  margin-top: 8px;
+}
+
+.portalPrepaidUnavailable {
+  margin-top: 14px;
+  border-radius: 14px;
+  background: #fff8dc;
+  color: #6f4900;
+  padding: 12px;
+  line-height: 1.5;
 }
 
 .portalItemRow div {
@@ -4426,6 +4574,15 @@ button {
   .portalMembershipFacts,
   .portalMembershipBenefits {
     grid-template-columns: 1fr;
+  }
+
+  .portalPrepaidBalance {
+    padding: 12px 14px;
+  }
+
+  .portalPrepaidActivity li {
+    gap: 8px;
+    padding: 9px;
   }
 
   .customerPortalBrand {

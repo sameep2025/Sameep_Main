@@ -24,8 +24,25 @@ function resolveVendorBodyOrQueryId(req) {
   return req.body?.vendorId || req.query?.vendorId || "";
 }
 
-router.post("/create", billingController.createBillingSession);
-router.post("/update", billingController.updateBillingCart);
+const UNRESOLVED_BILL_VENDOR_ID = "unresolved-billing-session";
+
+async function resolveBillVendorIdFromBody(req) {
+  const id = req.body?.billingId;
+  if (!id || !mongoose.Types.ObjectId.isValid(id)) return UNRESOLVED_BILL_VENDOR_ID;
+  const bill = await BillingSession.findById(id).select("vendorId").lean();
+  return bill?.vendorId || UNRESOLVED_BILL_VENDOR_ID;
+}
+
+router.post(
+  "/create",
+  requireVendorAccessFromExistingAuth((req) => req.body?.vendorId),
+  billingController.createBillingSession
+);
+router.post(
+  "/update",
+  requireVendorAccessFromExistingAuth(resolveBillVendorIdFromBody),
+  billingController.updateBillingCart
+);
 router.post(
   "/membership-preview",
   requireVendorAccessFromExistingAuth(resolveVendorBodyOrQueryId),
@@ -65,9 +82,21 @@ router.post(
 );
 router.get("/:id", billingController.getBillingSession);
 
-router.post("/request-otp", billingController.requestRedeemOTP);
-router.post("/verify-otp", billingController.verifyRedeemOTP);
+router.post(
+  "/request-otp",
+  requireVendorAccessFromExistingAuth(resolveBillVendorIdFromBody),
+  billingController.requestRedeemOTP
+);
+router.post(
+  "/verify-otp",
+  requireVendorAccessFromExistingAuth(resolveBillVendorIdFromBody),
+  billingController.verifyRedeemOTP
+);
 
-router.post("/complete", billingController.completeBillingSession);
+router.post(
+  "/complete",
+  requireVendorAccessFromExistingAuth(resolveBillVendorIdFromBody),
+  billingController.completeBillingSession
+);
 
 module.exports = router;

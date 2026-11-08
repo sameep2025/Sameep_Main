@@ -3,6 +3,17 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { API_BASE_URL } from "../../utils/config";
+import {
+  formatPrepaidActivityValue,
+  formatPrepaidPaise,
+  getMembershipTypeLabel,
+  getPrepaidActivityLabel,
+  getPrepaidActivityTone,
+  getPrepaidStatusClass,
+  getPrepaidStatusLabel,
+  isPrepaidMembership,
+  mergePrepaidActivityItems,
+} from "./prepaidMembershipUi.mjs";
 
 const CUSTOMER_PORTAL_TOKEN_KEY = "ynot_customer_portal_token";
 const DEFAULT_COUNTRY_CODE = "91";
@@ -51,7 +62,17 @@ function formatPaymentAllocation(bill = {}) {
   }
   if (bill.paymentMode === "CASH") return "Cash";
   if (bill.paymentMode === "ONLINE") return "Online";
+  if (bill.paymentMode === "PREPAID_VALUE" && bill.prepaidSettlement) return "Prepaid Wallet";
+  if (bill.paymentMode === "PREPAID_SESSIONS" && bill.prepaidSettlement) return "Prepaid Package";
   return "";
+}
+
+function formatPrepaidSettlementValue(settlement = {}) {
+  if (settlement.paymentMode === "PREPAID_VALUE") {
+    return formatPaise(settlement.redeemedAmountPaise);
+  }
+  const item = settlement.redeemedItemName ? ` - ${settlement.redeemedItemName}` : "";
+  return `${Number(settlement.redeemedQuantity || 0)} session(s)${item}`;
 }
 
 function formatDate(value, options = {}) {
@@ -153,13 +174,16 @@ function getRewardActivityLabel(entry) {
 
 function getMembershipStatusLabel(status) {
   const normalized = String(status || "").trim().toUpperCase();
+  if (["DEPLETED", "EXHAUSTED", "CANCELLED"].includes(normalized)) {
+    return getPrepaidStatusLabel(normalized);
+  }
   if (normalized === "SCHEDULED") return "SCHEDULED";
   if (normalized === "EXPIRED") return "EXPIRED";
   return "ACTIVE";
 }
 
 function getMembershipStatusClass(status) {
-  const normalized = getMembershipStatusLabel(status).toLowerCase();
+  const normalized = getPrepaidStatusClass(getMembershipStatusLabel(status));
   return `portalMembershipStatus ${normalized}`;
 }
 
@@ -1275,6 +1299,212 @@ function RewardsTab({ token, onAuthExpired }) {
   );
 }
 
+function PrepaidMembershipCard({ membership, token, onAuthExpired }) {
+  const wallet = membership?.prepaidWallet || null;
+  const isValueWallet = membership?.membershipType === "PREPAID_VALUE";
+  const item = wallet?.eligibleItem || {};
+  const requestKey = `${token}:${membership?.id || ""}`;
+  const requestInFlightRef = useRef(false);
+  const requestContextRef = useRef(requestKey);
+  const [activityOpen, setActivityOpen] = useState(false);
+  const [activity, setActivity] = useState({
+    items: [],
+    loading: false,
+    loaded: false,
+    error: "",
+    hasMore: false,
+    nextCursor: "",
+  });
+
+  useEffect(() => {
+    requestContextRef.current = requestKey;
+    requestInFlightRef.current = false;
+    setActivityOpen(false);
+    setActivity({
+      items: [],
+      loading: false,
+      loaded: false,
+      error: "",
+      hasMore: false,
+      nextCursor: "",
+    });
+  }, [requestKey]);
+
+  const loadActivity = useCallback(async ({ reset = false } = {}) => {
+    if (!wallet || requestInFlightRef.current) return;
+    if (!reset && activity.loaded && !activity.hasMore) return;
+
+    const contextAtRequest = requestContextRef.current;
+    const cursor = reset ? "" : activity.nextCursor;
+    const params = new URLSearchParams({ limit: "20" });
+    if (cursor) params.set("cursor", cursor);
+
+    try {
+      requestInFlightRef.current = true;
+      setActivity((current) => ({ ...current, loading: true, error: "" }));
+      const payload = await portalRequest(
+        `/api/customer-portal/memberships/${encodeURIComponent(membership.id)}/activity?${params.toString()}`,
+        { token }
+      );
+      if (requestContextRef.current !== contextAtRequest) return;
+
+      const nextItems = Array.isArray(payload?.data?.items) ? payload.data.items : [];
+      setActivity((current) => ({
+        items: reset
+          ? mergePrepaidActivityItems([], nextItems)
+          : mergePrepaidActivityItems(current.items, nextItems),
+        loading: false,
+        loaded: true,
+        error: "",
+        hasMore: Boolean(payload?.data?.hasMore),
+        nextCursor: payload?.data?.nextCursor || "",
+      }));
+    } catch (err) {
+      if (requestContextRef.current !== contextAtRequest) return;
+      if ([401, 403].includes(err.status)) {
+        onAuthExpired();
+        return;
+      }
+      setActivity((current) => ({
+        ...current,
+        loading: false,
+        error: "Unable to load membership activity. Please try again.",
+      }));
+    } finally {
+      if (requestContextRef.current === contextAtRequest) {
+        requestInFlightRef.current = false;
+      }
+    }
+  }, [activity.hasMore, activity.loaded, activity.nextCursor, membership.id, onAuthExpired, token, wallet]);
+
+  function toggleActivity() {
+    const nextOpen = !activityOpen;
+    setActivityOpen(nextOpen);
+    if (nextOpen && !activity.loaded && !activity.loading) {
+      loadActivity({ reset: true });
+    }
+  }
+
+  const statusLabel = getMembershipStatusLabel(wallet?.status || membership?.status);
+  const remainingLabel = isValueWallet
+    ? formatPrepaidPaise(wallet?.remainingAmountPaise)
+    : `${Number(wallet?.remainingQuantity || 0).toLocaleString("en-IN")} ${Number(wallet?.remainingQuantity || 0) === 1 ? "session" : "sessions"}`;
+
+  return (
+    <article className="portalMembershipCard portalPrepaidMembershipCard">
+      <div className="portalMembershipCardTop">
+        <div>
+          <p className="portalMembershipType">
+            {getMembershipTypeLabel(membership.membershipType)}
+          </p>
+          <h4>{membership.planName || "Membership"}</h4>
+          {!isValueWallet && item.name ? (
+            <p>{item.name} · {item.itemType === "PACKAGE" ? "Package" : "Service"}</p>
+          ) : null}
+        </div>
+        <span className={getMembershipStatusClass(statusLabel)}>{statusLabel}</span>
+      </div>
+
+      {wallet ? (
+        <>
+          <div className="portalPrepaidBalance" aria-label={isValueWallet ? "Remaining wallet value" : "Remaining sessions"}>
+            <span>{isValueWallet ? "Remaining Value" : "Sessions Remaining"}</span>
+            <strong>{remainingLabel}</strong>
+          </div>
+
+          <div className="portalMembershipFacts portalPrepaidFacts">
+            {isValueWallet ? (
+              <>
+                <div><span>Total Credited</span><strong>{formatPrepaidPaise(wallet.creditedAmountPaise)}</strong></div>
+                <div><span>Consumed</span><strong>{formatPrepaidPaise(wallet.consumedAmountPaise)}</strong></div>
+                <div><span>Originally Paid</span><strong>{formatPrepaidPaise(wallet.paidAmountPaise)}</strong></div>
+                <div><span>Bonus Value</span><strong>{formatPrepaidPaise(wallet.bonusAmountPaise)}</strong></div>
+              </>
+            ) : (
+              <>
+                <div><span>Total Credited</span><strong>{Number(wallet.creditedQuantity || 0).toLocaleString("en-IN")} sessions</strong></div>
+                <div><span>Consumed</span><strong>{Number(wallet.consumedQuantity || 0).toLocaleString("en-IN")} sessions</strong></div>
+                <div><span>Purchased</span><strong>{Number(wallet.purchasedQuantity || 0).toLocaleString("en-IN")} sessions</strong></div>
+                <div>
+                  <span>Eligible Item</span>
+                  <strong>{item.name || "Not recorded"}</strong>
+                  {Array.isArray(item.categoryPath) && item.categoryPath.length ? (
+                    <small>{item.categoryPath.join(" / ")}</small>
+                  ) : null}
+                </div>
+              </>
+            )}
+            <div><span>Starts</span><strong>{formatDate(wallet.activatesAt) || "Not recorded"}</strong></div>
+            <div><span>Valid Until</span><strong>{formatDate(wallet.expiresAt) || "Not recorded"}</strong></div>
+          </div>
+
+          {!isValueWallet && item.itemType === "PACKAGE" && item.packageIncludes ? (
+            <details className="portalPrepaidPackage">
+              <summary>View package inclusions</summary>
+              <p>{item.packageIncludes}</p>
+            </details>
+          ) : null}
+
+          <button
+            className="portalTextButton portalPrepaidActivityToggle"
+            type="button"
+            onClick={toggleActivity}
+            aria-expanded={activityOpen}
+          >
+            {activityOpen ? "Hide Activity" : "View Activity"}
+          </button>
+
+          {activityOpen ? (
+            <section className="portalPrepaidActivity" aria-label={`Activity for ${membership.planName || "membership"}`}>
+              {activity.loading && !activity.loaded ? <p>Loading activity...</p> : null}
+              {activity.error ? (
+                <div className="portalPrepaidActivityState">
+                  <p>{activity.error}</p>
+                  <button type="button" onClick={() => loadActivity({ reset: !activity.loaded })} disabled={activity.loading}>
+                    Try Again
+                  </button>
+                </div>
+              ) : null}
+              {activity.loaded && !activity.items.length && !activity.error ? (
+                <p>No wallet activity recorded yet.</p>
+              ) : null}
+              {activity.items.length ? (
+                <ul>
+                  {activity.items.map((entry) => (
+                    <li key={entry.id}>
+                      <div>
+                        <strong>{getPrepaidActivityLabel(entry.eventType)}</strong>
+                        <span>{formatDateTime(entry.occurredAt) || "Date not recorded"}</span>
+                      </div>
+                      <strong className={`portalPrepaidActivityAmount ${getPrepaidActivityTone(entry.eventType)}`}>
+                        {formatPrepaidActivityValue(entry)}
+                      </strong>
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
+              {activity.hasMore ? (
+                <button
+                  className="portalTextButton portalPrepaidLoadMore"
+                  type="button"
+                  onClick={() => loadActivity()}
+                  disabled={activity.loading}
+                >
+                  {activity.loading ? "Loading..." : "Load More"}
+                </button>
+              ) : null}
+            </section>
+          ) : null}
+        </>
+      ) : (
+        <div className="portalPrepaidUnavailable">
+          Wallet details are currently unavailable. Please contact the business if this continues.
+        </div>
+      )}
+    </article>
+  );
+}
+
 function MembershipsTab({ token, onAuthExpired }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -1348,6 +1578,17 @@ function MembershipsTab({ token, onAuthExpired }) {
 
           <div className="portalMembershipCards">
             {(group.memberships || []).map((membership) => {
+              if (isPrepaidMembership(membership)) {
+                return (
+                  <PrepaidMembershipCard
+                    key={`${token}:${membership.id}`}
+                    membership={membership}
+                    token={token}
+                    onAuthExpired={onAuthExpired}
+                  />
+                );
+              }
+
               const statusLabel = getMembershipStatusLabel(membership.status);
               const isExpanded = Boolean(expandedMembershipIds[membership.id]);
               const eligibleServices = Array.isArray(membership.benefits?.eligibleServices)
@@ -1368,6 +1609,7 @@ function MembershipsTab({ token, onAuthExpired }) {
                 <article className="portalMembershipCard" key={membership.id}>
                   <div className="portalMembershipCardTop">
                     <div>
+                      <p className="portalMembershipType">{getMembershipTypeLabel(membership.membershipType)}</p>
                       <h4>{membership.planName || "Membership"}</h4>
                       <p>
                         {toSafeNumber(membership.discountPercentage)}% discount on selected services
@@ -1486,6 +1728,7 @@ function BillRows({ bill, showAmountPaid = true, detailed = false }) {
   const splitDiscounts = detailed && shouldShowSplitDiscounts(bill);
   const totalSavings = toSafeNumber(bill.totalSavings || bill.discountAmount);
   const isCancelled = bill.status === "CANCELLED";
+  const prepaidSettlement = bill.prepaidSettlement || null;
 
   return (
     <div className="portalBillRows">
@@ -1522,7 +1765,22 @@ function BillRows({ bill, showAmountPaid = true, detailed = false }) {
           <strong>-{formatCurrency(bill.rewardsRedeemed)}</strong>
         </div>
       ) : null}
-      {showAmountPaid ? (
+      {prepaidSettlement ? (
+        <>
+          <div>
+            <span>
+              {prepaidSettlement.paymentMode === "PREPAID_VALUE"
+                ? `Prepaid Wallet ${isCancelled ? "Restored" : "Redeemed"}`
+                : `Prepaid Package ${isCancelled ? "Restored" : "Redeemed"}`}
+            </span>
+            <strong>{formatPrepaidSettlementValue(prepaidSettlement)}</strong>
+          </div>
+          <div className="portalAmountPaid">
+            <span>Balance Due</span>
+            <strong>{formatPaise(prepaidSettlement.balanceDuePaise)}</strong>
+          </div>
+        </>
+      ) : showAmountPaid ? (
         <div className="portalAmountPaid">
           <span>{isCancelled ? "Originally Paid" : "Amount Paid"}</span>
           <strong>{formatCurrency(bill.netCollected)}</strong>
@@ -1537,6 +1795,8 @@ function GstInvoicePanel({ invoice, bill }) {
   const totals = invoice.totals || {};
   const isTestDocument = invoice.documentMode === "TEST";
   const isNonTaxDocument = invoice.documentMode === "NON_TAX_INVOICE";
+  const prepaidSettlement = bill.prepaidSettlement || null;
+  const isCancelled = bill.status === "CANCELLED";
   const documentTitle = isTestDocument
     ? "GST Test Record"
     : isNonTaxDocument
@@ -1598,7 +1858,21 @@ function GstInvoicePanel({ invoice, bill }) {
         {Number(totals.igstPaise) > 0 ? <div><span>IGST</span><strong>{formatPaise(totals.igstPaise)}</strong></div> : null}
         <div><span>Total GST</span><strong>{formatPaise(totals.totalGstPaise)}</strong></div>
         <div><span>Invoice Total</span><strong>{formatPaise(totals.invoiceTotalPaise)}</strong></div>
-        <div className="portalGstPayable"><span>Final amount paid</span><strong>{formatPaise(totals.customerPayablePaise)}</strong></div>
+        {prepaidSettlement ? (
+          <>
+            <div>
+              <span>
+                {prepaidSettlement.paymentMode === "PREPAID_VALUE"
+                  ? `Prepaid Wallet ${isCancelled ? "Restored" : "Redeemed"}`
+                  : `Prepaid Package ${isCancelled ? "Restored" : "Redeemed"}`}
+              </span>
+              <strong>{formatPrepaidSettlementValue(prepaidSettlement)}</strong>
+            </div>
+            <div className="portalGstPayable"><span>Balance Due</span><strong>{formatPaise(prepaidSettlement.balanceDuePaise)}</strong></div>
+          </>
+        ) : (
+          <div className="portalGstPayable"><span>Final amount paid</span><strong>{formatPaise(totals.customerPayablePaise)}</strong></div>
+        )}
       </div>
       <div className="portalGstLoyalty">
         <span>Points earned: <strong>{Number(bill.pointsEarned || 0)}</strong></span>
@@ -1806,8 +2080,12 @@ function BillsTab({ token, onAuthExpired }) {
                 ) : null}
               </div>
               <div className="portalBillPaid">
-                <span>Amount Paid</span>
-                <strong>{formatCurrency(bill.netCollected)}</strong>
+                <span>{bill.prepaidSettlement ? "Balance Due" : "Amount Paid"}</span>
+                <strong>
+                  {bill.prepaidSettlement
+                    ? formatPaise(bill.prepaidSettlement.balanceDuePaise)
+                    : formatCurrency(bill.netCollected)}
+                </strong>
               </div>
             </div>
             <BillRows bill={bill} />

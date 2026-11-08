@@ -4,6 +4,11 @@ import { useEffect, useState } from "react";
 import { API_BASE_URL } from "../../../config";
 import RevenueSnapshot from "./RevenueSnapshot";
 import StaffPerformanceMetrics from "./StaffPerformanceMetrics";
+import PrepaidRevenueSummary from "./PrepaidRevenueSummary";
+import { getIstMonthToDateRange } from "./revenueDateRanges.mjs";
+import { calculateRevenueAverages, getMonthKey } from "./revenueAnalytics.mjs";
+import RevenuePeriodAnalytics from "./RevenuePeriodAnalytics";
+import { getVendorAuthHeaders } from "../../utils/vendorAuth";
 import "./RevenuePanels.css";
 
 const currencyFmt = new Intl.NumberFormat("en-IN", {
@@ -11,86 +16,16 @@ const currencyFmt = new Intl.NumberFormat("en-IN", {
   currency: "INR",
   maximumFractionDigits: 0,
 });
-
-function formatDateTime(value) {
-  if (!value) return "-";
-
-  return new Date(value).toLocaleString("en-IN", {
-    day: "2-digit",
-    month: "short",
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: true,
-  });
-}
-
-function formatItemMeta(item) {
-  const parts = [];
-
-  if (Number(item?.qty || 0) > 0) {
-    parts.push(`Qty ${item.qty}`);
-  }
-
-  if (Array.isArray(item?.nodePath) && item.nodePath.length > 0) {
-    parts.push(item.nodePath.join(" / "));
-  }
-
-  return parts.join(" • ");
-}
-
-function formatItemResource(item) {
-  return String(item?.resourceName || "").trim();
-}
+const averageCurrencyFmt = new Intl.NumberFormat("en-IN", {
+  style: "currency",
+  currency: "INR",
+  minimumFractionDigits: 2,
+  maximumFractionDigits: 2,
+});
 
 function getNumber(value, fallback = 0) {
   const number = Number(value);
   return Number.isFinite(number) ? number : fallback;
-}
-
-function hasAmount(value) {
-  return typeof value === "number" && Number.isFinite(value);
-}
-
-function getBillFinancials(bill) {
-  const billValue = getNumber(bill?.billValue ?? bill?.grossAmount ?? bill?.netBillValue ?? bill?.total);
-  const netBillValue = getNumber(bill?.netBillValue ?? bill?.total);
-  const rewardsRedeemedValue = getNumber(bill?.rewardsRedeemedValue ?? bill?.redeemed);
-  const netCollected = getNumber(
-    bill?.netCollected ?? Math.max(netBillValue - rewardsRedeemedValue, 0)
-  );
-
-  return {
-    discountAmount: hasAmount(bill?.discountAmount) ? getNumber(bill.discountAmount) : null,
-    billValue,
-    netBillValue,
-    rewardsRedeemedValue,
-    netCollected: Math.max(netCollected, 0),
-  };
-}
-
-function getPaymentModeLabel(bill) {
-  if (bill?.paymentMode === "SPLIT" && bill?.paymentBreakdown) {
-    return `Cash ${currencyFmt.format(Number(bill.paymentBreakdown.cashAmountPaise || 0) / 100)} + Online ${currencyFmt.format(Number(bill.paymentBreakdown.onlineAmountPaise || 0) / 100)}`;
-  }
-  if (bill?.paymentModeLabel) return bill.paymentModeLabel;
-  if (bill?.paymentMode === "ONLINE") return "Online";
-  if (bill?.paymentMode === "CASH") return "Cash";
-  if (bill?.paymentMode === "SPLIT") return "Cash + Online";
-  return "Not Recorded";
-}
-
-function getMonthRange() {
-  const start = new Date();
-  start.setDate(1);
-  start.setHours(0, 0, 0, 0);
-
-  const end = new Date();
-  end.setHours(23, 59, 59, 999);
-
-  return {
-    from: start.toISOString(),
-    to: end.toISOString(),
-  };
 }
 
 function getMonthSnapshotFileName() {
@@ -111,6 +46,7 @@ function createEmptyRevenueSummary() {
     cashCollected: 0,
     notRecordedCollected: 0,
     totalDistributed: 0,
+    prepaidReporting: {},
   };
 }
 
@@ -126,6 +62,7 @@ function normalizeRevenueSummary(source) {
     cashCollected: getNumber(summary.cashCollected),
     notRecordedCollected: getNumber(summary.notRecordedCollected),
     totalDistributed: getNumber(summary.pointsDistributed),
+    prepaidReporting: summary.prepaidReporting || {},
   };
 }
 
@@ -137,13 +74,16 @@ export default function MonthRevenue({
   hrPerformanceTitle = "Stylist Performance",
 }) {
   const [activeSection, setActiveSection] = useState("revenue");
-  const [bills, setBills] = useState([]);
   const [summary, setSummary] = useState(() => createEmptyRevenueSummary());
   const [loading, setLoading] = useState(true);
   const [stylists, setStylists] = useState([]);
   const [loadingStylists, setLoadingStylists] = useState(true);
-  const [expandedBills, setExpandedBills] = useState({});
   const [showSnapshot, setShowSnapshot] = useState(false);
+  const monthAverages = calculateRevenueAverages({
+    grossBillValue: summary.billValue,
+    netCollected: summary.netCollected,
+    completedBills: summary.totalBills,
+  });
 
   useEffect(() => {
     if (!hrEnabled && activeSection === "stylists") {
@@ -153,7 +93,6 @@ export default function MonthRevenue({
 
   useEffect(() => {
     if (!vendorId) {
-      setBills([]);
       setSummary(createEmptyRevenueSummary());
       setLoading(false);
       setStylists([]);
@@ -166,38 +105,26 @@ export default function MonthRevenue({
     const loadRevenue = async () => {
       try {
         setLoading(true);
-        const { from, to } = getMonthRange();
+        const { from, to } = getIstMonthToDateRange();
         const query = `vendorId=${encodeURIComponent(vendorId)}&from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`;
-        const [summaryRes, billsRes] = await Promise.all([
-          fetch(`${API_BASE_URL}/api/vendor/dashboard/bills-summary?${query}`, {
-            cache: "no-store",
-          }),
-          fetch(`${API_BASE_URL}/api/vendor/dashboard/bills?${query}`, {
-            cache: "no-store",
-          }),
-        ]);
+        const summaryRes = await fetch(`${API_BASE_URL}/api/vendor/dashboard/bills-summary?${query}`, {
+          cache: "no-store",
+          headers: getVendorAuthHeaders(vendorId),
+        });
 
-        if (!summaryRes.ok || !billsRes.ok) {
+        if (!summaryRes.ok) {
           throw new Error("Failed to load month revenue");
         }
 
         const summaryJson = await summaryRes.json();
-        const billsJson = await billsRes.json();
-        const rawBills = Array.isArray(billsJson)
-          ? billsJson
-          : Array.isArray(billsJson?.data)
-            ? billsJson.data
-            : [];
 
         if (!cancelled) {
           setSummary(normalizeRevenueSummary(summaryJson?.data));
-          setBills(rawBills.filter((bill) => Number(bill?.total || 0) > 0));
         }
       } catch (error) {
         console.error("Failed to fetch month revenue", error);
         if (!cancelled) {
           setSummary(createEmptyRevenueSummary());
-          setBills([]);
         }
       } finally {
         if (!cancelled) {
@@ -219,7 +146,7 @@ export default function MonthRevenue({
         setLoadingStylists(true);
         const res = await fetch(
           `${API_BASE_URL}/api/vendor/dashboard/stylist-performance?vendorId=${encodeURIComponent(vendorId)}&range=mtd`,
-          { cache: "no-store" }
+          { cache: "no-store", headers: getVendorAuthHeaders(vendorId) }
         );
 
         if (!res.ok) {
@@ -256,23 +183,6 @@ export default function MonthRevenue({
     };
   }, [vendorId, hrEnabled, hrLabelSingular]);
 
-  useEffect(() => {
-    setExpandedBills(
-      bills.reduce((acc, bill) => {
-        const key = bill.billId || `${bill.phone}-${bill.createdAt}`;
-        acc[key] = false;
-        return acc;
-      }, {})
-    );
-  }, [bills]);
-
-  const toggleBill = (billKey) => {
-    setExpandedBills((prev) => ({
-      ...prev,
-      [billKey]: !prev[billKey],
-    }));
-  };
-
   return (
     <section className="revenue-panel">
       <RevenueSnapshot
@@ -294,9 +204,7 @@ export default function MonthRevenue({
 
       <div className="revenue-panel-header">
         <div className="revenue-panel-title">This Month Revenue</div>
-        <div className="revenue-panel-subtitle">
-          Running revenue for the current month with the most recent bills.
-        </div>
+        <div className="revenue-panel-subtitle">Daily net collection and completed bills for the current month.</div>
       </div>
       <div className="revenue-panel-tabs">
         <button
@@ -334,7 +242,7 @@ export default function MonthRevenue({
 
             <div className="revenue-panel-stat-grid">
               <div className="revenue-panel-stat-card">
-                <div className="revenue-panel-stat-label">Bill Value</div>
+                <div className="revenue-panel-stat-label">Gross Bill Value</div>
                 <div className="revenue-panel-stat-value">
                   {currencyFmt.format(summary.billValue || 0)}
                 </div>
@@ -365,7 +273,17 @@ export default function MonthRevenue({
                 <div className="revenue-panel-stat-label">Points Distributed</div>
                 <div className="revenue-panel-stat-value">{summary.totalDistributed}</div>
               </div>
+              <div className="revenue-panel-stat-card">
+                <div className="revenue-panel-stat-label">Average Bill Value</div>
+                <div className="revenue-panel-stat-value">{averageCurrencyFmt.format(monthAverages.averageBillValue)}</div>
+              </div>
+              <div className="revenue-panel-stat-card">
+                <div className="revenue-panel-stat-label">Average Collection</div>
+                <div className="revenue-panel-stat-value">{averageCurrencyFmt.format(monthAverages.averageCollection)}</div>
+              </div>
             </div>
+
+            <PrepaidRevenueSummary reporting={summary.prepaidReporting} />
 
             <div className="revenue-panel-payment-breakdown">
               <div className="revenue-panel-payment-title">Payment Breakdown</div>
@@ -384,95 +302,12 @@ export default function MonthRevenue({
             </div>
 
             <div className="revenue-panel-section">
-              <div className="revenue-panel-section-title">Recent Bills</div>
-              {bills.length === 0 ? (
-                <div className="revenue-panel-empty">No revenue bills found for this month.</div>
-              ) : (
-                <div className="revenue-panel-list">
-                  {bills.map((bill) => {
-                    const billKey = bill.billId || `${bill.phone}-${bill.createdAt}`;
-                    const isExpanded = expandedBills[billKey] === true;
-                    const financials = getBillFinancials(bill);
-
-                    return (
-                    <div
-                      key={billKey}
-                      className="revenue-panel-list-item"
-                    >
-                      <div className="revenue-panel-bill-content">
-                        <div className="revenue-panel-list-main">
-                          Bill #{String(bill.billId || "").slice(0, 8)}
-                        </div>
-                        <div className="revenue-panel-list-sub">
-                          {bill.customerLabel || bill.phone || "Walk-in"} • {formatDateTime(bill.createdAt)}
-                        </div>
-                        <div className="revenue-panel-chip-row">
-                          <span className="revenue-panel-chip">
-                            Bill Value {currencyFmt.format(financials.billValue)}
-                          </span>
-                          {financials.discountAmount !== null ? (
-                            <span className="revenue-panel-chip">
-                              Discount {currencyFmt.format(financials.discountAmount)}
-                            </span>
-                          ) : null}
-                          <span className="revenue-panel-chip">
-                            Redeemed {currencyFmt.format(financials.rewardsRedeemedValue)}
-                          </span>
-                          <span className="revenue-panel-chip">
-                            Collected {currencyFmt.format(financials.netCollected)}
-                          </span>
-                          <span className="revenue-panel-chip">
-                            Payment {getPaymentModeLabel(bill)}
-                          </span>
-                          <span className="revenue-panel-chip">Earned {Number(bill.earned || 0)}</span>
-                          <span className="revenue-panel-chip">
-                            {Array.isArray(bill.items) ? bill.items.length : 0} item(s)
-                          </span>
-                        </div>
-                        <div className="revenue-panel-bill-meta">
-                          {isExpanded ? "Expanded item details" : "Tap to inspect bill items"}
-                        </div>
-
-                        {isExpanded && Array.isArray(bill.items) && bill.items.length > 0 ? (
-                          <div className="revenue-panel-items-list">
-                            {bill.items.map((item, index) => (
-                              <div
-                                key={`${bill.billId || bill.createdAt}-item-${item.itemId || item.name || index}`}
-                              className="revenue-panel-item-row"
-                            >
-                              <div>
-                                  <div className="revenue-panel-item-name">{item.name || "Unnamed Item"}</div>
-                                  <div className="revenue-panel-item-meta">{formatItemMeta(item)}</div>
-                                  {formatItemResource(item) ? (
-                                    <div className="revenue-panel-item-resource">
-                                      Handled by {formatItemResource(item)}
-                                    </div>
-                                  ) : null}
-                                </div>
-                                <div className="revenue-panel-item-value">
-                                  {currencyFmt.format(Number(item.total || item.price || 0))}
-                                </div>
-                              </div>
-                            ))}
-                          </div>
-                        ) : null}
-                      </div>
-                      <div className="revenue-panel-bill-actions">
-                        <div className="revenue-panel-list-value">
-                          {currencyFmt.format(financials.netCollected)}
-                        </div>
-                        <button
-                          type="button"
-                          className="revenue-panel-expand-btn"
-                          onClick={() => toggleBill(billKey)}
-                        >
-                          {isExpanded ? "Hide items" : "View items"}
-                        </button>
-                      </div>
-                    </div>
-                  )})}
-                </div>
-              )}
+              <RevenuePeriodAnalytics
+                vendorId={vendorId}
+                monthKey={getMonthKey()}
+                periodLabel={new Date().toLocaleDateString("en-IN", { month: "long", year: "numeric", timeZone: "Asia/Kolkata" })}
+                defaultChartType="line"
+              />
             </div>
           </>
         )

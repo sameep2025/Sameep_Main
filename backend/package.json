@@ -3,7 +3,8 @@
   "version": "1.0.0",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "test:prepaid:integration": "node --test --test-concurrency=1 tests/integration/*.test.js"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.929.0",
@@ -24,6 +25,8 @@
     "xlsx": "^0.18.5"
   },
   "devDependencies": {
-    "nodemon": "^2.0.22"
+    "mongodb-memory-server": "^10.3.0",
+    "nodemon": "^2.0.22",
+    "supertest": "^7.3.1"
   }
 }

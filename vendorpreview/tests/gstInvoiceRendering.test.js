@@ -36,10 +36,12 @@ test("public bill routes share conditional GST invoice rendering", () => {
 test("immediate print and historical reprint use the server GST snapshot", () => {
   const explore = read("app/_Explore/Explore.jsx");
   const history = read("app/components/dashboard/CustomerSearch.jsx");
+  const receiptMapper = read("app/components/dashboard/billReceiptSnapshot.mjs");
   const receipt = read("app/utils/receiptPrint.js");
 
   assert.match(explore, /gstInvoice: completeData\?\.gstInvoice \|\| null/);
-  assert.match(history, /gstInvoice: detail\?\.gstInvoice \|\| null/);
+  assert.match(receiptMapper, /gstInvoice: detail\?\.gstInvoice \|\| null/);
+  assert.match(history, /buildReceiptSnapshotFromBillDetail/);
   assert.match(history, /printReceiptSnapshot\(buildReceiptSnapshotFromBillDetail\(detail\)\)/);
   assert.match(receipt, /if \(gstInvoice\)/);
   assert.match(receipt, /GST TEST RECORD/);
@@ -130,6 +132,7 @@ test("GST items retain quantity, optional unit price, category and staff present
   const component = read("app/components/billing/GstInvoiceDetails.jsx");
   const explore = read("app/_Explore/Explore.jsx");
   const history = read("app/components/dashboard/CustomerSearch.jsx");
+  const receiptMapper = read("app/components/dashboard/billReceiptSnapshot.mjs");
   const portal = read("../ynot/web/src/app/mybills/page.js");
 
   assert.match(component, /data-label="Qty"/);
@@ -139,7 +142,8 @@ test("GST items retain quantity, optional unit price, category and staff present
   assert.match(component, /Staff:/);
   assert.match(explore, /hierarchy: Array\.isArray\(item\.nodePath\)/);
   assert.match(explore, /resourceName: String\(item\.resourceName/);
-  assert.match(history, /hierarchy: String\(item\.hierarchy/);
+  assert.match(history, /buildReceiptSnapshotFromBillDetail/);
+  assert.match(receiptMapper, /hierarchy: String\(item\.hierarchy/);
   assert.match(portal, /bill\.items\?\.\[index\]\?\.staffName/);
 });
 
@@ -155,14 +159,9 @@ test("GST inclusive and exclusive documents explain pricing without recalculatin
   }
 });
 
-test("public GST invoices retain the global Discover More section", () => {
+test("public pages do not render the global Discover More section", () => {
   const layout = read("app/layout.jsx");
-  const seo = read("app/components/ServerSeoContentSection.jsx");
-  assert.match(layout, /<ServerSeoContentSection vendorInfo=\{vendorContext\} \/>/);
-  assert.match(layout, /\{children\}[\s\S]*<ServerSeoContentSection/);
-  assert.match(seo, /Discover More/);
-  const css = read("app/components/SeoContentSection.css");
-  assert.match(css, /@media print[\s\S]*\.seo-content-section[\s\S]*display: none/);
+  assert.doesNotMatch(layout, /ServerSeoContentSection/);
 });
 
 test("GST header reuses the public vendor logo and published business website", () => {

@@ -156,6 +156,7 @@ function dateMatches(value, range = {}) {
   const date = new Date(value);
   if (range.$gte && date < range.$gte) return false;
   if (range.$lte && date > range.$lte) return false;
+  if (range.$lt && date >= range.$lt) return false;
   return true;
 }
 
@@ -285,8 +286,8 @@ test(
     assert.equal(res.statusCode, 200);
     assert.equal(state.queries.length, 1);
     assert.equal(state.queries[0].status, "COMPLETED");
-    assert.equal(state.limitValue, 100);
-    assert.deepEqual(state.sortSpec, { createdAt: -1 });
+    assert.equal(state.limitValue, 101);
+    assert.deepEqual(state.sortSpec, { createdAt: -1, _id: -1 });
 
     const bills = res.payload.data;
     assert.equal(bills.length, 1);
@@ -562,7 +563,11 @@ test(
 
     assert.equal(state.queries[0].status, "COMPLETED");
     assert.ok(state.queries[0].createdAt.$gte instanceof Date);
-    assert.ok(state.queries[0].createdAt.$lte instanceof Date);
+    assert.ok(state.queries[0].createdAt.$lt instanceof Date);
+    assert.equal(
+      state.queries[0].createdAt.$lt.toISOString(),
+      "2026-09-18T00:00:00.000Z"
+    );
     assert.equal(res.payload.data.length, 1);
     assert.equal(String(res.payload.data[0].billId), OUT_OF_RANGE_BILL_ID);
     assert.equal(res.payload.data[0].grossAmount, null);
@@ -623,6 +628,8 @@ test(
 
 test("vendor revenue bill summary aggregates all completed bills beyond drilldown limit", async () => {
   const originalAggregate = BillingSession.aggregate;
+  const originalMembershipAggregate = CustomerMembership.aggregate;
+  const originalReadyState = mongoose.connection.readyState;
   const aggregatePipelines = [];
   const completedBillCount = 142;
   const netCollectedPerBill = 890;
@@ -648,6 +655,8 @@ test("vendor revenue bill summary aggregates all completed bills beyond drilldow
       },
     ];
   };
+  CustomerMembership.aggregate = async () => [];
+  mongoose.connection.readyState = 1;
 
   try {
     const res = await callController(vendorDashboardController.getBillsSummary, {
@@ -673,15 +682,23 @@ test("vendor revenue bill summary aggregates all completed bills beyond drilldow
     const pipeline = aggregatePipelines[0];
     assert.equal(pipeline[0].$match.status, "COMPLETED");
     assert.ok(pipeline[0].$match.createdAt.$gte instanceof Date);
-    assert.ok(pipeline[0].$match.createdAt.$lte instanceof Date);
+    assert.ok(pipeline[0].$match.createdAt.$lt instanceof Date);
+    assert.equal(
+      pipeline[0].$match.createdAt.$lt.toISOString(),
+      "2026-10-01T00:00:00.000Z"
+    );
     assert.equal(JSON.stringify(pipeline).includes("$limit"), false);
   } finally {
     BillingSession.aggregate = originalAggregate;
+    CustomerMembership.aggregate = originalMembershipAggregate;
+    mongoose.connection.readyState = originalReadyState;
   }
 });
 
 test("historical month bill summary does not truncate beyond 250 bills", async () => {
   const originalAggregate = BillingSession.aggregate;
+  const originalMembershipAggregate = CustomerMembership.aggregate;
+  const originalReadyState = mongoose.connection.readyState;
   const completedBillCount = 300;
 
   BillingSession.aggregate = async () => [
@@ -699,6 +716,8 @@ test("historical month bill summary does not truncate beyond 250 bills", async (
       orders: completedBillCount,
     },
   ];
+  CustomerMembership.aggregate = async () => [];
+  mongoose.connection.readyState = 1;
 
   try {
     const res = await callController(vendorDashboardController.getBillsSummary, {
@@ -713,6 +732,8 @@ test("historical month bill summary does not truncate beyond 250 bills", async (
     assert.equal(res.payload.data.pointsDistributed, 600);
   } finally {
     BillingSession.aggregate = originalAggregate;
+    CustomerMembership.aggregate = originalMembershipAggregate;
+    mongoose.connection.readyState = originalReadyState;
   }
 });
 
@@ -1107,6 +1128,9 @@ test("vendor revenue period summary and chart aggregations require COMPLETED sta
   assert.match(summarySection, /monthBillValue/);
   assert.match(monthlySection, /status:\s*"COMPLETED"/);
   assert.match(monthlySection, /billValue/);
+  assert.match(monthlySection, /getIstRollingMonthWindow/);
+  assert.match(monthlySection, /timezone:\s*REPORTING_TIMEZONE/);
+  assert.match(monthlySection, /\$sort:\s*\{\s*_id:\s*1\s*\}/);
   assert.match(dailyTrendSection, /status:\s*"COMPLETED"/);
   assert.match(stylistSection, /status:\s*"COMPLETED"/);
   assert.match(itemNetRevenueSection, /cartItems\.finalLineAmount/);
@@ -1357,6 +1381,7 @@ test("vendor revenue payment breakdown reconciles legacy and split BillingSessio
   assert.match(accumulatorSection, /paymentBreakdown\.onlineAmountPaise/);
   assert.match(accumulatorSection, /\$divide/);
   assert.match(accumulatorSection, /netCollectedExpression/);
+  assert.match(accumulatorSection, /transaction\.finalPaidAmount/);
   assert.equal(accumulatorSection.includes("transaction.paymentMode"), false);
   assert.match(drilldownSection, /getStoredPaymentAllocation/);
   assert.match(drilldownSection, /paymentBreakdown:\s*paymentAllocation\.paymentBreakdown/);

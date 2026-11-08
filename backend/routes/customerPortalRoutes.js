@@ -16,6 +16,11 @@ router.get("/rewards", requireCustomerPortalSession, customerPortalRewardsContro
 router.get("/rewards/:vendorId/activity", requireCustomerPortalSession, customerPortalRewardsController.getRewardActivity);
 router.post("/rewards/:rewardId/reveal", requireCustomerPortalSession, customerPortalRewardsController.revealReward);
 router.get("/memberships", requireCustomerPortalSession, customerPortalMembershipsController.getMemberships);
+router.get(
+  "/memberships/:membershipId/activity",
+  requireCustomerPortalSession,
+  customerPortalMembershipsController.getMembershipActivity
+);
 router.get("/bills", requireCustomerPortalSession, customerPortalBillsController.getBills);
 router.get("/bills/:billIdentifier", requireCustomerPortalSession, customerPortalBillsController.getBillDetail);
 

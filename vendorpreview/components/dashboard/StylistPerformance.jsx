@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { API_BASE_URL } from "../../config";
+import { getVendorAuthHeaders } from "../../app/utils/vendorAuth";
 
 export default function StylistPerformance({ vendorId }) {
   const [range, setRange] = useState("today");
@@ -11,7 +12,8 @@ export default function StylistPerformance({ vendorId }) {
     if (!vendorId) return;
 
     fetch(
-      `${API_BASE_URL}/api/vendor/dashboard/stylist-performance?vendorId=${vendorId}&range=${range}`
+      `${API_BASE_URL}/api/vendor/dashboard/stylist-performance?vendorId=${vendorId}&range=${range}`,
+      { headers: getVendorAuthHeaders(vendorId) }
     )
       .then((res) => res.json())
       .then((json) => setData(Array.isArray(json) ? json : []))

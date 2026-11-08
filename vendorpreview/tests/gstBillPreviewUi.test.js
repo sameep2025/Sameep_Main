@@ -59,13 +59,15 @@ test("missing SAC or HSN warning is non-blocking and clearly displayed", () => {
   assert.match(css, /\.gst-bill-preview-warning/);
 });
 
-test("tax source hint is isolated from the existing billing completion snapshot", () => {
+test("billing snapshot preserves canonical identity without persisting preview tax values", () => {
   assert.match(source, /itemSource:\s*item\.itemSource/);
   const billingSnapshot = source.slice(
     source.indexOf("const buildBillingCartItemsSnapshot"),
     source.indexOf("const buildMembershipPreviewItems")
   );
-  assert.doesNotMatch(billingSnapshot, /itemSource/);
+  assert.match(billingSnapshot, /itemSource:\s*item\.itemSource/);
+  assert.match(billingSnapshot, /itemType:\s*item\.itemType/);
+  assert.doesNotMatch(billingSnapshot, /gstRateBps|taxableValuePaise|cgstPaise/);
 });
 
 test("preview styling follows the existing responsive dark-and-gold cart", () => {

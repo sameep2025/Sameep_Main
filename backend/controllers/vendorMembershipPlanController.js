@@ -4,6 +4,14 @@ const CustomerMembership = require("../models/CustomerMembership");
 const MembershipPlan = require("../models/MembershipPlan");
 const VendorMenuNode = require("../models/VendorMenuNode");
 const VendorPriceNode = require("../models/VendorPriceNode");
+const VendorCustomPackage = require("../models/VendorCustomPackage");
+const {
+  resolveCanonicalMembershipMenuItem,
+} = require("../services/canonicalMembershipMenuItem");
+const {
+  assertPrepaidMembershipWalletEnabled,
+  isPrepaidMembershipWalletEnabled,
+} = require("../services/prepaidMembershipCapability");
 
 const { PLAN_TYPES, DURATIONS, STATUSES } = MembershipPlan.constants;
 
@@ -99,6 +107,19 @@ function serializePlan(plan) {
     status: plan.status,
     serviceQuotaConfig: plan.serviceQuotaConfig || { benefits: [] },
     prepaidValueConfig: plan.prepaidValueConfig || { prepaidValue: 0, bonusValue: 0 },
+    ...(plan.planType === "PREPAID_SESSIONS"
+      ? {
+          prepaidSessionsConfig: plan.prepaidSessionsConfig
+            ? {
+                eligibleItemId: String(plan.prepaidSessionsConfig.eligibleItemId || ""),
+                eligibleItemSource: plan.prepaidSessionsConfig.eligibleItemSource || "",
+                eligibleItemKind: plan.prepaidSessionsConfig.eligibleItemKind || "",
+                paidQuantity: Number(plan.prepaidSessionsConfig.paidQuantity || 0),
+                creditedQuantity: Number(plan.prepaidSessionsConfig.creditedQuantity || 0),
+              }
+            : null,
+        }
+      : {}),
     serviceEligibilityRevisions: (plan.serviceEligibilityRevisions || []).map((revision) => ({
       revisionId: revision.revisionId ? String(revision.revisionId) : "",
       previousEligibleMenuItemIds: (revision.previousEligibleMenuItemIds || []).map((id) => String(id)),
@@ -212,9 +233,141 @@ function validateDiscountPayload(body, { partial = false } = {}) {
   return { payload, errors };
 }
 
+function normalizePositiveMoney(value) {
+  const amount = normalizeNumber(value, NaN);
+  if (!Number.isFinite(amount)) return NaN;
+  return Math.round(amount * 100) / 100;
+}
+
+function validatePrepaidPayload(
+  body,
+  { partial = false, planType: expectedType = "", currentSellingPrice = NaN } = {}
+) {
+  const errors = [];
+  const payload = {};
+  const planType = normalizeString(body?.planType || expectedType, 40).toUpperCase();
+  if (!["PREPAID_VALUE", "PREPAID_SESSIONS"].includes(planType)) {
+    errors.push("Valid prepaid membership type is required");
+  }
+  payload.planType = planType;
+
+  if (!partial || Object.prototype.hasOwnProperty.call(body, "name")) {
+    payload.name = normalizeString(body?.name, 120);
+    if (!payload.name) errors.push("Plan name is required");
+  }
+  if (!partial || Object.prototype.hasOwnProperty.call(body, "description")) {
+    payload.description = normalizeString(body?.description, 1000);
+  }
+  if (!partial || Object.prototype.hasOwnProperty.call(body, "duration")) {
+    payload.duration = normalizeString(body?.duration, 40).toUpperCase();
+    if (!DURATIONS.includes(payload.duration)) errors.push("Valid duration is required");
+  }
+  if (!partial || Object.prototype.hasOwnProperty.call(body, "sellingPrice")) {
+    payload.sellingPrice = normalizePositiveMoney(body?.sellingPrice);
+    if (!Number.isFinite(payload.sellingPrice) || payload.sellingPrice <= 0) {
+      errors.push("Selling price must be greater than 0");
+    }
+  }
+
+  if (planType === "PREPAID_VALUE") {
+    if (!partial || Object.prototype.hasOwnProperty.call(body, "prepaidValueConfig")) {
+      const config = body?.prepaidValueConfig || {};
+      const creditedValue = normalizePositiveMoney(config.prepaidValue ?? config.creditedValue);
+      const submittedBonus = config.bonusValue == null
+        ? null
+        : normalizePositiveMoney(config.bonusValue);
+      const paidValue = payload.sellingPrice ?? normalizePositiveMoney(currentSellingPrice);
+      const calculatedBonus = Math.round((creditedValue - paidValue) * 100) / 100;
+      if (!Number.isFinite(creditedValue) || creditedValue < paidValue || paidValue <= 0) {
+        errors.push("Credited wallet value must be at least the customer payment amount");
+      }
+      if (submittedBonus != null && submittedBonus !== calculatedBonus) {
+        errors.push("Bonus value must equal credited wallet value minus customer payment amount");
+      }
+      payload.prepaidValueConfig = {
+        prepaidValue: creditedValue,
+        bonusValue: calculatedBonus,
+      };
+    }
+  }
+
+  if (planType === "PREPAID_SESSIONS") {
+    if (!partial || Object.prototype.hasOwnProperty.call(body, "prepaidSessionsConfig")) {
+      const config = body?.prepaidSessionsConfig || {};
+      const paidQuantity = Number(config.paidQuantity);
+      const creditedQuantity = Number(config.creditedQuantity);
+      const eligibleItemId = normalizeId(config.eligibleItemId);
+      const eligibleItemSource = normalizeString(config.eligibleItemSource, 40).toLowerCase();
+      if (!isCanonicalObjectId(eligibleItemId)) errors.push("Valid eligible item is required");
+      if (!Number.isSafeInteger(paidQuantity) || paidQuantity < 1) {
+        errors.push("Paid quantity must be a positive integer");
+      }
+      if (!Number.isSafeInteger(creditedQuantity) || creditedQuantity < paidQuantity) {
+        errors.push("Credited quantity must be an integer not less than paid quantity");
+      }
+      payload.prepaidSessionsConfig = {
+        eligibleItemId,
+        eligibleItemSource,
+        paidQuantity,
+        creditedQuantity,
+      };
+    }
+  }
+
+  return { payload, errors };
+}
+
+async function resolvePrepaidSessionConfig(vendorId, config) {
+  const item = await resolveCanonicalMembershipMenuItem({
+    vendorId,
+    itemId: config.eligibleItemId,
+    itemSource: config.eligibleItemSource,
+  });
+  return {
+    eligibleItemId: new mongoose.Types.ObjectId(item.itemId),
+    eligibleItemSource: item.itemSource,
+    eligibleItemKind: item.itemKind,
+    paidQuantity: config.paidQuantity,
+    creditedQuantity: config.creditedQuantity,
+  };
+}
+
 async function loadEligibleMenuItems(vendorId) {
   const options = await loadEligibleMenuOptions(vendorId);
   return options.items;
+}
+
+async function loadPrepaidEligibleMenuItems(vendorId, existingItems = []) {
+  const customItems = await VendorCustomPackage.find({
+    vendorId,
+    isLeaf: true,
+    isDeleted: { $ne: true },
+    visibleToVendor: { $ne: false },
+    pricingStatus: "Active",
+  })
+    .select("_id")
+    .lean();
+  const candidates = [
+    ...existingItems.map((item) => ({
+      itemId: item.id,
+      itemSource: item.sourceType === "vendor_menu" ? "vendor_menu_node" : item.sourceType,
+    })),
+    ...customItems.map((item) => ({ itemId: String(item._id), itemSource: "custom_package" })),
+  ];
+  const uniqueCandidates = Array.from(
+    new Map(candidates.map((item) => [`${item.itemSource}:${item.itemId}`, item])).values()
+  );
+  const resolved = await Promise.all(uniqueCandidates.map(async (candidate) => {
+    try {
+      return await resolveCanonicalMembershipMenuItem({ vendorId, ...candidate });
+    } catch (error) {
+      return null;
+    }
+  }));
+  return {
+    items: resolved.filter(Boolean),
+    rejectedCount: resolved.filter((item) => !item).length,
+  };
 }
 
 async function getActivePricingSource(vendorId) {
@@ -409,11 +562,20 @@ async function listPlans(req, res) {
       return res.status(400).json({ success: false, message: "Valid vendorId required" });
     }
 
-    const plans = await MembershipPlan.find({ vendorId })
+    const query = isPrepaidMembershipWalletEnabled()
+      ? { vendorId }
+      : { vendorId, planType: { $nin: ["PREPAID_VALUE", "PREPAID_SESSIONS"] } };
+    const plans = await MembershipPlan.find(query)
       .sort({ updatedAt: -1, createdAt: -1 })
       .lean();
 
-    return res.json({ success: true, data: plans.map(serializePlan) });
+    return res.json({
+      success: true,
+      data: plans.map(serializePlan),
+      capabilities: {
+        prepaidMembershipWallets: isPrepaidMembershipWalletEnabled(),
+      },
+    });
   } catch (error) {
     console.error("Membership list error:", error?.message || error);
     return res.status(500).json({ success: false, message: "Failed to load membership plans" });
@@ -428,10 +590,17 @@ async function getEligibleItems(req, res) {
     }
 
     const options = await loadEligibleMenuOptions(vendorId);
+    const prepaidMembershipWallets = isPrepaidMembershipWalletEnabled();
+    const prepaidEligibility = prepaidMembershipWallets
+      ? await loadPrepaidEligibleMenuItems(vendorId, options.items)
+      : { items: [], rejectedCount: 0 };
     return res.json({
       success: true,
       data: options.items,
       tree: options.tree,
+      prepaidEligibleItems: prepaidEligibility.items,
+      prepaidEligibilityRejectedCount: prepaidEligibility.rejectedCount,
+      capabilities: { prepaidMembershipWallets },
       activeMenu: {
         pricingSource: options.activeSource.pricingSource,
         menuSourceType: options.activeSource.menuSourceType,
@@ -451,20 +620,32 @@ async function createPlan(req, res) {
       return res.status(400).json({ success: false, message: "Valid vendorId required" });
     }
 
-    const { payload, errors } = validateDiscountPayload(req.body);
+    const requestedType = normalizeString(req.body?.planType || "DISCOUNT", 40).toUpperCase();
+    const isPrepaid = ["PREPAID_VALUE", "PREPAID_SESSIONS"].includes(requestedType);
+    if (isPrepaid) assertPrepaidMembershipWalletEnabled();
+    const { payload, errors } = isPrepaid
+      ? validatePrepaidPayload(req.body, { planType: requestedType })
+      : validateDiscountPayload(req.body);
     if (errors.length > 0) {
       return res.status(400).json({ success: false, message: errors[0], errors });
     }
 
-    const itemValidation = await validateEligibleMenuItemIds(vendorId, payload.eligibleMenuItemIds);
-    if (!itemValidation.ok) {
-      return res.status(400).json({ success: false, message: itemValidation.message });
+    if (requestedType === "DISCOUNT") {
+      const itemValidation = await validateEligibleMenuItemIds(vendorId, payload.eligibleMenuItemIds);
+      if (!itemValidation.ok) {
+        return res.status(400).json({ success: false, message: itemValidation.message });
+      }
+      payload.eligibleMenuItemIds = itemValidation.ids;
+    } else if (requestedType === "PREPAID_SESSIONS") {
+      payload.prepaidSessionsConfig = await resolvePrepaidSessionConfig(
+        vendorId,
+        payload.prepaidSessionsConfig
+      );
     }
 
     const plan = await MembershipPlan.create({
       ...payload,
       vendorId,
-      eligibleMenuItemIds: itemValidation.ids,
       status: "INACTIVE",
       audit: {
         createdBy: req.vendorWriteAuth?.customerId || null,
@@ -474,6 +655,13 @@ async function createPlan(req, res) {
 
     return res.status(201).json({ success: true, data: serializePlan(plan.toObject()) });
   } catch (error) {
+    if (error?.statusCode) {
+      return res.status(error.statusCode).json({
+        success: false,
+        message: error.message,
+        code: error.code || undefined,
+      });
+    }
     console.error("Membership create error:", error?.message || error);
     return res.status(500).json({ success: false, message: "Failed to create membership plan" });
   }
@@ -491,9 +679,19 @@ async function getPlan(req, res) {
     if (!plan) {
       return res.status(404).json({ success: false, message: "Membership plan not found" });
     }
+    if (["PREPAID_VALUE", "PREPAID_SESSIONS"].includes(plan.planType)) {
+      assertPrepaidMembershipWalletEnabled();
+    }
 
     return res.json({ success: true, data: serializePlan(plan) });
   } catch (error) {
+    if (error?.statusCode) {
+      return res.status(error.statusCode).json({
+        success: false,
+        message: error.message,
+        code: error.code || undefined,
+      });
+    }
     console.error("Membership detail error:", error?.message || error);
     return res.status(500).json({ success: false, message: "Failed to load membership plan" });
   }
@@ -513,11 +711,79 @@ async function updatePlan(req, res) {
       return res.status(404).json({ success: false, message: "Membership plan not found" });
     }
 
-    if (existing.planType !== "DISCOUNT") {
+    const submittedType = req.body?.planType
+      ? normalizeString(req.body.planType, 40).toUpperCase()
+      : existing.planType;
+    if (submittedType !== existing.planType) {
       return res.status(400).json({
         success: false,
-        message: "Only DISCOUNT membership plans can be edited in Phase 1",
+        message: "Membership plan type cannot be changed after creation",
       });
+    }
+
+    if (!["DISCOUNT", "PREPAID_VALUE", "PREPAID_SESSIONS"].includes(existing.planType)) {
+      return res.status(400).json({
+        success: false,
+        message: "Only DISCOUNT and prepaid membership plans can be edited",
+      });
+    }
+
+    if (existing.planType !== "DISCOUNT") {
+      assertPrepaidMembershipWalletEnabled();
+      const { payload, errors } = validatePrepaidPayload(req.body, {
+        partial: true,
+        planType: existing.planType,
+        currentSellingPrice: existing.sellingPrice,
+      });
+      delete payload.planType;
+      if (errors.length > 0) {
+        return res.status(400).json({ success: false, message: errors[0], errors });
+      }
+      if (existing.planType === "PREPAID_VALUE" && payload.prepaidValueConfig) {
+        const sellingPrice = payload.sellingPrice ?? Number(existing.sellingPrice);
+        const creditedValue = payload.prepaidValueConfig.prepaidValue;
+        const submittedBonus = req.body?.prepaidValueConfig?.bonusValue;
+        const calculatedBonus = Math.round((creditedValue - sellingPrice) * 100) / 100;
+        if (creditedValue < sellingPrice || (
+          submittedBonus != null && normalizePositiveMoney(submittedBonus) !== calculatedBonus
+        )) {
+          return res.status(400).json({
+            success: false,
+            message: "Bonus value must equal credited wallet value minus customer payment amount",
+          });
+        }
+        payload.prepaidValueConfig.bonusValue = calculatedBonus;
+      }
+      if (
+        existing.planType === "PREPAID_VALUE" &&
+        Object.prototype.hasOwnProperty.call(payload, "sellingPrice") &&
+        !payload.prepaidValueConfig
+      ) {
+        const creditedValue = Number(existing.prepaidValueConfig?.prepaidValue || 0);
+        if (creditedValue < payload.sellingPrice) {
+          return res.status(400).json({
+            success: false,
+            message: "Credited wallet value must be at least the customer payment amount",
+          });
+        }
+        payload.prepaidValueConfig = {
+          prepaidValue: creditedValue,
+          bonusValue: Math.round((creditedValue - payload.sellingPrice) * 100) / 100,
+        };
+      }
+      if (existing.planType === "PREPAID_SESSIONS" && payload.prepaidSessionsConfig) {
+        payload.prepaidSessionsConfig = await resolvePrepaidSessionConfig(
+          vendorId,
+          payload.prepaidSessionsConfig
+        );
+      }
+      payload["audit.updatedBy"] = req.vendorWriteAuth?.customerId || null;
+      const updated = await MembershipPlan.findOneAndUpdate(
+        { _id: planId, vendorId, planType: existing.planType },
+        { $set: payload },
+        { new: true, runValidators: true }
+      ).lean();
+      return res.json({ success: true, data: serializePlan(updated) });
     }
 
     const { payload, errors } = validateDiscountPayload(req.body, { partial: true });
@@ -708,6 +974,13 @@ async function updatePlan(req, res) {
         : null,
     });
   } catch (error) {
+    if (error?.statusCode) {
+      return res.status(error.statusCode).json({
+        success: false,
+        message: error.message,
+        code: error.code || undefined,
+      });
+    }
     console.error("Membership update error:", error?.message || error);
     return res.status(500).json({ success: false, message: "Failed to update membership plan" });
   } finally {
@@ -732,11 +1005,17 @@ async function updatePlanStatus(req, res) {
     if (!existing) {
       return res.status(404).json({ success: false, message: "Membership plan not found" });
     }
-    if (status === "ACTIVE" && existing.planType !== "DISCOUNT") {
+    if (!["DISCOUNT", "PREPAID_VALUE", "PREPAID_SESSIONS"].includes(existing.planType)) {
       return res.status(400).json({
         success: false,
-        message: "Only DISCOUNT membership plans can be activated in Phase 1",
+        message: "This membership plan type is not available",
       });
+    }
+    if (existing.planType !== "DISCOUNT") {
+      assertPrepaidMembershipWalletEnabled();
+      if (status === "ACTIVE" && existing.planType === "PREPAID_SESSIONS") {
+        await resolvePrepaidSessionConfig(vendorId, existing.prepaidSessionsConfig || {});
+      }
     }
 
     const plan = await MembershipPlan.findOneAndUpdate(
@@ -752,6 +1031,13 @@ async function updatePlanStatus(req, res) {
 
     return res.json({ success: true, data: serializePlan(plan) });
   } catch (error) {
+    if (error?.statusCode) {
+      return res.status(error.statusCode).json({
+        success: false,
+        message: error.message,
+        code: error.code || undefined,
+      });
+    }
     console.error("Membership status error:", error?.message || error);
     return res.status(500).json({ success: false, message: "Failed to update membership status" });
   }
@@ -766,10 +1052,13 @@ module.exports = {
   updatePlanStatus,
   _private: {
     validateDiscountPayload,
+    validatePrepaidPayload,
+    resolvePrepaidSessionConfig,
     serializePlan,
     normalizeEligibleMenuItemIds,
     validateEligibleMenuItemIds,
     loadEligibleMenuOptions,
+    loadPrepaidEligibleMenuItems,
     buildTreeFromParentIds,
     flattenBillableItems,
     getActivePricingSource,

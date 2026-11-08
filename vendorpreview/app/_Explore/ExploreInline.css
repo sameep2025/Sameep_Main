@@ -2402,6 +2402,37 @@
   content: "₹";
 }
 
+.quick-billing-payment-options {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.quick-billing-payment-options label {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 44px;
+  padding: 8px 10px;
+  border: 1px solid rgba(245, 217, 122, 0.25);
+  border-radius: 9px;
+  color: rgba(255, 255, 255, 0.82);
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.quick-billing-payment-options label.selected {
+  border-color: #e6c37a;
+  background: rgba(230, 195, 122, 0.12);
+  color: #f5d97a;
+}
+
+.quick-billing-payment-options input {
+  accent-color: #e6c37a;
+}
+
 .quick-billing-payment-inputs {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -2447,8 +2478,111 @@
   line-height: 1.4;
 }
 
+.quick-billing-prepaid-card {
+  padding: 10px;
+  border: 1px solid rgba(245, 217, 122, 0.26);
+  border-radius: 10px;
+  background: #080808;
+}
+
+.quick-billing-prepaid-heading,
+.quick-billing-prepaid-lines > div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.quick-billing-prepaid-heading {
+  color: #f5d97a;
+  font-size: 13px;
+}
+
+.quick-billing-prepaid-heading span,
+.quick-billing-prepaid-status,
+.quick-billing-prepaid-help,
+.quick-billing-prepaid-otp p,
+.quick-billing-prepaid-otp small,
+.quick-billing-prepaid-item {
+  color: rgba(255, 255, 255, 0.68);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.quick-billing-prepaid-item,
+.quick-billing-prepaid-help,
+.quick-billing-prepaid-otp p,
+.quick-billing-prepaid-status {
+  margin: 8px 0 0;
+}
+
+.quick-billing-prepaid-lines {
+  display: grid;
+  gap: 6px;
+  margin-top: 9px;
+}
+
+.quick-billing-prepaid-lines > div {
+  color: rgba(255, 255, 255, 0.78);
+  font-size: 12px;
+}
+
+.quick-billing-prepaid-lines strong {
+  color: #fff;
+}
+
+.quick-billing-prepaid-otp {
+  margin-top: 10px;
+}
+
+.quick-billing-prepaid-otp input {
+  width: 100%;
+  min-height: 44px;
+  box-sizing: border-box;
+  margin-top: 8px;
+  padding: 10px;
+  border: 1px solid rgba(245, 217, 122, 0.35);
+  border-radius: 9px;
+  background: #111;
+  color: #fff;
+  font-size: 16px;
+  letter-spacing: 0.12em;
+}
+
+.quick-billing-prepaid-otp-actions {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.quick-billing-prepaid-otp-actions button {
+  min-height: 44px;
+  padding: 8px 10px;
+  border: 1px solid #e6c37a;
+  border-radius: 9px;
+  background: #e6c37a;
+  color: #080808;
+  font-weight: 800;
+}
+
+.quick-billing-prepaid-otp-actions button.secondary {
+  background: transparent;
+  color: #e6c37a;
+}
+
+.quick-billing-prepaid-otp-actions button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
 @media (max-width: 380px) {
+  .quick-billing-payment-options,
   .quick-billing-payment-inputs {
+    grid-template-columns: 1fr;
+  }
+
+  .quick-billing-prepaid-otp-actions {
     grid-template-columns: 1fr;
   }
 }

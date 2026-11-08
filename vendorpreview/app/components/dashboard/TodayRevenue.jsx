@@ -4,6 +4,9 @@ import { useEffect, useState } from "react";
 import { API_BASE_URL } from "../../../config";
 import RevenueSnapshot from "./RevenueSnapshot";
 import StaffPerformanceMetrics from "./StaffPerformanceMetrics";
+import PrepaidRevenueSummary from "./PrepaidRevenueSummary";
+import { getIstTodayRange } from "./revenueDateRanges.mjs";
+import { getVendorAuthHeaders } from "../../utils/vendorAuth";
 import "./TodayRevenue.css";
 
 const currencyFmt = new Intl.NumberFormat("en-IN", {
@@ -101,19 +104,6 @@ function getPaymentModeLabel(bill) {
   return "Not Recorded";
 }
 
-function getTodayRange() {
-  const start = new Date();
-  start.setHours(0, 0, 0, 0);
-
-  const end = new Date();
-  end.setHours(23, 59, 59, 999);
-
-  return {
-    from: start.toISOString(),
-    to: end.toISOString(),
-  };
-}
-
 function getTodaySnapshotFileName() {
   const date = new Date();
   const year = date.getFullYear();
@@ -133,6 +123,7 @@ function createEmptyRevenueSummary() {
     cashCollected: 0,
     notRecordedCollected: 0,
     pointsDistributed: 0,
+    prepaidReporting: {},
   };
 }
 
@@ -148,6 +139,7 @@ function normalizeRevenueSummary(source) {
     cashCollected: getNumber(summary.cashCollected),
     notRecordedCollected: getNumber(summary.notRecordedCollected),
     pointsDistributed: getNumber(summary.pointsDistributed),
+    prepaidReporting: summary.prepaidReporting || {},
   };
 }
 
@@ -190,14 +182,16 @@ function TodayRevenue({
     const loadRevenue = async () => {
       try {
         setLoadingRevenue(true);
-        const { from, to } = getTodayRange();
+        const { from, to } = getIstTodayRange();
         const query = `vendorId=${encodeURIComponent(vendorId)}&from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`;
         const [summaryRes, billsRes] = await Promise.all([
           fetch(`${API_BASE_URL}/api/vendor/dashboard/bills-summary?${query}`, {
             cache: "no-store",
+            headers: getVendorAuthHeaders(vendorId),
           }),
           fetch(`${API_BASE_URL}/api/vendor/dashboard/bills?${query}`, {
             cache: "no-store",
+            headers: getVendorAuthHeaders(vendorId),
           }),
         ]);
 
@@ -250,7 +244,7 @@ function TodayRevenue({
         setLoadingStylists(true);
         const res = await fetch(
           `${API_BASE_URL}/api/vendor/dashboard/stylist-performance?vendorId=${encodeURIComponent(vendorId)}&range=today`,
-          { cache: "no-store" }
+          { cache: "no-store", headers: getVendorAuthHeaders(vendorId) }
         );
 
         if (!res.ok) {
@@ -389,6 +383,8 @@ function TodayRevenue({
                 </div>
               ))}
             </div>
+
+            <PrepaidRevenueSummary reporting={summary.prepaidReporting} />
 
             <div className="today-revenue-payment-breakdown">
               <div className="today-revenue-payment-title">Payment Breakdown</div>

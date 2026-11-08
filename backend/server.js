@@ -62,6 +62,7 @@ const vendorGstPreviewRoutes = require("./routes/vendorGstPreviewRoutes");
 const vendorGstReportRoutes = require("./routes/vendorGstReportRoutes");
 const vendorMembershipPlanRoutes = require("./routes/vendorMembershipPlanRoutes");
 const vendorCustomerMembershipRoutes = require("./routes/vendorCustomerMembershipRoutes");
+const vendorPrepaidWalletRoutes = require("./routes/vendorPrepaidWalletRoutes");
 const vendorWhatsappBusinessRoutes = require("./routes/vendorWhatsappBusinessRoutes");
 const metaWhatsappWebhookRoutes = require("./routes/metaWhatsappWebhookRoutes");
 const customerPortalRoutes = require("./routes/customerPortalRoutes");
@@ -215,6 +216,7 @@ app.use("/api/vendor/gst-preview", vendorGstPreviewRoutes);
 app.use("/api/vendor/gst-reports", vendorGstReportRoutes);
 app.use("/api/vendor/membership-plans", vendorMembershipPlanRoutes);
 app.use("/api/vendor/customer-memberships", vendorCustomerMembershipRoutes);
+app.use("/api/vendor/prepaid-wallets", vendorPrepaidWalletRoutes);
 // Vendor Dashboard APIs
 app.use("/api/vendor/dashboard", require("./routes/vendorDashboardRoutes"));
 app.use("/api/vendor/dashboard", require("./routes/customerAnalyticsRoutes"));

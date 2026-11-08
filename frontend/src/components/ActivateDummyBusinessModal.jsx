@@ -13,7 +13,9 @@ function ActivateDummyBusinessModal({ show, onClose, customer, onActivated }) {
     if (!show) return;
     const fetchCategories = async () => {
       try {
-        let res = await axios.get(`${API_BASE_URL}/api/dummy-categories`);
+        const res = await axios.get(
+          `${API_BASE_URL}/api/dummy-vendors/categories/counts`
+        );
         setCategories(res.data || []);
         setCategoriesSource("dummy");
       } catch (err) {
@@ -116,7 +118,12 @@ function ActivateDummyBusinessModal({ show, onClose, customer, onActivated }) {
           <select value={categoryId} onChange={(e) => setCategoryId(e.target.value)} required style={{ padding: 10, borderRadius: 8, border: "1px solid #ccc" }}>
             <option value="">Select Dummy Category</option>
             {categories.map((c) => (
-              <option key={c._id || c.id} value={c._id || c.id}>{c.name}</option>
+              <option
+                key={c.categoryId || c._id || c.id}
+                value={c.categoryId || c._id || c.id}
+              >
+                {c.name}
+              </option>
             ))}
           </select>
           <div style={{ display: "flex", gap: 10 }}>

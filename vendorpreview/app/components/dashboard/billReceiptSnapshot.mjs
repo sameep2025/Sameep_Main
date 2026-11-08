@@ -1,0 +1,35 @@
+export function buildReceiptSnapshotFromBillDetail(detail) {
+  const totals = detail?.totals || {};
+  return {
+    vendorName: String(detail?.vendor?.businessName || "YNOT Vendor").trim(),
+    vendorPhone: String(detail?.vendor?.phone || "").trim(),
+    vendorAddress: String(detail?.vendor?.address || "").trim(),
+    completedAt: detail?.completedAt || detail?.createdAt || new Date().toISOString(),
+    billingSessionId: String(detail?.billingSessionId || detail?.billId || ""),
+    status: String(detail?.status || "COMPLETED"),
+    cancelledAt: detail?.cancellation?.cancelledAt || "",
+    customerLabel: detail?.customer?.label || "Walk-in",
+    items: (detail?.items || []).map((item) => ({
+      name: String(item.name || "Item"),
+      qty: Number(item.qty || 0),
+      price: Number(item.price || 0),
+      total: Number(item.total || 0),
+      hierarchy: String(item.hierarchy || "").trim(),
+      resourceName: String(item.resourceName || "").trim(),
+    })),
+    grossAmount: Number(totals.grossAmount ?? totals.billValue ?? 0),
+    discountAmount: Number(totals.discountAmount || 0),
+    membershipDiscountAmount: Number(totals.membershipDiscountAmount || 0),
+    additionalManualDiscountAmount: Number(totals.additionalManualDiscountAmount || 0),
+    manualDiscountPercent: Number(totals.manualDiscountPercent || 0),
+    membershipPlanName: String(detail?.membership?.planName || totals.membership?.planName || ""),
+    rewardsRedeemed: Number(totals.rewardsRedeemed || 0),
+    pointsEarned: Number(totals.pointsEarned || 0),
+    pointsRedeemed: Number(totals.pointsRedeemed || 0),
+    netCollected: Number(totals.netCollected || 0),
+    paymentMode: String(detail?.paymentMode || "ONLINE"),
+    paymentBreakdown: detail?.paymentBreakdown || null,
+    prepaidSettlement: detail?.prepaidSettlement || null,
+    gstInvoice: detail?.gstInvoice || null,
+  };
+}

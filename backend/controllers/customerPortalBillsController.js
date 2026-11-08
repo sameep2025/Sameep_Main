@@ -6,6 +6,9 @@ const {
   buildGstInvoicePresentation,
 } = require("../services/gstInvoicePresentationService");
 const { getStoredPaymentAllocation } = require("../services/paymentAllocationService");
+const {
+  buildPrepaidBillingPresentation,
+} = require("../services/prepaidBillingPresentation");
 
 const DEFAULT_BILL_LIMIT = 20;
 const MAX_BILL_LIMIT = 50;
@@ -20,7 +23,9 @@ function hasStoredNumber(value) {
 }
 
 function normalizePaymentMode(paymentMode) {
-  return ["ONLINE", "CASH", "SPLIT"].includes(paymentMode) ? paymentMode : null;
+  return ["ONLINE", "CASH", "SPLIT", "PREPAID_VALUE", "PREPAID_SESSIONS"].includes(paymentMode)
+    ? paymentMode
+    : null;
 }
 
 function buildBillFinancials(bill = {}, transaction = null) {
@@ -228,6 +233,7 @@ function buildBillListItem(bill, { transaction = null, vendor = null } = {}) {
     finalPaidAmount: financials.netCollected,
   });
   const paymentMode = normalizePaymentMode(paymentAllocation.paymentMode);
+  const prepaidSettlement = buildPrepaidBillingPresentation({ bill, transaction });
   const customerNameSnapshot = String(bill.customerNameSnapshot || "").trim();
 
   const item = {
@@ -250,8 +256,9 @@ function buildBillListItem(bill, { transaction = null, vendor = null } = {}) {
     manualDiscountMode: financials.manualDiscountMode,
     manualDiscountPercent: financials.manualDiscountPercent,
     membership: financials.membership,
-    paymentMode,
+    paymentMode: prepaidSettlement?.paymentMode || paymentMode,
     paymentBreakdown: paymentAllocation.paymentBreakdown,
+    ...(prepaidSettlement ? { prepaidSettlement } : {}),
     financialSnapshotAvailable: financials.financialSnapshotAvailable,
   };
   if (customerNameSnapshot) item.customerNameSnapshot = customerNameSnapshot;
@@ -271,6 +278,7 @@ function buildBillDetail(bill, { transaction = null, vendor = null } = {}) {
     finalPaidAmount: financials.netCollected,
   });
   const paymentMode = normalizePaymentMode(paymentAllocation.paymentMode);
+  const prepaidSettlement = buildPrepaidBillingPresentation({ bill, transaction });
 
   const customerNameSnapshot = String(bill.customerNameSnapshot || "").trim();
   const customer = {
@@ -302,8 +310,9 @@ function buildBillDetail(bill, { transaction = null, vendor = null } = {}) {
     manualDiscountMode: financials.manualDiscountMode,
     manualDiscountPercent: financials.manualDiscountPercent,
     membership: financials.membership,
-    paymentMode,
+    paymentMode: prepaidSettlement?.paymentMode || paymentMode,
     paymentBreakdown: paymentAllocation.paymentBreakdown,
+    ...(prepaidSettlement ? { prepaidSettlement } : {}),
     pointsEarned: toSafeNumber(bill.pointsEarned),
     pointsRedeemed: toSafeNumber(bill.pointsRedeemed),
     financialSnapshotAvailable: financials.financialSnapshotAvailable,

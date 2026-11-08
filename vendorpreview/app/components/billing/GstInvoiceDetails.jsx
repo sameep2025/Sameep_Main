@@ -68,6 +68,8 @@ export default function GstInvoiceDetails({ data, invoice: providedInvoice, samp
   if (!invoice) return null;
 
   const totals = invoice.totals || {};
+  const prepaidSettlement = data?.prepaidSettlement || null;
+  const isCancelled = data?.status === "CANCELLED";
   const isTestDocument = sample || invoice.documentMode === "TEST";
   const isNonTaxDocument = invoice.documentMode === "NON_TAX_INVOICE";
   const documentTitle = isTestDocument
@@ -187,10 +189,31 @@ export default function GstInvoiceDetails({ data, invoice: providedInvoice, samp
           <TaxRow label="IGST" value={totals.igstPaise} hideWhenZero />
           <TaxRow label="Total GST" value={totals.totalGstPaise} />
           <TaxRow label="Invoice total" value={totals.invoiceTotalPaise} strong />
-          <div className={`${styles.totalRow} ${styles.payable}`}>
-            <span>Final amount paid</span>
-            <strong>{formatPaise(totals.customerPayablePaise)}</strong>
-          </div>
+          {prepaidSettlement ? (
+            <>
+              <div className={styles.totalRow}>
+                <span>
+                  {prepaidSettlement.paymentMode === "PREPAID_VALUE"
+                    ? `Prepaid Wallet ${isCancelled ? "Restored" : "Redeemed"}`
+                    : `Prepaid Package ${isCancelled ? "Restored" : "Redeemed"}`}
+                </span>
+                <strong>
+                  {prepaidSettlement.paymentMode === "PREPAID_VALUE"
+                    ? formatPaise(prepaidSettlement.redeemedAmountPaise)
+                    : `${Number(prepaidSettlement.redeemedQuantity || 0)} session(s)${prepaidSettlement.redeemedItemName ? ` - ${prepaidSettlement.redeemedItemName}` : ""}`}
+                </strong>
+              </div>
+              <div className={`${styles.totalRow} ${styles.payable}`}>
+                <span>Balance Due</span>
+                <strong>{formatPaise(prepaidSettlement.balanceDuePaise)}</strong>
+              </div>
+            </>
+          ) : (
+            <div className={`${styles.totalRow} ${styles.payable}`}>
+              <span>Final amount paid</span>
+              <strong>{formatPaise(totals.customerPayablePaise)}</strong>
+            </div>
+          )}
         </section>
 
         <section className={styles.loyalty}>

@@ -292,6 +292,117 @@
   box-shadow: 0 0 0 3px rgba(230, 195, 122, 0.12);
 }
 
+.membership-type-selector {
+  min-width: 0;
+  margin: 0 0 18px;
+  border: 0;
+  padding: 0;
+}
+
+.membership-type-selector legend {
+  margin-bottom: 8px;
+  color: #f7edcf;
+  font-size: 13px;
+  font-weight: 900;
+}
+
+.membership-type-selector > small {
+  display: block;
+  margin-top: 8px;
+  color: rgba(255, 255, 255, 0.52);
+  font-size: 12px;
+}
+
+.membership-type-card-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.membership-type-card {
+  position: relative;
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.035);
+  cursor: pointer;
+  padding: 13px 36px 12px 13px;
+  transition: border-color 160ms ease, background 160ms ease, box-shadow 160ms ease;
+}
+
+.membership-type-card input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.membership-type-card strong {
+  color: #fff7d6;
+  font-size: 13px;
+  line-height: 1.3;
+}
+
+.membership-type-card > span:not(.membership-type-check) {
+  color: rgba(255, 255, 255, 0.62);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.membership-type-card small {
+  color: #d9b96e;
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 1.35;
+}
+
+.membership-type-card em {
+  color: rgba(255, 255, 255, 0.48);
+  font-size: 10px;
+  font-style: normal;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.membership-type-check {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  display: grid;
+  width: 19px;
+  height: 19px;
+  place-items: center;
+  border: 1px solid rgba(230, 195, 122, 0.38);
+  border-radius: 50%;
+  color: #111;
+  font-size: 12px;
+  font-weight: 950;
+}
+
+.membership-type-card.selected {
+  border-color: #e6c37a;
+  background: rgba(230, 195, 122, 0.11);
+  box-shadow: inset 0 0 0 1px rgba(230, 195, 122, 0.18);
+}
+
+.membership-type-card.selected .membership-type-check {
+  border-color: #e6c37a;
+  background: #e6c37a;
+}
+
+.membership-type-card:focus-within {
+  outline: 2px solid #f5d97a;
+  outline-offset: 3px;
+}
+
+.membership-type-card.unavailable {
+  cursor: not-allowed;
+  opacity: 0.48;
+}
+
 .membership-form-row {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -453,6 +564,23 @@
   border-radius: 12px;
   padding: 9px 10px 9px calc(10px + (var(--membership-tree-depth, 0) * 16px));
   background: rgba(255, 255, 255, 0.035);
+}
+
+.membership-tree-row.single-selected {
+  border-color: rgba(230, 195, 122, 0.62);
+  background: rgba(230, 195, 122, 0.1);
+  box-shadow: inset 3px 0 0 #e6c37a;
+}
+
+.membership-tree-row > input,
+.membership-tree-selection-placeholder {
+  width: 18px;
+  height: 18px;
+}
+
+.membership-tree-row > input {
+  accent-color: #e6c37a;
+  cursor: pointer;
 }
 
 .membership-tree-expander {
@@ -987,6 +1115,24 @@
   font-size: 12px;
 }
 
+.membership-wallet-activity-row > div:last-child {
+  min-width: 0;
+  text-align: right;
+}
+
+.membership-wallet-activity-amount {
+  overflow-wrap: anywhere;
+}
+
+.membership-wallet-activity-amount.incoming {
+  color: #9dd9ad;
+}
+
+.membership-wallet-activity-amount.redeemed,
+.membership-wallet-activity-amount.neutral {
+  color: #f0e6ce;
+}
+
 .membership-message {
   border-radius: 14px;
   margin-bottom: 16px;
@@ -1123,6 +1269,62 @@
   color: #fecaca;
 }
 
+.membership-type-label {
+  display: inline-flex;
+  margin-bottom: 0.35rem;
+  color: #d9b96e;
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.membership-prepaid-summary,
+.membership-wallet-summary {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  gap: 0.65rem;
+  padding: 0.8rem;
+  border: 1px solid rgba(218, 183, 100, 0.3);
+  border-radius: 12px;
+  background: rgba(218, 183, 100, 0.07);
+}
+
+.membership-prepaid-summary span,
+.membership-wallet-summary span {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 0.2rem;
+  color: #bcb7aa;
+  font-size: 0.75rem;
+}
+
+.membership-prepaid-summary strong,
+.membership-wallet-summary strong {
+  overflow-wrap: anywhere;
+  color: #f5e6bd;
+  font-size: 0.95rem;
+}
+
+.membership-selected-item {
+  display: grid;
+  gap: 0.25rem;
+  padding: 0.8rem;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 12px;
+  background: #171717;
+}
+
+.membership-selected-item strong { color: #f7edcf; }
+.membership-selected-item span,
+.membership-selected-item small { color: #aaa397; }
+.membership-selected-item p { margin: 0.35rem 0 0; color: #d8d1c2; font-size: 0.8rem; }
+
+.membership-selected-item-compact {
+  margin-top: 12px;
+}
+
 @media (max-width: 900px) {
   .membership-dashboard {
     padding: 18px;
@@ -1146,6 +1348,15 @@
 @media (max-width: 560px) {
   .membership-dashboard {
     padding: 14px;
+  }
+
+  .membership-type-card-grid {
+    grid-template-columns: 1fr;
+    gap: 8px;
+  }
+
+  .membership-type-card {
+    padding-block: 11px;
   }
 
   .membership-form,
@@ -1239,5 +1450,10 @@
   .membership-editor-footer {
     grid-template-columns: 1fr;
     padding: 12px 14px calc(12px + env(safe-area-inset-bottom));
+  }
+
+  .membership-prepaid-summary,
+  .membership-wallet-summary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }

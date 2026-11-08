@@ -1,9 +1,20 @@
 const mongoose = require("mongoose");
 const GstInvoiceSnapshotSchema = require("./gstInvoiceSnapshotSchema");
+const PrepaidSettlementSnapshotSchema = require("./prepaidSettlementSnapshotSchema");
 
 const BillingItemSchema = new mongoose.Schema(
   {
     itemId: mongoose.Schema.Types.ObjectId,
+    itemSource: {
+      type: String,
+      enum: ["vendor_price_node", "vendor_menu_node", "custom_package"],
+      default: undefined,
+    },
+    itemType: {
+      type: String,
+      enum: ["SERVICE", "PACKAGE", "PRODUCT"],
+      default: undefined,
+    },
     name: String,
     price: Number,
     qty: Number,
@@ -212,7 +223,7 @@ const BillingSessionSchema = new mongoose.Schema(
 
     paymentMode: {
       type: String,
-      enum: ["ONLINE", "CASH", "SPLIT"],
+      enum: ["ONLINE", "CASH", "SPLIT", "PREPAID_VALUE", "PREPAID_SESSIONS"],
       default: undefined,
     },
 
@@ -322,6 +333,11 @@ const BillingSessionSchema = new mongoose.Schema(
 
     gstInvoiceSnapshot: {
       type: GstInvoiceSnapshotSchema,
+      default: undefined,
+      immutable: true,
+    },
+    prepaidSettlementSnapshot: {
+      type: PrepaidSettlementSnapshotSchema,
       default: undefined,
       immutable: true,
     },

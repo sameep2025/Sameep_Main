@@ -23,13 +23,19 @@ function mockQueryChain(value) {
 
 test("membership plan schema supports Phase 1 enums and future plan foundations", () => {
   const constants = MembershipPlan.constants;
-  assert.deepEqual(constants.PLAN_TYPES, ["DISCOUNT", "SERVICE_QUOTA", "PREPAID_VALUE"]);
+  assert.deepEqual(constants.PLAN_TYPES, [
+    "DISCOUNT",
+    "SERVICE_QUOTA",
+    "PREPAID_VALUE",
+    "PREPAID_SESSIONS",
+  ]);
   assert.deepEqual(constants.DURATIONS, ["MONTHLY", "QUARTERLY", "HALF_YEARLY", "ANNUAL"]);
   assert.deepEqual(constants.STATUSES, ["ACTIVE", "INACTIVE"]);
 
   assert.ok(MembershipPlan.schema.path("eligibleMenuItemIds"));
   assert.ok(MembershipPlan.schema.path("serviceQuotaConfig.benefits"));
   assert.ok(MembershipPlan.schema.path("prepaidValueConfig.prepaidValue"));
+  assert.ok(MembershipPlan.schema.path("prepaidSessionsConfig.eligibleItemId"));
   assert.ok(MembershipPlan.schema.path("serviceEligibilityRevisions.revisionId"));
   assert.ok(MembershipPlan.schema.path("serviceEligibilityRevisions.scope"));
   assert.ok(MembershipPlan.schema.path("benefitRulesRevisions.revisionId"));

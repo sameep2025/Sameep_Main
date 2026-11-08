@@ -33,7 +33,7 @@ async function request(path, options = {}) {
 }
 
 export function fetchDummyCategories() {
-  return request("/api/dummy-categories", { method: "GET" });
+  return request("/api/dummy-vendors/categories/counts", { method: "GET" });
 }
 
 export function fetchCategoryTree(rootCategoryId) {

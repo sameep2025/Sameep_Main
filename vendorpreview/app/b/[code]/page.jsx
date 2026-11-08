@@ -59,6 +59,8 @@ function BillView({ data, error }) {
   const manualDiscountPercent = Number(totals.manualDiscountPercent || 0);
   const rewardsRedeemed = Number(totals.rewardsRedeemed || 0);
   const membership = data?.membership || {};
+  const prepaidSettlement = data?.prepaidSettlement || null;
+  const isCancelled = data?.status === "CANCELLED";
   const membershipLabel =
     (membership?.planName || membershipDiscountAmount > 0)
       ? `Membership Discount${membership?.planName ? ` - ${membership.planName}` : ""}${
@@ -151,10 +153,31 @@ function BillView({ data, error }) {
                   <strong style={styles.summaryValue}>-{formatCurrency(rewardsRedeemed)}</strong>
                 </div>
               ) : null}
-              <div style={styles.summaryItem}>
-                <span style={styles.summaryLabel}>Final Paid</span>
-                <strong style={styles.summaryValue}>{formatCurrency(totals.finalPaid)}</strong>
-              </div>
+              {prepaidSettlement ? (
+                <>
+                  <div style={styles.summaryItem}>
+                    <span style={styles.summaryLabel}>
+                      {prepaidSettlement.paymentMode === "PREPAID_VALUE"
+                        ? `Prepaid Wallet ${isCancelled ? "Restored" : "Redeemed"}`
+                        : `Prepaid Package ${isCancelled ? "Restored" : "Redeemed"}`}
+                    </span>
+                    <strong style={styles.summaryValue}>
+                      {prepaidSettlement.paymentMode === "PREPAID_VALUE"
+                        ? formatCurrency(Number(prepaidSettlement.redeemedAmountPaise || 0) / 100)
+                        : `${Number(prepaidSettlement.redeemedQuantity || 0)} session(s)${prepaidSettlement.redeemedItemName ? ` - ${prepaidSettlement.redeemedItemName}` : ""}`}
+                    </strong>
+                  </div>
+                  <div style={styles.summaryItem}>
+                    <span style={styles.summaryLabel}>Balance Due</span>
+                    <strong style={styles.summaryValue}>{formatCurrency(Number(prepaidSettlement.balanceDuePaise || 0) / 100)}</strong>
+                  </div>
+                </>
+              ) : (
+                <div style={styles.summaryItem}>
+                  <span style={styles.summaryLabel}>Final Paid</span>
+                  <strong style={styles.summaryValue}>{formatCurrency(totals.finalPaid)}</strong>
+                </div>
+              )}
               <div style={styles.summaryItem}>
                 <span style={styles.summaryLabel}>Points Earned</span>
                 <strong style={styles.summaryValue}>{Number(totals.pointsEarned || 0)}</strong>

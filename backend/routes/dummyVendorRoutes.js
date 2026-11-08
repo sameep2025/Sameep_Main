@@ -10,6 +10,9 @@ const multer = require("multer");
 const { v4: uuidv4 } = require("uuid");
 const { uploadBufferToS3, uploadBufferToS3WithLabel, deleteS3ObjectByUrl } = require("../utils/s3Upload");
 const { logAudit } = require("../utils/auditLogger");
+const {
+  buildPublishedCategoryCounts,
+} = require("../services/categoryPopularityService");
 
 const router = express.Router();
 
@@ -1188,35 +1191,13 @@ router.get("/categories/counts", async (req, res) => {
     const match = {};
     if (categoryId) match.categoryId = new mongoose.Types.ObjectId(categoryId);
 
-    const totalAgg = await DummyVendor.aggregate([
-      { $match: match },
-      { $group: { _id: "$categoryId", total: { $sum: 1 } } },
-    ]);
-
     const statusAgg = await DummyVendor.aggregate([
       { $match: match },
       { $group: { _id: { categoryId: "$categoryId", status: "$status" }, count: { $sum: 1 } } },
     ]);
 
-    const totals = new Map(totalAgg.map((d) => [String(d._id), d.total]));
-    const statusMap = new Map();
-    statusAgg.forEach((d) => {
-      const catId = String(d._id.categoryId);
-      const st = d._id.status || "Registered";
-      if (!statusMap.has(catId)) statusMap.set(catId, {});
-      statusMap.get(catId)[st] = d.count;
-    });
-
     const cats = await DummyCategory.find(categoryId ? { _id: categoryId } : {}).lean();
-    const result = cats.map((c) => ({
-      categoryId: c._id,
-      name: c.name,
-      imageUrl: c.imageUrl,
-      totalVendors: totals.get(String(c._id)) || 0,
-      statusCounts: statusMap.get(String(c._id)) || {},
-      visibleToVendor: c.visibleToVendor !== false,
-      onboardingEnabled: c.visibleToVendor !== false,
-    }));
+    const result = buildPublishedCategoryCounts(cats, statusAgg);
 
     res.json(result);
   } catch (err) {

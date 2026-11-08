@@ -150,6 +150,40 @@ test("customer bill detail exposes a validated split payment allocation", () => 
   });
 });
 
+test("customer bill detail presents prepaid settlement while preserving zero net collection", () => {
+  const bill = billsController.buildBillDetail(
+    {
+      _id: oid("692900000000000000000097"),
+      vendorId: oid("692900000000000000000098"),
+      status: "CANCELLED",
+      totalAmount: 200,
+      grossAmount: 200,
+      paymentMode: "PREPAID_VALUE",
+      prepaidSettlementSnapshot: {
+        walletType: "PREPAID_VALUE",
+        authorizedAmountPaise: 20000,
+      },
+      cartItems: [],
+    },
+    {
+      transaction: {
+        paymentMode: "PREPAID_VALUE",
+        finalPaidAmount: 0,
+      },
+    }
+  );
+
+  assert.equal(bill.netCollected, 0);
+  assert.equal(bill.paymentMode, "PREPAID_VALUE");
+  assert.deepEqual(bill.prepaidSettlement, {
+    paymentMode: "PREPAID_VALUE",
+    paymentMethodLabel: "Prepaid Wallet",
+    redeemedAmountPaise: 20000,
+    balanceDuePaise: 0,
+  });
+  assert.equal(bill.status, "CANCELLED");
+});
+
 test("historical bill without gross or discount falls back safely", () => {
   const financials = billsController.buildBillFinancials(
     {
