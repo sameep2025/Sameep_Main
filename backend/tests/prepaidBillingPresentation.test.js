@@ -13,6 +13,7 @@ test("prepaid value presentation uses persisted settlement amount without exposi
       prepaidSettlementSnapshot: {
         walletType: "PREPAID_VALUE",
         authorizedAmountPaise: 20000,
+        remainingAmountPaiseAfterRedemption: 630000,
         walletId: new mongoose.Types.ObjectId(),
         authorizationId: new mongoose.Types.ObjectId(),
         redemptionLedgerId: new mongoose.Types.ObjectId(),
@@ -25,6 +26,7 @@ test("prepaid value presentation uses persisted settlement amount without exposi
     paymentMode: "PREPAID_VALUE",
     paymentMethodLabel: "Prepaid Wallet",
     redeemedAmountPaise: 20000,
+    remainingAmountPaiseAfterRedemption: 630000,
     balanceDuePaise: 0,
   });
   assert.equal("walletId" in presentation, false);
@@ -49,6 +51,7 @@ test("prepaid sessions presentation matches the persisted canonical item identit
       prepaidSettlementSnapshot: {
         walletType: "PREPAID_SESSIONS",
         authorizedQuantity: 2,
+        remainingQuantityAfterRedemption: 4,
         eligibleItemId: itemId,
         eligibleItemSource: "custom_package",
       },
@@ -60,8 +63,24 @@ test("prepaid sessions presentation matches the persisted canonical item identit
     paymentMethodLabel: "Prepaid Package",
     redeemedQuantity: 2,
     redeemedItemName: "Bridal Care Combo",
+    remainingQuantityAfterRedemption: 4,
     balanceDuePaise: 0,
   });
+});
+
+test("historical prepaid snapshots remain presentable without fabricated remaining balances", () => {
+  const presentation = buildPrepaidBillingPresentation({
+    bill: {
+      paymentMode: "PREPAID_VALUE",
+      prepaidSettlementSnapshot: {
+        walletType: "PREPAID_VALUE",
+        authorizedAmountPaise: 20000,
+      },
+    },
+  });
+
+  assert.equal(presentation.redeemedAmountPaise, 20000);
+  assert.equal("remainingAmountPaiseAfterRedemption" in presentation, false);
 });
 
 test("ordinary payments and inconsistent prepaid snapshots do not fabricate settlement presentation", () => {

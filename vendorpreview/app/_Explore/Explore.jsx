@@ -52,6 +52,7 @@ import {
 import {
   buildPrepaidBillPresentation,
   createPrepaidAuthorizationBinding,
+  getPrepaidWalletSelectionAction,
   getPrepaidWalletQuote,
 } from "./prepaidWalletUi.mjs";
 const FOOTER_GALLERY_OPEN_EVENT = "ynot-footer-open-gallery";
@@ -1796,7 +1797,14 @@ function ExploreContent({ onReady, onOpenServices }) {
     const localPhone = digits.startsWith("91") && digits.length > 10 ? digits.slice(2) : digits;
     const nextMobile = localPhone.slice(-10);
     const nextName = String(result?.name || "");
+    const nextCustomerId = result?.customerId || null;
     if (!/^\d{10}$/.test(nextMobile)) return;
+
+    const prepaidSelectionAction = getPrepaidWalletSelectionAction({
+      currentCustomerId: customerId,
+      nextCustomerId,
+      walletStatus: prepaidWalletStatus,
+    });
 
     const selectedLabel = nextName ? `${nextName} ${nextMobile}` : nextMobile;
     customerSearchRequestRef.current += 1;
@@ -1810,20 +1818,24 @@ function ExploreContent({ onReady, onOpenServices }) {
     setCustomerName(nextName);
     setLoadedCustomerName(nextName);
     setCustomerNameStatus(nextName ? "Saved name loaded" : "");
-    setCustomerId(result?.customerId || null);
+    setCustomerId(nextCustomerId);
     setAvailablePoints(0);
     setRedeemPoints(0);
     loyaltyWalletRequestRef.current += 1;
-    prepaidWalletRequestRef.current += 1;
-    setLoyaltyWalletStatus(result?.customerId ? "loading" : "idle");
+    setLoyaltyWalletStatus(nextCustomerId ? "loading" : "idle");
     setLoyaltyWalletError("");
-    if (result?.customerId) {
-      fetchWallet(result.customerId, nextMobile);
+    if (nextCustomerId) {
+      fetchWallet(nextCustomerId, nextMobile);
     }
     setSelectedPaymentMode("STANDARD");
-    setPrepaidWallet(null);
-    setPrepaidWalletStatus(result?.customerId ? "loading" : "idle");
-    setPrepaidWalletError("");
+    if (prepaidSelectionAction === "RESET") {
+      prepaidWalletRequestRef.current += 1;
+      setPrepaidWallet(null);
+      setPrepaidWalletStatus(nextCustomerId ? "loading" : "idle");
+      setPrepaidWalletError("");
+    } else if (prepaidSelectionAction === "RETRY") {
+      fetchPrepaidWallet(nextCustomerId);
+    }
     setPrepaidAuthorization(null);
     setPrepaidOtp("");
     setPrepaidOtpError("");

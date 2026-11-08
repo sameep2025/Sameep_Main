@@ -9,6 +9,12 @@ function toPositiveInteger(value) {
   return Number.isSafeInteger(number) && number > 0 ? number : null;
 }
 
+function toNonNegativeInteger(value) {
+  if (value === undefined || value === null || value === "") return null;
+  const number = Number(value);
+  return Number.isSafeInteger(number) && number >= 0 ? number : null;
+}
+
 function buildPrepaidBillingPresentation({ bill = {}, transaction = null } = {}) {
   const paymentMode = String(bill.paymentMode || transaction?.paymentMode || "")
     .trim()
@@ -22,11 +28,17 @@ function buildPrepaidBillingPresentation({ bill = {}, transaction = null } = {})
 
   if (paymentMode === "PREPAID_VALUE") {
     const redeemedAmountPaise = toPositiveInteger(snapshot.authorizedAmountPaise);
+    const remainingAmountPaiseAfterRedemption = toNonNegativeInteger(
+      snapshot.remainingAmountPaiseAfterRedemption
+    );
     if (!redeemedAmountPaise) return null;
     return {
       paymentMode,
       paymentMethodLabel: "Prepaid Wallet",
       redeemedAmountPaise,
+      ...(remainingAmountPaiseAfterRedemption !== null
+        ? { remainingAmountPaiseAfterRedemption }
+        : {}),
       balanceDuePaise: 0,
     };
   }
@@ -34,6 +46,9 @@ function buildPrepaidBillingPresentation({ bill = {}, transaction = null } = {})
   const redeemedQuantity = toPositiveInteger(snapshot.authorizedQuantity);
   const eligibleItemId = normalizeId(snapshot.eligibleItemId);
   const eligibleItemSource = normalizeId(snapshot.eligibleItemSource).toLowerCase();
+  const remainingQuantityAfterRedemption = toNonNegativeInteger(
+    snapshot.remainingQuantityAfterRedemption
+  );
   if (!redeemedQuantity || !eligibleItemId || !eligibleItemSource) return null;
 
   const matchedItem = (Array.isArray(bill.cartItems) ? bill.cartItems : []).find(
@@ -47,6 +62,9 @@ function buildPrepaidBillingPresentation({ bill = {}, transaction = null } = {})
     paymentMethodLabel: "Prepaid Package",
     redeemedQuantity,
     redeemedItemName: String(matchedItem?.name || "").trim(),
+    ...(remainingQuantityAfterRedemption !== null
+      ? { remainingQuantityAfterRedemption }
+      : {}),
     balanceDuePaise: 0,
   };
 }

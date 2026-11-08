@@ -1775,6 +1775,21 @@ function BillRows({ bill, showAmountPaid = true, detailed = false }) {
             </span>
             <strong>{formatPrepaidSettlementValue(prepaidSettlement)}</strong>
           </div>
+          {prepaidSettlement.paymentMode === "PREPAID_VALUE" &&
+          Number.isSafeInteger(Number(prepaidSettlement.remainingAmountPaiseAfterRedemption)) &&
+          Number(prepaidSettlement.remainingAmountPaiseAfterRedemption) >= 0 ? (
+            <div>
+              <span>Remaining Wallet Balance</span>
+              <strong>{formatPaise(prepaidSettlement.remainingAmountPaiseAfterRedemption)}</strong>
+            </div>
+          ) : prepaidSettlement.paymentMode === "PREPAID_SESSIONS" &&
+            Number.isSafeInteger(Number(prepaidSettlement.remainingQuantityAfterRedemption)) &&
+            Number(prepaidSettlement.remainingQuantityAfterRedemption) >= 0 ? (
+            <div>
+              <span>Remaining Package Sessions</span>
+              <strong>{Number(prepaidSettlement.remainingQuantityAfterRedemption)}</strong>
+            </div>
+          ) : null}
           <div className="portalAmountPaid">
             <span>Balance Due</span>
             <strong>{formatPaise(prepaidSettlement.balanceDuePaise)}</strong>
@@ -1868,6 +1883,21 @@ function GstInvoicePanel({ invoice, bill }) {
               </span>
               <strong>{formatPrepaidSettlementValue(prepaidSettlement)}</strong>
             </div>
+            {prepaidSettlement.paymentMode === "PREPAID_VALUE" &&
+            Number.isSafeInteger(Number(prepaidSettlement.remainingAmountPaiseAfterRedemption)) &&
+            Number(prepaidSettlement.remainingAmountPaiseAfterRedemption) >= 0 ? (
+              <div>
+                <span>Remaining Wallet Balance</span>
+                <strong>{formatPaise(prepaidSettlement.remainingAmountPaiseAfterRedemption)}</strong>
+              </div>
+            ) : prepaidSettlement.paymentMode === "PREPAID_SESSIONS" &&
+              Number.isSafeInteger(Number(prepaidSettlement.remainingQuantityAfterRedemption)) &&
+              Number(prepaidSettlement.remainingQuantityAfterRedemption) >= 0 ? (
+              <div>
+                <span>Remaining Package Sessions</span>
+                <strong>{Number(prepaidSettlement.remainingQuantityAfterRedemption)}</strong>
+              </div>
+            ) : null}
             <div className="portalGstPayable"><span>Balance Due</span><strong>{formatPaise(prepaidSettlement.balanceDuePaise)}</strong></div>
           </>
         ) : (

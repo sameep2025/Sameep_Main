@@ -57,7 +57,7 @@ test("customer selection refreshes wallet and wallet failures are not presented 
   );
   const walletSource = sourceBetween("async function fetchWallet", "async function verifyCustomer");
 
-  assert.match(selectionSource, /fetchWallet\(result\.customerId, nextMobile\)/);
+  assert.match(selectionSource, /fetchWallet\(nextCustomerId, nextMobile\)/);
   assert.match(walletSource, /loyaltyWalletRequestRef\.current !== requestId/);
   assert.match(walletSource, /String\(vendorIdRef\.current \|\| ""\) !== expectedVendorId/);
   assert.match(walletSource, /!res\.ok \|\| !wallet\?\.success/);
@@ -65,6 +65,9 @@ test("customer selection refreshes wallet and wallet failures are not presented 
   assert.match(walletSource, /setLoyaltyWalletStatus\("error"\)/);
   assert.match(exploreSource, /loyaltyWalletStatus === "error"/);
   assert.match(exploreSource, /Retry points lookup/);
+  assert.match(selectionSource, /getPrepaidWalletSelectionAction/);
+  assert.match(selectionSource, /prepaidSelectionAction === "RESET"/);
+  assert.match(selectionSource, /prepaidSelectionAction === "RETRY"/);
 });
 
 test("membership preview sends redemption and refreshes loyalty estimates when it changes", () => {

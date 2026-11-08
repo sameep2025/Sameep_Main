@@ -172,6 +172,7 @@ test("value wallet redemption atomically consumes authorization, deducts paise a
       session: { id: "session" },
     });
     assert.equal(snapshot.authorizedAmountPaise, 100000);
+    assert.equal(snapshot.remainingAmountPaiseAfterRedemption, 0);
     assert.equal(snapshot.freshCashCollectedPaise, 0);
     assert.equal(String(snapshot.redemptionLedgerId), ids.redemption);
     assert.equal(calls.authorizationUpdates[0].update.$set.status, "CONSUMED");
@@ -198,6 +199,7 @@ test("session wallet redemption supports multiple exact eligible units", async (
       session: { id: "session" },
     });
     assert.equal(snapshot.authorizedQuantity, 2);
+    assert.equal(snapshot.remainingQuantityAfterRedemption, 1);
     assert.equal(snapshot.eligibleItemSource, "vendor_menu_node");
     assert.equal(calls.walletUpdates[0].update.$inc.remainingQuantity, -2);
     assert.equal(calls.ledgerCreates[0].documents[0].quantity, 2);
@@ -334,6 +336,7 @@ test("prepaid settlement snapshot is validated and persisted exactly once in the
     walletId: oid(ids.wallet),
     customerMembershipId: oid(ids.membership),
     authorizedAmountPaise: 100000,
+    remainingAmountPaiseAfterRedemption: 250000,
     operationalServiceValuePaise: 100000,
     freshCashCollectedPaise: 0,
     redemptionLedgerId: oid(ids.redemption),
@@ -354,6 +357,7 @@ test("prepaid settlement snapshot is validated and persisted exactly once in the
       session,
     });
     assert.equal(persisted.authorizedAmountPaise, 100000);
+    assert.equal(persisted.remainingAmountPaiseAfterRedemption, 250000);
     assert.equal(captured.filter.status, "COMPLETED");
     assert.deepEqual(captured.filter.prepaidSettlementSnapshot, { $exists: false });
     assert.equal(captured.options.session, session);

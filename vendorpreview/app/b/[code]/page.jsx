@@ -167,6 +167,25 @@ function BillView({ data, error }) {
                         : `${Number(prepaidSettlement.redeemedQuantity || 0)} session(s)${prepaidSettlement.redeemedItemName ? ` - ${prepaidSettlement.redeemedItemName}` : ""}`}
                     </strong>
                   </div>
+                  {prepaidSettlement.paymentMode === "PREPAID_VALUE" &&
+                  Number.isSafeInteger(Number(prepaidSettlement.remainingAmountPaiseAfterRedemption)) &&
+                  Number(prepaidSettlement.remainingAmountPaiseAfterRedemption) >= 0 ? (
+                    <div style={styles.summaryItem}>
+                      <span style={styles.summaryLabel}>Remaining Wallet Balance</span>
+                      <strong style={styles.summaryValue}>
+                        {formatCurrency(Number(prepaidSettlement.remainingAmountPaiseAfterRedemption) / 100)}
+                      </strong>
+                    </div>
+                  ) : prepaidSettlement.paymentMode === "PREPAID_SESSIONS" &&
+                    Number.isSafeInteger(Number(prepaidSettlement.remainingQuantityAfterRedemption)) &&
+                    Number(prepaidSettlement.remainingQuantityAfterRedemption) >= 0 ? (
+                    <div style={styles.summaryItem}>
+                      <span style={styles.summaryLabel}>Remaining Package Sessions</span>
+                      <strong style={styles.summaryValue}>
+                        {Number(prepaidSettlement.remainingQuantityAfterRedemption)}
+                      </strong>
+                    </div>
+                  ) : null}
                   <div style={styles.summaryItem}>
                     <span style={styles.summaryLabel}>Balance Due</span>
                     <strong style={styles.summaryValue}>{formatCurrency(Number(prepaidSettlement.balanceDuePaise || 0) / 100)}</strong>

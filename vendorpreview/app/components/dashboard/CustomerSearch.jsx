@@ -1314,6 +1314,31 @@ export default function CustomerSearch({ vendorId, initialCustomer = null }) {
                     </span>
                     <strong>{formatPrepaidSettlement(billDetail)}</strong>
                   </div>
+                  {billDetail.prepaidSettlement.paymentMode === "PREPAID_VALUE" &&
+                  Number.isSafeInteger(
+                    Number(billDetail.prepaidSettlement.remainingAmountPaiseAfterRedemption)
+                  ) &&
+                  Number(billDetail.prepaidSettlement.remainingAmountPaiseAfterRedemption) >= 0 ? (
+                    <div>
+                      <span>Remaining Wallet Balance</span>
+                      <strong>
+                        {formatPaise(
+                          billDetail.prepaidSettlement.remainingAmountPaiseAfterRedemption
+                        )}
+                      </strong>
+                    </div>
+                  ) : billDetail.prepaidSettlement.paymentMode === "PREPAID_SESSIONS" &&
+                    Number.isSafeInteger(
+                      Number(billDetail.prepaidSettlement.remainingQuantityAfterRedemption)
+                    ) &&
+                    Number(billDetail.prepaidSettlement.remainingQuantityAfterRedemption) >= 0 ? (
+                    <div>
+                      <span>Remaining Package Sessions</span>
+                      <strong>
+                        {Number(billDetail.prepaidSettlement.remainingQuantityAfterRedemption)}
+                      </strong>
+                    </div>
+                  ) : null}
                   <div>
                     <span>Balance Due</span>
                     <strong>{formatPaise(billDetail.prepaidSettlement.balanceDuePaise)}</strong>

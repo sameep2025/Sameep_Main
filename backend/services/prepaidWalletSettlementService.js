@@ -269,9 +269,13 @@ async function consumePrepaidAuthorization({
     walletId: wallet._id,
     customerMembershipId: wallet.customerMembershipId,
     ...(mode === "PREPAID_VALUE"
-      ? { authorizedAmountPaise: deduction.amountPaise }
+      ? {
+          authorizedAmountPaise: deduction.amountPaise,
+          remainingAmountPaiseAfterRedemption: Number(wallet.remainingAmountPaise),
+        }
       : {
           authorizedQuantity: deduction.quantity,
+          remainingQuantityAfterRedemption: Number(wallet.remainingQuantity),
           eligibleItemSource: authorization.eligibleItemSource,
           eligibleItemId: authorization.eligibleItemId,
         }),

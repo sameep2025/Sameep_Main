@@ -18,6 +18,7 @@ const PrepaidSettlementSnapshotSchema = new mongoose.Schema(
     walletId: { type: mongoose.Schema.Types.ObjectId, ref: "PrepaidMembershipWallet", required: true },
     customerMembershipId: { type: mongoose.Schema.Types.ObjectId, ref: "CustomerMembership", required: true },
     authorizedAmountPaise: { ...integerPaise, default: undefined },
+    remainingAmountPaiseAfterRedemption: { ...integerPaise, default: undefined },
     authorizedQuantity: {
       type: Number,
       min: 1,
@@ -25,6 +26,15 @@ const PrepaidSettlementSnapshotSchema = new mongoose.Schema(
       validate: {
         validator: (value) => value == null || Number.isSafeInteger(value),
         message: "authorized quantity must be an integer",
+      },
+    },
+    remainingQuantityAfterRedemption: {
+      type: Number,
+      min: 0,
+      default: undefined,
+      validate: {
+        validator: (value) => value == null || Number.isSafeInteger(value),
+        message: "remaining quantity must be an integer",
       },
     },
     eligibleItemSource: { type: String, enum: ITEM_SOURCES, default: undefined },

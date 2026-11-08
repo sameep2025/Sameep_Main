@@ -472,6 +472,17 @@ export function printReceiptSnapshot(receiptSnapshot) {
       "total-row",
       totals
     );
+    if (
+      Number.isSafeInteger(Number(prepaidSettlement.remainingAmountPaiseAfterRedemption)) &&
+      Number(prepaidSettlement.remainingAmountPaiseAfterRedemption) >= 0
+    ) {
+      addRow(
+        "Remaining Wallet Balance",
+        formatReceiptPaise(prepaidSettlement.remainingAmountPaiseAfterRedemption),
+        "total-row",
+        totals
+      );
+    }
     addRow("Balance Due", formatReceiptPaise(prepaidSettlement.balanceDuePaise), "total-row net", totals);
   } else if (prepaidSettlement?.paymentMode === "PREPAID_SESSIONS") {
     const itemLabel = prepaidSettlement.redeemedItemName
@@ -483,6 +494,17 @@ export function printReceiptSnapshot(receiptSnapshot) {
       "total-row",
       totals
     );
+    if (
+      Number.isSafeInteger(Number(prepaidSettlement.remainingQuantityAfterRedemption)) &&
+      Number(prepaidSettlement.remainingQuantityAfterRedemption) >= 0
+    ) {
+      addRow(
+        "Remaining Package Sessions",
+        String(Number(prepaidSettlement.remainingQuantityAfterRedemption)),
+        "total-row",
+        totals
+      );
+    }
     addRow("Balance Due", formatReceiptPaise(prepaidSettlement.balanceDuePaise), "total-row net", totals);
   } else {
     addRow("NET COLLECTED", formatReceiptCurrency(receiptSnapshot.netCollected), "total-row net", totals);

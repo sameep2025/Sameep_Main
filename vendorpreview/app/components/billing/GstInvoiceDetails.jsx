@@ -203,6 +203,21 @@ export default function GstInvoiceDetails({ data, invoice: providedInvoice, samp
                     : `${Number(prepaidSettlement.redeemedQuantity || 0)} session(s)${prepaidSettlement.redeemedItemName ? ` - ${prepaidSettlement.redeemedItemName}` : ""}`}
                 </strong>
               </div>
+              {prepaidSettlement.paymentMode === "PREPAID_VALUE" &&
+              Number.isSafeInteger(Number(prepaidSettlement.remainingAmountPaiseAfterRedemption)) &&
+              Number(prepaidSettlement.remainingAmountPaiseAfterRedemption) >= 0 ? (
+                <div className={styles.totalRow}>
+                  <span>Remaining Wallet Balance</span>
+                  <strong>{formatPaise(prepaidSettlement.remainingAmountPaiseAfterRedemption)}</strong>
+                </div>
+              ) : prepaidSettlement.paymentMode === "PREPAID_SESSIONS" &&
+                Number.isSafeInteger(Number(prepaidSettlement.remainingQuantityAfterRedemption)) &&
+                Number(prepaidSettlement.remainingQuantityAfterRedemption) >= 0 ? (
+                <div className={styles.totalRow}>
+                  <span>Remaining Package Sessions</span>
+                  <strong>{Number(prepaidSettlement.remainingQuantityAfterRedemption)}</strong>
+                </div>
+              ) : null}
               <div className={`${styles.totalRow} ${styles.payable}`}>
                 <span>Balance Due</span>
                 <strong>{formatPaise(prepaidSettlement.balanceDuePaise)}</strong>

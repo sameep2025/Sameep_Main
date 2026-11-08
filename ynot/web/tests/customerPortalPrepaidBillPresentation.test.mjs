@@ -17,6 +17,10 @@ test("Customer Portal shows authoritative prepaid settlement separately from amo
   assert.match(pageSource, /Prepaid Package \$\{isCancelled \? "Restored" : "Redeemed"\}/);
   assert.match(pageSource, /Balance Due/);
   assert.match(pageSource, /formatPaise\(prepaidSettlement\.balanceDuePaise\)/);
+  assert.match(pageSource, /Remaining Wallet Balance/);
+  assert.match(pageSource, /remainingAmountPaiseAfterRedemption/);
+  assert.match(pageSource, /Remaining Package Sessions/);
+  assert.match(pageSource, /remainingQuantityAfterRedemption/);
 });
 
 test("Customer Portal keeps standard payment modes and amount-paid presentation", () => {

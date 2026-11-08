@@ -13,6 +13,10 @@ const customerSearchSource = fs.readFileSync(
   "utf8"
 );
 const publicBillSource = fs.readFileSync(path.join(root, "app/b/[code]/page.jsx"), "utf8");
+const gstBillSource = fs.readFileSync(
+  path.join(root, "app/components/billing/GstInvoiceDetails.jsx"),
+  "utf8"
+);
 
 async function loadHelpers() {
   return import("../app/_Explore/prepaidWalletUi.mjs");
@@ -94,6 +98,38 @@ test("authorization binding changes with customer, cart, quantity, amount, or wa
   assert.notEqual(binding, createPrepaidAuthorizationBinding({ ...base, finalPayablePaise: 49000 }));
 });
 
+test("same-customer selection preserves active wallet requests and safely retries failures", async () => {
+  const { getPrepaidWalletSelectionAction } = await loadHelpers();
+  for (const walletStatus of ["ready", "loading", "unavailable"]) {
+    assert.equal(
+      getPrepaidWalletSelectionAction({
+        currentCustomerId: "customer-1",
+        nextCustomerId: "customer-1",
+        walletStatus,
+      }),
+      "PRESERVE"
+    );
+  }
+  for (const walletStatus of ["idle", "error"]) {
+    assert.equal(
+      getPrepaidWalletSelectionAction({
+        currentCustomerId: "customer-1",
+        nextCustomerId: "customer-1",
+        walletStatus,
+      }),
+      "RETRY"
+    );
+  }
+  assert.equal(
+    getPrepaidWalletSelectionAction({
+      currentCustomerId: "customer-1",
+      nextCustomerId: "customer-2",
+      walletStatus: "ready",
+    }),
+    "RESET"
+  );
+});
+
 test("Quick Billing capability-gates wallet lookup and preserves ordinary payment contract", () => {
   assert.match(source, /walletPaymentAvailable/);
   assert.match(source, /prepaid-wallets\/\$\{encodeURIComponent\(vendorId\)\}\/capabilities/);
@@ -126,6 +162,7 @@ test("completed prepaid transaction snapshots produce customer-safe receipt pres
       snapshot: {
         walletType: "PREPAID_VALUE",
         authorizedAmountPaise: 20000,
+        remainingAmountPaiseAfterRedemption: 630000,
         walletId: "internal-wallet-id",
       },
     }),
@@ -133,6 +170,7 @@ test("completed prepaid transaction snapshots produce customer-safe receipt pres
       paymentMode: "PREPAID_VALUE",
       paymentMethodLabel: "Prepaid Wallet",
       redeemedAmountPaise: 20000,
+      remainingAmountPaiseAfterRedemption: 630000,
       balanceDuePaise: 0,
     }
   );
@@ -143,6 +181,7 @@ test("completed prepaid transaction snapshots produce customer-safe receipt pres
       snapshot: {
         walletType: "PREPAID_SESSIONS",
         authorizedQuantity: 1,
+        remainingQuantityAfterRedemption: 5,
         eligibleItemId: "item-1",
         eligibleItemSource: "custom_package",
       },
@@ -159,9 +198,19 @@ test("completed prepaid transaction snapshots produce customer-safe receipt pres
       paymentMethodLabel: "Prepaid Package",
       redeemedQuantity: 1,
       redeemedItemName: "Bridal Care Combo",
+      remainingQuantityAfterRedemption: 5,
       balanceDuePaise: 0,
     }
   );
+
+  const historicalPresentation = buildPrepaidBillPresentation({
+    paymentMode: "PREPAID_VALUE",
+    snapshot: {
+      walletType: "PREPAID_VALUE",
+      authorizedAmountPaise: 20000,
+    },
+  });
+  assert.equal("remainingAmountPaiseAfterRedemption" in historicalPresentation, false);
 });
 
 test("bill detail, public bill, and print surfaces distinguish prepaid settlement from net collection", () => {
@@ -169,9 +218,15 @@ test("bill detail, public bill, and print surfaces distinguish prepaid settlemen
   assert.match(receiptSource, /Prepaid Wallet \$\{prepaidAction\}/);
   assert.match(receiptSource, /Prepaid Package \$\{prepaidAction\}/);
   assert.match(receiptSource, /Balance Due/);
+  assert.match(receiptSource, /Remaining Wallet Balance/);
+  assert.match(receiptSource, /Remaining Package Sessions/);
   assert.match(customerSearchSource, /Prepaid Restored/);
   assert.match(customerSearchSource, /Prepaid Redeemed/);
   assert.match(customerSearchSource, /Net Collected/);
   assert.match(publicBillSource, /prepaidSettlement/);
   assert.match(publicBillSource, /Balance Due/);
+  assert.match(publicBillSource, /remainingAmountPaiseAfterRedemption/);
+  assert.match(publicBillSource, /remainingQuantityAfterRedemption/);
+  assert.match(gstBillSource, /remainingAmountPaiseAfterRedemption/);
+  assert.match(gstBillSource, /remainingQuantityAfterRedemption/);
 });

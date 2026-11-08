@@ -2,6 +2,23 @@ function normalizeIdentity(value) {
   return String(value || "").trim();
 }
 
+function toOptionalNonNegativeInteger(value) {
+  if (value === undefined || value === null || value === "") return null;
+  const number = Number(value);
+  return Number.isSafeInteger(number) && number >= 0 ? number : null;
+}
+
+export function getPrepaidWalletSelectionAction({
+  currentCustomerId,
+  nextCustomerId,
+  walletStatus,
+} = {}) {
+  const currentId = normalizeIdentity(currentCustomerId);
+  const nextId = normalizeIdentity(nextCustomerId);
+  if (!nextId || currentId !== nextId) return "RESET";
+  return walletStatus === "idle" || walletStatus === "error" ? "RETRY" : "PRESERVE";
+}
+
 export function getPrepaidWalletQuote({
   wallet,
   cartItems = [],
@@ -104,11 +121,17 @@ export function buildPrepaidBillPresentation({ paymentMode, snapshot, cartItems 
 
   if (mode === "PREPAID_VALUE") {
     const redeemedAmountPaise = Number(snapshot.authorizedAmountPaise);
+    const remainingAmountPaiseAfterRedemption = toOptionalNonNegativeInteger(
+      snapshot.remainingAmountPaiseAfterRedemption
+    );
     if (!Number.isSafeInteger(redeemedAmountPaise) || redeemedAmountPaise < 1) return null;
     return {
       paymentMode: mode,
       paymentMethodLabel: "Prepaid Wallet",
       redeemedAmountPaise,
+      ...(remainingAmountPaiseAfterRedemption !== null
+        ? { remainingAmountPaiseAfterRedemption }
+        : {}),
       balanceDuePaise: 0,
     };
   }
@@ -117,6 +140,9 @@ export function buildPrepaidBillPresentation({ paymentMode, snapshot, cartItems 
   const redeemedQuantity = Number(snapshot.authorizedQuantity);
   const eligibleItemId = normalizeIdentity(snapshot.eligibleItemId);
   const eligibleItemSource = normalizeIdentity(snapshot.eligibleItemSource);
+  const remainingQuantityAfterRedemption = toOptionalNonNegativeInteger(
+    snapshot.remainingQuantityAfterRedemption
+  );
   if (!Number.isSafeInteger(redeemedQuantity) || redeemedQuantity < 1 || !eligibleItemId || !eligibleItemSource) {
     return null;
   }
@@ -130,6 +156,9 @@ export function buildPrepaidBillPresentation({ paymentMode, snapshot, cartItems 
     paymentMethodLabel: "Prepaid Package",
     redeemedQuantity,
     redeemedItemName: normalizeIdentity(item?.name),
+    ...(remainingQuantityAfterRedemption !== null
+      ? { remainingQuantityAfterRedemption }
+      : {}),
     balanceDuePaise: 0,
   };
 }

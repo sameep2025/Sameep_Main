@@ -326,9 +326,17 @@ async function assertSingleSettlement({ fixture, billingId, amountPaise, quantit
   assert.equal(redemptions.length, 1);
   if (amountPaise != null) {
     assert.equal(wallet.consumedAmountPaise, amountPaise);
+    assert.equal(
+      bill.prepaidSettlementSnapshot.remainingAmountPaiseAfterRedemption,
+      wallet.remainingAmountPaise
+    );
     assert.equal(redemptions[0].amountPaise, amountPaise);
   } else {
     assert.equal(wallet.consumedQuantity, quantity);
+    assert.equal(
+      bill.prepaidSettlementSnapshot.remainingQuantityAfterRedemption,
+      wallet.remainingQuantity
+    );
     assert.equal(redemptions[0].quantity, quantity);
   }
 }
