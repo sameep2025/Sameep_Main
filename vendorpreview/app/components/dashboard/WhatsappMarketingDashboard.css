@@ -41,6 +41,7 @@
 }
 
 .wa-marketing-hero p { margin: 0; color: #bdb7ab; }
+.wa-marketing-hero-actions { display: flex; align-items: center; gap: 9px; flex-wrap: wrap; }
 .wa-marketing-kicker {
   color: var(--wa-gold);
   font-size: 0.72rem;
@@ -119,6 +120,12 @@
 .wa-marketing-empty p { color: #aaa49a; }
 
 .wa-marketing-list { display: grid; gap: 10px; }
+.wa-marketing-campaign-drafts { display: grid; gap: 10px; margin-top: 22px; padding-top: 18px; border-top: 1px solid rgba(230,195,122,.2); }
+.wa-marketing-campaign-drafts h3, .wa-marketing-campaign-drafts p { margin: 4px 0; }.wa-marketing-campaign-drafts p { color: #aaa49a; }
+.wa-marketing-campaign-list { display: grid; grid-template-columns: repeat(auto-fit,minmax(220px,1fr)); gap: 9px; }
+.wa-marketing-campaign-list button { display: grid; gap: 4px; min-height: 82px; padding: 11px; border: 1px solid rgba(230,195,122,.25); border-radius: 11px; background: #111; color: #eee; text-align: left; cursor: pointer; }
+.wa-marketing-campaign-list span { color: #e6c37a; }.wa-marketing-campaign-list small { color: #817b72; }
+.wa-marketing-campaign-empty { padding: 14px; border: 1px dashed rgba(230,195,122,.25); border-radius: 11px; }
 .wa-marketing-template-card {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
@@ -304,7 +311,8 @@
 @media (max-width: 720px) {
   .wa-marketing-panel { padding: 13px; border-radius: 14px; }
   .wa-marketing-hero { align-items: stretch; flex-direction: column; }
-  .wa-marketing-hero .wa-marketing-primary { width: 100%; }
+  .wa-marketing-hero-actions { display: grid; grid-template-columns: 1fr; }
+  .wa-marketing-hero-actions button { width: 100%; }
   .wa-marketing-template-card { grid-template-columns: 1fr; gap: 12px; }
   .wa-marketing-card-actions { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .wa-marketing-card-actions button { min-width: 0; padding-inline: 5px; }

@@ -277,6 +277,14 @@
   background: rgba(255, 255, 255, 0.035);
 }
 
+.customer-marketing-checkbox { width: 20px; height: 20px; margin: 0; accent-color: #d6ae5f; }
+.customer-marketing-toolbar { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin: 12px 0; padding: 11px; border: 1px solid rgba(230, 195, 122, 0.28); border-radius: 11px; background: rgba(230, 195, 122, 0.06); }
+.customer-marketing-toolbar > div { display: grid; margin-right: auto; }
+.customer-marketing-toolbar span { color: #bdb7ab; font-size: 0.78rem; }
+.customer-marketing-toolbar button { min-height: 40px; padding: 8px 11px; border: 1px solid rgba(230, 195, 122, 0.55); border-radius: 9px; background: transparent; color: #f3d89e; font: inherit; font-weight: 750; cursor: pointer; }
+.customer-marketing-toolbar button.primary { background: #e6c37a; color: #090909; }
+.customer-marketing-toolbar button:disabled { opacity: 0.5; cursor: not-allowed; }
+
 .customer-analytics-row-main {
   min-width: 0;
 }
@@ -1382,6 +1390,9 @@ button.revenue-panel-list-item:focus-visible {
 }
 
 @media (max-width: 640px) {
+  .customer-marketing-toolbar { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .customer-marketing-toolbar > div,
+  .customer-marketing-toolbar button.primary { grid-column: 1 / -1; }
   .revenue-panel {
     padding: 18px;
   }

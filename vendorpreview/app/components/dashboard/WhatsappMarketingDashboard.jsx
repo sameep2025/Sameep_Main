@@ -11,6 +11,8 @@ import {
   validateMarketingDraft,
 } from "./whatsappMarketingTemplate.mjs";
 import "./WhatsappMarketingDashboard.css";
+import WhatsappCampaignComposer from "./WhatsappCampaignComposer";
+import WhatsappMarketingTestSend from "./WhatsappMarketingTestSend";
 
 const EMPTY_FORM = {
   internalName: "",
@@ -80,6 +82,15 @@ async function fetchMarketingTemplates(vendorId) {
   return json.data?.templates || [];
 }
 
+async function fetchCampaignDrafts(vendorId) {
+  const response = await fetch(marketingApiUrl(vendorId, "/campaigns"), {
+    cache: "no-store",
+    headers: getVendorAuthHeaders(vendorId),
+  });
+  const json = await readResponse(response, "Unable to load campaign drafts");
+  return json.data?.campaigns || [];
+}
+
 export default function WhatsappMarketingDashboard({ vendorId }) {
   const messageRef = useRef(null);
   const [capability, setCapability] = useState(null);
@@ -94,6 +105,9 @@ export default function WhatsappMarketingDashboard({ vendorId }) {
   const [uploading, setUploading] = useState(false);
   const [previewTemplate, setPreviewTemplate] = useState(null);
   const [operationId, setOperationId] = useState("");
+  const [campaignDrafts, setCampaignDrafts] = useState([]);
+  const [editingCampaignId, setEditingCampaignId] = useState("");
+  const [testSendOpen, setTestSendOpen] = useState(false);
 
   useEffect(() => {
     if (!vendorId) return;
@@ -111,8 +125,14 @@ export default function WhatsappMarketingDashboard({ vendorId }) {
         const nextCapability = json.data || null;
         setCapability(nextCapability);
         if (nextCapability?.eligible) {
-          const nextTemplates = await fetchMarketingTemplates(vendorId);
-          if (!cancelled) setTemplates(nextTemplates);
+          const [nextTemplates, nextCampaigns] = await Promise.all([
+            fetchMarketingTemplates(vendorId),
+            fetchCampaignDrafts(vendorId),
+          ]);
+          if (!cancelled) {
+            setTemplates(nextTemplates);
+            setCampaignDrafts(nextCampaigns);
+          }
         }
       } catch (loadError) {
         if (!cancelled) setError(loadError.message || "Unable to load WhatsApp Marketing");
@@ -393,9 +413,10 @@ export default function WhatsappMarketingDashboard({ vendorId }) {
           <h2>WhatsApp Marketing</h2>
           <p>Create reusable templates and submit them to your connected Meta account for approval.</p>
         </div>
-        <button type="button" className="wa-marketing-primary" onClick={openCreate}>
-          Create Template
-        </button>
+        <div className="wa-marketing-hero-actions">
+          <button type="button" className="wa-marketing-secondary" onClick={() => setTestSendOpen(true)}>Send Test Message</button>
+          <button type="button" className="wa-marketing-primary" onClick={openCreate}>Create Template</button>
+        </div>
       </header>
 
       {error ? <div className="wa-marketing-alert error">{error}</div> : null}
@@ -468,6 +489,25 @@ export default function WhatsappMarketingDashboard({ vendorId }) {
           ))}
         </div>
       )}
+
+      <section className="wa-marketing-campaign-drafts">
+        <div>
+          <span className="wa-marketing-kicker">Phase 3A</span>
+          <h3>Campaign Drafts</h3>
+          <p>Recipients and approved content are saved here. Sending is not enabled.</p>
+        </div>
+        {campaignDrafts.length ? (
+          <div className="wa-marketing-campaign-list">
+            {campaignDrafts.map((campaign) => (
+              <button type="button" key={campaign.id} onClick={() => setEditingCampaignId(campaign.id)}>
+                <strong>{campaign.campaignName}</strong>
+                <span>{campaign.counts?.eligible || 0} eligible of {campaign.counts?.selected || 0}</span>
+                <small>Updated {campaign.updatedAt ? new Date(campaign.updatedAt).toLocaleDateString("en-IN") : "recently"}</small>
+              </button>
+            ))}
+          </div>
+        ) : <p className="wa-marketing-campaign-empty">Create a campaign from Customer Analytics after selecting customers.</p>}
+      </section>
 
       {editorOpen ? (
         <div className="wa-marketing-modal" role="dialog" aria-modal="true" aria-labelledby="wa-marketing-editor-title">
@@ -665,6 +705,15 @@ export default function WhatsappMarketingDashboard({ vendorId }) {
           </div>
         </div>
       ) : null}
+      {editingCampaignId ? (
+        <WhatsappCampaignComposer
+          vendorId={vendorId}
+          campaignId={editingCampaignId}
+          onClose={() => setEditingCampaignId("")}
+          onSaved={async () => setCampaignDrafts(await fetchCampaignDrafts(vendorId))}
+        />
+      ) : null}
+      {testSendOpen ? <WhatsappMarketingTestSend vendorId={vendorId} onClose={() => setTestSendOpen(false)} /> : null}
     </section>
   );
 }

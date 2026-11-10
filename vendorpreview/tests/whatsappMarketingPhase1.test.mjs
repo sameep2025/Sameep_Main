@@ -69,7 +69,7 @@ test("template builder preserves draft CRUD and adds Meta approval lifecycle act
   assert.match(source, /Revise/);
   assert.match(source, /Meta feedback:/);
   assert.match(source, /status-\$\{String\(template.status/);
-  assert.doesNotMatch(source, /Send Campaign|Send Test/);
+  assert.doesNotMatch(source, /Send Campaign/);
 });
 
 test("marketing builder uses opaque responsive modal and accessible mobile controls", () => {

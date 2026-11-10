@@ -3,8 +3,12 @@ const DummyVendor = require("../models/DummyVendor");
 const Vendor = require("../models/Vendor");
 const MetaWhatsappCoexistenceEvent = require("../models/MetaWhatsappCoexistenceEvent");
 const WhatsappMarketingTemplate = require("../models/WhatsappMarketingTemplate");
+const WhatsappMarketingTestSend = require("../models/WhatsappMarketingTestSend");
 const { getMetaWhatsAppConfig } = require("../config/metaWhatsAppConfig");
 const { mapMetaMarketingStatus } = require("./whatsappMarketingMetaService");
+const {
+  mapMarketingTestDeliveryStatus,
+} = require("./whatsappMarketingTestSendService");
 
 const COEXISTENCE_EVENT_FIELDS = new Set([
   "history",
@@ -366,6 +370,47 @@ async function processMarketingTemplateStatusUpdate(item, dependencies = {}) {
   };
 }
 
+async function processMarketingTestDeliveryStatuses(item, vendorId, dependencies = {}) {
+  const TestSendModel = dependencies.WhatsappMarketingTestSendModel || WhatsappMarketingTestSend;
+  const statuses = Array.isArray(item?.value?.statuses) ? item.value.statuses : [];
+  const results = [];
+
+  for (const statusEvent of statuses) {
+    const metaMessageId = sanitizeWebhookLogValue(statusEvent?.id, 256);
+    const status = mapMarketingTestDeliveryStatus(statusEvent?.status);
+    if (!metaMessageId || !status) continue;
+    const error = Array.isArray(statusEvent?.errors) ? statusEvent.errors[0] : null;
+    const recordedAt = new Date();
+    const allowedCurrentStatuses = {
+      SENT: ["ACCEPTED", "SENT"],
+      DELIVERED: ["ACCEPTED", "SENT", "DELIVERED"],
+      READ: ["ACCEPTED", "SENT", "DELIVERED", "READ"],
+      FAILED: ["SUBMITTING", "ACCEPTED", "SENT", "FAILED"],
+    }[status];
+    const result = await TestSendModel.updateOne(
+      { vendorId, metaMessageId, status: { $in: allowedCurrentStatuses } },
+      {
+        $set: {
+          status,
+          lastStatusAt: recordedAt,
+          failureCode: status === "FAILED" ? sanitizeWebhookLogValue(error?.code, 80) : "",
+          failureMessage: status === "FAILED"
+            ? sanitizeWebhookLogValue(error?.title || error?.message, 240)
+            : "",
+        },
+      },
+      { runValidators: true }
+    );
+    results.push({
+      metaMessageId,
+      status,
+      updated: result?.matchedCount === 1,
+    });
+  }
+
+  return results;
+}
+
 async function processMetaWhatsappWebhook(payload, options = {}) {
   const metadata = extractWebhookMetadata(payload);
   const logger = options.logger || console;
@@ -413,6 +458,15 @@ async function processMetaWhatsappWebhook(payload, options = {}) {
     for (const deliveryStatus of extractDeliveryStatusLogs(item)) {
       logger.info("Meta WhatsApp delivery status", deliveryStatus);
     }
+    if (options.signatureVerified === true) {
+      try {
+        await processMarketingTestDeliveryStatuses(item, vendorMatch.vendor._id, options);
+      } catch (error) {
+        logger.warn("WhatsApp Marketing test delivery status update failed", {
+          code: sanitizeWebhookLogValue(error?.code || "marketing_test_status_update_failed", 80),
+        });
+      }
+    }
 
     if (process.env.NODE_ENV !== "production") {
       logger.info("Meta WhatsApp webhook received", {
@@ -440,6 +494,7 @@ module.exports = {
   processCoexistenceWebhookItem,
   processMetaWhatsappWebhook,
   processMarketingTemplateStatusUpdate,
+  processMarketingTestDeliveryStatuses,
   recordCoexistenceEvent,
   resolveVerifiedCoexistenceVendor,
   verifyWebhookSignature,

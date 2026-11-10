@@ -8,6 +8,14 @@ const CUSTOMER_ANALYTICS_LIMIT_MAX = 50;
 const INACTIVE_DAY_OPTIONS = [30, 45, 60, 75, 90, 120, 180];
 const SPENDING_THRESHOLD_OPTIONS = [500, 1000, 1500, 2000, 3000, 5000, 10000];
 
+class CustomerAnalyticsFilterError extends Error {
+  constructor(message) {
+    super(message);
+    this.name = "CustomerAnalyticsFilterError";
+    this.statusCode = 400;
+  }
+}
+
 function normalizePositiveInteger(value, fallback, max) {
   const parsed = Number.parseInt(String(value ?? ""), 10);
   if (!Number.isFinite(parsed) || parsed <= 0) return fallback;
@@ -120,6 +128,72 @@ function getCustomerGroupStages() {
       },
     },
   ];
+}
+
+function applyCustomerSegmentStages(pipeline, {
+  segment = "top_spenders",
+  days = 30,
+  threshold = 500,
+  now = new Date(),
+  customerIds = [],
+} = {}) {
+  if (segment === "inactive") {
+    const normalizedDays = Number(days);
+    if (!INACTIVE_DAY_OPTIONS.includes(normalizedDays)) {
+      throw new CustomerAnalyticsFilterError("Invalid inactive day filter");
+    }
+    pipeline.push({
+      $match: { lastVisit: { $lte: new Date(now.getTime() - normalizedDays * 86400000) } },
+    });
+    if (customerIds.length) pipeline.push({ $match: { _id: { $in: customerIds } } });
+    pipeline.push({ $sort: { lastVisit: 1, _id: 1 } });
+  } else if (segment === "threshold") {
+    const normalizedThreshold = Number(threshold);
+    if (!SPENDING_THRESHOLD_OPTIONS.includes(normalizedThreshold)) {
+      throw new CustomerAnalyticsFilterError("Invalid spending threshold");
+    }
+    pipeline.push({ $match: { totalSpend: { $gte: normalizedThreshold } } });
+    if (customerIds.length) pipeline.push({ $match: { _id: { $in: customerIds } } });
+    pipeline.push({ $sort: { totalSpend: -1, lastVisit: -1, _id: 1 } });
+  } else if (segment === "repeat") {
+    pipeline.push({ $match: { visitCount: { $gte: 2 } } });
+    if (customerIds.length) pipeline.push({ $match: { _id: { $in: customerIds } } });
+    pipeline.push({ $sort: { visitCount: -1, totalSpend: -1, lastVisit: -1, _id: 1 } });
+  } else if (segment === "top_spenders") {
+    if (customerIds.length) pipeline.push({ $match: { _id: { $in: customerIds } } });
+    pipeline.push({ $sort: { totalSpend: -1, lastVisit: -1, _id: 1 } });
+  } else {
+    throw new CustomerAnalyticsFilterError("Invalid customer analytics segment");
+  }
+  return pipeline;
+}
+
+async function resolveCustomerAnalyticsSegment({
+  vendorId,
+  segment = "top_spenders",
+  days = 30,
+  threshold = 500,
+  customerIds = [],
+  offset = 0,
+  limit = CUSTOMER_ANALYTICS_LIMIT_DEFAULT,
+  now = new Date(),
+}) {
+  if (!isCanonicalObjectId(vendorId)) {
+    throw new CustomerAnalyticsFilterError("Valid vendorId required");
+  }
+  const ids = customerIds.map((id) => {
+    if (!isCanonicalObjectId(id)) throw new CustomerAnalyticsFilterError("Invalid customer selection");
+    return new mongoose.Types.ObjectId(id);
+  });
+  const pipeline = [
+    ...getCompletedBillingBasePipeline(vendorId, { customerLinkedOnly: true }),
+    ...getCustomerGroupStages(),
+  ];
+  applyCustomerSegmentStages(pipeline, { segment, days, threshold, now, customerIds: ids });
+  pipeline.push({ $skip: offset }, { $limit: limit });
+  const rows = await BillingSession.aggregate(pipeline);
+  const nameMap = await getVendorCustomerNameMap(vendorId, rows.map((row) => row?._id));
+  return rows.map((row) => formatCustomerRow(row, now, nameMap));
 }
 
 async function getVendorCustomerNameMap(vendorId, customerIds = []) {
@@ -244,30 +318,12 @@ exports.getCustomerAnalyticsCustomers = async (req, res) => {
       ...getCompletedBillingBasePipeline(vendorId, { customerLinkedOnly: true }),
       ...getCustomerGroupStages(),
     ];
-
-    if (segment === "inactive") {
-      const days = Number(req.query.days || 30);
-      if (!INACTIVE_DAY_OPTIONS.includes(days)) {
-        return res.status(400).json({ success: false, message: "Invalid inactive day filter" });
-      }
-      const cutoff = new Date(now.getTime() - days * 86400000);
-      pipeline.push({ $match: { lastVisit: { $lte: cutoff } } });
-      pipeline.push({ $sort: { lastVisit: 1, _id: 1 } });
-    } else if (segment === "threshold") {
-      const threshold = Number(req.query.threshold || 500);
-      if (!SPENDING_THRESHOLD_OPTIONS.includes(threshold)) {
-        return res.status(400).json({ success: false, message: "Invalid spending threshold" });
-      }
-      pipeline.push({ $match: { totalSpend: { $gte: threshold } } });
-      pipeline.push({ $sort: { totalSpend: -1, lastVisit: -1, _id: 1 } });
-    } else if (segment === "repeat") {
-      pipeline.push({ $match: { visitCount: { $gte: 2 } } });
-      pipeline.push({ $sort: { visitCount: -1, totalSpend: -1, lastVisit: -1, _id: 1 } });
-    } else if (segment === "top_spenders") {
-      pipeline.push({ $sort: { totalSpend: -1, lastVisit: -1, _id: 1 } });
-    } else {
-      return res.status(400).json({ success: false, message: "Invalid customer analytics segment" });
-    }
+    applyCustomerSegmentStages(pipeline, {
+      segment,
+      days: req.query.days || 30,
+      threshold: req.query.threshold || 500,
+      now,
+    });
 
     pipeline.push({ $skip: offset }, { $limit: limit + 1 });
 
@@ -291,10 +347,17 @@ exports.getCustomerAnalyticsCustomers = async (req, res) => {
       },
     });
   } catch (err) {
+    if (err instanceof CustomerAnalyticsFilterError) {
+      return res.status(400).json({ success: false, message: err.message });
+    }
     console.error("Customer analytics customers error:", err);
     return res.status(500).json({ success: false, message: "Failed to load customer analytics customers" });
   }
 };
+
+exports.CustomerAnalyticsFilterError = CustomerAnalyticsFilterError;
+exports.applyCustomerSegmentStages = applyCustomerSegmentStages;
+exports.resolveCustomerAnalyticsSegment = resolveCustomerAnalyticsSegment;
 
 exports.getCustomerAnalyticsItems = async (req, res) => {
   try {

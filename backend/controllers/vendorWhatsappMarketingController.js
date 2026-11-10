@@ -238,7 +238,11 @@ async function loadVendorMetaConnection(vendorId, dependencies = {}) {
       409
     );
   }
-  return { wabaId, accessToken };
+  return {
+    wabaId,
+    accessToken,
+    phoneNumberId: String(config.phoneNumberId || "").trim(),
+  };
 }
 
 function getMetaRejectionReason(metaTemplate) {

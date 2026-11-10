@@ -20,6 +20,18 @@ const {
   MARKETING_MEDIA_MIME_TYPES,
 } = require("../services/whatsappMarketingImageService");
 const { requireVendorAccessFromExistingAuth } = require("../utils/vendorWriteAuth");
+const {
+  createCampaignDraft,
+  getCampaignDraft,
+  listApprovedTemplates,
+  listCampaignDrafts,
+  previewRecipients,
+  updateCampaignDraft,
+} = require("../controllers/vendorWhatsappMarketingCampaignController");
+const {
+  listMarketingTestSends,
+  sendMarketingTestMessage,
+} = require("../controllers/vendorWhatsappMarketingTestSendController");
 
 const router = express.Router();
 const resolveVendorId = (req) => req.params.vendorId;
@@ -68,6 +80,14 @@ router.delete("/:vendorId/templates/:templateId", deleteTemplate);
 router.post("/:vendorId/templates/:templateId/submit", submitTemplateForApproval);
 router.post("/:vendorId/templates/:templateId/refresh-status", refreshTemplateApprovalStatus);
 router.post("/:vendorId/templates/:templateId/revise", reviseRejectedTemplate);
+router.get("/:vendorId/campaign-templates", listApprovedTemplates);
+router.post("/:vendorId/campaign-recipient-preview", express.json(), previewRecipients);
+router.get("/:vendorId/campaigns", listCampaignDrafts);
+router.post("/:vendorId/campaigns", express.json(), createCampaignDraft);
+router.get("/:vendorId/campaigns/:campaignId", getCampaignDraft);
+router.patch("/:vendorId/campaigns/:campaignId", express.json(), updateCampaignDraft);
+router.get("/:vendorId/marketing-test-sends", listMarketingTestSends);
+router.post("/:vendorId/marketing-test-sends", express.json(), sendMarketingTestMessage);
 
 module.exports = router;
 module.exports.parseMarketingImage = parseMarketingImage;

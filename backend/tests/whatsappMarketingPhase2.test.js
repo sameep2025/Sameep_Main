@@ -265,7 +265,7 @@ test("Meta connection verification is vendor-owned and fails closed", async () =
       decryptMetaAccessToken: () => "secret",
       getWhatsAppBusinessAccount: async () => ({ id: "waba-1" }),
     }),
-    { wabaId: "waba-1", accessToken: "secret" }
+    { wabaId: "waba-1", accessToken: "secret", phoneNumberId: "" }
   );
   await assert.rejects(
     controller.loadVendorMetaConnection(VENDOR_ID, {
@@ -328,5 +328,5 @@ test("routes preserve vendor authorization and atomic submission locking", () =>
   assert.match(routes, /templates\/:templateId\/revise/);
   assert.match(controllerSource, /findOneAndUpdate\([\s\S]*status: "DRAFT"/);
   assert.match(controllerSource, /status: "SUBMITTING"/);
-  assert.doesNotMatch(routes, /send|campaign/);
+  assert.doesNotMatch(routes, /campaigns[^\n]*send/);
 });

@@ -1007,6 +1007,8 @@ async function sendMetaTemplateMessage({
   templateName,
   languageCode = "en",
   bodyParameters = [],
+  headerParameter = null,
+  httpClient = axios,
 }) {
   const id = String(phoneNumberId || "").trim();
   const recipient = String(recipientPhoneNumber || "").trim();
@@ -1018,6 +1020,38 @@ async function sendMetaTemplateMessage({
     throw error;
   }
 
+  const components = [];
+  if (headerParameter?.type === "IMAGE" && headerParameter.link) {
+    components.push({
+      type: "header",
+      parameters: [{ type: "image", image: { link: String(headerParameter.link) } }],
+    });
+  } else if (headerParameter?.type === "DOCUMENT" && headerParameter.link) {
+    components.push({
+      type: "header",
+      parameters: [{
+        type: "document",
+        document: {
+          link: String(headerParameter.link),
+          ...(headerParameter.filename ? { filename: String(headerParameter.filename) } : {}),
+        },
+      }],
+    });
+  } else if (headerParameter) {
+    const error = new Error("A valid image or document template header is required");
+    error.code = "meta_test_send_header_invalid";
+    throw error;
+  }
+  if (bodyParameters.length) {
+    components.push({
+      type: "body",
+      parameters: bodyParameters.map((text) => ({
+        type: "text",
+        text: String(text ?? ""),
+      })),
+    });
+  }
+
   const payload = {
     messaging_product: "whatsapp",
     to: recipient.replace(/^\+/, ""),
@@ -1027,20 +1061,12 @@ async function sendMetaTemplateMessage({
       language: {
         code: languageCode || "en",
       },
-      components: [
-        {
-          type: "body",
-          parameters: bodyParameters.map((text) => ({
-            type: "text",
-            text: String(text ?? ""),
-          })),
-        },
-      ],
+      ...(components.length ? { components } : {}),
     },
   };
 
   try {
-    const response = await axios.post(graphUrl(`${id}/messages`), payload, {
+    const response = await httpClient.post(graphUrl(`${id}/messages`), payload, {
       headers: {
         Authorization: `Bearer ${accessToken}`,
         "Content-Type": "application/json",

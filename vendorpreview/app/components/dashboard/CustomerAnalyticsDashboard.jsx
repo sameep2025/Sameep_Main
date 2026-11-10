@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { API_BASE_URL } from "../../../config";
 import { getVendorAuthHeaders } from "../../utils/vendorAuth";
+import WhatsappCampaignComposer from "./WhatsappCampaignComposer";
 import "./RevenuePanels.css";
 
 const PAGE_LIMIT = 10;
@@ -63,6 +64,9 @@ function CustomerList({
   emptyText,
   showInactiveDays = false,
   onViewHistory,
+  selectable = false,
+  isSelected,
+  onToggleSelection,
 }) {
   return (
     <div className="customer-analytics-section-body">
@@ -79,6 +83,15 @@ function CustomerList({
           <div className="customer-analytics-rows">
             {rows.map((customer) => (
               <div key={`${customer.customerId}-${customer.lastVisit}`} className="customer-analytics-row">
+                {selectable ? (
+                  <input
+                    type="checkbox"
+                    className="customer-marketing-checkbox"
+                    aria-label={`Select ${customer.name || customer.phone || "customer"}`}
+                    checked={isSelected(customer.customerId)}
+                    onChange={() => onToggleSelection(customer.customerId)}
+                  />
+                ) : null}
                 <div className="customer-analytics-row-main">
                   <div className="customer-analytics-row-title">
                     <CustomerIdentity name={customer.name} phone={customer.phone} />
@@ -161,6 +174,12 @@ export default function CustomerAnalyticsDashboard({ vendorId, onViewCustomerHis
   const [itemsLoading, setItemsLoading] = useState(true);
   const [itemsLoadingMore, setItemsLoadingMore] = useState(false);
   const [itemsError, setItemsError] = useState("");
+  const [selectionMode, setSelectionMode] = useState("EXPLICIT");
+  const [selectedCustomerIds, setSelectedCustomerIds] = useState(() => new Set());
+  const [excludedCustomerIds, setExcludedCustomerIds] = useState(() => new Set());
+  const [allMatchingCount, setAllMatchingCount] = useState(0);
+  const [selectionLoading, setSelectionLoading] = useState(false);
+  const [campaignOpen, setCampaignOpen] = useState(false);
 
   async function fetchJson(path) {
     const response = await fetch(`${API_BASE_URL}${path}`, {
@@ -173,6 +192,90 @@ export default function CustomerAnalyticsDashboard({ vendorId, onViewCustomerHis
       throw new Error(data?.message || "Failed to load customer analytics");
     }
     return data;
+  }
+
+  function getCurrentSelection() {
+    const segment = activeSection === "top" ? "top_spenders" : activeSection;
+    return {
+      mode: selectionMode,
+      segment,
+      filters: {
+        inactiveDays: activeSection === "inactive" ? inactiveDays : null,
+        spendingThreshold: activeSection === "threshold" ? threshold : null,
+      },
+      selectedCustomerIds: [...selectedCustomerIds],
+      excludedCustomerIds: [...excludedCustomerIds],
+    };
+  }
+
+  function clearSelection() {
+    setSelectionMode("EXPLICIT");
+    setSelectedCustomerIds(new Set());
+    setAllMatchingCount(0);
+  }
+
+  function resetSelection() {
+    clearSelection();
+    setExcludedCustomerIds(new Set());
+  }
+
+  function changeSection(section) {
+    setActiveSection(section);
+    resetSelection();
+  }
+
+  function isCustomerSelected(customerId) {
+    return selectionMode === "ALL_MATCHING"
+      ? !excludedCustomerIds.has(customerId)
+      : selectedCustomerIds.has(customerId);
+  }
+
+  function toggleCustomerSelection(customerId) {
+    if (selectionMode === "ALL_MATCHING") {
+      setExcludedCustomerIds((current) => {
+        const next = new Set(current);
+        if (next.has(customerId)) next.delete(customerId);
+        else next.add(customerId);
+        return next;
+      });
+      return;
+    }
+    const nextSelected = new Set(selectedCustomerIds);
+    const nextExcluded = new Set(excludedCustomerIds);
+    if (nextSelected.has(customerId)) {
+      nextSelected.delete(customerId);
+      nextExcluded.add(customerId);
+    } else {
+      nextSelected.add(customerId);
+      nextExcluded.delete(customerId);
+    }
+    setSelectedCustomerIds(nextSelected);
+    setExcludedCustomerIds(nextExcluded);
+  }
+
+  async function selectAllMatching() {
+    try {
+      setSelectionLoading(true);
+      setSummaryError("");
+      const selection = { ...getCurrentSelection(), mode: "ALL_MATCHING" };
+      const response = await fetch(
+        `${API_BASE_URL}/api/vendor/whatsapp-marketing/${encodeURIComponent(vendorId)}/campaign-recipient-preview`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json", ...getVendorAuthHeaders(vendorId) },
+          body: JSON.stringify({ selection }),
+        }
+      );
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok || !data.success) throw new Error(data.message || "Unable to select segment");
+      setSelectionMode("ALL_MATCHING");
+      setSelectedCustomerIds(new Set());
+      setAllMatchingCount(Number(data.data?.counts?.selected || 0));
+    } catch (selectionError) {
+      setSummaryError(selectionError.message || "Unable to select matching customers");
+    } finally {
+      setSelectionLoading(false);
+    }
   }
 
   async function loadCustomerSegment({ segment, append = false, offset = 0, days, spendThreshold }) {
@@ -503,7 +606,7 @@ export default function CustomerAnalyticsDashboard({ vendorId, onViewCustomerHis
               className={`revenue-panel-stat-card customer-analytics-stat-card customer-analytics-stat-button ${
                 activeSection === "repeat" ? "active" : ""
               }`}
-              onClick={() => setActiveSection("repeat")}
+              onClick={() => changeSection("repeat")}
             >
               <div className="revenue-panel-stat-label">Repeat Customers</div>
               <div className="revenue-panel-stat-value">{formatNumber(customerLinked.repeatCustomers)}</div>
@@ -530,7 +633,7 @@ export default function CustomerAnalyticsDashboard({ vendorId, onViewCustomerHis
             key={section.key}
             type="button"
             className={`customer-analytics-tile ${activeSection === section.key ? "active" : ""}`}
-            onClick={() => setActiveSection(section.key)}
+            onClick={() => changeSection(section.key)}
             role="tab"
             aria-selected={activeSection === section.key}
           >
@@ -539,6 +642,31 @@ export default function CustomerAnalyticsDashboard({ vendorId, onViewCustomerHis
           </button>
         ))}
       </div>
+
+      {activeSection !== "items" ? (
+        <div className="customer-marketing-toolbar">
+          <div>
+            <strong>Marketing recipients</strong>
+            <span>
+              {selectionMode === "ALL_MATCHING"
+                ? Math.max(allMatchingCount - excludedCustomerIds.size, 0)
+                : selectedCustomerIds.size} selected
+            </span>
+          </div>
+          <button type="button" onClick={selectAllMatching} disabled={selectionLoading}>
+            {selectionLoading ? "Selecting..." : "Select All Matching"}
+          </button>
+          <button type="button" onClick={clearSelection}>Deselect All</button>
+          <button
+            type="button"
+            className="primary"
+            onClick={() => setCampaignOpen(true)}
+            disabled={(selectionMode === "ALL_MATCHING" ? allMatchingCount - excludedCustomerIds.size : selectedCustomerIds.size) <= 0}
+          >
+            Create Marketing Campaign
+          </button>
+        </div>
+      ) : null}
 
       {activeSection === "top" && (
         <div className="customer-analytics-active-section">
@@ -557,6 +685,9 @@ export default function CustomerAnalyticsDashboard({ vendorId, onViewCustomerHis
             loadingMore={topLoadingMore}
             onLoadMore={() => loadMoreCustomers("top")}
             emptyText="No customer-linked spending data yet."
+            selectable
+            isSelected={isCustomerSelected}
+            onToggleSelection={toggleCustomerSelection}
           />
         </div>
       )}
@@ -583,6 +714,9 @@ export default function CustomerAnalyticsDashboard({ vendorId, onViewCustomerHis
             onLoadMore={() => loadMoreCustomers("repeat")}
             emptyText="No repeat customer activity yet."
             onViewHistory={onViewCustomerHistory}
+            selectable
+            isSelected={isCustomerSelected}
+            onToggleSelection={toggleCustomerSelection}
           />
         </div>
       )}
@@ -597,7 +731,7 @@ export default function CustomerAnalyticsDashboard({ vendorId, onViewCustomerHis
             <select
               className="revenue-panel-input customer-analytics-filter"
               value={inactiveDays}
-              onChange={(event) => setInactiveDays(Number(event.target.value))}
+              onChange={(event) => { setInactiveDays(Number(event.target.value)); resetSelection(); }}
             >
               {INACTIVE_DAY_OPTIONS.map((days) => (
                 <option key={days} value={days}>
@@ -616,6 +750,9 @@ export default function CustomerAnalyticsDashboard({ vendorId, onViewCustomerHis
             onLoadMore={() => loadMoreCustomers("inactive")}
             emptyText={`No customers inactive for ${inactiveDays}+ days.`}
             showInactiveDays
+            selectable
+            isSelected={isCustomerSelected}
+            onToggleSelection={toggleCustomerSelection}
           />
         </div>
       )}
@@ -630,7 +767,7 @@ export default function CustomerAnalyticsDashboard({ vendorId, onViewCustomerHis
             <select
               className="revenue-panel-input customer-analytics-filter"
               value={threshold}
-              onChange={(event) => setThreshold(Number(event.target.value))}
+              onChange={(event) => { setThreshold(Number(event.target.value)); resetSelection(); }}
             >
               {SPENDING_THRESHOLDS.map((value) => (
                 <option key={value} value={value}>
@@ -648,6 +785,9 @@ export default function CustomerAnalyticsDashboard({ vendorId, onViewCustomerHis
             loadingMore={thresholdLoadingMore}
             onLoadMore={() => loadMoreCustomers("threshold")}
             emptyText={`No customers have crossed ${formatCurrency(threshold)} yet.`}
+            selectable
+            isSelected={isCustomerSelected}
+            onToggleSelection={toggleCustomerSelection}
           />
         </div>
       )}
@@ -709,6 +849,13 @@ export default function CustomerAnalyticsDashboard({ vendorId, onViewCustomerHis
           )}
         </div>
       )}
+      {campaignOpen ? (
+        <WhatsappCampaignComposer
+          vendorId={vendorId}
+          initialSelection={getCurrentSelection()}
+          onClose={() => setCampaignOpen(false)}
+        />
+      ) : null}
     </div>
   );
 }
