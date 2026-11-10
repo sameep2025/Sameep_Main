@@ -261,6 +261,7 @@ function cartFor(item, { quantity = 1, price = 500 } = {}) {
 async function createAndUpdateBill(fixture, options = {}) {
   const cartItems = cartFor(fixture.item, options);
   const grossAmount = cartItems.reduce((sum, item) => sum + item.total, 0);
+  const discountAmount = Number(options.discountAmount || 0);
   const created = await request(app)
     .post("/api/billing/create")
     .set(auth(fixture.token))
@@ -270,7 +271,14 @@ async function createAndUpdateBill(fixture, options = {}) {
   const updated = await request(app)
     .post("/api/billing/update")
     .set(auth(fixture.token))
-    .send({ billingId, cartItems, grossAmount, discountAmount: 0 });
+    .send({
+      billingId,
+      cartItems,
+      grossAmount,
+      discountAmount,
+      manualDiscountMode: discountAmount > 0 ? "amount" : null,
+      manualDiscountPercent: 0,
+    });
   assert.equal(updated.status, 200, JSON.stringify(updated.body));
   return { billingId, cartItems, grossAmount };
 }
@@ -402,6 +410,34 @@ test("authenticated Value Wallet flow creates, updates, authorizes, and complete
     persistedBill.prepaidSettlementSnapshot,
     "completed BillingSession must persist its immutable prepaid settlement snapshot"
   );
+});
+
+test("Value Wallet completion applies manual discount before authorization and settlement", async () => {
+  const fixture = await createPrepaidFixture({
+    type: "PREPAID_VALUE",
+    suffix: "113",
+    balance: 125000,
+  });
+  const bill = await createAndUpdateBill(fixture, { price: 1260, discountAmount: 10 });
+  const authorizationId = await authorizeBill(fixture, bill, { amountPaise: 125000 });
+  const completed = await completeBill(fixture, bill.billingId, authorizationId);
+  assert.equal(completed.status, 200, JSON.stringify(completed.body));
+
+  const [storedBill, transaction, wallet, membership, ledger] = await Promise.all([
+    BillingSession.findById(bill.billingId).lean(),
+    Transaction.findOne({ billingSessionId: bill.billingId }).lean(),
+    PrepaidMembershipWallet.findById(fixture.wallet._id).lean(),
+    CustomerMembership.findById(fixture.membership._id).lean(),
+    PrepaidWalletLedger.findOne({ billingSessionId: bill.billingId, eventType: "REDEMPTION" }).lean(),
+  ]);
+  assert.equal(storedBill.grossAmount, 1260);
+  assert.equal(storedBill.discountAmount, 10);
+  assert.equal(storedBill.totalAmount, 1250);
+  assert.equal(transaction.discountAmount, 10);
+  assert.equal(wallet.remainingAmountPaise, 0);
+  assert.equal(wallet.status, "DEPLETED");
+  assert.equal(membership.status, "DEPLETED");
+  assert.equal(ledger.amountPaise, 125000);
 });
 
 test("authenticated Sessions Wallet flow consumes the exact eligible quantity", async () => {

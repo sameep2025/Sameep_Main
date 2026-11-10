@@ -45,7 +45,7 @@ async function prepaidLifecycleNeedsReconciliation({
       customerId,
       membershipType: { $in: PREPAID_MEMBERSHIP_TYPES },
       $or: [
-        { status: { $in: ["ACTIVE", "SCHEDULED"] }, expiresAt: { $lte: now } },
+        { status: { $in: ["ACTIVE", "SCHEDULED", "DEPLETED"] }, expiresAt: { $lte: now } },
         { status: "SCHEDULED", activatedAt: { $lte: now }, expiresAt: { $gt: now } },
       ],
     }),
@@ -123,7 +123,7 @@ async function reconcilePrepaidLifecycleInSession({
       vendorId,
       customerId,
       ...prepaidScope,
-      status: { $in: ["ACTIVE", "SCHEDULED"] },
+      status: { $in: ["ACTIVE", "SCHEDULED", "DEPLETED"] },
       expiresAt: { $lte: now },
     },
     { $set: { status: "EXPIRED" } },

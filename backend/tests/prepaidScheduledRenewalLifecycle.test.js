@@ -128,7 +128,7 @@ test("expiry wins over scheduled, active, and depleted wallet states", async () 
 
   const membershipExpiryFilter = models.calls.membershipUpdates[0][0];
   const walletExpiryFilter = models.calls.walletUpdates[0][0];
-  assert.deepEqual(membershipExpiryFilter.status.$in, ["ACTIVE", "SCHEDULED"]);
+  assert.deepEqual(membershipExpiryFilter.status.$in, ["ACTIVE", "SCHEDULED", "DEPLETED"]);
   assert.deepEqual(walletExpiryFilter.status.$in, ["ACTIVE", "SCHEDULED", "DEPLETED"]);
   assert.equal(membershipExpiryFilter.status.$in.includes("CANCELLED"), false);
   assert.equal(walletExpiryFilter.status.$in.includes("CANCELLED"), false);

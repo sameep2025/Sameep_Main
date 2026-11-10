@@ -18,7 +18,13 @@ test("customer membership schema snapshots purchased discount plan benefits", ()
     "PREPAID_VALUE",
     "PREPAID_SESSIONS",
   ]);
-  assert.deepEqual(constants.MEMBERSHIP_STATUSES, ["ACTIVE", "SCHEDULED", "EXPIRED", "CANCELLED"]);
+  assert.deepEqual(constants.MEMBERSHIP_STATUSES, [
+    "ACTIVE",
+    "SCHEDULED",
+    "DEPLETED",
+    "EXPIRED",
+    "CANCELLED",
+  ]);
   assert.deepEqual(constants.PAYMENT_METHODS, ["CASH", "UPI", "CARD", "ONLINE"]);
 
   assert.ok(CustomerMembership.schema.path("vendorId"));
@@ -58,6 +64,46 @@ test("customer membership schema snapshots purchased discount plan benefits", ()
     status: "ACTIVE",
     membershipType: { $in: ["PREPAID_VALUE", "PREPAID_SESSIONS"] },
   });
+});
+
+test("prepaid renewal availability requires depletion or expiry", () => {
+  const { getPrepaidRenewalAvailability } = controller._private;
+  const valueWallet = (remainingAmountPaise) => ({ remainingAmountPaise });
+  const sessionWallet = (remainingQuantity) => ({ remainingQuantity });
+
+  assert.deepEqual(getPrepaidRenewalAvailability({
+    effectiveStatus: "ACTIVE",
+    membershipType: "PREPAID_VALUE",
+    wallet: valueWallet(125000),
+  }), {
+    allowed: false,
+    code: "prepaid_renewal_balance_remaining",
+    remainingBalance: 125000,
+  });
+  assert.deepEqual(getPrepaidRenewalAvailability({
+    effectiveStatus: "ACTIVE",
+    membershipType: "PREPAID_VALUE",
+    wallet: valueWallet(0),
+  }), { allowed: true, remainingBalance: 0 });
+  assert.deepEqual(getPrepaidRenewalAvailability({
+    effectiveStatus: "DEPLETED",
+    membershipType: "PREPAID_SESSIONS",
+    wallet: sessionWallet(0),
+  }), { allowed: true, remainingBalance: 0 });
+  assert.deepEqual(getPrepaidRenewalAvailability({
+    effectiveStatus: "DEPLETED",
+    membershipType: "PREPAID_SESSIONS",
+    wallet: sessionWallet(1),
+  }), {
+    allowed: false,
+    code: "prepaid_renewal_wallet_inconsistent",
+    remainingBalance: 1,
+  });
+  assert.deepEqual(getPrepaidRenewalAvailability({
+    effectiveStatus: "EXPIRED",
+    membershipType: "PREPAID_VALUE",
+    wallet: valueWallet(50000),
+  }), { allowed: true, remainingBalance: 50000 });
 });
 
 test("membership renewal and transaction indexes have one permanent unique definition", () => {

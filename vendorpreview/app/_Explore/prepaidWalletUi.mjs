@@ -27,10 +27,12 @@ export function getPrepaidWalletQuote({
   redeemPoints = 0,
 }) {
   if (!wallet) return { eligible: false, reason: "No active prepaid wallet is available." };
-  if (hasManualDiscount || Number(redeemPoints) > 0) {
+  if (Number(redeemPoints) > 0 || (wallet.walletType !== "PREPAID_VALUE" && hasManualDiscount)) {
     return {
       eligible: false,
-      reason: "Prepaid wallet payment cannot be combined with discounts, Discount Membership benefits, or loyalty redemption.",
+      reason: wallet.walletType === "PREPAID_VALUE"
+        ? "Prepaid wallet payment cannot be combined with loyalty redemption."
+        : "Prepaid Package payment cannot be combined with discounts or loyalty redemption.",
     };
   }
 

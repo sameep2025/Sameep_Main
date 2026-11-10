@@ -7,6 +7,7 @@ import {
   formatPrepaidActivityValue,
   getPrepaidActivityPresentation,
 } from "./prepaidActivityPresentation.mjs";
+import { getMembershipRenewalAvailability } from "./membershipRenewalUi.mjs";
 import "./MembershipPlansDashboard.css";
 
 const DURATION_OPTIONS = [
@@ -520,6 +521,8 @@ export default function MembershipPlansDashboard({ vendorId }) {
     hasMore: false,
   });
   const [membershipsLoading, setMembershipsLoading] = useState(false);
+  const [plansLoadError, setPlansLoadError] = useState("");
+  const [membershipsLoadError, setMembershipsLoadError] = useState("");
   const [selectedMembership, setSelectedMembership] = useState(null);
   const [selectedMembershipHistory, setSelectedMembershipHistory] = useState([]);
   const [selectedMembershipWallet, setSelectedMembershipWallet] = useState(null);
@@ -659,6 +662,9 @@ export default function MembershipPlansDashboard({ vendorId }) {
   );
   const renewalStartsAt = useMemo(() => {
     if (!renewalMembership) return null;
+    if (normalizePlanType(renewalMembership.membershipType) !== "DISCOUNT") {
+      return new Date();
+    }
     const expiresAt = renewalMembership.expiresAt ? new Date(renewalMembership.expiresAt) : null;
     const now = new Date();
     return renewalMembership.status === "ACTIVE" && expiresAt && expiresAt.getTime() > now.getTime()
@@ -682,6 +688,8 @@ export default function MembershipPlansDashboard({ vendorId }) {
     try {
       setLoading(true);
       setError("");
+      setPlansLoadError("");
+      setMembershipsLoadError("");
 
       const headers = getVendorAuthHeaders(vendorId);
       const [plansRes, itemsRes, membershipsRes] = await Promise.all([
@@ -757,6 +765,8 @@ export default function MembershipPlansDashboard({ vendorId }) {
       setPrepaidEligibilityRejectedCount(0);
       setPrepaidCapabilityEnabled(false);
       setActiveMenu(null);
+      setPlansLoadError(loadError?.message || "Unable to load membership plans");
+      setMembershipsLoadError(loadError?.message || "Unable to load customer memberships");
       setError(loadError?.message || "Unable to load membership plans");
     } finally {
       setLoading(false);
@@ -769,6 +779,7 @@ export default function MembershipPlansDashboard({ vendorId }) {
     try {
       setMembershipsLoading(true);
       setError("");
+      setMembershipsLoadError("");
       const params = new URLSearchParams({
         page: String(nextPage),
         limit: "25",
@@ -801,6 +812,7 @@ export default function MembershipPlansDashboard({ vendorId }) {
       console.error("Customer memberships load failed", loadError);
       setCustomerMemberships([]);
       setMembershipPagination({ page: nextPage, limit: 25, total: 0, hasMore: false });
+      setMembershipsLoadError(loadError?.message || "Unable to load customer memberships");
       setError(loadError?.message || "Unable to load customer memberships");
     } finally {
       setMembershipsLoading(false);
@@ -884,6 +896,7 @@ export default function MembershipPlansDashboard({ vendorId }) {
   };
 
   const goCustomers = () => {
+    setMembershipsLoading(true);
     setActiveView("customers");
     setSelectedMembership(null);
     setMessage("");
@@ -1076,6 +1089,11 @@ export default function MembershipPlansDashboard({ vendorId }) {
   };
 
   const openRenewalModal = (membership) => {
+    const renewalAvailability = getMembershipRenewalAvailability(membership);
+    if (!renewalAvailability.allowed) {
+      setError(renewalAvailability.reason);
+      return;
+    }
     const currentPlan = activeMembershipPlans.find((plan) => plan.id === membership?.membershipPlanId);
     setRenewalMembership(membership);
     setRenewalForm({
@@ -1412,7 +1430,11 @@ export default function MembershipPlansDashboard({ vendorId }) {
       </div>
 
       {message && <div className="membership-message success">{message}</div>}
-      {error && <div className="membership-message error">{error}</div>}
+      {error &&
+        !(activeView === "plans" && plansLoadError) &&
+        !(activeView === "customers" && membershipsLoadError) ? (
+        <div className="membership-message error">{error}</div>
+      ) : null}
 
       {activeView === "home" && (
         <div className="membership-home-grid">
@@ -1445,7 +1467,12 @@ export default function MembershipPlansDashboard({ vendorId }) {
             <button type="button" className="membership-secondary-action" onClick={goHome}>
               Back
             </button>
-            <button type="button" className="membership-create-button" onClick={openCreateEditor}>
+            <button
+              type="button"
+              className="membership-create-button"
+              onClick={openCreateEditor}
+              disabled={loading}
+            >
               Create Membership Plan
             </button>
           </div>
@@ -1459,7 +1486,12 @@ export default function MembershipPlansDashboard({ vendorId }) {
           </div>
 
           {loading ? (
-            <div className="membership-empty-state">Loading membership plans...</div>
+            <div className="membership-loading-state" role="status" aria-live="polite">
+              <span className="membership-loading-spinner" aria-hidden="true" />
+              Loading membership plans...
+            </div>
+          ) : plansLoadError ? (
+            <div className="membership-message error" role="alert">{plansLoadError}</div>
           ) : plans.length === 0 ? (
             <div className="membership-empty-state">
               No membership plans yet. Create your first membership plan.
@@ -1596,6 +1628,7 @@ export default function MembershipPlansDashboard({ vendorId }) {
               <option value="ALL">All statuses</option>
               <option value="ACTIVE">Active</option>
               <option value="SCHEDULED">Scheduled</option>
+              <option value="DEPLETED">Depleted</option>
               <option value="EXPIRED">Expired</option>
               <option value="CANCELLED">Cancelled</option>
             </select>
@@ -1616,15 +1649,22 @@ export default function MembershipPlansDashboard({ vendorId }) {
           </div>
 
           {membershipsLoading ? (
-            <div className="membership-empty-state">Loading customer memberships...</div>
+            <div className="membership-loading-state" role="status" aria-live="polite">
+              <span className="membership-loading-spinner" aria-hidden="true" />
+              Loading customer memberships...
+            </div>
+          ) : membershipsLoadError ? (
+            <div className="membership-message error" role="alert">{membershipsLoadError}</div>
           ) : customerMemberships.length === 0 ? (
             <div className="membership-empty-state">
               No customer memberships activated yet.
             </div>
           ) : (
             <div className="membership-plan-stack">
-              {customerMemberships.map((membership) => (
-                <article key={membership.id} className="membership-plan-card membership-customer-card">
+              {customerMemberships.map((membership) => {
+                const renewalAvailability = getMembershipRenewalAvailability(membership);
+                const showRenewal = ["ACTIVE", "DEPLETED", "EXPIRED"].includes(membership.status);
+                return <article key={membership.id} className="membership-plan-card membership-customer-card">
                   <div className="membership-plan-card-head">
                     <div>
                       <span className="membership-type-label">{formatPlanType(membership.membershipType)}</span>
@@ -1663,14 +1703,23 @@ export default function MembershipPlansDashboard({ vendorId }) {
                     <button type="button" onClick={() => openMembershipDetails(membership)}>
                       View Details
                     </button>
-                    {["ACTIVE", "EXPIRED"].includes(membership.status) ? (
-                      <button type="button" className="success" onClick={() => openRenewalModal(membership)}>
+                    {showRenewal ? (
+                      <button
+                        type="button"
+                        className="success"
+                        onClick={() => openRenewalModal(membership)}
+                        disabled={!renewalAvailability.allowed}
+                        title={renewalAvailability.reason || undefined}
+                      >
                         Renew
                       </button>
                     ) : null}
                   </div>
+                  {showRenewal && !renewalAvailability.allowed ? (
+                    <p className="membership-renewal-note">{renewalAvailability.reason}</p>
+                  ) : null}
                 </article>
-              ))}
+              })}
             </div>
           )}
 
@@ -1845,8 +1894,20 @@ export default function MembershipPlansDashboard({ vendorId }) {
               </div>
             </div>
             <footer className="membership-editor-footer">
-              {["ACTIVE", "EXPIRED"].includes(selectedMembership.status) ? (
-                <button type="button" className="membership-secondary-button" onClick={() => openRenewalModal(selectedMembership)}>
+              {["ACTIVE", "DEPLETED", "EXPIRED"].includes(selectedMembership.status) ? (
+                <button
+                  type="button"
+                  className="membership-secondary-button"
+                  onClick={() => openRenewalModal({ ...selectedMembership, wallet: selectedMembershipWallet })}
+                  disabled={!getMembershipRenewalAvailability({
+                    ...selectedMembership,
+                    wallet: selectedMembershipWallet,
+                  }).allowed}
+                  title={getMembershipRenewalAvailability({
+                    ...selectedMembership,
+                    wallet: selectedMembershipWallet,
+                  }).reason || undefined}
+                >
                   Renew Membership
                 </button>
               ) : null}

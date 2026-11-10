@@ -22,7 +22,7 @@ async function loadHelpers() {
   return import("../app/_Explore/prepaidWalletUi.mjs");
 }
 
-test("value wallet allows an independent Discount Membership but rejects manual discount combinations", async () => {
+test("value wallet uses the discounted final payable while still rejecting loyalty", async () => {
   const { getPrepaidWalletQuote } = await loadHelpers();
   const wallet = { walletType: "PREPAID_VALUE", remainingAmountPaise: 1200000 };
   assert.deepEqual(getPrepaidWalletQuote({ wallet, finalPayablePaise: 100000 }), {
@@ -40,9 +40,18 @@ test("value wallet allows an independent Discount Membership but rejects manual 
     }).eligible,
     true
   );
-  assert.match(
-    getPrepaidWalletQuote({ wallet, finalPayablePaise: 100000, hasManualDiscount: true }).reason,
-    /cannot be combined/i
+  assert.deepEqual(
+    getPrepaidWalletQuote({
+      wallet: { ...wallet, remainingAmountPaise: 125000 },
+      finalPayablePaise: 125000,
+      hasManualDiscount: true,
+    }),
+    {
+      eligible: true,
+      paymentMode: "PREPAID_VALUE",
+      amountPaise: 125000,
+      expectedRemainingAmountPaise: 0,
+    }
   );
   assert.equal(
     getPrepaidWalletQuote({ wallet, finalPayablePaise: 100000, redeemPoints: 5 }).eligible,
@@ -144,7 +153,8 @@ test("Quick Billing capability-gates wallet lookup and preserves ordinary paymen
   assert.match(source, /could not be confirmed\. Enter the code if it arrived/);
   assert.match(source, /"Prepaid Wallet" : "Prepaid Packages"/);
   assert.match(source, /Discount Membership benefits are not applied when prepaid payment is selected/);
-  assert.match(source, /const billingDiscount = prepaidSelected \? 0 : appliedDiscount/);
+  assert.match(source, /prepaidWallet\?\.walletType !== "PREPAID_VALUE"/);
+  assert.match(source, /prepaidSelected \? finalTotal : getAuthoritativeCartTotal\(\)/);
 });
 
 test("prepaid controls remain compact on narrow mobile layouts", () => {

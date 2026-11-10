@@ -527,6 +527,17 @@ test("concurrent enrollment and renewal preserve one financial record per reques
   assert.equal(await PrepaidMembershipWallet.countDocuments({ customerMembershipId: original._id }), 1);
   assert.equal(await PrepaidWalletLedger.countDocuments({ customerMembershipId: original._id, eventType: "CREDIT" }), 1);
 
+  const originalWallet = await PrepaidMembershipWallet.findOne({ customerMembershipId: original._id });
+  await PrepaidMembershipWallet.updateOne(
+    { _id: originalWallet._id },
+    {
+      $set: {
+        remainingAmountPaise: 0,
+        consumedAmountPaise: originalWallet.creditedAmountPaise,
+      },
+    }
+  );
+
   const renewalResults = await Promise.all([
     renew({ vendorId, membershipId: original._id, key: "renew-race-a" }),
     renew({ vendorId, membershipId: original._id, key: "renew-race-b" }),
@@ -544,16 +555,41 @@ test("concurrent activation-boundary lookups promote membership and wallet toget
   const { plan } = await createSessionsPlan(vendorId);
   const enrolled = await enroll({ vendorId, plan, mobile: "9876500020", key: "activation-parent" });
   const parent = await CustomerMembership.findById(enrolled.payload.data.id);
-  const renewed = await renew({
-    vendorId,
-    membershipId: parent._id,
-    key: "activation-child",
-    paymentAmount: plan.sellingPrice,
-  });
-  assert.equal(renewed.statusCode, 201);
-  const child = await CustomerMembership.findById(renewed.payload.data.id);
   const boundary = new Date("2030-01-01T00:00:00.000Z");
   const expiry = new Date("2031-01-01T00:00:00.000Z");
+  const parentWallet = await PrepaidMembershipWallet.findOne({ customerMembershipId: parent._id }).lean();
+  const childData = parent.toObject();
+  delete childData._id;
+  delete childData.createdAt;
+  delete childData.updatedAt;
+  childData.status = "SCHEDULED";
+  childData.activatedAt = boundary;
+  childData.expiresAt = expiry;
+  childData.renewedFromMembershipId = parent._id;
+  childData.enrollmentIdempotencyKey = "activation-child";
+  childData.enrollmentRequestFingerprint = "activation-child-fixture";
+  const child = await CustomerMembership.create(childData);
+  const childWalletData = { ...parentWallet };
+  delete childWalletData._id;
+  delete childWalletData.createdAt;
+  delete childWalletData.updatedAt;
+  childWalletData.customerMembershipId = child._id;
+  childWalletData.status = "SCHEDULED";
+  childWalletData.activatesAt = boundary;
+  childWalletData.expiresAt = expiry;
+  childWalletData.idempotencyKey = "activation-child-wallet";
+  const childWallet = await PrepaidMembershipWallet.create(childWalletData);
+  await PrepaidWalletLedger.create({
+    vendorId,
+    customerId: parent.customerId,
+    customerMembershipId: child._id,
+    walletId: childWallet._id,
+    walletType: "PREPAID_SESSIONS",
+    eventType: "CREDIT",
+    quantity: childWallet.creditedQuantity,
+    occurredAt: new Date(boundary.getTime() - 1),
+    idempotencyKey: "activation-child-credit",
+  });
   await CustomerMembership.collection.updateOne({ _id: parent._id }, { $set: { expiresAt: boundary, status: "ACTIVE" } });
   await PrepaidMembershipWallet.collection.updateOne({ customerMembershipId: parent._id }, { $set: { expiresAt: boundary, status: "ACTIVE" } });
   await CustomerMembership.collection.updateOne({ _id: child._id }, { $set: { activatedAt: boundary, expiresAt: expiry, status: "SCHEDULED" } });
@@ -574,7 +610,7 @@ test("concurrent activation-boundary lookups promote membership and wallet toget
     prepaidWalletController._private.loadAvailableWallet(vendorId, parent.customerId, null, boundary),
   ]);
   assert.ok(results.every((result) => String(result.wallet.customerMembershipId) === String(child._id)));
-  const [storedParent, storedChild, childWallet, storedDiscount] = await Promise.all([
+  const [storedParent, storedChild, storedChildWallet, storedDiscount] = await Promise.all([
     CustomerMembership.findById(parent._id).lean(),
     CustomerMembership.findById(child._id).lean(),
     PrepaidMembershipWallet.findOne({ customerMembershipId: child._id }).lean(),
@@ -582,7 +618,7 @@ test("concurrent activation-boundary lookups promote membership and wallet toget
   ]);
   assert.equal(storedParent.status, "EXPIRED");
   assert.equal(storedChild.status, "ACTIVE");
-  assert.equal(childWallet.status, "ACTIVE");
+  assert.equal(storedChildWallet.status, "ACTIVE");
   assert.equal(storedDiscount.status, "ACTIVE");
   assert.equal(await PrepaidWalletLedger.countDocuments({ customerMembershipId: child._id, eventType: "CREDIT" }), 1);
 });

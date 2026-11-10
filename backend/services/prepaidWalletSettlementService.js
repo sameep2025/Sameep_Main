@@ -1,4 +1,5 @@
 const mongoose = require("mongoose");
+const CustomerMembership = require("../models/CustomerMembership");
 const PrepaidMembershipWallet = require("../models/PrepaidMembershipWallet");
 const PrepaidRedemptionAuthorization = require("../models/PrepaidRedemptionAuthorization");
 const PrepaidWalletLedger = require("../models/PrepaidWalletLedger");
@@ -73,22 +74,27 @@ async function persistInitialPrepaidSettlementSnapshot({
   return persistedSnapshot;
 }
 
-function assertNoPrepaidDiscountsOrRewards({ billing, authoritativeFinancials }) {
+function assertNoPrepaidDiscountsOrRewards({ billing, authoritativeFinancials, paymentMode }) {
+  const mode = String(paymentMode || "").trim().toUpperCase();
   const pointsRedeemed = Number(billing?.pointsRedeemed || 0);
   const storedDiscount = Number(billing?.discountAmount || 0);
   const membershipDiscount = Number(authoritativeFinancials?.membershipDiscountAmount || 0);
   const manualDiscount = Number(authoritativeFinancials?.additionalManualDiscountAmount || 0);
   const totalDiscount = Number(authoritativeFinancials?.discountAmount || 0);
-  if (
-    pointsRedeemed !== 0 ||
-    storedDiscount !== 0 ||
-    membershipDiscount !== 0 ||
-    manualDiscount !== 0 ||
-    totalDiscount !== 0 ||
-    authoritativeFinancials?.membership
-  ) {
+  const hasForbiddenBenefit = pointsRedeemed !== 0 || membershipDiscount !== 0 ||
+    Boolean(authoritativeFinancials?.membership);
+  const hasForbiddenSessionDiscount = mode !== "PREPAID_VALUE" && (
+    storedDiscount !== 0 || manualDiscount !== 0 || totalDiscount !== 0
+  );
+  const hasInconsistentValueDiscount = mode === "PREPAID_VALUE" && (
+    Math.abs(storedDiscount - manualDiscount) > 0.001 ||
+    Math.abs(totalDiscount - manualDiscount) > 0.001
+  );
+  if (hasForbiddenBenefit || hasForbiddenSessionDiscount || hasInconsistentValueDiscount) {
     throw createPublicError(
-      "Prepaid wallet bills cannot use discounts, Discount Membership benefits, or loyalty redemption",
+      mode === "PREPAID_VALUE"
+        ? "Prepaid wallet bills cannot use Discount Membership benefits or loyalty redemption"
+        : "Prepaid Package bills cannot use discounts, Discount Membership benefits, or loyalty redemption",
       "prepaid_discounts_or_rewards_not_allowed"
     );
   }
@@ -243,11 +249,29 @@ async function consumePrepaidAuthorization({
     throw createPublicError("Insufficient or unavailable prepaid wallet balance", "prepaid_wallet_insufficient", 409);
   }
   if (Number(wallet[balanceField]) === 0) {
-    await PrepaidMembershipWallet.updateOne(
+    const walletStatusUpdate = await PrepaidMembershipWallet.updateOne(
       { _id: wallet._id, status: "ACTIVE" },
       { $set: { status: "DEPLETED" } },
       { session }
     );
+    const membershipStatusUpdate = await CustomerMembership.updateOne(
+      {
+        _id: wallet.customerMembershipId,
+        vendorId: billing.vendorId,
+        customerId: billing.customerId,
+        membershipType: mode,
+        status: "ACTIVE",
+      },
+      { $set: { status: "DEPLETED" } },
+      { session }
+    );
+    if (walletStatusUpdate.modifiedCount !== 1 || membershipStatusUpdate.modifiedCount !== 1) {
+      throw createPublicError(
+        "Prepaid wallet depletion status could not be persisted safely",
+        "prepaid_depletion_status_conflict",
+        409
+      );
+    }
   }
 
   const ledger = await createRedemptionLedger({
@@ -345,6 +369,26 @@ async function reversePrepaidSettlement({ bill, transaction, session, now = new 
     { $set: { status: restoredStatus } },
     { session }
   );
+  if (wallet.status === "DEPLETED" && ["ACTIVE", "EXPIRED"].includes(restoredStatus)) {
+    const membershipUpdate = await CustomerMembership.updateOne(
+      {
+        _id: snapshot.customerMembershipId,
+        vendorId: bill.vendorId,
+        customerId: bill.customerId,
+        membershipType: mode,
+        status: "DEPLETED",
+      },
+      { $set: { status: restoredStatus } },
+      { session }
+    );
+    if (membershipUpdate.modifiedCount !== 1) {
+      throw createPublicError(
+        "Prepaid membership could not be restored safely",
+        "prepaid_membership_reversal_conflict",
+        409
+      );
+    }
+  }
 
   const [reversal] = await PrepaidWalletLedger.create([{
     vendorId: bill.vendorId,

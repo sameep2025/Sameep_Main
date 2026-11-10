@@ -17,6 +17,11 @@ const activityPresentationPath = path.join(
   root,
   "app/components/dashboard/prepaidActivityPresentation.mjs"
 );
+const renewalUiPath = path.join(
+  root,
+  "app/components/dashboard/membershipRenewalUi.mjs"
+);
+const renewalUiSource = fs.readFileSync(renewalUiPath, "utf8");
 
 test("Discount remains the default and prepaid types are server-capability gated", () => {
   assert.match(source, /planType:\s*"DISCOUNT"/);
@@ -86,6 +91,41 @@ test("prepaid enrollment and renewal are idempotent and prevent duplicate submit
   assert.match(source, /\{ idempotencyKey: renewalForm\.idempotencyKey \}/);
   assert.match(source, /disabled=\{activationSaving \|\| !selectedActivationPlan\}/);
   assert.match(source, /disabled=\{renewalSaving \|\| !selectedRenewalPlan\}/);
+});
+
+test("membership views distinguish loading, empty and error states", () => {
+  assert.match(source, /membership-loading-state/);
+  assert.match(source, /plansLoadError/);
+  assert.match(source, /membershipsLoadError/);
+  assert.match(source, /role="status"/);
+  assert.match(source, /No membership plans yet/);
+  assert.match(source, /No customer memberships activated yet/);
+  assert.match(css, /\.membership-loading-spinner/);
+});
+
+test("prepaid renewal UI allows only depleted or expired balances", async () => {
+  const { getMembershipRenewalAvailability } = await import(renewalUiPath);
+  assert.equal(getMembershipRenewalAvailability({
+    membershipType: "PREPAID_VALUE",
+    status: "ACTIVE",
+    wallet: { remainingAmountPaise: 1 },
+  }).allowed, false);
+  assert.equal(getMembershipRenewalAvailability({
+    membershipType: "PREPAID_VALUE",
+    status: "ACTIVE",
+    wallet: { remainingAmountPaise: 0 },
+  }).allowed, true);
+  assert.equal(getMembershipRenewalAvailability({
+    membershipType: "PREPAID_SESSIONS",
+    status: "DEPLETED",
+    wallet: { remainingQuantity: 0 },
+  }).allowed, true);
+  assert.equal(getMembershipRenewalAvailability({
+    membershipType: "PREPAID_VALUE",
+    status: "EXPIRED",
+  }).allowed, true);
+  assert.match(renewalUiSource, /Renewal is available after the current wallet balance is exhausted/);
+  assert.match(source, /<option value="DEPLETED">Depleted<\/option>/);
 });
 
 test("wallet details and mobile layout use authenticated response values", () => {

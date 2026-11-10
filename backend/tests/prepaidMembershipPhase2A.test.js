@@ -333,15 +333,18 @@ test("initial credit failure propagates from the transaction without a success r
   }, { ledgerError: new Error("ledger write failed") });
 });
 
-test("active prepaid renewal creates a new scheduled wallet with independent credit", async () => {
+test("exhausted prepaid renewal depletes the old wallet and activates independent credit immediately", async () => {
   const originals = {
     startSession: mongoose.startSession,
     planFindOne: MembershipPlan.findOne,
     membershipFindOne: CustomerMembership.findOne,
     membershipFind: CustomerMembership.find,
     membershipUpdateMany: CustomerMembership.updateMany,
+    membershipUpdateOne: CustomerMembership.updateOne,
     membershipCreate: CustomerMembership.create,
+    walletFindOne: PrepaidMembershipWallet.findOne,
     walletUpdateMany: PrepaidMembershipWallet.updateMany,
+    walletUpdateOne: PrepaidMembershipWallet.updateOne,
     walletCreate: PrepaidMembershipWallet.create,
     ledgerCreate: PrepaidWalletLedger.create,
   };
@@ -371,7 +374,18 @@ test("active prepaid renewal creates a new scheduled wallet with independent cre
   };
   CustomerMembership.find = () => query([]);
   CustomerMembership.updateMany = async () => ({ modifiedCount: 0 });
+  CustomerMembership.updateOne = async () => ({ modifiedCount: 1 });
   PrepaidMembershipWallet.updateMany = async () => ({ modifiedCount: 0 });
+  PrepaidMembershipWallet.updateOne = async () => ({ modifiedCount: 1 });
+  PrepaidMembershipWallet.findOne = () => query({
+    _id: id("690000000000000000000023"),
+    vendorId,
+    customerId: existing.customerId,
+    customerMembershipId: existing._id,
+    walletType: "PREPAID_VALUE",
+    status: "ACTIVE",
+    remainingAmountPaise: 0,
+  });
   MembershipPlan.findOne = () => query(plan);
   CustomerMembership.create = async (documents, options) => {
     creates.memberships.push({ documents, options });
@@ -401,14 +415,13 @@ test("active prepaid renewal creates a new scheduled wallet with independent cre
     }, res);
 
     assert.equal(res.statusCode, 201);
-    assert.equal(res.payload.data.status, "SCHEDULED");
+    assert.equal(res.payload.data.status, "ACTIVE");
     assert.equal(creates.memberships.length, 1);
     assert.equal(String(creates.memberships[0].documents[0].renewedFromMembershipId), String(existing._id));
     assert.equal(creates.wallets.length, 1);
-    assert.equal(creates.wallets[0].documents[0].status, "SCHEDULED");
-    assert.equal(
-      new Date(creates.wallets[0].documents[0].activatesAt).getTime(),
-      existing.expiresAt.getTime()
+    assert.equal(creates.wallets[0].documents[0].status, "ACTIVE");
+    assert.ok(
+      new Date(creates.wallets[0].documents[0].activatesAt).getTime() < existing.expiresAt.getTime()
     );
     assert.equal(creates.ledgers.length, 1);
     assert.equal(creates.ledgers[0].documents[0].eventType, "CREDIT");
@@ -422,8 +435,11 @@ test("active prepaid renewal creates a new scheduled wallet with independent cre
     CustomerMembership.findOne = originals.membershipFindOne;
     CustomerMembership.find = originals.membershipFind;
     CustomerMembership.updateMany = originals.membershipUpdateMany;
+    CustomerMembership.updateOne = originals.membershipUpdateOne;
     CustomerMembership.create = originals.membershipCreate;
+    PrepaidMembershipWallet.findOne = originals.walletFindOne;
     PrepaidMembershipWallet.updateMany = originals.walletUpdateMany;
+    PrepaidMembershipWallet.updateOne = originals.walletUpdateOne;
     PrepaidMembershipWallet.create = originals.walletCreate;
     PrepaidWalletLedger.create = originals.ledgerCreate;
     if (previousFlag === undefined) delete process.env.PREPAID_MEMBERSHIP_WALLETS_ENABLED;
@@ -431,7 +447,7 @@ test("active prepaid renewal creates a new scheduled wallet with independent cre
   }
 });
 
-test("prepaid renewals create separate scheduled wallets and preserve discount branches", () => {
+test("prepaid renewals create separate wallets and preserve discount branches", () => {
   assert.deepEqual(PrepaidMembershipWallet.constants.WALLET_STATUSES, [
     "ACTIVE", "SCHEDULED", "DEPLETED", "EXPIRED", "CANCELLED",
   ]);

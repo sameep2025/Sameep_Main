@@ -2581,7 +2581,7 @@ function ExploreContent({ onReady, onOpenServices }) {
     Number.isInteger(gstPreview?.totals?.estimatedCustomerPayablePaise) && gstPreviewAvailable
       ? gstPreview.totals.estimatedCustomerPayablePaise
       : Math.round(
-          ((prepaidSelected ? cartTotal : getAuthoritativeCartTotal()) + Number.EPSILON) * 100
+          ((prepaidSelected ? finalTotal : getAuthoritativeCartTotal()) + Number.EPSILON) * 100
         ),
     0
   );
@@ -2670,7 +2670,7 @@ function ExploreContent({ onReady, onOpenServices }) {
         wallet: prepaidWallet,
         cartItems,
         finalPayablePaise: paymentFinalPayablePaise,
-        hasManualDiscount: prepaidSelected ? false : Number(appliedDiscount) > 0,
+        hasManualDiscount: Number(appliedDiscount) > 0,
         redeemPoints: prepaidSelected ? 0 : redeemPoints,
       }),
     [
@@ -4381,8 +4381,12 @@ function ExploreContent({ onReady, onOpenServices }) {
             items: gstPreviewItems,
             manualDiscount: {
               mode: discountMode,
-              amount: prepaidSelected ? 0 : appliedDiscount,
-              percent: prepaidSelected ? 0 : discountPercent,
+              amount: prepaidSelected && prepaidWallet?.walletType !== "PREPAID_VALUE"
+                ? 0
+                : appliedDiscount,
+              percent: prepaidSelected && prepaidWallet?.walletType !== "PREPAID_VALUE"
+                ? 0
+                : discountPercent,
             },
             redemption: { amount: prepaidSelected ? 0 : redeemPoints },
           }),
@@ -4418,6 +4422,7 @@ function ExploreContent({ onReady, onOpenServices }) {
     discountPercent,
     redeemPoints,
     prepaidSelected,
+    prepaidWallet?.walletType,
     gstPreviewRetryNonce,
   ]);
 
@@ -4878,7 +4883,9 @@ function ExploreContent({ onReady, onOpenServices }) {
       // STEP 2 - Update cart with hierarchy fields
       const billingCartItems = buildBillingCartItemsSnapshot();
       const billingSubtotal = cartTotal;
-      const billingDiscount = prepaidSelected ? 0 : appliedDiscount;
+      const billingDiscount = prepaidSelected && prepaidWallet?.walletType !== "PREPAID_VALUE"
+        ? 0
+        : appliedDiscount;
       const updateRes = await fetch(`${API_BASE_URL}/api/billing/update`, {
         method: "POST",
         headers: {
@@ -4890,9 +4897,15 @@ function ExploreContent({ onReady, onOpenServices }) {
           cartItems: billingCartItems,
           grossAmount: billingSubtotal,
           discountAmount: billingDiscount,
-          manualDiscountMode: prepaidSelected ? null : discountMode,
+          manualDiscountMode:
+            prepaidSelected && prepaidWallet?.walletType !== "PREPAID_VALUE"
+              ? null
+              : discountMode,
           manualDiscountPercent:
-            !prepaidSelected && discountMode === "percent" ? discountPercent : 0,
+            (!prepaidSelected || prepaidWallet?.walletType === "PREPAID_VALUE") &&
+            discountMode === "percent"
+              ? discountPercent
+              : 0,
         }),
       });
 

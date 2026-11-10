@@ -279,8 +279,39 @@ function getEffectiveMembershipStatus(membership, now = new Date()) {
   const nowTime = now.getTime();
 
   if (expiryTime && expiryTime <= nowTime) return "EXPIRED";
+  if (membership.status === "DEPLETED") return "DEPLETED";
   if (startTime && startTime > nowTime) return "SCHEDULED";
   return "ACTIVE";
+}
+
+function getPrepaidWalletRemainingBalance(wallet, membershipType) {
+  if (!wallet) return null;
+  const value = membershipType === "PREPAID_VALUE"
+    ? wallet.remainingAmountPaise
+    : wallet.remainingQuantity;
+  const balance = Number(value);
+  return Number.isSafeInteger(balance) && balance >= 0 ? balance : null;
+}
+
+function getPrepaidRenewalAvailability({ effectiveStatus, wallet, membershipType }) {
+  const remainingBalance = getPrepaidWalletRemainingBalance(wallet, membershipType);
+  if (!wallet || remainingBalance === null) {
+    return { allowed: false, code: "prepaid_renewal_wallet_inconsistent" };
+  }
+  if (effectiveStatus === "EXPIRED") {
+    return { allowed: true, remainingBalance };
+  }
+  if (effectiveStatus === "ACTIVE" && remainingBalance > 0) {
+    return { allowed: false, code: "prepaid_renewal_balance_remaining", remainingBalance };
+  }
+  if (["ACTIVE", "DEPLETED"].includes(effectiveStatus) && remainingBalance === 0) {
+    return { allowed: true, remainingBalance };
+  }
+  return {
+    allowed: false,
+    code: "prepaid_renewal_wallet_inconsistent",
+    remainingBalance,
+  };
 }
 
 function escapeRegExp(value) {
@@ -718,9 +749,12 @@ async function listMemberships(req, res) {
       query.$or = [
         { status: "EXPIRED" },
         { status: "ACTIVE", expiresAt: { $lte: now } },
+        { status: "DEPLETED", expiresAt: { $lte: now } },
       ];
     } else if (status === "CANCELLED") {
       query.status = status;
+    } else if (status === "DEPLETED") {
+      query.status = "DEPLETED";
     } else if (status === "SCHEDULED") {
       query.status = "SCHEDULED";
       query.activatedAt = { $gt: now };
@@ -756,11 +790,28 @@ async function listMemberships(req, res) {
       .lean(),
       CustomerMembership.countDocuments(query),
     ]);
-    const nameMap = await getVendorCustomerNameMap(vendorId, memberships);
+    const prepaidMembershipIds = memberships
+      .filter((membership) => ["PREPAID_VALUE", "PREPAID_SESSIONS"].includes(membership.membershipType))
+      .map((membership) => membership._id);
+    const [nameMap, wallets] = await Promise.all([
+      getVendorCustomerNameMap(vendorId, memberships),
+      prepaidMembershipIds.length
+        ? PrepaidMembershipWallet.find({
+            vendorId,
+            customerMembershipId: { $in: prepaidMembershipIds },
+          }).lean()
+        : [],
+    ]);
+    const walletMap = new Map(wallets.map((wallet) => [String(wallet.customerMembershipId), wallet]));
 
     return res.json({
       success: true,
-      data: memberships.map((membership) => serializeMembership(membership, nameMap)),
+      data: memberships.map((membership) => ({
+        ...serializeMembership(membership, nameMap),
+        ...(["PREPAID_VALUE", "PREPAID_SESSIONS"].includes(membership.membershipType)
+          ? { wallet: serializeWallet(walletMap.get(String(membership._id)) || null) }
+          : {}),
+      })),
       pagination: {
         limit,
         page,
@@ -877,11 +928,11 @@ async function renewMembership(req, res) {
         now,
       });
 
-      const refreshedExisting = await CustomerMembership.findOne({ _id: membershipId, vendorId })
+      let refreshedExisting = await CustomerMembership.findOne({ _id: membershipId, vendorId })
         .session(session)
         .lean();
-      const effectiveStatus = getEffectiveMembershipStatus(refreshedExisting, now);
-      if (!["ACTIVE", "EXPIRED"].includes(effectiveStatus)) {
+      let effectiveStatus = getEffectiveMembershipStatus(refreshedExisting, now);
+      if (!["ACTIVE", "DEPLETED", "EXPIRED"].includes(effectiveStatus)) {
         const error = new Error("Only active or expired memberships can be renewed");
         error.statusCode = 400;
         throw error;
@@ -953,7 +1004,9 @@ async function renewMembership(req, res) {
       const pendingRenewal = await CustomerMembership.findOne({
         vendorId,
         customerId: refreshedExisting.customerId,
-        membershipPlanId: refreshedExisting.membershipPlanId,
+        ...(plan.planType === "DISCOUNT"
+          ? { membershipPlanId: refreshedExisting.membershipPlanId }
+          : getMembershipEntitlementFilter(plan.planType)),
         status: "SCHEDULED",
         expiresAt: { $gt: now },
       })
@@ -965,8 +1018,77 @@ async function renewMembership(req, res) {
         throw error;
       }
 
+      const isPrepaidRenewal = ["PREPAID_VALUE", "PREPAID_SESSIONS"].includes(
+        refreshedExisting.membershipType
+      );
+      let sourceWallet = null;
+      if (isPrepaidRenewal) {
+        sourceWallet = await PrepaidMembershipWallet.findOne({
+          vendorId,
+          customerId: refreshedExisting.customerId,
+          customerMembershipId: refreshedExisting._id,
+          walletType: refreshedExisting.membershipType,
+        }).session(session).lean();
+        const renewalAvailability = getPrepaidRenewalAvailability({
+          effectiveStatus,
+          wallet: sourceWallet,
+          membershipType: refreshedExisting.membershipType,
+        });
+        if (renewalAvailability.code === "prepaid_renewal_wallet_inconsistent") {
+          const error = new Error("Prepaid wallet record is missing or inconsistent");
+          error.statusCode = 409;
+          error.code = "prepaid_renewal_wallet_inconsistent";
+          throw error;
+        }
+        if (renewalAvailability.code === "prepaid_renewal_balance_remaining") {
+          const error = new Error(
+            "Renewal is available after the current wallet balance is exhausted or the membership expires."
+          );
+          error.statusCode = 409;
+          error.code = "prepaid_renewal_balance_remaining";
+          throw error;
+        }
+        const remainingBalance = renewalAvailability.remainingBalance;
+        if (remainingBalance === 0 && effectiveStatus !== "EXPIRED") {
+          const walletUpdate = sourceWallet.status === "DEPLETED"
+            ? { modifiedCount: 1 }
+            : await PrepaidMembershipWallet.updateOne(
+                {
+                  _id: sourceWallet._id,
+                  vendorId,
+                  status: "ACTIVE",
+                  ...(refreshedExisting.membershipType === "PREPAID_VALUE"
+                    ? { remainingAmountPaise: 0 }
+                    : { remainingQuantity: 0 }),
+                },
+                { $set: { status: "DEPLETED" } },
+                { session }
+              );
+          const membershipUpdate = refreshedExisting.status === "DEPLETED"
+            ? { modifiedCount: 1 }
+            : await CustomerMembership.updateOne(
+                {
+                  _id: refreshedExisting._id,
+                  vendorId,
+                  status: "ACTIVE",
+                  expiresAt: { $gt: now },
+                },
+                { $set: { status: "DEPLETED" } },
+                { session }
+              );
+          if (walletUpdate.modifiedCount !== 1 || membershipUpdate.modifiedCount !== 1) {
+            const error = new Error("Prepaid wallet status changed during renewal");
+            error.statusCode = 409;
+            error.code = "prepaid_renewal_state_conflict";
+            throw error;
+          }
+          refreshedExisting = { ...refreshedExisting, status: "DEPLETED" };
+          effectiveStatus = "DEPLETED";
+        }
+      }
+
       const renewalStartsAt =
-        effectiveStatus === "ACTIVE" && refreshedExisting.expiresAt
+        !isPrepaidRenewal && effectiveStatus === "ACTIVE" && refreshedExisting.expiresAt
           ? new Date(refreshedExisting.expiresAt)
           : now;
       const expiresAt = calculateExpiry(renewalStartsAt, plan.duration);
@@ -1132,10 +1254,12 @@ module.exports = {
     normalizeIdempotencyKey,
     buildEnrollmentFingerprint,
     buildPrepaidEnrollmentData,
+    getEffectiveMembershipStatus,
+    getPrepaidWalletRemainingBalance,
+    getPrepaidRenewalAvailability,
     serializeWallet,
     serializeWalletLedger,
     serializeMembership,
-    getEffectiveMembershipStatus,
     refreshLifecycleForCustomer,
     getMembershipSort,
     DURATION_MONTHS,

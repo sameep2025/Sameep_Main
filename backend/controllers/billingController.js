@@ -2364,7 +2364,11 @@ exports.completeBillingSession = async (req, res) => {
         session,
       });
       if (isPrepaidPayment) {
-        assertNoPrepaidDiscountsOrRewards({ billing, authoritativeFinancials });
+        assertNoPrepaidDiscountsOrRewards({
+          billing,
+          authoritativeFinancials,
+          paymentMode,
+        });
       }
       let finalPaidAmount = Math.max(
         roundMoney(authoritativeFinancials.totalAmount - effectiveRedeemPoints),

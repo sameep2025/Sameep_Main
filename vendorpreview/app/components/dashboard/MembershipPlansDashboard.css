@@ -1166,6 +1166,40 @@
   font-size: 14px;
 }
 
+.membership-loading-state {
+  min-height: 116px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  color: #e6c37a;
+  font-weight: 800;
+}
+
+.membership-loading-spinner {
+  width: 22px;
+  height: 22px;
+  border: 3px solid rgba(230, 195, 122, 0.24);
+  border-top-color: #e6c37a;
+  border-radius: 50%;
+  animation: membership-spin 0.8s linear infinite;
+}
+
+.membership-renewal-note {
+  margin: 10px 0 0;
+  color: #c8bfae;
+  font-size: 0.8rem;
+  line-height: 1.4;
+}
+
+@keyframes membership-spin {
+  to { transform: rotate(360deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .membership-loading-spinner { animation: none; }
+}
+
 .membership-plan-stack {
   display: grid;
   gap: 14px;
