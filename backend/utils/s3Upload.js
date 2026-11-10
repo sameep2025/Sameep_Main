@@ -1,4 +1,4 @@
-const { S3Client, PutObjectCommand, DeleteObjectCommand } = require('@aws-sdk/client-s3');
+const { S3Client, PutObjectCommand, GetObjectCommand, DeleteObjectCommand } = require('@aws-sdk/client-s3');
 const { v4: uuidv4 } = require('uuid');
 const mime = require('mime-types');
 
@@ -55,7 +55,7 @@ function normalizeSegments(opts) {
 
 async function uploadBufferToS3(buffer, mimetype, folderType, options = null) {
   if (!buffer || !mimetype) throw new Error('Missing buffer or mimetype');
-  const allowed = ['image/jpeg', 'image/png', 'image/webp', 'image/gif', 'image/svg+xml', 'image/heic', 'image/heif'];
+  const allowed = ['image/jpeg', 'image/png', 'image/webp', 'image/gif', 'image/svg+xml', 'image/heic', 'image/heif', 'application/pdf'];
   if (!allowed.includes(mimetype)) throw new Error(`Invalid file type: ${mimetype}`);
   if (!process.env.S3_BUCKET_NAME) throw new Error('S3 bucket not configured');
   const ext = mime.extension(mimetype) || 'bin';
@@ -77,7 +77,7 @@ async function uploadBufferToS3(buffer, mimetype, folderType, options = null) {
 
 async function uploadBufferToS3WithLabel(buffer, mimetype, folderType, labelName, options = null) {
   if (!buffer || !mimetype) throw new Error('Missing buffer or mimetype');
-  const allowed = ['image/jpeg', 'image/png', 'image/webp', 'image/gif', 'image/svg+xml', 'image/heic', 'image/heif'];
+  const allowed = ['image/jpeg', 'image/png', 'image/webp', 'image/gif', 'image/svg+xml', 'image/heic', 'image/heif', 'application/pdf'];
   if (!allowed.includes(mimetype)) throw new Error(`Invalid file type: ${mimetype}`);
   if (!process.env.S3_BUCKET_NAME) throw new Error('S3 bucket not configured');
   const ext = mime.extension(mimetype) || 'bin';
@@ -118,6 +118,23 @@ async function deleteS3ObjectByKey(key) {
   }));
 }
 
+async function getS3ObjectByKey(key, { maxBytes = 10 * 1024 * 1024 } = {}) {
+  if (!key || !process.env.S3_BUCKET_NAME) throw new Error('S3 object is not configured');
+  const response = await s3.send(new GetObjectCommand({
+    Bucket: process.env.S3_BUCKET_NAME,
+    Key: key,
+  }));
+  const declaredLength = Number(response.ContentLength || 0);
+  if (declaredLength > maxBytes) throw new Error('S3 object exceeds the allowed size');
+  const bytes = await response.Body.transformToByteArray();
+  if (bytes.byteLength > maxBytes) throw new Error('S3 object exceeds the allowed size');
+  return {
+    buffer: Buffer.from(bytes),
+    contentType: String(response.ContentType || ''),
+    sizeBytes: bytes.byteLength,
+  };
+}
+
 async function deleteS3ObjectByUrl(url) {
   const key = extractKeyFromUrl(url);
   if (key) {
@@ -125,4 +142,4 @@ async function deleteS3ObjectByUrl(url) {
   }
 }
 
-module.exports = { uploadBufferToS3, uploadBufferToS3WithLabel, deleteS3ObjectByUrl, deleteS3ObjectByKey, extractKeyFromUrl };
+module.exports = { uploadBufferToS3, uploadBufferToS3WithLabel, getS3ObjectByKey, deleteS3ObjectByUrl, deleteS3ObjectByKey, extractKeyFromUrl };

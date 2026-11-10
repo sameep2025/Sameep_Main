@@ -2,13 +2,16 @@ const crypto = require("crypto");
 const DummyVendor = require("../models/DummyVendor");
 const Vendor = require("../models/Vendor");
 const MetaWhatsappCoexistenceEvent = require("../models/MetaWhatsappCoexistenceEvent");
+const WhatsappMarketingTemplate = require("../models/WhatsappMarketingTemplate");
 const { getMetaWhatsAppConfig } = require("../config/metaWhatsAppConfig");
+const { mapMetaMarketingStatus } = require("./whatsappMarketingMetaService");
 
 const COEXISTENCE_EVENT_FIELDS = new Set([
   "history",
   "smb_app_state_sync",
   "smb_message_echoes",
 ]);
+const MARKETING_TEMPLATE_STATUS_FIELD = "message_template_status_update";
 const PHONE_IDENTIFIER_KEYS = new Set(["phone_number_id", "phoneNumberId"]);
 const WABA_IDENTIFIER_KEYS = new Set([
   "waba_id",
@@ -300,13 +303,88 @@ async function findVendorByMetaIdentifiers({ wabaId, phoneNumberId }) {
   return null;
 }
 
+async function processMarketingTemplateStatusUpdate(item, dependencies = {}) {
+  if (item?.field !== MARKETING_TEMPLATE_STATUS_FIELD) {
+    return { processed: false, reason: "not_marketing_template_status" };
+  }
+  const findVendor = dependencies.findStandardVendor || findVendorByMetaIdentifiers;
+  const TemplateModel = dependencies.WhatsappMarketingTemplateModel || WhatsappMarketingTemplate;
+  const vendorMatch = await findVendor({
+    wabaId: item.wabaId,
+    phoneNumberId: item.phoneNumberId,
+  });
+  if (!vendorMatch) return { processed: false, reason: "vendor_not_found" };
+
+  const value = item.value || {};
+  const status = mapMetaMarketingStatus(value.event || value.status, "");
+  if (!status) return { processed: false, reason: "unsupported_template_status" };
+  const templateId = String(value.message_template_id || value.id || "").trim();
+  const templateName = String(value.message_template_name || value.name || "").trim();
+  const language = String(value.message_template_language || value.language || "").trim();
+  if (!templateId && !templateName) {
+    return { processed: false, reason: "template_identity_missing" };
+  }
+  const reason = String(value.reason || value.rejected_reason || "").trim().slice(0, 1000);
+  const recordedAt = new Date();
+  const result = await TemplateModel.updateOne(
+    {
+      vendorId: vendorMatch.vendor._id,
+      $or: [
+        ...(templateId ? [{ "metaTemplate.templateId": templateId }] : []),
+        ...(templateName ? [{ "metaTemplate.templateName": templateName }] : []),
+      ],
+    },
+    {
+      $set: {
+        status,
+        "metaTemplate.status": status,
+        "metaTemplate.lastSyncedAt": recordedAt,
+        "metaTemplate.rejectionReason": reason,
+        ...(["APPROVED", "REJECTED"].includes(status)
+          ? { "metaTemplate.reviewedAt": recordedAt }
+          : {}),
+        ...(templateId ? { "metaTemplate.templateId": templateId } : {}),
+        ...(templateName ? { "metaTemplate.templateName": templateName } : {}),
+        ...(language ? { "metaTemplate.language": language } : {}),
+      },
+      $push: {
+        approvalHistory: {
+          status,
+          metaTemplateId: templateId,
+          metaTemplateName: templateName,
+          reason,
+          recordedAt,
+        },
+      },
+    },
+    { runValidators: true }
+  );
+  return {
+    processed: result?.matchedCount === 1,
+    reason: result?.matchedCount === 1 ? "status_updated" : "template_not_found",
+    status,
+  };
+}
+
 async function processMetaWhatsappWebhook(payload, options = {}) {
   const metadata = extractWebhookMetadata(payload);
   const logger = options.logger || console;
   const findStandardVendor = options.findStandardVendor || findVendorByMetaIdentifiers;
   const results = [];
+  const marketing = [];
 
   for (const item of metadata) {
+    if (item.field === MARKETING_TEMPLATE_STATUS_FIELD) {
+      if (options.signatureVerified !== true) {
+        marketing.push({ field: item.field, processed: false, reason: "signature_unverified" });
+      } else {
+        marketing.push({
+          field: item.field,
+          ...(await processMarketingTemplateStatusUpdate(item, options)),
+        });
+      }
+      continue;
+    }
     if (COEXISTENCE_EVENT_FIELDS.has(item.field)) {
       if (options.signatureVerified !== true) {
         results.push({ field: item.field, processed: false, reason: "signature_unverified" });
@@ -347,11 +425,12 @@ async function processMetaWhatsappWebhook(payload, options = {}) {
     }
   }
 
-  return { processed: metadata.length, coexistence: results };
+  return { processed: metadata.length, coexistence: results, marketing };
 }
 
 module.exports = {
   COEXISTENCE_EVENT_FIELDS,
+  MARKETING_TEMPLATE_STATUS_FIELD,
   buildCoexistenceDeduplicationKey,
   extractCoexistenceIdentity,
   extractDeliveryStatusLogs,
@@ -360,6 +439,7 @@ module.exports = {
   hasCoexistenceWebhookEvents,
   processCoexistenceWebhookItem,
   processMetaWhatsappWebhook,
+  processMarketingTemplateStatusUpdate,
   recordCoexistenceEvent,
   resolveVerifiedCoexistenceVendor,
   verifyWebhookSignature,

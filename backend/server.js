@@ -64,6 +64,7 @@ const vendorMembershipPlanRoutes = require("./routes/vendorMembershipPlanRoutes"
 const vendorCustomerMembershipRoutes = require("./routes/vendorCustomerMembershipRoutes");
 const vendorPrepaidWalletRoutes = require("./routes/vendorPrepaidWalletRoutes");
 const vendorWhatsappBusinessRoutes = require("./routes/vendorWhatsappBusinessRoutes");
+const vendorWhatsappMarketingRoutes = require("./routes/vendorWhatsappMarketingRoutes");
 const metaWhatsappWebhookRoutes = require("./routes/metaWhatsappWebhookRoutes");
 const customerPortalRoutes = require("./routes/customerPortalRoutes");
 const publicVendorHighlightsRoutes = require("./routes/publicVendorHighlightsRoutes");
@@ -192,6 +193,7 @@ app.use("/api/google/places", googlePlacesRoutes);
 app.use("/api/setup-progress", setupProgressRoutes);
 app.use("/api/vendor-flow", vendorFlowRoutes);
 app.use("/api/vendor/whatsapp-business", vendorWhatsappBusinessRoutes);
+app.use("/api/vendor/whatsapp-marketing", vendorWhatsappMarketingRoutes);
 app.use("/api", require("./routes/vendorFlowRoutes"));
 app.use("/api/billing", billingRoutes);
 app.use("/api/loyalty", loyaltyRoutes);

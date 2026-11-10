@@ -24,6 +24,7 @@ import EnquiriesDashboard from "../components/dashboard/EnquiriesDashboard";
 import WebsiteAnalyticsDashboard from "../components/dashboard/WebsiteAnalyticsDashboard";
 import CustomerAnalyticsDashboard from "../components/dashboard/CustomerAnalyticsDashboard";
 import WhatsappBusinessDashboard from "../components/dashboard/WhatsappBusinessDashboard";
+import WhatsappMarketingDashboard from "../components/dashboard/WhatsappMarketingDashboard";
 import MembershipPlansDashboard from "../components/dashboard/MembershipPlansDashboard";
 import GstReports from "../components/dashboard/GstReports";
 import AppointmentCalendar, { TodayAppointmentsWidget } from "../components/dashboard/AppointmentCalendar";
@@ -7682,6 +7683,13 @@ function ExploreContent({ onReady, onOpenServices }) {
                   },
                 },
                 {
+                  title: "WhatsApp Marketing",
+                  description: "Create reusable customer marketing message templates.",
+                  onClick: () => {
+                    setViewMode("whatsapp-marketing-dashboard");
+                  },
+                },
+                {
                   title: "Website Analytics",
                   description: "Check visitors, CTA clicks, enquiries, and traffic sources.",
                   onClick: () => {
@@ -8070,6 +8078,16 @@ function ExploreContent({ onReady, onOpenServices }) {
             {renderDashboardHeader("Manage My WhatsApp Business", () => setViewMode("new-dashboard"))}
 
             <WhatsappBusinessDashboard vendorId={vendorId} />
+          </div>
+        </div>
+      )}
+
+      {viewMode === "whatsapp-marketing-dashboard" && (
+        <div className="new-dashboard-overlay">
+          <div className="new-dashboard-shell">
+            {renderDashboardHeader("WhatsApp Marketing", () => setViewMode("new-dashboard"))}
+
+            <WhatsappMarketingDashboard vendorId={vendorId} />
           </div>
         </div>
       )}

@@ -710,6 +710,67 @@ async function createTemplate({ wabaId, accessToken, payload }) {
   }
 }
 
+async function uploadTemplateMediaSample({
+  accessToken,
+  fileName,
+  fileType,
+  buffer,
+  httpClient = axios,
+}) {
+  const { appId } = getMetaWhatsAppConfig();
+  const safeFileName = String(fileName || "marketing-media").trim().slice(0, 180);
+  const mimeType = String(fileType || "").trim();
+  if (!appId || !accessToken || !safeFileName || !mimeType || !Buffer.isBuffer(buffer) || !buffer.length) {
+    const error = new Error("Meta app, access token, and media file are required");
+    error.code = "meta_template_media_payload_invalid";
+    throw error;
+  }
+
+  try {
+    const sessionResponse = await httpClient.post(graphUrl(`${appId}/uploads`), null, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+      params: {
+        file_name: safeFileName,
+        file_length: buffer.length,
+        file_type: mimeType,
+      },
+    });
+    const sessionId = String(sessionResponse?.data?.id || "").trim();
+    if (!sessionId) {
+      const error = new Error("Meta did not create a media upload session");
+      error.code = "meta_template_media_session_missing";
+      throw error;
+    }
+
+    const uploadResponse = await httpClient.post(graphUrl(sessionId), buffer, {
+      headers: {
+        Authorization: `OAuth ${accessToken}`,
+        file_offset: "0",
+        "Content-Type": "application/octet-stream",
+      },
+      maxBodyLength: Infinity,
+    });
+    const handle = String(uploadResponse?.data?.h || "").trim();
+    if (!handle) {
+      const error = new Error("Meta did not return a media sample handle");
+      error.code = "meta_template_media_handle_missing";
+      throw error;
+    }
+    return { handle, sessionId };
+  } catch (error) {
+    if (
+      error.code === "meta_template_media_session_missing" ||
+      error.code === "meta_template_media_handle_missing"
+    ) {
+      throw error;
+    }
+    const wrapped = new Error("Unable to upload template media sample to Meta");
+    wrapped.code = "meta_template_media_upload_failed";
+    wrapped.metaError = getSafeMetaError(error);
+    throw wrapped;
+  }
+}
+
 async function findTemplateByName({ wabaId, accessToken, name }) {
   const id = String(wabaId || "").trim();
   const templateName = normalizeTemplateName(name);
@@ -739,6 +800,23 @@ async function findTemplateByName({ wabaId, accessToken, name }) {
 
 async function getTemplateStatus({ wabaId, accessToken, name }) {
   return findTemplateByName({ wabaId, accessToken, name });
+}
+
+async function getTemplateById({ templateId, accessToken }) {
+  const id = String(templateId || "").trim();
+  if (!id || !accessToken) return null;
+  try {
+    const response = await axios.get(graphUrl(id), {
+      headers: { Authorization: `Bearer ${accessToken}` },
+      params: { fields: "id,name,status,category,language,rejected_reason" },
+    });
+    return response.data || null;
+  } catch (error) {
+    const wrapped = new Error("Unable to read WhatsApp template status from Meta");
+    wrapped.code = "meta_template_lookup_failed";
+    wrapped.metaError = getSafeMetaError(error);
+    throw wrapped;
+  }
 }
 
 async function getPhoneNumberStatus({ phoneNumberId, accessToken }) {
@@ -993,6 +1071,7 @@ module.exports = {
   getPhoneNumberStatusWithSystemUserToken,
   getPhoneNumberReadinessWithSystemUserToken,
   getTemplateStatus,
+  getTemplateById,
   getWhatsAppBusinessAccount,
   readGraphAssetWithSystemUserToken,
   registerPhoneNumber,
@@ -1003,6 +1082,7 @@ module.exports = {
   runMetaSystemUserAssetDiagnostics,
   sendMetaTemplateMessage,
   sendTemplateMessage,
+  uploadTemplateMediaSample,
   setTwoStepVerificationPinWithSystemUserToken,
   getSubscribedAppIds,
   subscribeAppToWaba,

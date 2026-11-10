@@ -16,6 +16,7 @@ const PlanSchema = new mongoose.Schema({
     basicBilling: { type: Boolean, default: true },
     customerBilling: { type: Boolean, default: false },
     whatsappBilling: { type: Boolean, default: false },
+    whatsappMarketing: { type: Boolean, default: false },
     whatsappBundle: { type: Number, default: 0 },
     advancedBilling: { type: Boolean, default: false },
     humanResourceManagement: { type: Boolean, default: false },
