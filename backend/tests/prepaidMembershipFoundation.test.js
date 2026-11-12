@@ -12,6 +12,7 @@ const PrepaidWalletLedger = require("../models/PrepaidWalletLedger");
 const membershipPlanController = require("../controllers/vendorMembershipPlanController");
 const {
   resolveCanonicalMembershipMenuItem,
+  resolveCanonicalMembershipMenuItems,
 } = require("../services/canonicalMembershipMenuItem");
 const {
   assertPrepaidMembershipWalletEnabled,
@@ -43,6 +44,118 @@ function queryModel(documents = []) {
     },
   };
 }
+
+function batchQueryModel(documents = [], calls = { count: 0 }) {
+  return {
+    find() {
+      calls.count += 1;
+      return {
+        select() { return this; },
+        session() { return this; },
+        lean: async () => documents,
+      };
+    },
+  };
+}
+
+test("batch canonical resolution preserves all active legacy service variants with bounded queries", async () => {
+  const vendorId = id();
+  const variants = ["Ammonia Free", "Premium", "Regular"].map((name) => ({
+    _id: id(),
+    vendorId,
+    name,
+    price: name === "Ammonia Free" ? 720 : 600,
+    isLeaf: true,
+    pricingStatus: "Active",
+    // Legacy uploaded leaves may predate both fields but are still active services.
+    datasetStatus: undefined,
+    customType: "",
+    pathNames: ["Hair Colour Combo", name],
+  }));
+  const menuCalls = { count: 0 };
+  const result = await resolveCanonicalMembershipMenuItems({
+    vendorId: String(vendorId),
+    candidates: variants.map((variant) => ({
+      itemId: String(variant._id),
+      itemSource: "vendor_menu_node",
+    })),
+  }, {
+    models: {
+      vendor_menu_node: batchQueryModel(variants, menuCalls),
+    },
+  });
+
+  assert.equal(menuCalls.count, 1);
+  assert.equal(result.errors.length, 0);
+  assert.deepEqual(result.items.map((item) => item.name), ["Ammonia Free", "Premium", "Regular"]);
+  assert.ok(result.items.every((item) => item.itemKind === "SERVICE"));
+  assert.equal(result.items[0].price, 720);
+});
+
+test("standard price variants fail closed only when their canonical master record is missing", async () => {
+  const vendorId = id();
+  const rootId = id();
+  const comboId = id();
+  const ammoniaMasterId = id();
+  const premiumMasterId = id();
+  const regularMasterId = id();
+  const variants = [
+    { name: "Ammonia Free", price: 720, categoryId: ammoniaMasterId },
+    { name: "Premium", price: 570, categoryId: premiumMasterId },
+    { name: "Regular", price: 570, categoryId: regularMasterId },
+  ].map((variant) => ({
+    _id: id(),
+    vendorId,
+    rootCategoryId: rootId,
+    isLeaf: true,
+    pricingStatus: "Active",
+    ...variant,
+  }));
+  const masterRows = [
+    { _id: comboId, category: rootId, name: "Hair Colour Combo", parentSubcategory: null },
+    {
+      _id: premiumMasterId,
+      category: rootId,
+      name: "Premium",
+      parentSubcategory: comboId,
+      packagesIncludes: "Hair Cut,Colour,Shave",
+    },
+    {
+      _id: regularMasterId,
+      category: rootId,
+      name: "Regular",
+      parentSubcategory: comboId,
+      packagesIncludes: "Hair Cut,Colour,Shave",
+    },
+  ];
+
+  const result = await resolveCanonicalMembershipMenuItems({
+    vendorId: String(vendorId),
+    candidates: variants.map((variant) => ({
+      itemId: String(variant._id),
+      itemSource: "vendor_price_node",
+    })),
+  }, {
+    models: {
+      vendor_price_node: batchQueryModel(variants),
+      DummyCategory: batchQueryModel([{
+        _id: rootId,
+        name: "Salon & Spa",
+        categoryType: "Services",
+      }]),
+      DummySubcategory: batchQueryModel(masterRows),
+    },
+  });
+
+  assert.deepEqual(result.items.map((item) => item.name), ["Premium", "Regular"]);
+  assert.deepEqual(result.errors, [{
+    candidate: {
+      itemId: String(variants[0]._id),
+      itemSource: "vendor_price_node",
+    },
+    code: "item_kind_unavailable",
+  }]);
+});
 
 function baseCustomerMembership(overrides = {}) {
   const now = new Date("2026-11-05T10:00:00.000Z");

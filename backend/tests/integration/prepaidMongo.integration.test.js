@@ -550,6 +550,49 @@ test("concurrent enrollment and renewal preserve one financial record per reques
   assert.equal(await PrepaidWalletLedger.countDocuments({ customerMembershipId: children[0]._id, eventType: "CREDIT" }), 1);
 });
 
+test("a historical depleted membership cannot renew after its successor becomes active", async () => {
+  const vendorId = oid();
+  const plan = await createValuePlan(vendorId);
+  const enrolled = await enroll({
+    vendorId,
+    plan,
+    mobile: "9876500044",
+    key: "historical-renewal-parent",
+  });
+  const parent = await CustomerMembership.findById(enrolled.payload.data.id);
+  const parentWallet = await PrepaidMembershipWallet.findOne({ customerMembershipId: parent._id });
+  await Promise.all([
+    CustomerMembership.updateOne({ _id: parent._id }, { $set: { status: "DEPLETED" } }),
+    PrepaidMembershipWallet.updateOne({ _id: parentWallet._id }, {
+      $set: {
+        status: "DEPLETED",
+        remainingAmountPaise: 0,
+        consumedAmountPaise: parentWallet.creditedAmountPaise,
+      },
+    }),
+  ]);
+
+  const firstRenewal = await renew({
+    vendorId,
+    membershipId: parent._id,
+    key: "historical-renewal-child",
+  });
+  assert.equal(firstRenewal.statusCode, 201);
+  assert.equal(firstRenewal.payload.data.status, "ACTIVE");
+
+  const secondRenewal = await renew({
+    vendorId,
+    membershipId: parent._id,
+    key: "historical-renewal-duplicate",
+  });
+  assert.equal(secondRenewal.statusCode, 409);
+  assert.equal(secondRenewal.payload.code, "prepaid_renewal_successor_exists");
+  assert.equal(
+    await CustomerMembership.countDocuments({ renewedFromMembershipId: parent._id }),
+    1
+  );
+});
+
 test("concurrent activation-boundary lookups promote membership and wallet together", async () => {
   const vendorId = oid();
   const { plan } = await createSessionsPlan(vendorId);

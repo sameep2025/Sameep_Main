@@ -21,6 +21,10 @@ const renewalUiPath = path.join(
   root,
   "app/components/dashboard/membershipRenewalUi.mjs"
 );
+const eligibilityCoveragePath = path.join(
+  root,
+  "app/components/dashboard/membershipEligibilityCoverage.mjs"
+);
 const renewalUiSource = fs.readFileSync(renewalUiPath, "utf8");
 
 test("Discount remains the default and prepaid types are server-capability gated", () => {
@@ -84,6 +88,36 @@ test("prepaid selector exposes the complete verified item set without frontend s
   assert.match(css, /\.membership-editor-footer[\s\S]*position:\s*sticky/);
 });
 
+test("membership eligibility coverage counts complete unique canonical items", async () => {
+  const { getMembershipEligibilityCoverage } = await import(eligibilityCoveragePath);
+  const standardItems = [
+    { id: "regular", sourceType: "vendor_price_node" },
+    { id: "premium", sourceType: "vendor_price_node" },
+    { id: "ammonia", sourceType: "vendor_price_node" },
+    { id: "ammonia", sourceType: "vendor_price_node" },
+  ];
+  const prepaidItems = [
+    { itemId: "regular", itemSource: "vendor_price_node" },
+    { itemId: "premium", itemSource: "vendor_price_node" },
+    { itemId: "premium", itemSource: "vendor_price_node" },
+  ];
+
+  assert.deepEqual(getMembershipEligibilityCoverage({
+    standardItems,
+    discountItems: standardItems,
+    prepaidItems,
+  }), {
+    standardMenu: 3,
+    discountEligible: 3,
+    prepaidEligible: 2,
+  });
+  assert.match(source, /Membership service coverage/);
+  assert.match(source, /eligibilityCoverage\.standardMenu/);
+  assert.match(source, /eligibilityCoverage\.discountEligible/);
+  assert.match(source, /eligibilityCoverage\.prepaidEligible/);
+  assert.match(css, /\.membership-eligibility-coverage[\s\S]*repeat\(3, minmax\(0, 1fr\)\)/);
+});
+
 test("prepaid enrollment and renewal are idempotent and prevent duplicate submits", () => {
   assert.match(source, /createIdempotencyKey\("membership-enrollment"\)/);
   assert.match(source, /createIdempotencyKey\("membership-renewal"\)/);
@@ -115,6 +149,19 @@ test("prepaid renewal UI allows only depleted or expired balances", async () => 
     status: "ACTIVE",
     wallet: { remainingAmountPaise: 0 },
   }).allowed, true);
+  assert.deepEqual(getMembershipRenewalAvailability({
+    membershipType: "PREPAID_VALUE",
+    status: "DEPLETED",
+    wallet: { remainingAmountPaise: 0 },
+    renewal: {
+      allowed: false,
+      reason: "A newer prepaid membership is already active.",
+    },
+  }), {
+    allowed: false,
+    reason: "A newer prepaid membership is already active.",
+    code: "",
+  });
   assert.equal(getMembershipRenewalAvailability({
     membershipType: "PREPAID_SESSIONS",
     status: "DEPLETED",
@@ -126,6 +173,20 @@ test("prepaid renewal UI allows only depleted or expired balances", async () => 
   }).allowed, true);
   assert.match(renewalUiSource, /Renewal is available after the current wallet balance is exhausted/);
   assert.match(source, /<option value="DEPLETED">Depleted<\/option>/);
+  assert.match(source, /prepaid_renewal_successor_exists/);
+});
+
+test("customer membership list is compact and supports type-first filtering", () => {
+  assert.match(source, /<span>Membership type<\/span>/);
+  assert.match(source, /All Memberships/);
+  assert.match(source, /Discount Memberships/);
+  assert.match(source, /Prepaid Packages/);
+  assert.match(source, /Prepaid Wallets/);
+  assert.match(source, /params\.set\("membershipType", membershipTypeFilter\)/);
+  assert.match(source, /membership-customer-summary/);
+  assert.match(source, /View Details/);
+  assert.match(css, /\.membership-customer-card/);
+  assert.match(css, /\.membership-customer-summary/);
 });
 
 test("wallet details and mobile layout use authenticated response values", () => {

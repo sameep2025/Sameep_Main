@@ -24,6 +24,8 @@ const {
 } = require("../utils/membershipEligibleServices");
 
 const PAYMENT_METHODS = CustomerMembership.constants.PAYMENT_METHODS;
+const PREPAID_MEMBERSHIP_TYPES = ["PREPAID_VALUE", "PREPAID_SESSIONS"];
+const FILTERABLE_MEMBERSHIP_TYPES = ["DISCOUNT", ...PREPAID_MEMBERSHIP_TYPES];
 const DURATION_MONTHS = {
   MONTHLY: 1,
   QUARTERLY: 3,
@@ -293,16 +295,37 @@ function getPrepaidWalletRemainingBalance(wallet, membershipType) {
   return Number.isSafeInteger(balance) && balance >= 0 ? balance : null;
 }
 
-function getPrepaidRenewalAvailability({ effectiveStatus, wallet, membershipType }) {
+function getPrepaidRenewalAvailability({
+  effectiveStatus,
+  wallet,
+  membershipType,
+  competingMembership = null,
+}) {
+  if (competingMembership) {
+    return {
+      allowed: false,
+      code: "prepaid_renewal_successor_exists",
+      reason: "Renewal is unavailable because a newer active or scheduled prepaid membership already exists.",
+    };
+  }
   const remainingBalance = getPrepaidWalletRemainingBalance(wallet, membershipType);
   if (!wallet || remainingBalance === null) {
-    return { allowed: false, code: "prepaid_renewal_wallet_inconsistent" };
+    return {
+      allowed: false,
+      code: "prepaid_renewal_wallet_inconsistent",
+      reason: "Prepaid wallet information is unavailable or inconsistent.",
+    };
   }
   if (effectiveStatus === "EXPIRED") {
     return { allowed: true, remainingBalance };
   }
   if (effectiveStatus === "ACTIVE" && remainingBalance > 0) {
-    return { allowed: false, code: "prepaid_renewal_balance_remaining", remainingBalance };
+    return {
+      allowed: false,
+      code: "prepaid_renewal_balance_remaining",
+      reason: "Renewal is available after the current wallet balance is exhausted or the membership expires.",
+      remainingBalance,
+    };
   }
   if (["ACTIVE", "DEPLETED"].includes(effectiveStatus) && remainingBalance === 0) {
     return { allowed: true, remainingBalance };
@@ -310,8 +333,18 @@ function getPrepaidRenewalAvailability({ effectiveStatus, wallet, membershipType
   return {
     allowed: false,
     code: "prepaid_renewal_wallet_inconsistent",
+    reason: "Prepaid wallet information is unavailable or inconsistent.",
     remainingBalance,
   };
+}
+
+function findCompetingPrepaidMembership(membership, peers = []) {
+  return peers.find((peer) => (
+    String(peer?._id || peer?.id || "") !== String(membership?._id || membership?.id || "") &&
+    String(peer?.customerId || "") === String(membership?.customerId || "") &&
+    PREPAID_MEMBERSHIP_TYPES.includes(peer?.membershipType) &&
+    ["ACTIVE", "SCHEDULED"].includes(getEffectiveMembershipStatus(peer))
+  )) || null;
 }
 
 function escapeRegExp(value) {
@@ -735,12 +768,16 @@ async function listMemberships(req, res) {
     const limit = Math.min(Math.max(Number(req.query?.limit) || 25, 1), 50);
     const page = Math.max(Number(req.query?.page) || 1, 1);
     const status = String(req.query?.status || "").trim().toUpperCase();
+    const membershipType = String(req.query?.membershipType || "").trim().toUpperCase();
     const search = String(req.query?.search || "").trim();
     const query = { vendorId };
     const now = new Date();
 
     if (!isCanonicalObjectId(vendorId)) {
       return res.status(400).json({ success: false, message: "Valid vendorId required" });
+    }
+    if (FILTERABLE_MEMBERSHIP_TYPES.includes(membershipType)) {
+      query.membershipType = membershipType;
     }
     if (status === "ACTIVE") {
       query.status = "ACTIVE";
@@ -791,9 +828,14 @@ async function listMemberships(req, res) {
       CustomerMembership.countDocuments(query),
     ]);
     const prepaidMembershipIds = memberships
-      .filter((membership) => ["PREPAID_VALUE", "PREPAID_SESSIONS"].includes(membership.membershipType))
+      .filter((membership) => PREPAID_MEMBERSHIP_TYPES.includes(membership.membershipType))
       .map((membership) => membership._id);
-    const [nameMap, wallets] = await Promise.all([
+    const prepaidCustomerIds = Array.from(new Set(
+      memberships
+        .filter((membership) => PREPAID_MEMBERSHIP_TYPES.includes(membership.membershipType))
+        .map((membership) => String(membership.customerId))
+    ));
+    const [nameMap, wallets, prepaidPeers] = await Promise.all([
       getVendorCustomerNameMap(vendorId, memberships),
       prepaidMembershipIds.length
         ? PrepaidMembershipWallet.find({
@@ -801,17 +843,43 @@ async function listMemberships(req, res) {
             customerMembershipId: { $in: prepaidMembershipIds },
           }).lean()
         : [],
+      prepaidCustomerIds.length
+        ? CustomerMembership.find({
+            vendorId,
+            customerId: { $in: prepaidCustomerIds },
+            membershipType: { $in: PREPAID_MEMBERSHIP_TYPES },
+            status: { $in: ["ACTIVE", "SCHEDULED"] },
+            expiresAt: { $gt: now },
+          })
+            .select("_id customerId membershipType status activatedAt expiresAt")
+            .lean()
+        : [],
     ]);
     const walletMap = new Map(wallets.map((wallet) => [String(wallet.customerMembershipId), wallet]));
 
     return res.json({
       success: true,
-      data: memberships.map((membership) => ({
-        ...serializeMembership(membership, nameMap),
-        ...(["PREPAID_VALUE", "PREPAID_SESSIONS"].includes(membership.membershipType)
-          ? { wallet: serializeWallet(walletMap.get(String(membership._id)) || null) }
-          : {}),
-      })),
+      data: memberships.map((membership) => {
+        const wallet = walletMap.get(String(membership._id)) || null;
+        const isPrepaid = PREPAID_MEMBERSHIP_TYPES.includes(membership.membershipType);
+        const competingMembership = isPrepaid
+          ? findCompetingPrepaidMembership(membership, prepaidPeers)
+          : null;
+        return {
+          ...serializeMembership(membership, nameMap),
+          ...(isPrepaid
+            ? {
+                wallet: serializeWallet(wallet),
+                renewal: getPrepaidRenewalAvailability({
+                  effectiveStatus: getEffectiveMembershipStatus(membership, now),
+                  wallet,
+                  membershipType: membership.membershipType,
+                  competingMembership,
+                }),
+              }
+            : {}),
+        };
+      }),
       pagination: {
         limit,
         page,
@@ -848,14 +916,25 @@ async function getMembership(req, res) {
       .sort({ activatedAt: 1, createdAt: 1, _id: 1 })
       .lean();
 
-    const isPrepaid = ["PREPAID_VALUE", "PREPAID_SESSIONS"].includes(membership.membershipType);
+    const isPrepaid = PREPAID_MEMBERSHIP_TYPES.includes(membership.membershipType);
     if (isPrepaid) assertPrepaidMembershipWalletEnabled();
-    const [nameMap, serviceMap, wallet] = await Promise.all([
+    const [nameMap, serviceMap, wallet, prepaidPeers] = await Promise.all([
       getVendorCustomerNameMap(vendorId, [membership, ...history]),
       loadMembershipEligibleServiceMap([membership, ...history]),
       isPrepaid
         ? PrepaidMembershipWallet.findOne({ vendorId, customerMembershipId: membership._id }).lean()
         : null,
+      isPrepaid
+        ? CustomerMembership.find({
+            vendorId,
+            customerId: membership.customerId,
+            membershipType: { $in: PREPAID_MEMBERSHIP_TYPES },
+            status: { $in: ["ACTIVE", "SCHEDULED"] },
+            expiresAt: { $gt: new Date() },
+          })
+            .select("_id customerId membershipType status activatedAt expiresAt")
+            .lean()
+        : [],
     ]);
     const walletLedger = wallet
       ? await PrepaidWalletLedger.find({ vendorId, walletId: wallet._id })
@@ -865,7 +944,19 @@ async function getMembership(req, res) {
 
     return res.json({
       success: true,
-      data: serializeMembership(membership, nameMap, serviceMap),
+      data: {
+        ...serializeMembership(membership, nameMap, serviceMap),
+        ...(isPrepaid
+          ? {
+              renewal: getPrepaidRenewalAvailability({
+                effectiveStatus: getEffectiveMembershipStatus(membership),
+                wallet,
+                membershipType: membership.membershipType,
+                competingMembership: findCompetingPrepaidMembership(membership, prepaidPeers),
+              }),
+            }
+          : {}),
+      },
       history: history.map((row) => serializeMembership(row, nameMap, serviceMap)),
       wallet: serializeWallet(wallet),
       walletLedger: walletLedger.map(serializeWalletLedger),
@@ -1001,6 +1092,9 @@ async function renewMembership(req, res) {
         }
       }
 
+      const isPrepaidRenewal = PREPAID_MEMBERSHIP_TYPES.includes(
+        refreshedExisting.membershipType
+      );
       const pendingRenewal = await CustomerMembership.findOne({
         vendorId,
         customerId: refreshedExisting.customerId,
@@ -1018,9 +1112,27 @@ async function renewMembership(req, res) {
         throw error;
       }
 
-      const isPrepaidRenewal = ["PREPAID_VALUE", "PREPAID_SESSIONS"].includes(
-        refreshedExisting.membershipType
-      );
+      const competingActivePrepaid = isPrepaidRenewal
+        ? await CustomerMembership.findOne({
+            _id: { $ne: refreshedExisting._id },
+            vendorId,
+            customerId: refreshedExisting.customerId,
+            membershipType: { $in: PREPAID_MEMBERSHIP_TYPES },
+            status: "ACTIVE",
+            expiresAt: { $gt: now },
+          })
+            .session(session)
+            .lean()
+        : null;
+      if (competingActivePrepaid) {
+        const error = new Error(
+          "Renewal is unavailable because a newer active or scheduled prepaid membership already exists."
+        );
+        error.statusCode = 409;
+        error.code = "prepaid_renewal_successor_exists";
+        throw error;
+      }
+
       let sourceWallet = null;
       if (isPrepaidRenewal) {
         sourceWallet = await PrepaidMembershipWallet.findOne({
@@ -1257,6 +1369,7 @@ module.exports = {
     getEffectiveMembershipStatus,
     getPrepaidWalletRemainingBalance,
     getPrepaidRenewalAvailability,
+    findCompetingPrepaidMembership,
     serializeWallet,
     serializeWalletLedger,
     serializeMembership,

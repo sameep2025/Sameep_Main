@@ -44,6 +44,13 @@ async function findOneLean(Model, filter, select, session) {
   return typeof query.lean === "function" ? query.lean() : query;
 }
 
+async function findManyLean(Model, filter, select, session) {
+  let query = Model.find(filter);
+  if (select && typeof query.select === "function") query = query.select(select);
+  query = withSession(query, session);
+  return typeof query.lean === "function" ? query.lean() : query;
+}
+
 function normalizePath(values, itemName) {
   const path = (Array.isArray(values) ? values : [])
     .map((value) => String(value || "").trim())
@@ -56,7 +63,7 @@ function assertBillable(source, item) {
   const hasPrice = Number.isFinite(Number(item?.price)) && Number(item.price) >= 0;
   const active = item?.pricingStatus === "Active";
   const sourceActive =
-    (source !== "vendor_menu_node" || item?.datasetStatus === "active") &&
+    (source !== "vendor_menu_node" || item?.datasetStatus !== "archived") &&
     (source !== "custom_package" || item?.isDeleted !== true);
 
   if (item?.isLeaf !== true || !hasPrice || !active || !sourceActive) {
@@ -65,6 +72,81 @@ function assertBillable(source, item) {
       "item_not_billable"
     );
   }
+}
+
+function resolveVendorPriceMetadataFromMaps(item, rootCategories, subcategories) {
+  const rootCategory = rootCategories.get(String(item.rootCategoryId || ""));
+  const masterItem = subcategories.get(
+    `${String(item.rootCategoryId || "")}:${String(item.categoryId || "")}`
+  );
+  if (!masterItem || !rootCategory) {
+    throw new CanonicalMembershipMenuItemError(
+      "Authoritative menu classification is unavailable",
+      "item_kind_unavailable"
+    );
+  }
+
+  const masterPath = [];
+  const visited = new Set();
+  let current = masterItem;
+  while (current) {
+    const currentId = String(current._id || "");
+    if (!currentId || visited.has(currentId)) {
+      throw new CanonicalMembershipMenuItemError(
+        "Authoritative menu hierarchy is invalid",
+        "invalid_item_hierarchy"
+      );
+    }
+    visited.add(currentId);
+    masterPath.unshift(String(current.name || "").trim());
+    if (!current.parentSubcategory) break;
+    current = subcategories.get(
+      `${String(item.rootCategoryId || "")}:${String(current.parentSubcategory)}`
+    );
+    if (!current) {
+      throw new CanonicalMembershipMenuItemError(
+        "Authoritative menu hierarchy is incomplete",
+        "invalid_item_hierarchy"
+      );
+    }
+  }
+
+  const packageIncludes = String(masterItem.packagesIncludes || "").trim();
+  const itemKind = packageIncludes
+    ? "PACKAGE"
+    : String(rootCategory.categoryType || "").trim() === "Services"
+      ? "SERVICE"
+      : null;
+  if (!ITEM_KINDS.includes(itemKind)) {
+    throw new CanonicalMembershipMenuItemError(
+      "Authoritative Service or Package classification is unavailable",
+      "item_kind_unavailable"
+    );
+  }
+  return {
+    itemKind,
+    packageIncludes,
+    terms: String(item.terms || masterItem.terms || "").trim(),
+    categoryPath: normalizePath([rootCategory.name, ...masterPath], item.name),
+  };
+}
+
+function serializeResolvedItem(source, item, metadata) {
+  const pricePaise = Math.round(Number(item.price) * 100);
+  if (!Number.isSafeInteger(pricePaise)) {
+    throw new CanonicalMembershipMenuItemError("Menu item price is invalid", "invalid_item_price");
+  }
+  return {
+    itemId: String(item._id),
+    itemSource: source,
+    itemKind: metadata.itemKind,
+    name: String(item.name || "").trim(),
+    price: Number(item.price),
+    pricePaise,
+    categoryPath: metadata.categoryPath,
+    packageIncludes: metadata.packageIncludes,
+    terms: metadata.terms,
+  };
 }
 
 async function resolveVendorPriceMetadata(item, models, session) {
@@ -221,22 +303,84 @@ async function resolveCanonicalMembershipMenuItem(input = {}, dependencies = {})
   const metadata = source === "vendor_price_node"
     ? await resolveVendorPriceMetadata(item, models, input.session)
     : resolveExplicitMetadata(source, item);
-  const pricePaise = Math.round(Number(item.price) * 100);
-  if (!Number.isSafeInteger(pricePaise)) {
-    throw new CanonicalMembershipMenuItemError("Menu item price is invalid", "invalid_item_price");
-  }
+  return serializeResolvedItem(source, item, metadata);
+}
 
-  return {
-    itemId: String(item._id),
-    itemSource: source,
-    itemKind: metadata.itemKind,
-    name: String(item.name || "").trim(),
-    price: Number(item.price),
-    pricePaise,
-    categoryPath: metadata.categoryPath,
-    packageIncludes: metadata.packageIncludes,
-    terms: metadata.terms,
+async function resolveCanonicalMembershipMenuItems(input = {}, dependencies = {}) {
+  const vendorId = normalizeId(input.vendorId, "vendorId");
+  const candidates = Array.isArray(input.candidates) ? input.candidates : [];
+  const models = {
+    ...SOURCE_MODELS,
+    DummyCategory,
+    DummySubcategory,
+    ...(dependencies.models || {}),
   };
+  const normalized = candidates.map((candidate) => ({
+    itemId: normalizeId(candidate.itemId, "itemId"),
+    itemSource: String(candidate.itemSource || "").trim(),
+  }));
+  normalized.forEach((candidate) => {
+    if (!ITEM_SOURCES.includes(candidate.itemSource)) {
+      throw new CanonicalMembershipMenuItemError(
+        "Item source is unsupported",
+        "unsupported_item_source"
+      );
+    }
+  });
+
+  const documents = new Map();
+  await Promise.all(ITEM_SOURCES.map(async (source) => {
+    const ids = normalized
+      .filter((candidate) => candidate.itemSource === source)
+      .map((candidate) => candidate.itemId);
+    if (!ids.length) return;
+    const rows = await findManyLean(
+      models[source],
+      { _id: { $in: ids }, vendorId },
+      "_id vendorId name price isLeaf pricingStatus terms packagesIncludes customType pathNames pathLabels datasetStatus isDeleted categoryId rootCategoryId",
+      input.session
+    );
+    rows.forEach((row) => documents.set(`${source}:${String(row._id)}`, row));
+  }));
+
+  const priceRows = Array.from(documents.entries())
+    .filter(([key]) => key.startsWith("vendor_price_node:"))
+    .map(([, row]) => row);
+  const rootIds = Array.from(new Set(priceRows.map((row) => String(row.rootCategoryId || "")).filter(Boolean)));
+  const [rootRows, subcategoryRows] = rootIds.length
+    ? await Promise.all([
+        findManyLean(models.DummyCategory, { _id: { $in: rootIds } }, "_id name categoryType", input.session),
+        findManyLean(
+          models.DummySubcategory,
+          { category: { $in: rootIds } },
+          "_id category name parentSubcategory terms packagesIncludes",
+          input.session
+        ),
+      ])
+    : [[], []];
+  const rootCategories = new Map(rootRows.map((row) => [String(row._id), row]));
+  const subcategories = new Map(
+    subcategoryRows.map((row) => [`${String(row.category)}:${String(row._id)}`, row])
+  );
+
+  const items = [];
+  const errors = [];
+  normalized.forEach((candidate) => {
+    try {
+      const item = documents.get(`${candidate.itemSource}:${candidate.itemId}`);
+      if (!item) {
+        throw new CanonicalMembershipMenuItemError("Menu item was not found", "item_not_found", 404);
+      }
+      assertBillable(candidate.itemSource, item);
+      const metadata = candidate.itemSource === "vendor_price_node"
+        ? resolveVendorPriceMetadataFromMaps(item, rootCategories, subcategories)
+        : resolveExplicitMetadata(candidate.itemSource, item);
+      items.push(serializeResolvedItem(candidate.itemSource, item, metadata));
+    } catch (error) {
+      errors.push({ candidate, code: error?.code || "item_resolution_failed" });
+    }
+  });
+  return { items, errors };
 }
 
 module.exports = {
@@ -244,4 +388,5 @@ module.exports = {
   ITEM_KINDS,
   ITEM_SOURCES,
   resolveCanonicalMembershipMenuItem,
+  resolveCanonicalMembershipMenuItems,
 };

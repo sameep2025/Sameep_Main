@@ -78,6 +78,7 @@ test("prepaid renewal availability requires depletion or expiry", () => {
   }), {
     allowed: false,
     code: "prepaid_renewal_balance_remaining",
+    reason: "Renewal is available after the current wallet balance is exhausted or the membership expires.",
     remainingBalance: 125000,
   });
   assert.deepEqual(getPrepaidRenewalAvailability({
@@ -97,6 +98,7 @@ test("prepaid renewal availability requires depletion or expiry", () => {
   }), {
     allowed: false,
     code: "prepaid_renewal_wallet_inconsistent",
+    reason: "Prepaid wallet information is unavailable or inconsistent.",
     remainingBalance: 1,
   });
   assert.deepEqual(getPrepaidRenewalAvailability({
@@ -104,6 +106,20 @@ test("prepaid renewal availability requires depletion or expiry", () => {
     membershipType: "PREPAID_VALUE",
     wallet: valueWallet(50000),
   }), { allowed: true, remainingBalance: 50000 });
+  assert.deepEqual(getPrepaidRenewalAvailability({
+    effectiveStatus: "DEPLETED",
+    membershipType: "PREPAID_VALUE",
+    wallet: valueWallet(0),
+    competingMembership: {
+      _id: new mongoose.Types.ObjectId(),
+      status: "ACTIVE",
+      membershipType: "PREPAID_VALUE",
+    },
+  }), {
+    allowed: false,
+    code: "prepaid_renewal_successor_exists",
+    reason: "Renewal is unavailable because a newer active or scheduled prepaid membership already exists.",
+  });
 });
 
 test("membership renewal and transaction indexes have one permanent unique definition", () => {
@@ -388,6 +404,8 @@ test("customer membership listing supports server-side filters, sorting, and pag
   assert.match(controllerSource, /\.skip\(skip\)/);
   assert.match(controllerSource, /hasMore/);
   assert.match(controllerSource, /status === "EXPIRED"/);
+  assert.match(controllerSource, /membershipType = String\(req\.query\?\.membershipType/);
+  assert.match(controllerSource, /prepaid_renewal_successor_exists/);
 });
 
 test("vendor membership detail returns effective override services and keeps history", async () => {

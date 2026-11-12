@@ -8,6 +8,7 @@ import {
   getPrepaidActivityPresentation,
 } from "./prepaidActivityPresentation.mjs";
 import { getMembershipRenewalAvailability } from "./membershipRenewalUi.mjs";
+import { getMembershipEligibilityCoverage } from "./membershipEligibilityCoverage.mjs";
 import "./MembershipPlansDashboard.css";
 
 const DURATION_OPTIONS = [
@@ -230,15 +231,15 @@ function sameStringSet(left = [], right = []) {
 }
 
 function collectBillableIds(nodes = []) {
-  const ids = [];
+  const ids = new Set();
 
   function walk(node) {
-    if (node?.isBillable) ids.push(String(node.id));
+    if (node?.isBillable) ids.add(String(node.id));
     (node?.children || []).forEach(walk);
   }
 
   nodes.forEach(walk);
-  return ids;
+  return Array.from(ids);
 }
 
 function collectExpandableIds(nodes = []) {
@@ -283,8 +284,11 @@ function getPrepaidItemKey(item = {}) {
 function buildPrepaidEligibleTree(items = []) {
   const roots = [];
   const groups = new Map();
+  const uniqueItems = Array.from(
+    new Map((Array.isArray(items) ? items : []).map((item) => [getPrepaidItemKey(item), item])).values()
+  ).filter((item) => getPrepaidItemKey(item) !== ":");
 
-  items.forEach((item) => {
+  uniqueItems.forEach((item) => {
     const itemName = String(item?.name || "Unnamed item").trim();
     const rawPath = Array.isArray(item?.categoryPath)
       ? item.categoryPath.map((part) => String(part || "").trim()).filter(Boolean)
@@ -511,6 +515,7 @@ export default function MembershipPlansDashboard({ vendorId }) {
   const [statusChangingId, setStatusChangingId] = useState("");
   const [activeView, setActiveView] = useState("home");
   const [membershipSearch, setMembershipSearch] = useState("");
+  const [membershipTypeFilter, setMembershipTypeFilter] = useState("ALL");
   const [membershipStatusFilter, setMembershipStatusFilter] = useState("ALL");
   const [membershipSort, setMembershipSort] = useState("newest");
   const [membershipPage, setMembershipPage] = useState(1);
@@ -597,6 +602,14 @@ export default function MembershipPlansDashboard({ vendorId }) {
   const visiblePrepaidItemCount = useMemo(
     () => collectBillableIds(visiblePrepaidTree).length,
     [visiblePrepaidTree]
+  );
+  const eligibilityCoverage = useMemo(
+    () => getMembershipEligibilityCoverage({
+      standardItems: eligibleItems,
+      discountItems: eligibleItems,
+      prepaidItems: prepaidEligibleItems,
+    }),
+    [eligibleItems, prepaidEligibleItems]
   );
   const selectedPrepaidItemKeys = useMemo(
     () => new Set(form.eligibleItemId
@@ -786,6 +799,7 @@ export default function MembershipPlansDashboard({ vendorId }) {
         sort: membershipSort,
       });
       if (membershipSearch.trim()) params.set("search", membershipSearch.trim());
+      if (membershipTypeFilter !== "ALL") params.set("membershipType", membershipTypeFilter);
       if (membershipStatusFilter !== "ALL") params.set("status", membershipStatusFilter);
 
       const res = await fetch(
@@ -826,7 +840,7 @@ export default function MembershipPlansDashboard({ vendorId }) {
   useEffect(() => {
     if (activeView !== "customers") return;
     loadCustomerMemberships(1);
-  }, [activeView, membershipStatusFilter, membershipSort]);
+  }, [activeView, membershipTypeFilter, membershipStatusFilter, membershipSort]);
 
   useEffect(() => {
     if (
@@ -1042,6 +1056,7 @@ export default function MembershipPlansDashboard({ vendorId }) {
       setSelectedMembership(json.data || null);
       setActiveView("customers");
       setMembershipSearch("");
+      setMembershipTypeFilter("ALL");
       setMembershipStatusFilter("ALL");
       setMembershipSort("newest");
       setMembershipPage(1);
@@ -1609,6 +1624,22 @@ export default function MembershipPlansDashboard({ vendorId }) {
           </div>
 
           <div className="membership-filter-bar">
+            <label className="membership-filter-field membership-type-filter">
+              <span>Membership type</span>
+              <select
+                value={membershipTypeFilter}
+                onChange={(event) => {
+                  setMembershipPage(1);
+                  setMembershipTypeFilter(event.target.value);
+                }}
+                disabled={membershipsLoading}
+              >
+                <option value="ALL">All Memberships</option>
+                <option value="DISCOUNT">Discount Memberships</option>
+                <option value="PREPAID_SESSIONS">Prepaid Packages</option>
+                <option value="PREPAID_VALUE">Prepaid Wallets</option>
+              </select>
+            </label>
             <input
               type="search"
               value={membershipSearch}
@@ -1617,6 +1648,8 @@ export default function MembershipPlansDashboard({ vendorId }) {
                 if (event.key === "Enter") loadCustomerMemberships(1);
               }}
               placeholder="Search mobile or plan name"
+              aria-label="Search customer memberships"
+              disabled={membershipsLoading}
             />
             <select
               value={membershipStatusFilter}
@@ -1624,6 +1657,8 @@ export default function MembershipPlansDashboard({ vendorId }) {
                 setMembershipPage(1);
                 setMembershipStatusFilter(event.target.value);
               }}
+              aria-label="Filter memberships by status"
+              disabled={membershipsLoading}
             >
               <option value="ALL">All statuses</option>
               <option value="ACTIVE">Active</option>
@@ -1638,6 +1673,8 @@ export default function MembershipPlansDashboard({ vendorId }) {
                 setMembershipPage(1);
                 setMembershipSort(event.target.value);
               }}
+              aria-label="Sort customer memberships"
+              disabled={membershipsLoading}
             >
               <option value="newest">Newest</option>
               <option value="activation_date">Activation date</option>
@@ -1663,40 +1700,35 @@ export default function MembershipPlansDashboard({ vendorId }) {
             <div className="membership-plan-stack">
               {customerMemberships.map((membership) => {
                 const renewalAvailability = getMembershipRenewalAvailability(membership);
-                const showRenewal = ["ACTIVE", "DEPLETED", "EXPIRED"].includes(membership.status);
+                const showRenewal = ["ACTIVE", "DEPLETED", "EXPIRED"].includes(membership.status) &&
+                  renewalAvailability.code !== "prepaid_renewal_successor_exists";
+                const membershipType = normalizePlanType(membership.membershipType);
+                const remainingLabel = membershipType === "PREPAID_VALUE"
+                  ? formatPaise(membership.wallet?.remainingAmountPaise)
+                  : membershipType === "PREPAID_SESSIONS"
+                    ? `${Number(membership.wallet?.remainingQuantity || 0)} session${Number(membership.wallet?.remainingQuantity || 0) === 1 ? "" : "s"}`
+                    : "";
                 return <article key={membership.id} className="membership-plan-card membership-customer-card">
                   <div className="membership-plan-card-head">
                     <div>
                       <span className="membership-type-label">{formatPlanType(membership.membershipType)}</span>
-                      <h4>{membership.planSnapshot?.name || "Membership"}</h4>
-                      <p>{formatCustomerIdentity(membership.customerName, membership.customerMobileSnapshot)}</p>
+                      <h4>{formatCustomerIdentity(membership.customerName, membership.customerMobileSnapshot)}</h4>
+                      <p>{membership.planSnapshot?.name || "Membership"}</p>
                     </div>
                     <span className={`membership-status ${membership.status === "ACTIVE" ? "active" : ""}`}>
                       {membership.status}
                     </span>
                   </div>
-                  <div className="membership-plan-metrics">
-                    <span>
-                      <strong>{formatCurrency(membership.sellingPriceAtPurchase)}</strong>
-                      Paid
-                    </span>
-                    {normalizePlanType(membership.membershipType) === "DISCOUNT" ? <span>
-                      <strong>{Number(membership.planSnapshot?.discountPercentage || 0)}%</strong>
-                      Discount
-                    </span> : null}
-                    <span>
-                      <strong>{formatDate(membership.activatedAt)}</strong>
-                      Activated
-                    </span>
+                  <div className="membership-customer-summary">
                     <span>
                       <strong>{formatDate(membership.expiresAt)}</strong>
                       Expires
                     </span>
-                  </div>
-                  <div className="membership-plan-flags">
-                    <span>Payment {membership.payment?.method || "-"}</span>
-                    {membership.payment?.reference ? (
-                      <span>Ref {membership.payment.reference}</span>
+                    {remainingLabel ? (
+                      <span>
+                        <strong>{remainingLabel}</strong>
+                        Remaining
+                      </span>
                     ) : null}
                   </div>
                   <div className="membership-plan-actions">
@@ -1894,7 +1926,8 @@ export default function MembershipPlansDashboard({ vendorId }) {
               </div>
             </div>
             <footer className="membership-editor-footer">
-              {["ACTIVE", "DEPLETED", "EXPIRED"].includes(selectedMembership.status) ? (
+              {["ACTIVE", "DEPLETED", "EXPIRED"].includes(selectedMembership.status) &&
+              selectedMembership.renewal?.code !== "prepaid_renewal_successor_exists" ? (
                 <button
                   type="button"
                   className="membership-secondary-button"
@@ -2121,6 +2154,14 @@ export default function MembershipPlansDashboard({ vendorId }) {
                       />
                     </label>
                   </div>
+
+                  {form.planType === "DISCOUNT" || form.planType === "PREPAID_SESSIONS" ? (
+                    <div className="membership-eligibility-coverage" aria-label="Membership service coverage">
+                      <span><strong>{eligibilityCoverage.standardMenu}</strong>Standard Menu</span>
+                      <span><strong>{eligibilityCoverage.discountEligible}</strong>Discount Eligible</span>
+                      <span><strong>{eligibilityCoverage.prepaidEligible}</strong>Prepaid Eligible</span>
+                    </div>
+                  ) : null}
 
                   {form.planType === "DISCOUNT" ? <>
                   <div className="membership-form-row">

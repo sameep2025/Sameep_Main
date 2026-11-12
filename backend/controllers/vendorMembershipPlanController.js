@@ -7,6 +7,7 @@ const VendorPriceNode = require("../models/VendorPriceNode");
 const VendorCustomPackage = require("../models/VendorCustomPackage");
 const {
   resolveCanonicalMembershipMenuItem,
+  resolveCanonicalMembershipMenuItems,
 } = require("../services/canonicalMembershipMenuItem");
 const {
   assertPrepaidMembershipWalletEnabled,
@@ -357,16 +358,13 @@ async function loadPrepaidEligibleMenuItems(vendorId, existingItems = []) {
   const uniqueCandidates = Array.from(
     new Map(candidates.map((item) => [`${item.itemSource}:${item.itemId}`, item])).values()
   );
-  const resolved = await Promise.all(uniqueCandidates.map(async (candidate) => {
-    try {
-      return await resolveCanonicalMembershipMenuItem({ vendorId, ...candidate });
-    } catch (error) {
-      return null;
-    }
-  }));
+  const resolved = await resolveCanonicalMembershipMenuItems({
+    vendorId,
+    candidates: uniqueCandidates,
+  });
   return {
-    items: resolved.filter(Boolean),
-    rejectedCount: resolved.filter((item) => !item).length,
+    items: resolved.items,
+    rejectedCount: resolved.errors.length,
   };
 }
 

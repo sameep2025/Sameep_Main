@@ -1,6 +1,13 @@
 const PREPAID_TYPES = new Set(["PREPAID_VALUE", "PREPAID_SESSIONS"]);
 
 export function getMembershipRenewalAvailability(membership = {}) {
+  if (typeof membership.renewal?.allowed === "boolean") {
+    return {
+      allowed: membership.renewal.allowed,
+      reason: membership.renewal.reason || "",
+      code: membership.renewal.code || "",
+    };
+  }
   const membershipType = String(membership.membershipType || "").toUpperCase();
   const status = String(membership.status || "").toUpperCase();
 

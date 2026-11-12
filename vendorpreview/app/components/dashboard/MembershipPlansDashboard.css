@@ -199,6 +199,23 @@
   margin-bottom: 18px;
 }
 
+.membership-filter-field {
+  display: grid;
+  gap: 5px;
+  color: rgba(255, 255, 255, 0.62);
+  font-size: 0.72rem;
+  font-weight: 800;
+}
+
+.membership-filter-field span {
+  padding-left: 2px;
+}
+
+.membership-type-filter {
+  grid-column: 1 / -1;
+  max-width: 260px;
+}
+
 .membership-filter-bar input,
 .membership-filter-bar select {
   width: 100%;
@@ -756,6 +773,32 @@
   padding: 16px;
 }
 
+.membership-eligibility-coverage {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin: 0 0 14px;
+}
+
+.membership-eligibility-coverage span {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  border: 1px solid rgba(230, 195, 122, 0.16);
+  border-radius: 11px;
+  background: rgba(255, 255, 255, 0.035);
+  color: rgba(255, 255, 255, 0.62);
+  font-size: 11px;
+  line-height: 1.25;
+  padding: 9px 8px;
+}
+
+.membership-eligibility-coverage strong {
+  color: #f5d97a;
+  font-size: 17px;
+  line-height: 1;
+}
+
 .membership-service-summary h4 {
   margin: 0;
   color: #fff7d6;
@@ -1264,6 +1307,30 @@
   margin-bottom: 3px;
 }
 
+.membership-customer-card {
+  padding: 14px 16px;
+}
+
+.membership-customer-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.membership-customer-summary span {
+  min-width: 120px;
+  color: rgba(255, 255, 255, 0.58);
+  font-size: 0.75rem;
+}
+
+.membership-customer-summary strong {
+  display: block;
+  color: #e6c37a;
+  font-size: 0.9rem;
+  margin-bottom: 2px;
+}
+
 .membership-plan-flags {
   display: flex;
   flex-wrap: wrap;
@@ -1437,6 +1504,10 @@
   .membership-filter-bar,
   .membership-detail-grid {
     grid-template-columns: 1fr;
+  }
+
+  .membership-type-filter {
+    max-width: none;
   }
 
   .membership-pagination {
