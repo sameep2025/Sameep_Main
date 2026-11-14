@@ -1,5 +1,11 @@
 # Membership Coexistence Index Migration
 
+> **Retired:** mutation modes are disabled. Unlimited membership activation no
+> longer uses active-membership uniqueness. Use
+> `migrateUnlimitedMembershipIndexes.js` for the separately authorized removal
+> of legacy entitlement indexes. This utility remains dry-run-only for audit
+> history and cannot create or drop indexes.
+
 This utility targets only `cluster0.ddzqz7y.mongodb.net/categoryApp.customermemberships`.
 It uses `MONGODB_AUDIT_URI`, disables Mongoose auto-indexing, never calls
 `syncIndexes()`, and never modifies membership records.

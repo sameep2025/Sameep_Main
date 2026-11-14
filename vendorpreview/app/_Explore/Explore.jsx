@@ -1357,6 +1357,7 @@ function ExploreContent({ onReady, onOpenServices }) {
   const lastEditedPaymentFieldRef = useRef("cash");
   const [selectedPaymentMode, setSelectedPaymentMode] = useState("STANDARD");
   const [prepaidCapabilities, setPrepaidCapabilities] = useState(null);
+  const [prepaidWallets, setPrepaidWallets] = useState([]);
   const [prepaidWallet, setPrepaidWallet] = useState(null);
   const [prepaidWalletStatus, setPrepaidWalletStatus] = useState("idle");
   const [prepaidWalletError, setPrepaidWalletError] = useState("");
@@ -1368,6 +1369,8 @@ function ExploreContent({ onReady, onOpenServices }) {
   const prepaidCapabilitiesRequestRef = useRef(0);
   const prepaidWalletRequestRef = useRef(0);
   const prepaidAuthorizationBindingRef = useRef("");
+  const [discountMemberships, setDiscountMemberships] = useState([]);
+  const [selectedDiscountMembershipId, setSelectedDiscountMembershipId] = useState("");
 
 
   const [resources, setResources] = useState([]);
@@ -1714,9 +1717,12 @@ function ExploreContent({ onReady, onOpenServices }) {
     setLoadedCustomerName("");
     setCustomerNameStatus("");
     setMembershipPreview(null);
+    setDiscountMemberships([]);
+    setSelectedDiscountMembershipId("");
     setMembershipPreviewError("");
     setMembershipPreviewLoading(false);
     setSelectedPaymentMode("STANDARD");
+    setPrepaidWallets([]);
     setPrepaidWallet(null);
     setPrepaidWalletStatus("idle");
     setPrepaidWalletError("");
@@ -1820,6 +1826,9 @@ function ExploreContent({ onReady, onOpenServices }) {
     setLoadedCustomerName(nextName);
     setCustomerNameStatus(nextName ? "Saved name loaded" : "");
     setCustomerId(nextCustomerId);
+    setMembershipPreview(null);
+    setDiscountMemberships([]);
+    setSelectedDiscountMembershipId("");
     setAvailablePoints(0);
     setRedeemPoints(0);
     loyaltyWalletRequestRef.current += 1;
@@ -1831,6 +1840,7 @@ function ExploreContent({ onReady, onOpenServices }) {
     setSelectedPaymentMode("STANDARD");
     if (prepaidSelectionAction === "RESET") {
       prepaidWalletRequestRef.current += 1;
+      setPrepaidWallets([]);
       setPrepaidWallet(null);
       setPrepaidWalletStatus(nextCustomerId ? "loading" : "idle");
       setPrepaidWalletError("");
@@ -1961,6 +1971,34 @@ function ExploreContent({ onReady, onOpenServices }) {
         </div>
       );
     }
+    const membershipSelector = discountMemberships.length > 1 ? (
+      <fieldset className="membership-billing-selector">
+        <legend>Select one Discount Membership</legend>
+        {discountMemberships.map((membership) => (
+          <label
+            key={membership.id}
+            className={selectedDiscountMembershipId === membership.id ? "selected" : ""}
+          >
+            <input
+              type="radio"
+              name="quick-billing-discount-membership"
+              checked={selectedDiscountMembershipId === membership.id}
+              onChange={() => setSelectedDiscountMembershipId(membership.id)}
+            />
+            <span>
+              <strong>{membership.planName || "Discount Membership"}</strong>
+              <small>
+                {Number(membership.discountPercentage || 0)}% · Expires {membership.expiresAt
+                  ? new Date(membership.expiresAt).toLocaleDateString("en-IN")
+                  : "-"}
+              </small>
+            </span>
+          </label>
+        ))}
+        {!selectedDiscountMembershipId ? <small>Select one membership. Benefits are never stacked.</small> : null}
+      </fieldset>
+    ) : null;
+    if (membershipPreview?.selectionRequired) return membershipSelector;
     if (!membershipPreview?.hasEffectiveMembership) return null;
 
     const preview = membershipPreview.preview || {};
@@ -1982,6 +2020,8 @@ function ExploreContent({ onReady, onOpenServices }) {
       : `Spend ${formatMembershipPreviewAmount(remainingToQualify)} more to qualify.`;
 
     return (
+      <>
+      {membershipSelector}
       <div className="membership-billing-preview-card">
         <div className="membership-billing-preview-head">
           <strong>{membership.planName || "Membership"}</strong>
@@ -2029,6 +2069,7 @@ function ExploreContent({ onReady, onOpenServices }) {
         )}
         <small>{previewMessage}</small>
       </div>
+      </>
     );
   };
 
@@ -2713,6 +2754,7 @@ function ExploreContent({ onReady, onOpenServices }) {
       const payload = await response.json().catch(() => null);
       if (prepaidWalletRequestRef.current !== requestId) return null;
       if (response.status === 404) {
+        setPrepaidWallets([]);
         setPrepaidWallet(null);
         setPrepaidWalletStatus("unavailable");
         return null;
@@ -2720,11 +2762,21 @@ function ExploreContent({ onReady, onOpenServices }) {
       if (!response.ok || !payload?.success) {
         throw new Error(payload?.message || "Unable to load prepaid wallet");
       }
-      setPrepaidWallet(payload.wallet);
+      const wallets = Array.isArray(payload.wallets)
+        ? payload.wallets
+        : payload.wallet
+          ? [payload.wallet]
+          : [];
+      setPrepaidWallets(wallets);
+      setPrepaidWallet((current) => {
+        const retained = wallets.find((wallet) => String(wallet.id) === String(current?.id));
+        return retained || (wallets.length === 1 ? wallets[0] : null);
+      });
       setPrepaidWalletStatus("ready");
-      return payload.wallet;
+      return wallets.length === 1 ? wallets[0] : null;
     } catch (error) {
       if (prepaidWalletRequestRef.current !== requestId) return null;
+      setPrepaidWallets([]);
       setPrepaidWallet(null);
       setPrepaidWalletStatus("error");
       setPrepaidWalletError(error?.message || "Unable to load prepaid wallet");
@@ -2767,6 +2819,7 @@ function ExploreContent({ onReady, onOpenServices }) {
   useEffect(() => {
     if (!prepaidWalletPaymentAvailable || !customerId) {
       prepaidWalletRequestRef.current += 1;
+      setPrepaidWallets([]);
       setPrepaidWallet(null);
       setPrepaidWalletStatus("idle");
       setSelectedPaymentMode("STANDARD");
@@ -2976,20 +3029,34 @@ function ExploreContent({ onReady, onOpenServices }) {
           />
           Cash / Online / Split
         </label>
-        {prepaidWalletPaymentAvailable && prepaidWallet ? (
-          <label className={selectedPaymentMode === prepaidWallet.walletType ? "selected" : ""}>
-            <input
-              type="radio"
-              name="quick-billing-payment-mode"
-              checked={selectedPaymentMode === prepaidWallet.walletType}
-              onChange={() => {
-                setSelectedPaymentMode(prepaidWallet.walletType);
-                clearPrepaidAuthorization();
-              }}
-            />
-            {prepaidWallet.walletType === "PREPAID_VALUE" ? "Prepaid Wallet" : "Prepaid Packages"}
-          </label>
-        ) : null}
+        {prepaidWalletPaymentAvailable ? prepaidWallets.map((wallet) => {
+          const selected = selectedPaymentMode === wallet.walletType && prepaidWallet?.id === wallet.id;
+          const balance = wallet.walletType === "PREPAID_VALUE"
+            ? `₹${formatPaymentPaiseInput(wallet.remainingAmountPaise)}`
+            : `${wallet.remainingQuantity ?? 0} session${Number(wallet.remainingQuantity) === 1 ? "" : "s"}`;
+          return (
+            <label key={wallet.id} className={selected ? "selected" : ""}>
+              <input
+                type="radio"
+                name="quick-billing-payment-mode"
+                checked={selected}
+                onChange={() => {
+                  setPrepaidWallet(wallet);
+                  setSelectedPaymentMode(wallet.walletType);
+                  clearPrepaidAuthorization();
+                }}
+              />
+              <span>
+                <strong>{wallet.planName || (wallet.walletType === "PREPAID_VALUE" ? "Prepaid Wallet" : "Prepaid Packages")}</strong>
+                <small>
+                  {wallet.walletType === "PREPAID_VALUE" ? "Prepaid Wallet" : "Prepaid Packages"} · {balance} · Expires {wallet.expiresAt
+                    ? new Date(wallet.expiresAt).toLocaleDateString("en-IN")
+                    : "-"}
+                </small>
+              </span>
+            </label>
+          );
+        }) : null}
       </div>
 
       {selectedPaymentMode === "STANDARD" ? (
@@ -3025,7 +3092,7 @@ function ExploreContent({ onReady, onOpenServices }) {
       ) : (
         <div className="quick-billing-prepaid-card">
           <div className="quick-billing-prepaid-heading">
-            <strong>{prepaidWallet?.walletType === "PREPAID_VALUE" ? "Prepaid Wallet" : "Prepaid Packages"}</strong>
+            <strong>{prepaidWallet?.planName || (prepaidWallet?.walletType === "PREPAID_VALUE" ? "Prepaid Wallet" : "Prepaid Packages")}</strong>
             <span>Expires {prepaidWallet?.expiresAt ? new Date(prepaidWallet.expiresAt).toLocaleDateString("en-IN") : "-"}</span>
           </div>
           {prepaidWallet?.walletType === "PREPAID_VALUE" ? (
@@ -3102,6 +3169,9 @@ function ExploreContent({ onReady, onOpenServices }) {
       ) : null}
       {prepaidWalletPaymentAvailable && customerId && prepaidWalletStatus === "unavailable" ? (
         <p className="quick-billing-prepaid-status">No active prepaid wallet is available for this customer.</p>
+      ) : null}
+      {prepaidWalletPaymentAvailable && prepaidWalletStatus === "ready" && prepaidWallets.length > 1 && !prepaidWallet ? (
+        <p className="quick-billing-prepaid-status">Select one prepaid wallet or package. Balances are never combined.</p>
       ) : null}
       {prepaidWalletPaymentAvailable && prepaidWalletError ? (
         <p className="quick-billing-payment-error" role="alert">{prepaidWalletError}</p>
@@ -3563,6 +3633,7 @@ function ExploreContent({ onReady, onOpenServices }) {
         },
         body: JSON.stringify({
           billingId,
+          discountMembershipId: selectedDiscountMembershipId || undefined,
           ...paymentSubmission,
         }),
       });
@@ -4261,6 +4332,7 @@ function ExploreContent({ onReady, onOpenServices }) {
           body: JSON.stringify({
             vendorId,
             customerMobile,
+            customerMembershipId: selectedDiscountMembershipId || undefined,
             items: buildMembershipPreviewItems(),
             manualDiscount: {
               mode: discountMode,
@@ -4280,6 +4352,12 @@ function ExploreContent({ onReady, onOpenServices }) {
           throw new Error(json?.message || "Membership preview failed");
         }
         if (membershipPreviewRequestRef.current !== requestId) return;
+        const availableMemberships = Array.isArray(json.memberships) ? json.memberships : [];
+        setDiscountMemberships(availableMemberships);
+        setSelectedDiscountMembershipId((current) => {
+          if (availableMemberships.length === 1) return availableMemberships[0].id;
+          return availableMemberships.some((membership) => membership.id === current) ? current : "";
+        });
         setMembershipPreview(json);
       } catch (previewError) {
         if (previewError?.name === "AbortError") return;
@@ -4308,6 +4386,7 @@ function ExploreContent({ onReady, onOpenServices }) {
     discountPercent,
     percentPer100,
     redeemPoints,
+    selectedDiscountMembershipId,
     membershipPreviewRetryNonce,
   ]);
 
@@ -4682,6 +4761,8 @@ function ExploreContent({ onReady, onOpenServices }) {
     setVerifyingCustomer(false);
     setCheckingCustomer(false);
     setMembershipPreview(null);
+    setDiscountMemberships([]);
+    setSelectedDiscountMembershipId("");
     setMembershipPreviewLoading(false);
     setMembershipPreviewError("");
     setGstPreview(null);
@@ -4704,6 +4785,7 @@ function ExploreContent({ onReady, onOpenServices }) {
     setOnlineAmountInput("");
     setPaymentAllocationError("");
     setSelectedPaymentMode("STANDARD");
+    setPrepaidWallets([]);
     setPrepaidWallet(null);
     setPrepaidWalletStatus("idle");
     setPrepaidWalletError("");
@@ -4820,6 +4902,13 @@ function ExploreContent({ onReady, onOpenServices }) {
       }
       if (!membershipPreview) {
         alert("Please wait for membership verification before generating the bill.");
+        return;
+      }
+      if (!prepaidSelected && (
+        membershipPreview.selectionRequired ||
+        (discountMemberships.length > 1 && !selectedDiscountMembershipId)
+      )) {
+        alert("Select one Discount Membership before generating the bill.");
         return;
       }
     }
@@ -4956,6 +5045,7 @@ function ExploreContent({ onReady, onOpenServices }) {
         },
         body: JSON.stringify({
           billingId: newBillingId,
+          discountMembershipId: selectedDiscountMembershipId || undefined,
           ...paymentSubmission,
         }),
       });

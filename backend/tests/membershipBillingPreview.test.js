@@ -479,6 +479,47 @@ test("membership preview normalizes mobile and lifecycle state", () => {
   );
 });
 
+test("multiple active Discount Memberships require an exact selection", async () => {
+  const Customer = require("../models/Customer");
+  const CustomerMembership = require("../models/CustomerMembership");
+  const originals = {
+    customerFindOne: Customer.findOne,
+    membershipFind: CustomerMembership.find,
+  };
+  const customerId = new mongoose.Types.ObjectId();
+  const memberships = [membership(), membership({ planSnapshot: { name: "Silver" } })];
+  Customer.findOne = () => ({
+    select() { return this; },
+    async lean() { return { _id: customerId, fullNumber: "919876543210" }; },
+  });
+  CustomerMembership.find = () => ({
+    sort() { return this; },
+    async lean() { return memberships; },
+  });
+  try {
+    const unresolved = await controller._private.findEffectiveMembership({
+      vendorId: new mongoose.Types.ObjectId(),
+      fullNumber: "919876543210",
+      now: new Date("2026-10-15T00:00:00.000Z"),
+    });
+    assert.equal(unresolved.membership, null);
+    assert.equal(unresolved.selectionRequired, true);
+    assert.equal(unresolved.memberships.length, 2);
+
+    const selected = await controller._private.findEffectiveMembership({
+      vendorId: new mongoose.Types.ObjectId(),
+      fullNumber: "919876543210",
+      customerMembershipId: String(memberships[1]._id),
+      now: new Date("2026-10-15T00:00:00.000Z"),
+    });
+    assert.equal(String(selected.membership._id), String(memberships[1]._id));
+    assert.equal(selected.selectionRequired, false);
+  } finally {
+    Customer.findOne = originals.customerFindOne;
+    CustomerMembership.find = originals.membershipFind;
+  }
+});
+
 test("membership preview route is vendor-authenticated and read-only", () => {
   const routeSource = fs.readFileSync(path.join(__dirname, "../routes/billingRoutes.js"), "utf8");
   const controllerSource = fs.readFileSync(

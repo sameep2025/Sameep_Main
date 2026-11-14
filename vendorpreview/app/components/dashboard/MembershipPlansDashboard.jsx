@@ -1700,8 +1700,7 @@ export default function MembershipPlansDashboard({ vendorId }) {
             <div className="membership-plan-stack">
               {customerMemberships.map((membership) => {
                 const renewalAvailability = getMembershipRenewalAvailability(membership);
-                const showRenewal = ["ACTIVE", "DEPLETED", "EXPIRED"].includes(membership.status) &&
-                  renewalAvailability.code !== "prepaid_renewal_successor_exists";
+                const showRenewal = ["ACTIVE", "DEPLETED", "EXPIRED"].includes(membership.status);
                 const membershipType = normalizePlanType(membership.membershipType);
                 const remainingLabel = membershipType === "PREPAID_VALUE"
                   ? formatPaise(membership.wallet?.remainingAmountPaise)
@@ -1926,8 +1925,7 @@ export default function MembershipPlansDashboard({ vendorId }) {
               </div>
             </div>
             <footer className="membership-editor-footer">
-              {["ACTIVE", "DEPLETED", "EXPIRED"].includes(selectedMembership.status) &&
-              selectedMembership.renewal?.code !== "prepaid_renewal_successor_exists" ? (
+              {["ACTIVE", "DEPLETED", "EXPIRED"].includes(selectedMembership.status) ? (
                 <button
                   type="button"
                   className="membership-secondary-button"

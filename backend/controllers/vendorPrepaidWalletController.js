@@ -42,6 +42,7 @@ function serializeWallet(wallet, membership) {
     id: String(wallet._id),
     customerMembershipId: String(wallet.customerMembershipId),
     walletType: wallet.walletType,
+    planName: String(membership?.planSnapshot?.name || ""),
     expiresAt: wallet.expiresAt,
   };
   if (wallet.walletType === "PREPAID_VALUE") {
@@ -60,6 +61,58 @@ function serializeWallet(wallet, membership) {
   };
 }
 
+function hasAvailableBalance(wallet) {
+  return wallet?.walletType === "PREPAID_VALUE"
+    ? Number(wallet.remainingAmountPaise) > 0
+    : Number(wallet?.remainingQuantity) > 0;
+}
+
+async function loadAvailableWallets(
+  vendorId,
+  customerId,
+  now = new Date(),
+  { reconcileLifecycle = reconcilePrepaidLifecycleForCustomer } = {}
+) {
+  if (!validId(vendorId) || !validId(customerId)) {
+    throw createPublicError("Valid vendor and customer identity required", "invalid_identity");
+  }
+  const customer = await Customer.findById(customerId).select("_id fullNumber").lean();
+  if (!customer) throw createPublicError("Customer not found", "customer_not_found", 404);
+
+  await reconcileLifecycle({ vendorId, customerId, now });
+
+  const wallets = await PrepaidMembershipWallet.find({
+    vendorId,
+    customerId,
+    walletType: { $in: ["PREPAID_VALUE", "PREPAID_SESSIONS"] },
+    status: "ACTIVE",
+    activatesAt: { $lte: now },
+    expiresAt: { $gt: now },
+  }).lean();
+  const availableWallets = wallets.filter(hasAvailableBalance);
+  if (!availableWallets.length) return { customer, entries: [] };
+
+  const memberships = await CustomerMembership.find({
+    _id: { $in: availableWallets.map((wallet) => wallet.customerMembershipId) },
+    vendorId,
+    customerId,
+    membershipType: { $in: ["PREPAID_VALUE", "PREPAID_SESSIONS"] },
+    status: "ACTIVE",
+    activatedAt: { $lte: now },
+    expiresAt: { $gt: now },
+  }).lean();
+  const membershipMap = new Map(memberships.map((membership) => [String(membership._id), membership]));
+  const entries = availableWallets
+    .map((wallet) => ({ wallet, membership: membershipMap.get(String(wallet.customerMembershipId)) }))
+    .filter(({ wallet, membership }) => membership && membership.membershipType === wallet.walletType)
+    .sort((left, right) => {
+      const expiryDiff = new Date(left.wallet.expiresAt).getTime() - new Date(right.wallet.expiresAt).getTime();
+      if (expiryDiff !== 0) return expiryDiff;
+      return String(left.wallet._id).localeCompare(String(right.wallet._id));
+    });
+  return { customer, entries };
+}
+
 function maskMobile(value) {
   const digits = String(value || "").replace(/\D/g, "");
   if (digits.length < 4) return "";
@@ -76,38 +129,48 @@ async function loadAvailableWallet(
   if (!validId(vendorId) || !validId(customerId) || (walletId && !validId(walletId))) {
     throw createPublicError("Valid vendor, customer, and wallet identity required", "invalid_identity");
   }
+  if (!walletId) {
+    const available = await loadAvailableWallets(vendorId, customerId, now, { reconcileLifecycle });
+    if (available.entries.length === 0) {
+      throw createPublicError("No available prepaid wallet balance", "prepaid_wallet_unavailable", 404);
+    }
+    if (available.entries.length > 1) {
+      throw createPublicError(
+        "Select one prepaid wallet or package",
+        "prepaid_wallet_selection_required",
+        409
+      );
+    }
+    return { customer: available.customer, ...available.entries[0] };
+  }
+
   const customer = await Customer.findById(customerId).select("_id fullNumber").lean();
   if (!customer) throw createPublicError("Customer not found", "customer_not_found", 404);
-
   await reconcileLifecycle({ vendorId, customerId, now });
 
-  const membership = await CustomerMembership.findOne({
+  const wallet = await PrepaidMembershipWallet.findOne({
+    _id: walletId,
     vendorId,
     customerId,
-    membershipType: { $in: ["PREPAID_VALUE", "PREPAID_SESSIONS"] },
+    walletType: { $in: ["PREPAID_VALUE", "PREPAID_SESSIONS"] },
+    status: "ACTIVE",
+    activatesAt: { $lte: now },
+    expiresAt: { $gt: now },
+  }).lean();
+  if (!wallet || !hasAvailableBalance(wallet)) {
+    throw createPublicError("No available prepaid wallet balance", "prepaid_wallet_unavailable", 404);
+  }
+  const membership = await CustomerMembership.findOne({
+    _id: wallet.customerMembershipId,
+    vendorId,
+    customerId,
+    membershipType: wallet.walletType,
     status: "ACTIVE",
     activatedAt: { $lte: now },
     expiresAt: { $gt: now },
   }).lean();
   if (!membership) {
     throw createPublicError("No active prepaid membership found", "prepaid_membership_unavailable", 404);
-  }
-
-  const wallet = await PrepaidMembershipWallet.findOne({
-    ...(walletId ? { _id: walletId } : {}),
-    vendorId,
-    customerId,
-    customerMembershipId: membership._id,
-    walletType: membership.membershipType,
-    status: "ACTIVE",
-    activatesAt: { $lte: now },
-    expiresAt: { $gt: now },
-  }).lean();
-  const hasBalance = wallet?.walletType === "PREPAID_VALUE"
-    ? Number(wallet.remainingAmountPaise) > 0
-    : Number(wallet?.remainingQuantity) > 0;
-  if (!wallet || !hasBalance) {
-    throw createPublicError("No available prepaid wallet balance", "prepaid_wallet_unavailable", 404);
   }
   return { customer, membership, wallet };
 }
@@ -306,8 +369,17 @@ function sendError(res, error, fallback) {
 exports.getAvailableWallet = async (req, res) => {
   try {
     assertPrepaidMembershipWalletEnabled();
-    const { wallet, membership } = await loadAvailableWallet(req.params.vendorId, req.params.customerId);
-    return res.json({ success: true, wallet: serializeWallet(wallet, membership) });
+    const { entries } = await loadAvailableWallets(req.params.vendorId, req.params.customerId);
+    if (!entries.length) {
+      throw createPublicError("No available prepaid wallet balance", "prepaid_wallet_unavailable", 404);
+    }
+    const wallets = entries.map(({ wallet, membership }) => serializeWallet(wallet, membership));
+    return res.json({
+      success: true,
+      wallets,
+      wallet: wallets.length === 1 ? wallets[0] : null,
+      selectionRequired: wallets.length > 1,
+    });
   } catch (error) {
     return sendError(res, error, "Failed to load prepaid wallet");
   }
@@ -671,6 +743,7 @@ exports._private = {
   finalizeAcceptedReservation,
   finalizeUncertainReservation,
   loadAvailableWallet,
+  loadAvailableWallets,
   maskMobile,
   otpGenerationFilter,
   releaseRejectedReservation,

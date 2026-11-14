@@ -166,9 +166,14 @@ function calculateMembershipPreview({ membership, items, manualDiscount, loyalty
   };
 }
 
-async function findEffectiveMembership({ vendorId, fullNumber, now = new Date() }) {
+async function findEffectiveMembership({
+  vendorId,
+  fullNumber,
+  customerMembershipId = "",
+  now = new Date(),
+}) {
   const customer = await Customer.findOne({ fullNumber }).select("_id fullNumber").lean();
-  if (!customer) return { customer: null, membership: null };
+  if (!customer) return { customer: null, membership: null, memberships: [], selectionRequired: false };
 
   const candidates = await CustomerMembership.find({
     vendorId,
@@ -181,8 +186,20 @@ async function findEffectiveMembership({ vendorId, fullNumber, now = new Date() 
     .sort({ activatedAt: -1, createdAt: -1, _id: -1 })
     .lean();
 
-  const membership = candidates.find((entry) => getEffectiveMembershipStatus(entry, now) === "ACTIVE") || null;
-  return { customer, membership };
+  const memberships = candidates.filter((entry) => getEffectiveMembershipStatus(entry, now) === "ACTIVE");
+  const requestedId = normalizeId(customerMembershipId);
+  const membership = requestedId
+    ? memberships.find((entry) => String(entry._id) === requestedId) || null
+    : memberships.length === 1
+      ? memberships[0]
+      : null;
+  return {
+    customer,
+    membership,
+    memberships,
+    selectionRequired: memberships.length > 1 && !membership,
+    invalidSelection: Boolean(requestedId && !membership),
+  };
 }
 
 async function previewMembershipDiscount(req, res) {
@@ -197,18 +214,43 @@ async function previewMembershipDiscount(req, res) {
       return res.status(400).json({ success: false, message: "Valid customer mobile number required" });
     }
 
-    const { customer, membership } = await findEffectiveMembership({ vendorId, fullNumber });
-    if (!customer || !membership) {
+    const customerMembershipId = normalizeId(req.body?.customerMembershipId);
+    if (customerMembershipId && !mongoose.Types.ObjectId.isValid(customerMembershipId)) {
+      return res.status(400).json({ success: false, message: "Valid customerMembershipId required" });
+    }
+    const result = await findEffectiveMembership({ vendorId, fullNumber, customerMembershipId });
+    if (result.invalidSelection) {
+      return res.status(409).json({
+        success: false,
+        code: "discount_membership_unavailable",
+        message: "Selected Discount Membership is no longer available",
+      });
+    }
+    const serializedMemberships = result.memberships.map(serializePreviewMembership);
+    if (!result.customer || result.memberships.length === 0) {
       return res.json({
         success: true,
         hasEffectiveMembership: false,
         membership: null,
+        memberships: [],
+        selectionRequired: false,
+        preview: null,
+      });
+    }
+    if (result.selectionRequired) {
+      return res.json({
+        success: true,
+        hasEffectiveMembership: true,
+        customerId: String(result.customer._id),
+        membership: null,
+        memberships: serializedMemberships,
+        selectionRequired: true,
         preview: null,
       });
     }
 
     const preview = calculateMembershipPreview({
-      membership,
+      membership: result.membership,
       items: req.body?.items || req.body?.cartItems || [],
       manualDiscount: req.body?.manualDiscount || {},
       loyalty: req.body?.loyalty || {},
@@ -218,8 +260,10 @@ async function previewMembershipDiscount(req, res) {
     return res.json({
       success: true,
       hasEffectiveMembership: true,
-      customerId: String(customer._id),
-      membership: serializePreviewMembership(membership),
+      customerId: String(result.customer._id),
+      membership: serializePreviewMembership(result.membership),
+      memberships: serializedMemberships,
+      selectionRequired: false,
       preview,
     });
   } catch (error) {

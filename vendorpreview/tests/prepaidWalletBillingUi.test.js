@@ -155,6 +155,10 @@ test("Quick Billing capability-gates wallet lookup and preserves ordinary paymen
   assert.match(source, /Discount Membership benefits are not applied when prepaid payment is selected/);
   assert.match(source, /prepaidWallet\?\.walletType !== "PREPAID_VALUE"/);
   assert.match(source, /prepaidSelected \? finalTotal : getAuthoritativeCartTotal\(\)/);
+  assert.match(source, /prepaidWallets\.map\(\(wallet\) =>/);
+  assert.match(source, /setPrepaidWallet\(wallet\)/);
+  assert.match(source, /discountMemberships\.map\(\(membership\) =>/);
+  assert.match(source, /discountMembershipId:\s*selectedDiscountMembershipId \|\| undefined/);
 });
 
 test("prepaid controls remain compact on narrow mobile layouts", () => {

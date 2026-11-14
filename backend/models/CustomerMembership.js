@@ -320,28 +320,6 @@ CustomerMembershipSchema.index({ vendorId: 1, customerId: 1, status: 1, expiresA
 CustomerMembershipSchema.index({ vendorId: 1, createdAt: -1, _id: -1 });
 CustomerMembershipSchema.index({ vendorId: 1, customerId: 1, activatedAt: 1, expiresAt: 1 });
 CustomerMembershipSchema.index(
-  { vendorId: 1, customerId: 1 },
-  {
-    unique: true,
-    partialFilterExpression: {
-      status: "ACTIVE",
-      membershipType: "DISCOUNT",
-    },
-    name: "customer_membership_active_discount_unique",
-  }
-);
-CustomerMembershipSchema.index(
-  { vendorId: 1, customerId: 1 },
-  {
-    unique: true,
-    partialFilterExpression: {
-      status: "ACTIVE",
-      membershipType: { $in: ["PREPAID_VALUE", "PREPAID_SESSIONS"] },
-    },
-    name: "customer_membership_active_prepaid_unique",
-  }
-);
-CustomerMembershipSchema.index(
   { vendorId: 1, enrollmentIdempotencyKey: 1 },
   {
     unique: true,

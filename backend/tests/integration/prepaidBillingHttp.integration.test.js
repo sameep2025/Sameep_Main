@@ -451,13 +451,14 @@ test("authenticated Sessions Wallet flow consumes the exact eligible quantity", 
   assert.equal(wallet.remainingQuantity, 4);
 });
 
-test("coexisting Discount Membership is ignored for prepaid payment and retained for standard billing", async () => {
+test("prepaid ignores multiple Discounts while standard billing requires exactly one selection", async () => {
   const fixture = await createPrepaidFixture({
     type: "PREPAID_VALUE",
     suffix: "112",
     balance: 100000,
   });
   const discountMembership = await addDiscountMembership(fixture);
+  const secondDiscountMembership = await addDiscountMembership(fixture, 20);
 
   const prepaidBill = await createAndUpdateBill(fixture);
   const authorizationId = await authorizeBill(fixture, prepaidBill, { amountPaise: 50000 });
@@ -468,12 +469,24 @@ test("coexisting Discount Membership is ignored for prepaid payment and retained
   assert.equal(storedPrepaidBill.membershipDiscountAmount, 0);
   assert.equal(storedPrepaidBill.membershipBillingSnapshot?.customerMembershipId ?? null, null);
   assert.equal((await CustomerMembership.findById(discountMembership._id).lean()).status, "ACTIVE");
+  assert.equal((await CustomerMembership.findById(secondDiscountMembership._id).lean()).status, "ACTIVE");
 
   const standardBill = await createAndUpdateBill(fixture);
-  const standardCompleted = await request(app)
+  const selectionRequired = await request(app)
     .post("/api/billing/complete")
     .set(auth(fixture.token))
     .send({ billingId: standardBill.billingId, paymentMode: "CASH" });
+  assert.equal(selectionRequired.status, 409, JSON.stringify(selectionRequired.body));
+  assert.equal(selectionRequired.body.code, "discount_membership_selection_required");
+
+  const standardCompleted = await request(app)
+    .post("/api/billing/complete")
+    .set(auth(fixture.token))
+    .send({
+      billingId: standardBill.billingId,
+      paymentMode: "CASH",
+      discountMembershipId: discountMembership._id,
+    });
   assert.equal(standardCompleted.status, 200, JSON.stringify(standardCompleted.body));
   const storedStandardBill = await BillingSession.findById(standardBill.billingId).lean();
   assert.equal(storedStandardBill.membershipDiscountAmount, 50);

@@ -434,13 +434,14 @@ test("wallet lookup returns minimum value and session response shapes", async ()
     const value = await prepaidController._private.loadAvailableWallet(
       ids.vendor,
       ids.customer,
-      "",
+      ids.wallet,
       now,
       { reconcileLifecycle: async () => ({ promoted: false }) }
     );
     assert.deepEqual(prepaidController._private.serializeWallet(value.wallet, value.membership), {
       id: ids.wallet,
       customerMembershipId: ids.membership,
+      planName: "",
       walletType: "PREPAID_VALUE",
       expiresAt: value.wallet.expiresAt,
       remainingAmountPaise: 125000,
@@ -463,7 +464,7 @@ test("wallet lookup returns minimum value and session response shapes", async ()
     const sessions = await prepaidController._private.loadAvailableWallet(
       ids.vendor,
       ids.customer,
-      "",
+      ids.wallet,
       now,
       { reconcileLifecycle: async () => ({ promoted: false }) }
     );
@@ -483,24 +484,107 @@ test("wallet lookup returns minimum value and session response shapes", async ()
   }
 });
 
-test("wallet lookup rejects cross-customer, inactive, expired, and empty wallets", async () => {
-  const originals = { customer: Customer.findById, membership: CustomerMembership.findOne };
+test("wallet lookup lists every eligible wallet and requires explicit selection when multiple exist", async () => {
+  const originals = {
+    customer: Customer.findById,
+    memberships: CustomerMembership.find,
+    wallets: PrepaidMembershipWallet.find,
+  };
+  const secondMembershipId = id("690000000000000000000013");
+  const secondWalletId = id("690000000000000000000014");
+  const now = new Date("2026-11-13T06:00:00.000Z");
+  const later = new Date("2027-12-01T00:00:00.000Z");
   Customer.findById = () => query({ _id: id(ids.customer), fullNumber: "919876543210" });
-  CustomerMembership.findOne = () => query(null);
+  PrepaidMembershipWallet.find = () => query([
+    {
+      _id: secondWalletId,
+      customerMembershipId: secondMembershipId,
+      walletType: "PREPAID_SESSIONS",
+      remainingQuantity: 3,
+      expiresAt: later,
+    },
+    {
+      _id: id(ids.wallet),
+      customerMembershipId: id(ids.membership),
+      walletType: "PREPAID_VALUE",
+      remainingAmountPaise: 650000,
+      expiresAt: new Date("2027-01-01T00:00:00.000Z"),
+    },
+  ]);
+  CustomerMembership.find = () => query([
+    {
+      _id: id(ids.membership),
+      membershipType: "PREPAID_VALUE",
+      planSnapshot: { name: "Gold Wallet" },
+    },
+    {
+      _id: secondMembershipId,
+      membershipType: "PREPAID_SESSIONS",
+      planSnapshot: { name: "Facial Pack" },
+      prepaidSessionsSnapshot: {
+        eligibleItemId: id(ids.item),
+        eligibleItemSource: "vendor_menu_node",
+        eligibleItemKind: "SERVICE",
+        itemName: "Facial",
+      },
+    },
+  ]);
   try {
+    const available = await prepaidController._private.loadAvailableWallets(
+      ids.vendor,
+      ids.customer,
+      now,
+      { reconcileLifecycle: async () => ({ promoted: false }) }
+    );
+    assert.equal(available.entries.length, 2);
+    assert.equal(String(available.entries[0].wallet._id), ids.wallet, "earliest expiry sorts first");
+    assert.deepEqual(
+      available.entries.map(({ wallet, membership }) => (
+        prepaidController._private.serializeWallet(wallet, membership).planName
+      )),
+      ["Gold Wallet", "Facial Pack"]
+    );
     await assert.rejects(
       prepaidController._private.loadAvailableWallet(
         ids.vendor,
         ids.customer,
         "",
+        now,
+        { reconcileLifecycle: async () => ({ promoted: false }) }
+      ),
+      (error) => error.code === "prepaid_wallet_selection_required"
+    );
+  } finally {
+    Customer.findById = originals.customer;
+    CustomerMembership.find = originals.memberships;
+    PrepaidMembershipWallet.find = originals.wallets;
+  }
+});
+
+test("wallet lookup rejects cross-customer, inactive, expired, and empty wallets", async () => {
+  const originals = {
+    customer: Customer.findById,
+    membership: CustomerMembership.findOne,
+    wallet: PrepaidMembershipWallet.findOne,
+  };
+  Customer.findById = () => query({ _id: id(ids.customer), fullNumber: "919876543210" });
+  CustomerMembership.findOne = () => query(null);
+  PrepaidMembershipWallet.findOne = () => query(null);
+  try {
+    await assert.rejects(
+      prepaidController._private.loadAvailableWallet(
+        ids.vendor,
+        ids.customer,
+        ids.wallet,
         new Date(),
         { reconcileLifecycle: async () => ({ promoted: false }) }
       ),
-      (error) => error.code === "prepaid_membership_unavailable"
+      (error) => error.code === "prepaid_wallet_unavailable"
     );
   } finally {
     Customer.findById = originals.customer;
     CustomerMembership.findOne = originals.membership;
+    PrepaidMembershipWallet.findOne = originals.wallet;
   }
 });
 

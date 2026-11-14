@@ -28,7 +28,6 @@ function query(value) {
 function lifecycleModels({
   membershipType = "PREPAID_VALUE",
   dueMemberships,
-  overlappingActive = null,
   walletOverrides = {},
   membershipModified = 1,
   walletModified = 1,
@@ -53,6 +52,15 @@ function lifecycleModels({
     expiresAt: EXPIRY,
     ...walletOverrides,
   };
+  const memberships = dueMemberships === undefined ? [membership] : dueMemberships;
+  const wallets = memberships.map((entry, index) => ({
+    ...wallet,
+    _id: index === 0 ? WALLET_ID : `69000000000000000000000${index + 4}`,
+    customerMembershipId: entry._id,
+    walletType: entry.membershipType,
+    activatesAt: entry.activatedAt,
+    expiresAt: entry.expiresAt,
+  }));
   const calls = { membershipUpdates: [], walletUpdates: [] };
 
   return {
@@ -62,8 +70,7 @@ function lifecycleModels({
     CustomerMembershipModel: {
       exists: async () => true,
       updateMany: async (...args) => { calls.membershipUpdates.push(args); return { modifiedCount: 0 }; },
-      find: () => query(dueMemberships === undefined ? [membership] : dueMemberships),
-      findOne: () => query(overlappingActive),
+      find: () => query(memberships),
       updateOne: async (...args) => {
         calls.membershipUpdates.push(args);
         return { modifiedCount: membershipModified };
@@ -72,7 +79,9 @@ function lifecycleModels({
     PrepaidMembershipWalletModel: {
       exists: async () => true,
       updateMany: async (...args) => { calls.walletUpdates.push(args); return { modifiedCount: 0 }; },
-      findOne: () => query(wallet),
+      findOne: (filter) => query(wallets.find((entry) => (
+        String(entry.customerMembershipId) === String(filter.customerMembershipId)
+      )) || null),
       updateOne: async (...args) => {
         calls.walletUpdates.push(args);
         return { modifiedCount: walletModified };
@@ -136,19 +145,26 @@ test("expiry wins over scheduled, active, and depleted wallet states", async () 
   assert.equal(models.calls.walletUpdates.length, 1);
 });
 
-test("multiple due renewals and inconsistent matching wallets fail closed", async () => {
+test("multiple independent due renewals activate while inconsistent records fail closed", async () => {
   const first = lifecycleModels();
-  const secondMembership = { ...first.membership, _id: "690000000000000000000005" };
-  await assert.rejects(
-    reconcilePrepaidLifecycleInSession({
-      vendorId: VENDOR_ID,
-      customerId: CUSTOMER_ID,
-      session: {},
-      now: NOW,
-      ...lifecycleModels({ dueMemberships: [first.membership, secondMembership] }),
-    }),
-    (error) => error.code === "prepaid_lifecycle_ambiguous"
-  );
+  const secondMembership = {
+    ...first.membership,
+    _id: "690000000000000000000005",
+    membershipType: "PREPAID_SESSIONS",
+  };
+  const multiple = lifecycleModels({ dueMemberships: [first.membership, secondMembership] });
+  const result = await reconcilePrepaidLifecycleInSession({
+    vendorId: VENDOR_ID,
+    customerId: CUSTOMER_ID,
+    session: {},
+    now: NOW,
+    ...multiple,
+  });
+  assert.equal(result.promoted, true);
+  assert.equal(result.promotedCount, 2);
+  assert.equal(result.memberships.length, 2);
+  assert.equal(multiple.calls.membershipUpdates.length, 3);
+  assert.equal(multiple.calls.walletUpdates.length, 3);
 
   await assert.rejects(
     reconcilePrepaidLifecycleInSession({

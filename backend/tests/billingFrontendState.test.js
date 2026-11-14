@@ -81,7 +81,10 @@ test("membership preview sends redemption and refreshes loyalty estimates when i
   );
 
   assert.match(previewEffect, /redemption:\s*\{\s*amount: redeemPoints/);
-  assert.match(previewEffect, /percentPer100,\s*redeemPoints,\s*membershipPreviewRetryNonce/);
+  assert.match(
+    previewEffect,
+    /percentPer100,\s*redeemPoints,\s*selectedDiscountMembershipId,\s*membershipPreviewRetryNonce/
+  );
   assert.match(earnHelper, /membershipPreview\?\.hasEffectiveMembership/);
   assert.match(earnHelper, /preview\?\.estimatedRewardPoints/);
   assert.match(earnHelper, /finalTotal[\s\S]*redeemPoints/);

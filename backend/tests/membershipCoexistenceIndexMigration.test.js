@@ -92,39 +92,21 @@ function repository({
   };
 }
 
-test("CLI defaults to dry-run and separates create from guarded drop modes", () => {
+test("retired coexistence migration remains read-only", () => {
   assert.deepEqual(parseArguments(baseArguments()), options());
-  assert.deepEqual(
-    parseArguments(baseArguments(["--create-replacements"])),
-    options("create_replacements")
+  assert.throws(
+    () => parseArguments(baseArguments(["--create-replacements"])),
+    { message: "membership_coexistence_migration_retired" }
   );
   assert.throws(
-    () => parseArguments(baseArguments(["--create-replacements", "--drop-old-index"])),
-    { message: "migration_modes_conflict" }
-  );
-});
-
-test("drop mode requires exact confirmation and all operational attestations", () => {
-  const complete = baseArguments([
-    "--drop-old-index",
-    `--confirm-drop=${DROP_CONFIRMATION}`,
-    "--membership-writes-paused=true",
-    "--old-backends-stopped=true",
-    "--global-index-recreation-prevented=true",
-  ]);
-  assert.deepEqual(parseArguments(complete), options("drop_old_index"));
-
-  for (const missing of [
-    `--confirm-drop=${DROP_CONFIRMATION}`,
-    "--membership-writes-paused=true",
-    "--old-backends-stopped=true",
-    "--global-index-recreation-prevented=true",
-  ]) {
-    assert.throws(() => parseArguments(complete.filter((argument) => argument !== missing)));
-  }
-  assert.throws(
-    () => parseArguments(baseArguments(["--membership-writes-paused=true"])),
-    { message: "drop_guards_without_drop_mode" }
+    () => parseArguments(baseArguments([
+      "--drop-old-index",
+      `--confirm-drop=${DROP_CONFIRMATION}`,
+      "--membership-writes-paused=true",
+      "--old-backends-stopped=true",
+      "--global-index-recreation-prevented=true",
+    ])),
+    { message: "membership_coexistence_migration_retired" }
   );
 });
 
@@ -163,19 +145,13 @@ test("catalog accepts only exact legacy and replacement definitions", () => {
   );
 });
 
-test("replacement definitions exactly match the current Mongoose schema", () => {
+test("retired entitlement indexes are absent from the current Mongoose schema", () => {
   const schemaIndexes = CustomerMembership.schema.indexes();
   for (const replacement of REPLACEMENT_INDEXES) {
     const schemaIndex = schemaIndexes.find(([, indexOptions]) => (
       indexOptions.name === replacement.name
     ));
-    assert.ok(schemaIndex, `${replacement.name} must be declared by the schema`);
-    assert.deepEqual(schemaIndex[0], replacement.key);
-    assert.equal(schemaIndex[1].unique, true);
-    assert.deepEqual(
-      schemaIndex[1].partialFilterExpression,
-      replacement.partialFilterExpression
-    );
+    assert.equal(schemaIndex, undefined, `${replacement.name} must not be declared by the schema`);
   }
 });
 
@@ -217,18 +193,16 @@ test("the migration fails closed outside the audited MongoDB 8 major version", a
   assert.equal(repo.calls.dropIndex.length, 0);
 });
 
-test("create mode creates only missing replacements and is idempotent", async () => {
+test("direct callers cannot use retired mutation modes", async () => {
   const repo = repository();
-  const first = await runMigration({ options: options("create_replacements"), repository: repo });
-  assert.deepEqual(first.created, REPLACEMENT_INDEXES.map((index) => index.name));
-  assert.equal(repo.calls.createIndex.length, 2);
+  for (const mode of ["create_replacements", "drop_old_index"]) {
+    await assert.rejects(
+      runMigration({ options: options(mode), repository: repo }),
+      { message: "membership_coexistence_migration_retired" }
+    );
+  }
+  assert.equal(repo.calls.createIndex.length, 0);
   assert.equal(repo.calls.dropIndex.length, 0);
-  assert.equal(first.indexes.legacy.present, true);
-
-  const second = await runMigration({ options: options("create_replacements"), repository: repo });
-  assert.deepEqual(second.created, []);
-  assert.equal(repo.calls.createIndex.length, 2);
-  assert.ok(second.indexes.replacements.every((index) => index.action === "verified"));
 });
 
 test("duplicate and unsupported membership records block every mutation", async () => {
@@ -257,7 +231,7 @@ test("duplicate and unsupported membership records block every mutation", async 
     }),
   ]) {
     await assert.rejects(runMigration({
-      options: options("create_replacements"),
+      options: options(),
       repository: repo,
     }));
     assert.equal(repo.calls.createIndex.length, 0);
@@ -265,66 +239,13 @@ test("duplicate and unsupported membership records block every mutation", async 
   }
 });
 
-test("drop mode requires both replacements and reruns fresh anomaly checks", async () => {
-  const missing = repository({ replacementsPresent: false });
-  await assert.rejects(
-    runMigration({ options: options("drop_old_index"), repository: missing }),
-    { message: "replacement_indexes_required_before_drop" }
-  );
-  assert.equal(missing.calls.dropIndex.length, 0);
-
-  const ready = repository({ replacementsPresent: true });
-  const result = await runMigration({ options: options("drop_old_index"), repository: ready });
-  assert.deepEqual(result.dropped, [LEGACY_INDEX.name]);
-  assert.equal(ready.calls.createIndex.length, 0);
-  assert.deepEqual(ready.calls.dropIndex, [{
-    collectionName: APPROVED_TARGET.collectionName,
-    indexName: LEGACY_INDEX.name,
-  }]);
-  assert.equal(ready.calls.aggregate.length, 6, "drop preflight must rerun all three audits");
-  assert.equal(result.indexes.legacy.present, false);
-  assert.ok(result.indexes.replacements.every((index) => index.action === "verified"));
-});
-
-test("drop mode is idempotent only when exact replacements remain", async () => {
-  const repo = repository({ legacyPresent: false, replacementsPresent: true });
-  const result = await runMigration({ options: options("drop_old_index"), repository: repo });
-  assert.deepEqual(result.dropped, []);
-  assert.equal(repo.calls.dropIndex.length, 0);
-
+test("legacy dry-run still fails closed when the old index is unexpectedly absent", async () => {
   await assert.rejects(
     runMigration({
       options: options(),
       repository: repository({ legacyPresent: false, replacementsPresent: false }),
     }),
     { message: "global_index_missing_before_replacements" }
-  );
-});
-
-test("drop failures expose only sanitized operation details", async () => {
-  const repo = repository({ replacementsPresent: true });
-  repo.dropIndex = async () => {
-    const error = new Error("mongodb+srv://secret:password@production.invalid/private");
-    error.code = 13;
-    error.codeName = "Unauthorized";
-    throw error;
-  };
-  await assert.rejects(
-    runMigration({ options: options("drop_old_index"), repository: repo }),
-    (error) => {
-      assert.equal(error.safeCode, "index_drop_failed");
-      assert.deepEqual(error.safeDetails, {
-        operation: "drop_index",
-        stage: "drop_old_index",
-        collectionName: APPROVED_TARGET.collectionName,
-        indexName: LEGACY_INDEX.name,
-        mongoCode: 13,
-        mongoCodeName: "Unauthorized",
-        category: "authorization_failed",
-      });
-      assert.doesNotMatch(JSON.stringify(error.safeDetails), /secret|password|production\.invalid/);
-      return true;
-    }
   );
 });
 

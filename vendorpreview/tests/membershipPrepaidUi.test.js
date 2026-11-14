@@ -173,7 +173,7 @@ test("prepaid renewal UI allows only depleted or expired balances", async () => 
   }).allowed, true);
   assert.match(renewalUiSource, /Renewal is available after the current wallet balance is exhausted/);
   assert.match(source, /<option value="DEPLETED">Depleted<\/option>/);
-  assert.match(source, /prepaid_renewal_successor_exists/);
+  assert.doesNotMatch(source, /prepaid_renewal_successor_exists/);
 });
 
 test("customer membership list is compact and supports type-first filtering", () => {

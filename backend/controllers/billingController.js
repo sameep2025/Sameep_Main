@@ -194,7 +194,13 @@ function buildMembershipBillingSnapshot(membership, benefits, eligibilitySource)
   };
 }
 
-async function findEffectiveCustomerMembership({ vendorId, customerId, now, session }) {
+async function findEffectiveCustomerMembership({
+  vendorId,
+  customerId,
+  selectedMembershipId = "",
+  now,
+  session,
+}) {
   if (!vendorId || !customerId) return null;
   const query = CustomerMembership.find({
     vendorId,
@@ -206,6 +212,32 @@ async function findEffectiveCustomerMembership({ vendorId, customerId, now, sess
   }).sort({ activatedAt: -1, createdAt: -1, _id: -1 });
   if (session) query.session(session);
   const memberships = await query.lean();
+  const requestedId = String(selectedMembershipId || "").trim();
+  if (requestedId) {
+    if (!mongoose.Types.ObjectId.isValid(requestedId)) {
+      const error = new Error("Valid Discount Membership selection required");
+      error.statusCode = 400;
+      error.publicMessage = error.message;
+      error.code = "discount_membership_selection_invalid";
+      throw error;
+    }
+    const selected = memberships.find((membership) => String(membership._id) === requestedId);
+    if (!selected) {
+      const error = new Error("Selected Discount Membership is no longer available");
+      error.statusCode = 409;
+      error.publicMessage = error.message;
+      error.code = "discount_membership_unavailable";
+      throw error;
+    }
+    return selected;
+  }
+  if (memberships.length > 1) {
+    const error = new Error("Select one Discount Membership before completing this bill");
+    error.statusCode = 409;
+    error.publicMessage = error.message;
+    error.code = "discount_membership_selection_required";
+    throw error;
+  }
   return memberships[0] || null;
 }
 
@@ -241,6 +273,7 @@ async function calculateAuthoritativeBillingFinancials({
   billing,
   isWalkIn,
   applyDiscountMembership = true,
+  selectedDiscountMembershipId = "",
   loyaltyRule,
   redeemedAmount = 0,
   now,
@@ -281,6 +314,7 @@ async function calculateAuthoritativeBillingFinancials({
     ? await findEffectiveCustomerMembership({
         vendorId: billing.vendorId,
         customerId: billing.customerId,
+        selectedMembershipId: selectedDiscountMembershipId,
         now,
         session,
       })
@@ -2274,7 +2308,13 @@ exports.verifyRedeemOTP = async (req, res) => {
 // ✅ Complete Billing WITH FIFO + OTP SAFETY
 exports.completeBillingSession = async (req, res) => {
   try {
-    const { billingId, paymentMode, paymentBreakdown, prepaidAuthorizationId } = req.body;
+    const {
+      billingId,
+      paymentMode,
+      paymentBreakdown,
+      prepaidAuthorizationId,
+      discountMembershipId,
+    } = req.body;
 
     const completionResult = await runBillingCompletionAtomically(async (session) => {
       const billing = await findBillingSessionById(billingId, session);
@@ -2358,6 +2398,7 @@ exports.completeBillingSession = async (req, res) => {
         billing,
         isWalkIn,
         applyDiscountMembership: !isPrepaidPayment,
+        selectedDiscountMembershipId: isPrepaidPayment ? "" : discountMembershipId,
         loyaltyRule: rule,
         redeemedAmount: effectiveRedeemPoints,
         now,
@@ -2688,6 +2729,7 @@ exports.completeBillingSession = async (req, res) => {
     if (err?.statusCode) {
       return res.status(err.statusCode).json({
         success: false,
+        ...(err.code ? { code: err.code } : {}),
         message: err.publicMessage || err.message,
       });
     }

@@ -48,22 +48,12 @@ test("customer membership schema snapshots purchased discount plan benefits", ()
   assert.ok(CustomerMembership.schema.path("prepaidValueSnapshot.creditedAmountPaise"));
 
   const indexes = CustomerMembership.schema.indexes();
-  const discountIndex = indexes.find(([, options]) => (
-    options?.name === "customer_membership_active_discount_unique"
-  ));
-  const prepaidIndex = indexes.find(([, options]) => (
-    options?.name === "customer_membership_active_prepaid_unique"
-  ));
-  assert.equal(discountIndex?.[1].unique, true);
-  assert.deepEqual(discountIndex?.[1].partialFilterExpression, {
-    status: "ACTIVE",
-    membershipType: "DISCOUNT",
-  });
-  assert.equal(prepaidIndex?.[1].unique, true);
-  assert.deepEqual(prepaidIndex?.[1].partialFilterExpression, {
-    status: "ACTIVE",
-    membershipType: { $in: ["PREPAID_VALUE", "PREPAID_SESSIONS"] },
-  });
+  const entitlementIndexes = indexes.filter(([, options]) => [
+    "vendorId_1_customerId_1",
+    "customer_membership_active_discount_unique",
+    "customer_membership_active_prepaid_unique",
+  ].includes(options?.name));
+  assert.deepEqual(entitlementIndexes, []);
 });
 
 test("prepaid renewal availability requires depletion or expiry", () => {
@@ -115,11 +105,7 @@ test("prepaid renewal availability requires depletion or expiry", () => {
       status: "ACTIVE",
       membershipType: "PREPAID_VALUE",
     },
-  }), {
-    allowed: false,
-    code: "prepaid_renewal_successor_exists",
-    reason: "Renewal is unavailable because a newer active or scheduled prepaid membership already exists.",
-  });
+  }), { allowed: true, remainingBalance: 0 });
 });
 
 test("membership renewal and transaction indexes have one permanent unique definition", () => {
@@ -139,13 +125,7 @@ test("membership renewal and transaction indexes have one permanent unique defin
     fields.customerId === 1 &&
     options?.partialFilterExpression?.status === "ACTIVE"
   ));
-  assert.deepEqual(
-    activeMembershipIndexes.map(([, options]) => options.name).sort(),
-    [
-      "customer_membership_active_discount_unique",
-      "customer_membership_active_prepaid_unique",
-    ]
-  );
+  assert.deepEqual(activeMembershipIndexes, []);
 
   const enrollmentIndex = membershipIndexes.find(([, options]) => (
     options?.name === "prepaid_membership_enrollment_idempotency_unique"
@@ -405,7 +385,7 @@ test("customer membership listing supports server-side filters, sorting, and pag
   assert.match(controllerSource, /hasMore/);
   assert.match(controllerSource, /status === "EXPIRED"/);
   assert.match(controllerSource, /membershipType = String\(req\.query\?\.membershipType/);
-  assert.match(controllerSource, /prepaid_renewal_successor_exists/);
+  assert.doesNotMatch(controllerSource, /findCompetingPrepaidMembership/);
 });
 
 test("vendor membership detail returns effective override services and keeps history", async () => {
@@ -523,7 +503,7 @@ test("customer membership routes are vendor-authenticated and isolated from bill
   assert.match(controllerSource, /startSession/);
   assert.match(controllerSource, /withTransaction/);
   assert.match(controllerSource, /renewedFromMembershipId/);
-  assert.match(controllerSource, /scheduled renewal already exists/i);
+  assert.match(controllerSource, /renewal already exists/i);
   assert.doesNotMatch(controllerSource, /require\(["']\.\.\/models\/Transaction["']\)/);
   assert.doesNotMatch(controllerSource, /require\(["']\.\.\/models\/LoyaltyLedger["']\)/);
   assert.doesNotMatch(controllerSource, /require\(["'].*Whatsapp|require\(["'].*WhatsApp|MSG91/);

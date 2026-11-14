@@ -338,8 +338,6 @@ test("actual prepaid indexes reject duplicates and permit absent optional refere
     ...transactionIndexes,
   ];
   for (const name of [
-    "customer_membership_active_discount_unique",
-    "customer_membership_active_prepaid_unique",
     "customer_membership_renewal_lineage_unique",
     "prepaid_membership_enrollment_idempotency_unique",
     "prepaid_wallet_membership_unique",
@@ -354,12 +352,8 @@ test("actual prepaid indexes reject duplicates and permit absent optional refere
   assert.deepEqual(
     membershipIndexes
       .filter((index) => index.unique && index.key.vendorId === 1 && index.key.customerId === 1)
-      .map((index) => index.name)
-      .sort(),
-    [
-      "customer_membership_active_discount_unique",
-      "customer_membership_active_prepaid_unique",
-    ]
+      .map((index) => index.name),
+    []
   );
 
   const memberships = CustomerMembership.collection;
@@ -385,18 +379,18 @@ test("actual prepaid indexes reject duplicates and permit absent optional refere
     status: "ACTIVE",
     membershipType: "PREPAID_VALUE",
   });
-  await expectDuplicate(memberships.insertOne({
+  await memberships.insertOne({
     vendorId,
     customerId: activeCustomer,
     status: "ACTIVE",
     membershipType: "DISCOUNT",
-  }));
-  await expectDuplicate(memberships.insertOne({
+  });
+  await memberships.insertOne({
     vendorId,
     customerId: activeCustomer,
     status: "ACTIVE",
     membershipType: "PREPAID_SESSIONS",
-  }));
+  });
   await memberships.insertOne({ vendorId, customerId: oid(), status: "EXPIRED", enrollmentIdempotencyKey: "idem-1" });
   await expectDuplicate(memberships.insertOne({ vendorId, customerId: oid(), status: "EXPIRED", enrollmentIdempotencyKey: "idem-1" }));
 
@@ -451,7 +445,7 @@ test("value and sessions enrollment persist one wallet and initial CREDIT atomic
   assert.equal(await PrepaidWalletLedger.countDocuments({ customerMembershipId: sessionsMembership._id, eventType: "CREDIT" }), 1);
 });
 
-test("Discount and Prepaid enrollment coexist in either order while each entitlement remains unique", async () => {
+test("unlimited membership combinations create independent records", async () => {
   const vendorId = oid();
   const discountPlan = await createDiscountPlan(vendorId);
   const valuePlan = await createValuePlan(vendorId);
@@ -499,8 +493,15 @@ test("Discount and Prepaid enrollment coexist in either order while each entitle
     mobile: "9876500031",
     key: "duplicate-prepaid",
   });
-  assert.equal(duplicateDiscount.statusCode, 409);
-  assert.equal(duplicatePrepaid.statusCode, 409);
+  const repeatedValuePlan = await enroll({
+    vendorId,
+    plan: valuePlan,
+    mobile: "9876500031",
+    key: "repeated-value-plan",
+  });
+  assert.equal(duplicateDiscount.statusCode, 201);
+  assert.equal(duplicatePrepaid.statusCode, 201);
+  assert.equal(repeatedValuePlan.statusCode, 201);
 
   const customer = await Customer.findOne({ fullNumber: "919876500031" }).lean();
   const active = await CustomerMembership.find({
@@ -510,8 +511,14 @@ test("Discount and Prepaid enrollment coexist in either order while each entitle
   }).lean();
   assert.deepEqual(
     active.map((membership) => membership.membershipType).sort(),
-    ["DISCOUNT", "PREPAID_VALUE"]
+    ["DISCOUNT", "DISCOUNT", "PREPAID_SESSIONS", "PREPAID_VALUE", "PREPAID_VALUE"]
   );
+  const valueMemberships = active.filter((membership) => membership.membershipType === "PREPAID_VALUE");
+  assert.equal(valueMemberships.length, 2);
+  assert.notEqual(String(valueMemberships[0]._id), String(valueMemberships[1]._id));
+  assert.equal(await PrepaidMembershipWallet.countDocuments({
+    customerMembershipId: { $in: valueMemberships.map((membership) => membership._id) },
+  }), 2);
 });
 
 test("concurrent enrollment and renewal preserve one financial record per request/source", async () => {
@@ -550,7 +557,7 @@ test("concurrent enrollment and renewal preserve one financial record per reques
   assert.equal(await PrepaidWalletLedger.countDocuments({ customerMembershipId: children[0]._id, eventType: "CREDIT" }), 1);
 });
 
-test("a historical depleted membership cannot renew after its successor becomes active", async () => {
+test("a source membership can create only one direct renewal", async () => {
   const vendorId = oid();
   const plan = await createValuePlan(vendorId);
   const enrolled = await enroll({
@@ -586,7 +593,7 @@ test("a historical depleted membership cannot renew after its successor becomes 
     key: "historical-renewal-duplicate",
   });
   assert.equal(secondRenewal.statusCode, 409);
-  assert.equal(secondRenewal.payload.code, "prepaid_renewal_successor_exists");
+  assert.equal(secondRenewal.payload.code, "membership_renewal_source_already_renewed");
   assert.equal(
     await CustomerMembership.countDocuments({ renewedFromMembershipId: parent._id }),
     1

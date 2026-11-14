@@ -96,6 +96,11 @@ function parseArguments(argv) {
   }
 
   const mode = createReplacements ? "create_replacements" : dropOldIndex ? "drop_old_index" : "dry_run";
+  if (mode !== "dry_run") {
+    throw migrationError("membership_coexistence_migration_retired", {
+      replacementUtility: "migrateUnlimitedMembershipIndexes.js",
+    });
+  }
   const options = {
     mode,
     expectedHost: normalizeHost(values["expected-host"]),
@@ -318,6 +323,11 @@ async function loadAndInspectCatalog(repository) {
 }
 
 async function runMigration({ options, repository }) {
+  if (options?.mode !== "dry_run") {
+    throw migrationError("membership_coexistence_migration_retired", {
+      replacementUtility: "migrateUnlimitedMembershipIndexes.js",
+    });
+  }
   const connected = verifyConnectedIdentity({
     options,
     databaseName: await repository.getDatabaseName(),
