@@ -38,15 +38,17 @@ test("staff metrics expose all labels, zero fallback and responsive layout", () 
     "utf8"
   );
 
-  assert.match(source, />Revenue</);
+  assert.match(source, />Gross Revenue</);
+  assert.match(source, />Allocated Discounts</);
+  assert.match(source, />Net Revenue</);
   assert.match(source, />Services</);
-  assert.match(source, />Avg\. Service Value</);
+  assert.match(source, />Avg\. Net Service Value</);
   assert.match(source, />Customers Attended</);
   assert.match(source, /row\?\.customersAttended/);
   assert.match(source, /unidentifiedCustomerBills/);
   assert.match(source, /without customer identity/);
   assert.match(source, /averageServiceValue === null \? "—"/);
-  assert.match(css, /grid-template-columns:\s*repeat\(4, minmax\(0, 1fr\)\)/);
+  assert.match(css, /grid-template-columns:\s*repeat\(3, minmax\(0, 1fr\)\)/);
   assert.match(css, /@media \(max-width: 640px\)/);
   assert.match(css, /grid-template-columns:\s*repeat\(2, minmax\(0, 1fr\)\)/);
   assert.match(css, /overflow-wrap:\s*anywhere/);

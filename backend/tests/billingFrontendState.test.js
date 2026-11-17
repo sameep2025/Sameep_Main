@@ -70,7 +70,7 @@ test("customer selection refreshes wallet and wallet failures are not presented 
   assert.match(selectionSource, /prepaidSelectionAction === "RETRY"/);
 });
 
-test("membership preview sends redemption and refreshes loyalty estimates when it changes", () => {
+test("membership preview sends redemption and refreshes only for canonical billing changes", () => {
   const previewEffect = sourceBetween(
     "const requestId = membershipPreviewRequestRef.current + 1",
     "/*\n  const saveLoyaltyRule"
@@ -81,10 +81,8 @@ test("membership preview sends redemption and refreshes loyalty estimates when i
   );
 
   assert.match(previewEffect, /redemption:\s*\{\s*amount: redeemPoints/);
-  assert.match(
-    previewEffect,
-    /percentPer100,\s*redeemPoints,\s*selectedDiscountMembershipId,\s*membershipPreviewRetryNonce/
-  );
+  assert.match(previewEffect, /\[membershipPreviewRequestKey, membershipPreviewRetryNonce\]/);
+  assert.match(previewEffect, /resolveSelectedDiscountMembershipId/);
   assert.match(earnHelper, /membershipPreview\?\.hasEffectiveMembership/);
   assert.match(earnHelper, /preview\?\.estimatedRewardPoints/);
   assert.match(earnHelper, /finalTotal[\s\S]*redeemPoints/);

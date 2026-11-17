@@ -4,7 +4,12 @@ import { useEffect, useMemo, useState } from "react";
 import { API_BASE_URL } from "../../../config";
 import RevenueSnapshot from "./RevenueSnapshot";
 import StaffPerformanceMetrics from "./StaffPerformanceMetrics";
+import StylistReconciliationWarning from "./StylistReconciliationWarning";
 import PrepaidRevenueSummary, { addPrepaidReporting } from "./PrepaidRevenueSummary";
+import {
+  createCompleteStylistReconciliation,
+  normalizeStylistPerformanceResponse,
+} from "./stylistReconciliation.mjs";
 import RevenuePeriodAnalytics from "./RevenuePeriodAnalytics";
 import RevenueTrendChart from "./RevenueTrendChart";
 import { calculateRevenueAverages } from "./revenueAnalytics.mjs";
@@ -53,6 +58,9 @@ export default function YearRevenue({
   const [selectedMonthKey, setSelectedMonthKey] = useState("");
   const [loading, setLoading] = useState(true);
   const [stylists, setStylists] = useState([]);
+  const [stylistReconciliation, setStylistReconciliation] = useState(
+    createCompleteStylistReconciliation
+  );
   const [loadingStylists, setLoadingStylists] = useState(true);
   const [showSnapshot, setShowSnapshot] = useState(false);
 
@@ -69,6 +77,7 @@ export default function YearRevenue({
       setSelectedMonthKey("");
       setLoading(false);
       setStylists([]);
+      setStylistReconciliation(createCompleteStylistReconciliation());
       setLoadingStylists(false);
       return;
     }
@@ -146,6 +155,7 @@ export default function YearRevenue({
   useEffect(() => {
     if (!vendorId) {
       setStylists([]);
+      setStylistReconciliation(createCompleteStylistReconciliation());
       setLoadingStylists(false);
       return;
     }
@@ -156,6 +166,7 @@ export default function YearRevenue({
       if (!hrEnabled) {
         if (!cancelled) {
           setStylists([]);
+          setStylistReconciliation(createCompleteStylistReconciliation());
           setLoadingStylists(false);
         }
         return;
@@ -164,6 +175,7 @@ export default function YearRevenue({
       if (!selectedMonth?.startDate || !selectedMonth?.endDate) {
         if (!cancelled) {
           setStylists([]);
+          setStylistReconciliation(createCompleteStylistReconciliation());
           setLoadingStylists(false);
         }
         return;
@@ -186,19 +198,17 @@ export default function YearRevenue({
         }
 
         const json = await res.json();
-        const rawStylists = Array.isArray(json)
-          ? json
-          : Array.isArray(json?.data)
-            ? json.data
-            : [];
+        const normalized = normalizeStylistPerformanceResponse(json);
 
         if (!cancelled) {
-          setStylists(rawStylists);
+          setStylists(normalized.data);
+          setStylistReconciliation(normalized.reconciliation);
         }
       } catch (error) {
         console.error(`Failed to fetch ${hrLabelSingular.toLowerCase()} performance`, error);
         if (!cancelled) {
           setStylists([]);
+          setStylistReconciliation(createCompleteStylistReconciliation());
         }
       } finally {
         if (!cancelled) {
@@ -471,11 +481,14 @@ export default function YearRevenue({
               </span>
             ) : null}
           </div>
+          <StylistReconciliationWarning reconciliation={stylistReconciliation} />
           {loadingStylists ? (
             <div className="revenue-panel-loading">{`Loading ${hrLabelSingular.toLowerCase()} performance...`}</div>
           ) : stylists.length === 0 ? (
             <div className="revenue-panel-empty">
-              {`No ${hrLabelSingular.toLowerCase()} performance data available for ${selectedMonthLabel}.`}
+              {stylistReconciliation.complete
+                ? `No ${hrLabelSingular.toLowerCase()} performance data available for ${selectedMonthLabel}.`
+                : `No reconciled ${hrLabelSingular.toLowerCase()} performance data is available for ${selectedMonthLabel}.`}
             </div>
           ) : (
             <div className="revenue-panel-list">

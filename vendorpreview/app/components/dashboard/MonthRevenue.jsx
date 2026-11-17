@@ -4,7 +4,12 @@ import { useEffect, useState } from "react";
 import { API_BASE_URL } from "../../../config";
 import RevenueSnapshot from "./RevenueSnapshot";
 import StaffPerformanceMetrics from "./StaffPerformanceMetrics";
+import StylistReconciliationWarning from "./StylistReconciliationWarning";
 import PrepaidRevenueSummary from "./PrepaidRevenueSummary";
+import {
+  createCompleteStylistReconciliation,
+  normalizeStylistPerformanceResponse,
+} from "./stylistReconciliation.mjs";
 import { getIstMonthToDateRange } from "./revenueDateRanges.mjs";
 import { calculateRevenueAverages, getMonthKey } from "./revenueAnalytics.mjs";
 import RevenuePeriodAnalytics from "./RevenuePeriodAnalytics";
@@ -77,6 +82,9 @@ export default function MonthRevenue({
   const [summary, setSummary] = useState(() => createEmptyRevenueSummary());
   const [loading, setLoading] = useState(true);
   const [stylists, setStylists] = useState([]);
+  const [stylistReconciliation, setStylistReconciliation] = useState(
+    createCompleteStylistReconciliation
+  );
   const [loadingStylists, setLoadingStylists] = useState(true);
   const [showSnapshot, setShowSnapshot] = useState(false);
   const monthAverages = calculateRevenueAverages({
@@ -96,6 +104,7 @@ export default function MonthRevenue({
       setSummary(createEmptyRevenueSummary());
       setLoading(false);
       setStylists([]);
+      setStylistReconciliation(createCompleteStylistReconciliation());
       setLoadingStylists(false);
       return;
     }
@@ -137,6 +146,7 @@ export default function MonthRevenue({
       if (!hrEnabled) {
         if (!cancelled) {
           setStylists([]);
+          setStylistReconciliation(createCompleteStylistReconciliation());
           setLoadingStylists(false);
         }
         return;
@@ -154,19 +164,17 @@ export default function MonthRevenue({
         }
 
         const json = await res.json();
-        const rawStylists = Array.isArray(json)
-          ? json
-          : Array.isArray(json?.data)
-            ? json.data
-            : [];
+        const normalized = normalizeStylistPerformanceResponse(json);
 
         if (!cancelled) {
-          setStylists(rawStylists);
+          setStylists(normalized.data);
+          setStylistReconciliation(normalized.reconciliation);
         }
       } catch (error) {
         console.error(`Failed to fetch ${hrLabelSingular.toLowerCase()} performance`, error);
         if (!cancelled) {
           setStylists([]);
+          setStylistReconciliation(createCompleteStylistReconciliation());
         }
       } finally {
         if (!cancelled) {
@@ -314,11 +322,14 @@ export default function MonthRevenue({
       ) : (
         <div className="revenue-panel-section">
           <div className="revenue-panel-section-title">{hrPerformanceTitle}</div>
+          <StylistReconciliationWarning reconciliation={stylistReconciliation} />
           {loadingStylists ? (
             <div className="revenue-panel-loading">{`Loading ${hrLabelSingular.toLowerCase()} performance...`}</div>
           ) : stylists.length === 0 ? (
             <div className="revenue-panel-empty">
-              {`No ${hrLabelSingular.toLowerCase()} performance data available for this month.`}
+              {stylistReconciliation.complete
+                ? `No ${hrLabelSingular.toLowerCase()} performance data available for this month.`
+                : `No reconciled ${hrLabelSingular.toLowerCase()} performance data is available for this month.`}
             </div>
           ) : (
             <div className="revenue-panel-list">

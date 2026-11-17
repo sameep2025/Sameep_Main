@@ -7,6 +7,10 @@ const VendorCustomerProfile = require("../models/VendorCustomerProfile");
 const { calculateMembershipBillingPreview } = require("../utils/membershipBillingCalculator");
 const { getStoredPaymentAllocation } = require("../services/paymentAllocationService");
 const {
+  StylistRevenueAllocationError,
+  reconcileStylistBillRevenue,
+} = require("../services/stylistRevenueAllocationService");
+const {
   getPrepaidRevenueDaily,
   getPrepaidRevenueMonthly,
   getPrepaidRevenueSummary,
@@ -357,17 +361,47 @@ function buildReportItemBreakdown(bill = {}, membershipMap = new Map()) {
   );
 
   if (hasPersistedLineAmounts) {
-    return cartItems.map((item) => ({
-      item,
-      finalLineAmount: hasStoredNumber(item?.finalLineAmount)
-        ? toSafeNumber(item.finalLineAmount)
-        : Math.max(
-            toSafeNumber(item?.total) -
-              toSafeNumber(item?.membershipDiscountAmount) -
-              toSafeNumber(item?.manualDiscountAmount),
-            0
-          ),
-    }));
+    return {
+      lines: cartItems.map((item) => {
+        const hasExplicitDiscount = hasStoredNumber(item?.membershipDiscountAmount) ||
+          hasStoredNumber(item?.manualDiscountAmount);
+        const existingDiscountAmount = hasExplicitDiscount
+          ? toSafeNumber(item?.membershipDiscountAmount) + toSafeNumber(item?.manualDiscountAmount)
+          : undefined;
+        return {
+          item,
+          existingDiscountAmount,
+          finalLineAmount: hasStoredNumber(item?.finalLineAmount)
+            ? toSafeNumber(item.finalLineAmount)
+            : hasExplicitDiscount
+              ? Math.max(toSafeNumber(item?.total) - existingDiscountAmount, 0)
+              : undefined,
+          manualDiscountEligible: item?.manualDiscountEligible,
+        };
+      }),
+      membershipAllocationUnavailable: false,
+    };
+  }
+
+  const gstLines = Array.isArray(bill.gstInvoiceSnapshot?.items)
+    ? bill.gstInvoiceSnapshot.items
+    : [];
+  if (
+    gstLines.length === cartItems.length &&
+    gstLines.every((line) => Number.isSafeInteger(line?.totalDiscountPaise) && line.totalDiscountPaise >= 0)
+  ) {
+    return {
+      lines: cartItems.map((item, index) => ({
+        item,
+        existingDiscountAmount: gstLines[index].totalDiscountPaise / 100,
+        finalLineAmount: Math.max(
+          toSafeNumber(item?.total) - gstLines[index].totalDiscountPaise / 100,
+          0
+        ),
+        manualDiscountEligible: item?.manualDiscountEligible,
+      })),
+      membershipAllocationUnavailable: false,
+    };
   }
 
   const membershipId = bill.membershipBillingSnapshot?.customerMembershipId
@@ -412,18 +446,66 @@ function buildReportItemBreakdown(bill = {}, membershipMap = new Map()) {
       },
     });
 
-    return cartItems.map((item, index) => ({
-      item,
-      finalLineAmount: hasStoredNumber(calculation.items?.[index]?.finalLineAmount)
-        ? toSafeNumber(calculation.items[index].finalLineAmount)
-        : toSafeNumber(item?.total),
-    }));
+    return {
+      lines: cartItems.map((item, index) => {
+        const calculated = calculation.items?.[index] || {};
+        return {
+          item,
+          existingDiscountAmount:
+            toSafeNumber(calculated.membershipDiscountAmount) +
+            toSafeNumber(calculated.manualDiscountAmount),
+          finalLineAmount: hasStoredNumber(calculated.finalLineAmount)
+            ? toSafeNumber(calculated.finalLineAmount)
+            : toSafeNumber(item?.total),
+          manualDiscountEligible: calculated.manualDiscountEligible,
+        };
+      }),
+      membershipAllocationUnavailable: false,
+    };
   }
 
-  return cartItems.map((item) => ({
-    item,
-    finalLineAmount: toSafeNumber(item?.total),
-  }));
+  return {
+    lines: cartItems.map((item) => ({ item })),
+    membershipAllocationUnavailable: toSafeNumber(bill.membershipDiscountAmount) > 0,
+  };
+}
+
+function resolveStylistReportingRange({ range, from, to } = {}, now = new Date()) {
+  const fromDate = from ? parseReportingDate(from, "from") : null;
+  const toDate = to ? parseReportingDate(to, "to") : null;
+  if (fromDate) return { startDate: fromDate, endDate: toDate };
+  if (range === "today") return { startDate: getIstDayBounds(now).start, endDate: null };
+  if (range === "mtd") return { startDate: getIstMonthStart(now), endDate: null };
+  if (range === "ytd") {
+    return { startDate: getIstRollingMonthWindow(now, 12).start, endDate: null };
+  }
+  return { startDate: new Date(0), endDate: null };
+}
+
+function buildUnreconciledBillFinancials(bill = {}) {
+  const grossRevenue = hasStoredNumber(bill.grossAmount) ? toSafeNumber(bill.grossAmount) : null;
+  const discounts = hasStoredNumber(bill.discountAmount) ? toSafeNumber(bill.discountAmount) : null;
+  const netRevenue = grossRevenue !== null && discounts !== null && discounts <= grossRevenue
+    ? Math.round((grossRevenue - discounts) * 100) / 100
+    : null;
+  return { grossRevenue, discounts, netRevenue };
+}
+
+function buildStylistReconciliation(issues = []) {
+  const sumWhenComplete = (field) => issues.every((issue) => issue[field] !== null)
+    ? Math.round(issues.reduce((sum, issue) => sum + issue[field], 0) * 100) / 100
+    : null;
+  return {
+    complete: issues.length === 0,
+    unreconciledBillCount: issues.length,
+    unreconciledGrossRevenue: issues.length ? sumWhenComplete("grossRevenue") : 0,
+    unreconciledDiscounts: issues.length ? sumWhenComplete("discounts") : 0,
+    unreconciledNetRevenue: issues.length ? sumWhenComplete("netRevenue") : 0,
+    issues: issues.map((issue) => ({
+      billingSessionId: issue.billingSessionId,
+      code: issue.code,
+    })),
+  };
 }
 
 function getStylistRowKey(item = {}) {
@@ -1142,28 +1224,7 @@ exports.getStylistPerformance = async (req, res) => {
       return res.status(400).json({ message: "vendorId required" });
     }
 
-    const now = new Date();
-    let startDate;
-    let endDate;
-
-    const fromDate = from ? new Date(from) : null;
-    const toDate = to ? new Date(to) : null;
-
-    if (fromDate && !Number.isNaN(fromDate.getTime())) {
-      startDate = fromDate;
-      if (toDate && !Number.isNaN(toDate.getTime())) {
-        endDate = toDate;
-      }
-    } else if (range === "today") {
-      startDate = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-    } else if (range === "mtd") {
-      startDate = new Date(now.getFullYear(), now.getMonth(), 1);
-    } else if (range === "ytd") {
-      startDate = new Date(now.getFullYear(), now.getMonth(), 1);
-      startDate.setMonth(startDate.getMonth() - 11);
-    } else {
-      startDate = new Date(0);
-    }
+    const { startDate, endDate } = resolveStylistReportingRange({ range, from, to });
 
     const createdAtMatch = { $gte: startDate };
     if (endDate) {
@@ -1177,6 +1238,8 @@ exports.getStylistPerformance = async (req, res) => {
     })
       .select({
         cartItems: 1,
+        grossAmount: 1,
+        discountAmount: 1,
         customerId: 1,
         customerPhoneSnapshot: 1,
         membershipDiscountAmount: 1,
@@ -1184,12 +1247,34 @@ exports.getStylistPerformance = async (req, res) => {
         manualDiscountMode: 1,
         manualDiscountPercent: 1,
         membershipBillingSnapshot: 1,
+        gstInvoiceSnapshot: 1,
       })
       .lean();
 
+    const transactionMap = await getTransactionsForBills(bills);
+    const reportingBills = bills.map((bill) => {
+      const transaction = transactionMap.get(String(bill._id)) || null;
+      return {
+        ...bill,
+        grossAmount: hasStoredNumber(bill.grossAmount)
+          ? bill.grossAmount
+          : transaction?.grossAmount,
+        discountAmount: hasStoredNumber(bill.discountAmount)
+          ? bill.discountAmount
+          : transaction?.discountAmount,
+        membershipDiscountAmount: hasStoredNumber(bill.membershipDiscountAmount)
+          ? bill.membershipDiscountAmount
+          : transaction?.membershipDiscountAmount,
+        additionalManualDiscountAmount: hasStoredNumber(bill.additionalManualDiscountAmount)
+          ? bill.additionalManualDiscountAmount
+          : transaction?.additionalManualDiscountAmount,
+        membershipBillingSnapshot:
+          bill.membershipBillingSnapshot || transaction?.membershipBillingSnapshot || null,
+      };
+    });
     const membershipIds = [
       ...new Set(
-        bills
+        reportingBills
           .map((bill) => bill.membershipBillingSnapshot?.customerMembershipId)
           .filter(Boolean)
           .map(String)
@@ -1203,27 +1288,50 @@ exports.getStylistPerformance = async (req, res) => {
       membership,
     ]));
     const customerIdentityByPhone = new Map();
-    for (const bill of bills) {
+    for (const bill of reportingBills) {
       const phone = getNormalizedCustomerPhone(bill);
       if (phone && bill.customerId) {
         customerIdentityByPhone.set(phone, `customer:${String(bill.customerId)}`);
       }
     }
     const grouped = new Map();
+    const reconciliationIssues = [];
 
-    for (const bill of bills) {
+    for (const bill of reportingBills) {
       const performedStylistKeys = new Set();
-      for (const { item, finalLineAmount } of buildReportItemBreakdown(bill, membershipMap)) {
+      let allocation;
+      try {
+        const breakdown = buildReportItemBreakdown(bill, membershipMap);
+        allocation = reconcileStylistBillRevenue({
+          bill,
+          lineBreakdown: breakdown.lines,
+          membershipAllocationUnavailable: breakdown.membershipAllocationUnavailable,
+        });
+      } catch (error) {
+        if (!(error instanceof StylistRevenueAllocationError)) throw error;
+        const financials = buildUnreconciledBillFinancials(bill);
+        reconciliationIssues.push({
+          billingSessionId: String(bill._id || ""),
+          code: error.code || "stylist_reconciliation_failed",
+          ...financials,
+        });
+        continue;
+      }
+      for (const { item, grossRevenue, allocatedDiscounts, netRevenue } of allocation.lines) {
         const key = getStylistRowKey(item);
         const existing = grouped.get(key) || {
           _id: key,
           stylist: getStylistRowLabel(item),
-          revenue: 0,
+          grossRevenue: 0,
+          allocatedDiscounts: 0,
+          netRevenue: 0,
           services: 0,
           customerIdentities: new Set(),
           unidentifiedBillIds: new Set(),
         };
-        existing.revenue += toSafeNumber(finalLineAmount);
+        existing.grossRevenue += toSafeNumber(grossRevenue);
+        existing.allocatedDiscounts += toSafeNumber(allocatedDiscounts);
+        existing.netRevenue += toSafeNumber(netRevenue);
         existing.services += toSafeNumber(item?.qty);
         grouped.set(key, existing);
         performedStylistKeys.add(key);
@@ -1245,14 +1353,20 @@ exports.getStylistPerformance = async (req, res) => {
       .map((row) => ({
         _id: row._id,
         stylist: row.stylist,
-        revenue: Math.round(row.revenue * 100) / 100,
+        grossRevenue: Math.round(row.grossRevenue * 100) / 100,
+        allocatedDiscounts: Math.round(row.allocatedDiscounts * 100) / 100,
+        netRevenue: Math.round(row.netRevenue * 100) / 100,
+        revenue: Math.round(row.netRevenue * 100) / 100,
         services: row.services,
         customersAttended: row.customerIdentities.size,
         unidentifiedCustomerBills: row.unidentifiedBillIds.size,
       }))
-      .sort((left, right) => right.revenue - left.revenue);
+      .sort((left, right) => right.netRevenue - left.netRevenue);
 
-    res.json(result);
+    res.json({
+      data: result,
+      reconciliation: buildStylistReconciliation(reconciliationIssues),
+    });
   } catch (err) {
     console.error("Stylist analytics error:", err);
     res.status(500).json({ message: "Server error" });
@@ -1262,10 +1376,14 @@ exports.getStylistPerformance = async (req, res) => {
 exports._private = {
   MAX_BILL_PAGE_LIMIT,
   MAX_DAILY_TREND_DAYS,
+  buildReportItemBreakdown,
+  buildStylistReconciliation,
+  buildUnreconciledBillFinancials,
   buildCreatedAtRange,
   decodeBillCursor,
   encodeBillCursor,
   parseBillPageLimit,
   resolveExclusiveEnd,
   resolveReportingRange,
+  resolveStylistReportingRange,
 };

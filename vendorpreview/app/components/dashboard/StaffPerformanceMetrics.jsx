@@ -4,11 +4,16 @@ import "./StaffPerformanceMetrics.css";
 const currencyFmt = new Intl.NumberFormat("en-IN", {
   style: "currency",
   currency: "INR",
-  maximumFractionDigits: 0,
+  maximumFractionDigits: 2,
 });
 
 export default function StaffPerformanceMetrics({ row, fallbackName }) {
-  const averageServiceValue = getAverageServiceValue(row?.revenue, row?.services);
+  const netRevenue = Number(row?.netRevenue ?? row?.revenue ?? 0);
+  const grossRevenue = Number(row?.grossRevenue ?? netRevenue);
+  const allocatedDiscounts = Number(
+    row?.allocatedDiscounts ?? Math.max(grossRevenue - netRevenue, 0)
+  );
+  const averageServiceValue = getAverageServiceValue(netRevenue, row?.services);
   const hasCustomerCount = Number.isFinite(Number(row?.customersAttended));
   const unidentifiedCustomerBills = Number(row?.unidentifiedCustomerBills || 0);
 
@@ -19,15 +24,23 @@ export default function StaffPerformanceMetrics({ row, fallbackName }) {
       </div>
       <div className="staff-performance-metrics">
         <div className="staff-performance-metric">
-          <span>Revenue</span>
-          <strong>{currencyFmt.format(Number(row?.revenue || 0))}</strong>
+          <span>Gross Revenue</span>
+          <strong>{currencyFmt.format(grossRevenue)}</strong>
+        </div>
+        <div className="staff-performance-metric">
+          <span>Allocated Discounts</span>
+          <strong>{currencyFmt.format(allocatedDiscounts)}</strong>
+        </div>
+        <div className="staff-performance-metric">
+          <span>Net Revenue</span>
+          <strong>{currencyFmt.format(netRevenue)}</strong>
         </div>
         <div className="staff-performance-metric">
           <span>Services</span>
           <strong>{row?.services ?? 0}</strong>
         </div>
         <div className="staff-performance-metric">
-          <span>Avg. Service Value</span>
+          <span>Avg. Net Service Value</span>
           <strong>
             {averageServiceValue === null ? "—" : currencyFmt.format(averageServiceValue)}
           </strong>

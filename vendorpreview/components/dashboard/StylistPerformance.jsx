@@ -3,22 +3,54 @@
 import { useEffect, useState } from "react";
 import { API_BASE_URL } from "../../config";
 import { getVendorAuthHeaders } from "../../app/utils/vendorAuth";
+import StylistReconciliationWarning from "../../app/components/dashboard/StylistReconciliationWarning";
+import {
+  createCompleteStylistReconciliation,
+  normalizeStylistPerformanceResponse,
+} from "../../app/components/dashboard/stylistReconciliation.mjs";
 
 export default function StylistPerformance({ vendorId }) {
   const [range, setRange] = useState("today");
   const [data, setData] = useState([]);
+  const [reconciliation, setReconciliation] = useState(
+    createCompleteStylistReconciliation
+  );
 
   useEffect(() => {
     if (!vendorId) return;
+
+    let cancelled = false;
 
     fetch(
       `${API_BASE_URL}/api/vendor/dashboard/stylist-performance?vendorId=${vendorId}&range=${range}`,
       { headers: getVendorAuthHeaders(vendorId) }
     )
-      .then((res) => res.json())
-      .then((json) => setData(Array.isArray(json) ? json : []))
-      .catch(console.error);
+      .then((res) => {
+        if (!res.ok) throw new Error("Failed to load stylist performance");
+        return res.json();
+      })
+      .then((json) => {
+        if (cancelled) return;
+        const normalized = normalizeStylistPerformanceResponse(json);
+        setData(normalized.data);
+        setReconciliation(normalized.reconciliation);
+      })
+      .catch((error) => {
+        if (cancelled) return;
+        console.error(error);
+        setData([]);
+        setReconciliation(createCompleteStylistReconciliation());
+      });
+
+    return () => {
+      cancelled = true;
+    };
   }, [vendorId, range]);
+
+  const visibleData = vendorId ? data : [];
+  const visibleReconciliation = vendorId
+    ? reconciliation
+    : createCompleteStylistReconciliation();
 
   return (
     <div className="dashboardCard" style={{ marginTop: 20 }}>
@@ -32,6 +64,8 @@ export default function StylistPerformance({ vendorId }) {
         </select>
       </div>
 
+      <StylistReconciliationWarning reconciliation={visibleReconciliation} />
+
       <table className="stylistTable" style={{ width: "100%", marginTop: 12 }}>
         <thead>
           <tr>
@@ -42,17 +76,19 @@ export default function StylistPerformance({ vendorId }) {
         </thead>
 
         <tbody>
-          {data.map((row) => (
+          {visibleData.map((row) => (
             <tr key={row._id}>
               <td>{row.stylist || "-"}</td>
               <td align="right">₹{Number(row.revenue || 0).toLocaleString("en-IN")}</td>
               <td align="right">{Number(row.services || 0)}</td>
             </tr>
           ))}
-          {!data.length && (
+          {!visibleData.length && (
             <tr>
               <td colSpan={3} style={{ opacity: 0.6, paddingTop: 8 }}>
-                No data available
+                {visibleReconciliation.complete
+                  ? "No data available"
+                  : "No reconciled stylist data available for this period"}
               </td>
             </tr>
           )}

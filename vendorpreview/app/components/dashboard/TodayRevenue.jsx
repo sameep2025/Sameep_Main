@@ -4,7 +4,12 @@ import { useEffect, useState } from "react";
 import { API_BASE_URL } from "../../../config";
 import RevenueSnapshot from "./RevenueSnapshot";
 import StaffPerformanceMetrics from "./StaffPerformanceMetrics";
+import StylistReconciliationWarning from "./StylistReconciliationWarning";
 import PrepaidRevenueSummary from "./PrepaidRevenueSummary";
+import {
+  createCompleteStylistReconciliation,
+  normalizeStylistPerformanceResponse,
+} from "./stylistReconciliation.mjs";
 import { getIstTodayRange } from "./revenueDateRanges.mjs";
 import { getVendorAuthHeaders } from "../../utils/vendorAuth";
 import "./TodayRevenue.css";
@@ -156,6 +161,9 @@ function TodayRevenue({
   const [bills, setBills] = useState([]);
   const [summary, setSummary] = useState(() => createEmptyRevenueSummary());
   const [stylists, setStylists] = useState([]);
+  const [stylistReconciliation, setStylistReconciliation] = useState(
+    createCompleteStylistReconciliation
+  );
   const [loadingRevenue, setLoadingRevenue] = useState(true);
   const [loadingStylists, setLoadingStylists] = useState(true);
   const [expandedBills, setExpandedBills] = useState({});
@@ -172,6 +180,7 @@ function TodayRevenue({
       setBills([]);
       setSummary(createEmptyRevenueSummary());
       setStylists([]);
+      setStylistReconciliation(createCompleteStylistReconciliation());
       setLoadingRevenue(false);
       setLoadingStylists(false);
       return;
@@ -235,6 +244,7 @@ function TodayRevenue({
       if (!hrEnabled) {
         if (!cancelled) {
           setStylists([]);
+          setStylistReconciliation(createCompleteStylistReconciliation());
           setLoadingStylists(false);
         }
         return;
@@ -252,19 +262,17 @@ function TodayRevenue({
         }
 
         const json = await res.json();
-        const rawStylists = Array.isArray(json)
-          ? json
-          : Array.isArray(json?.data)
-            ? json.data
-            : [];
+        const normalized = normalizeStylistPerformanceResponse(json);
 
         if (!cancelled) {
-          setStylists(rawStylists);
+          setStylists(normalized.data);
+          setStylistReconciliation(normalized.reconciliation);
         }
       } catch (error) {
         console.error(`Failed to fetch ${hrLabelSingular.toLowerCase()} performance`, error);
         if (!cancelled) {
           setStylists([]);
+          setStylistReconciliation(createCompleteStylistReconciliation());
         }
       } finally {
         if (!cancelled) {
@@ -526,9 +534,12 @@ function TodayRevenue({
         ) : (
           <>
             <div className="today-revenue-section-title">{hrPerformanceTitle}</div>
+            <StylistReconciliationWarning reconciliation={stylistReconciliation} />
             {stylists.length === 0 ? (
               <div className="today-revenue-empty">
-                {`No ${hrLabelSingular.toLowerCase()} performance data available for today.`}
+                {stylistReconciliation.complete
+                  ? `No ${hrLabelSingular.toLowerCase()} performance data available for today.`
+                  : `No reconciled ${hrLabelSingular.toLowerCase()} performance data is available for today.`}
               </div>
             ) : (
               <div className="today-revenue-stylist-list">

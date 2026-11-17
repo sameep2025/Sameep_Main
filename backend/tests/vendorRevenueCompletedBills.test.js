@@ -1138,6 +1138,7 @@ test("vendor revenue period summary and chart aggregations require COMPLETED sta
   assert.match(itemNetRevenueSection, /cartItems\.manualDiscountAmount/);
   assert.match(topServicesSection, /getCartItemNetRevenueExpression\(\)/);
   assert.match(stylistSection, /BillingSession\.find/);
+  assert.match(stylistSection, /getTransactionsForBills/);
   assert.match(stylistSection, /CustomerMembership\.find/);
   assert.match(stylistSection, /buildReportItemBreakdown/);
 });
@@ -1146,6 +1147,7 @@ test("stylist performance uses persisted net item revenue with allocation fallba
   const originals = {
     billingFind: BillingSession.find,
     membershipFind: CustomerMembership.find,
+    transactionFind: Transaction.find,
   };
   const membershipId = new mongoose.Types.ObjectId("6acdc56ed47dc604dcd13384");
   const relaxItemId = new mongoose.Types.ObjectId("69e7342c717a6defb0c40947");
@@ -1221,6 +1223,7 @@ test("stylist performance uses persisted net item revenue with allocation fallba
       },
     ],
   });
+  Transaction.find = () => ({ lean: async () => [] });
 
   const req = {
     query: {
@@ -1246,17 +1249,26 @@ test("stylist performance uses persisted net item revenue with allocation fallba
   } finally {
     BillingSession.find = originals.billingFind;
     CustomerMembership.find = originals.membershipFind;
+    Transaction.find = originals.transactionFind;
   }
 
   assert.equal(res.statusCode, 200);
-  assert.equal(res.payload[0].stylist, "Ravi");
-  assert.equal(res.payload[0].revenue, 513);
-  assert.equal(res.payload[1].stylist, "Veena");
-  assert.equal(res.payload[1].revenue, 475);
+  assert.equal(res.payload.reconciliation.complete, true);
+  assert.equal(res.payload.data[0].stylist, "Ravi");
+  assert.equal(res.payload.data[0].grossRevenue, 600);
+  assert.equal(res.payload.data[0].allocatedDiscounts, 87);
+  assert.equal(res.payload.data[0].netRevenue, 513);
+  assert.equal(res.payload.data[0].revenue, 513);
+  assert.equal(res.payload.data[1].stylist, "Veena");
+  assert.equal(res.payload.data[1].grossRevenue, 500);
+  assert.equal(res.payload.data[1].allocatedDiscounts, 25);
+  assert.equal(res.payload.data[1].netRevenue, 475);
+  assert.equal(res.payload.data[1].revenue, 475);
 });
 
 test("stylist performance counts distinct identifiable customers per performing stylist", async () => {
   const originalFind = BillingSession.find;
+  const originalTransactionFind = Transaction.find;
   const raviId = new mongoose.Types.ObjectId("652000000000000000000011");
   const veenaId = new mongoose.Types.ObjectId("652000000000000000000012");
   const customerId = new mongoose.Types.ObjectId("690d8bf7a6dc67fbf8757115");
@@ -1330,6 +1342,7 @@ test("stylist performance counts distinct identifiable customers per performing 
       lean: async () => bills,
     };
   };
+  Transaction.find = () => ({ lean: async () => [] });
 
   const req = { query: { vendorId: VENDOR_ID, range: "today" } };
   const res = {
@@ -1343,11 +1356,12 @@ test("stylist performance counts distinct identifiable customers per performing 
     await vendorDashboardController.getStylistPerformance(req, res);
   } finally {
     BillingSession.find = originalFind;
+    Transaction.find = originalTransactionFind;
   }
 
-  const ravi = res.payload.find((row) => row.stylist === "Ravi");
-  const veena = res.payload.find((row) => row.stylist === "Veena");
-  const unassigned = res.payload.find((row) => row.stylist === "No Stylist Selected");
+  const ravi = res.payload.data.find((row) => row.stylist === "Ravi");
+  const veena = res.payload.data.find((row) => row.stylist === "Veena");
+  const unassigned = res.payload.data.find((row) => row.stylist === "No Stylist Selected");
 
   assert.equal(ravi.services, 8);
   assert.equal(ravi.customersAttended, 2);
@@ -1356,6 +1370,49 @@ test("stylist performance counts distinct identifiable customers per performing 
   assert.equal(veena.unidentifiedCustomerBills, 0);
   assert.equal(unassigned.customersAttended, 0);
   assert.equal(unassigned.unidentifiedCustomerBills, 1);
+});
+
+test("stylist performance uses Transaction discount snapshots when legacy bills are sparse", async () => {
+  const originalBillingFind = BillingSession.find;
+  const originalTransactionFind = Transaction.find;
+  const billId = new mongoose.Types.ObjectId("6aceeba96be139f321d43cb2");
+
+  BillingSession.find = () => ({
+    select() { return this; },
+    lean: async () => [{
+      _id: billId,
+      cartItems: [{
+        name: "Legacy service",
+        qty: 1,
+        total: 1000,
+        resourceName: "Ravi",
+      }],
+    }],
+  });
+  Transaction.find = () => ({
+    lean: async () => [{ billingSessionId: billId, discountAmount: 100 }],
+  });
+
+  const req = { query: { vendorId: VENDOR_ID, range: "today" } };
+  const res = {
+    statusCode: 200,
+    payload: null,
+    status(code) { this.statusCode = code; return this; },
+    json(payload) { this.payload = payload; return this; },
+  };
+
+  try {
+    await vendorDashboardController.getStylistPerformance(req, res);
+  } finally {
+    BillingSession.find = originalBillingFind;
+    Transaction.find = originalTransactionFind;
+  }
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.payload.data[0].grossRevenue, 1000);
+  assert.equal(res.payload.data[0].allocatedDiscounts, 100);
+  assert.equal(res.payload.data[0].netRevenue, 900);
+  assert.equal(res.payload.data[0].revenue, 900);
 });
 
 test("vendor revenue payment breakdown reconciles legacy and split BillingSession payments", () => {

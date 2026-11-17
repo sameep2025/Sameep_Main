@@ -56,6 +56,11 @@ import {
   getPrepaidWalletSelectionAction,
   getPrepaidWalletQuote,
 } from "./prepaidWalletUi.mjs";
+import {
+  createMembershipPreviewRequestKey,
+  getMembershipVerificationGate,
+  resolveSelectedDiscountMembershipId,
+} from "./membershipVerificationUi.mjs";
 const FOOTER_GALLERY_OPEN_EVENT = "ynot-footer-open-gallery";
 const CART_ORIGIN_PUBLIC = "PUBLIC_ENQUIRY";
 const CART_ORIGIN_BILLING = "VENDOR_BILLING";
@@ -1413,9 +1418,11 @@ function ExploreContent({ onReady, onOpenServices }) {
   const [billType, setBillType] = useState("customer");
   const [billSuccessMessage, setBillSuccessMessage] = useState("");
   const [receiptSnapshot, setReceiptSnapshot] = useState(null);
-  const [membershipPreview, setMembershipPreview] = useState(null);
+  const [membershipPreviewResult, setMembershipPreview] = useState(null);
+  const [membershipPreviewResolvedKey, setMembershipPreviewResolvedKey] = useState("");
   const [membershipPreviewLoading, setMembershipPreviewLoading] = useState(false);
-  const [membershipPreviewError, setMembershipPreviewError] = useState("");
+  const [membershipPreviewErrorResult, setMembershipPreviewError] = useState("");
+  const [membershipPreviewErrorKey, setMembershipPreviewErrorKey] = useState("");
   const [membershipPreviewRetryNonce, setMembershipPreviewRetryNonce] = useState(0);
   const membershipPreviewRequestRef = useRef(0);
   const [gstPreview, setGstPreview] = useState(null);
@@ -1717,9 +1724,11 @@ function ExploreContent({ onReady, onOpenServices }) {
     setLoadedCustomerName("");
     setCustomerNameStatus("");
     setMembershipPreview(null);
+    setMembershipPreviewResolvedKey("");
     setDiscountMemberships([]);
     setSelectedDiscountMembershipId("");
     setMembershipPreviewError("");
+    setMembershipPreviewErrorKey("");
     setMembershipPreviewLoading(false);
     setSelectedPaymentMode("STANDARD");
     setPrepaidWallets([]);
@@ -1806,6 +1815,8 @@ function ExploreContent({ onReady, onOpenServices }) {
     const nextName = String(result?.name || "");
     const nextCustomerId = result?.customerId || null;
     if (!/^\d{10}$/.test(nextMobile)) return;
+    const customerChanged =
+      String(customerId || "") !== String(nextCustomerId || "") || customerMobile !== nextMobile;
 
     const prepaidSelectionAction = getPrepaidWalletSelectionAction({
       currentCustomerId: customerId,
@@ -1826,9 +1837,15 @@ function ExploreContent({ onReady, onOpenServices }) {
     setLoadedCustomerName(nextName);
     setCustomerNameStatus(nextName ? "Saved name loaded" : "");
     setCustomerId(nextCustomerId);
-    setMembershipPreview(null);
-    setDiscountMemberships([]);
-    setSelectedDiscountMembershipId("");
+    if (customerChanged) {
+      setMembershipPreview(null);
+      setMembershipPreviewResolvedKey("");
+      setMembershipPreviewError("");
+      setMembershipPreviewErrorKey("");
+      setMembershipPreviewLoading(Boolean(nextCustomerId && cartItems.length > 0));
+      setDiscountMemberships([]);
+      setSelectedDiscountMembershipId("");
+    }
     setAvailablePoints(0);
     setRedeemPoints(0);
     loyaltyWalletRequestRef.current += 1;
@@ -1943,7 +1960,7 @@ function ExploreContent({ onReady, onOpenServices }) {
   );
 
   const renderMembershipPreviewCard = () => {
-    if (membershipPreviewLoading) {
+    if (membershipVerification.pending) {
       return (
         <div className="membership-billing-preview-card">
           <div className="membership-billing-preview-head">
@@ -2618,6 +2635,35 @@ function ExploreContent({ onReady, onOpenServices }) {
     viewMode,
   });
   const prepaidSelected = selectedPaymentMode !== "STANDARD";
+  const membershipPreviewRequestKey = createMembershipPreviewRequestKey({
+    vendorId,
+    customerId,
+    customerMobile,
+    cartItems,
+    discountMode,
+    appliedDiscount,
+    discountPercent,
+    percentPer100,
+    redeemPoints,
+    selectedDiscountMembershipId,
+    prepaidSelected,
+  });
+  const membershipPreview = membershipPreviewResolvedKey === membershipPreviewRequestKey
+    ? membershipPreviewResult
+    : null;
+  const membershipPreviewError = membershipPreviewErrorKey === membershipPreviewRequestKey
+    ? membershipPreviewErrorResult
+    : "";
+  const membershipVerification = getMembershipVerificationGate({
+    customerId,
+    cartItemCount: cartItems.length,
+    prepaidSelected,
+    preview: membershipPreview,
+    loading: membershipPreviewLoading,
+    error: membershipPreviewError,
+    discountMembershipCount: discountMemberships.length,
+    selectedDiscountMembershipId,
+  });
   const paymentFinalPayablePaise = Math.max(
     Number.isInteger(gstPreview?.totals?.estimatedCustomerPayablePaise) && gstPreviewAvailable
       ? gstPreview.totals.estimatedCustomerPayablePaise
@@ -3189,6 +3235,7 @@ function ExploreContent({ onReady, onOpenServices }) {
     !!vendorId &&
     !showOtpInput &&
     !prepaidAuthorization &&
+    !membershipVerification.blocked &&
     !processingBill;
   useEffect(() => {
     if (pendingAction === "GENERATE_BILL") return;
@@ -4296,10 +4343,13 @@ function ExploreContent({ onReady, onOpenServices }) {
       !customerId ||
       !customerMobile ||
       customerMobile.length !== 10 ||
-      cartItems.length === 0
+      cartItems.length === 0 ||
+      prepaidSelected
     ) {
       setMembershipPreview(null);
+      setMembershipPreviewResolvedKey("");
       setMembershipPreviewError("");
+      setMembershipPreviewErrorKey("");
       setMembershipPreviewLoading(false);
       return undefined;
     }
@@ -4310,13 +4360,17 @@ function ExploreContent({ onReady, onOpenServices }) {
         : null;
     if (!vendorToken) {
       setMembershipPreview(null);
+      setMembershipPreviewResolvedKey("");
       setMembershipPreviewError("");
+      setMembershipPreviewErrorKey("");
       setMembershipPreviewLoading(false);
       return undefined;
     }
 
     setMembershipPreview(null);
+    setMembershipPreviewResolvedKey("");
     setMembershipPreviewError("");
+    setMembershipPreviewErrorKey("");
     setMembershipPreviewLoading(true);
 
     const controller = new AbortController();
@@ -4354,17 +4408,19 @@ function ExploreContent({ onReady, onOpenServices }) {
         if (membershipPreviewRequestRef.current !== requestId) return;
         const availableMemberships = Array.isArray(json.memberships) ? json.memberships : [];
         setDiscountMemberships(availableMemberships);
-        setSelectedDiscountMembershipId((current) => {
-          if (availableMemberships.length === 1) return availableMemberships[0].id;
-          return availableMemberships.some((membership) => membership.id === current) ? current : "";
-        });
+        setSelectedDiscountMembershipId((current) =>
+          resolveSelectedDiscountMembershipId(availableMemberships, current)
+        );
         setMembershipPreview(json);
+        setMembershipPreviewResolvedKey(membershipPreviewRequestKey);
       } catch (previewError) {
         if (previewError?.name === "AbortError") return;
         if (membershipPreviewRequestRef.current !== requestId) return;
         console.error("Membership preview failed", previewError);
         setMembershipPreview(null);
+        setMembershipPreviewResolvedKey("");
         setMembershipPreviewError(previewError?.message || "Unable to preview membership discount");
+        setMembershipPreviewErrorKey(membershipPreviewRequestKey);
       } finally {
         if (!controller.signal.aborted && membershipPreviewRequestRef.current === requestId) {
           setMembershipPreviewLoading(false);
@@ -4376,19 +4432,9 @@ function ExploreContent({ onReady, onOpenServices }) {
       clearTimeout(handle);
       controller.abort();
     };
-  }, [
-    vendorId,
-    customerId,
-    customerMobile,
-    cartItems,
-    discountMode,
-    appliedDiscount,
-    discountPercent,
-    percentPer100,
-    redeemPoints,
-    selectedDiscountMembershipId,
-    membershipPreviewRetryNonce,
-  ]);
+    // The canonical key contains every billing input and intentionally excludes stylist assignment.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [membershipPreviewRequestKey, membershipPreviewRetryNonce]);
 
   useEffect(() => {
     let cancelled = false;
@@ -4761,10 +4807,12 @@ function ExploreContent({ onReady, onOpenServices }) {
     setVerifyingCustomer(false);
     setCheckingCustomer(false);
     setMembershipPreview(null);
+    setMembershipPreviewResolvedKey("");
     setDiscountMemberships([]);
     setSelectedDiscountMembershipId("");
     setMembershipPreviewLoading(false);
     setMembershipPreviewError("");
+    setMembershipPreviewErrorKey("");
     setGstPreview(null);
     setGstPreviewLoading(false);
     setGstPreviewError("");
@@ -4891,23 +4939,18 @@ function ExploreContent({ onReady, onOpenServices }) {
       return;
     }
 
-    if (customerId && cartItems.length > 0) {
-      if (membershipPreviewLoading) {
-        alert("Please wait while membership benefits are calculated.");
-        return;
-      }
+    if (!prepaidSelected && customerId && cartItems.length > 0) {
       if (membershipPreviewError) {
         alert("Resolve the membership preview error before generating the bill.");
         return;
       }
       if (!membershipPreview) {
-        alert("Please wait for membership verification before generating the bill.");
         return;
       }
-      if (!prepaidSelected && (
+      if (
         membershipPreview.selectionRequired ||
         (discountMemberships.length > 1 && !selectedDiscountMembershipId)
-      )) {
+      ) {
         alert("Select one Discount Membership before generating the bill.");
         return;
       }
@@ -7002,7 +7045,11 @@ function ExploreContent({ onReady, onOpenServices }) {
                                   }}
                                   disabled={!canGenerateBill}
                                 >
-                                  {processingBill ? "Generating..." : "Generate Bill"}
+                                  {processingBill
+                                    ? "Generating..."
+                                    : membershipVerification.pending
+                                      ? "Checking membership..."
+                                      : "Generate Bill"}
                                 </button>
                               </div>
                             </>
@@ -7516,7 +7563,11 @@ function ExploreContent({ onReady, onOpenServices }) {
                                     }}
                                     disabled={!canGenerateBill}
                                   >
-                                    {processingBill ? "Generating..." : "Generate Bill"}
+                                    {processingBill
+                                      ? "Generating..."
+                                      : membershipVerification.pending
+                                        ? "Checking membership..."
+                                        : "Generate Bill"}
                                   </button>
                                 </div>
                               </>
