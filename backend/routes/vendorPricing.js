@@ -5,6 +5,7 @@ const router = express.Router();
 const VendorCategoryPrice = require("../models/VendorCategoryPrice");
 const Vendor = require("../models/Vendor");
 const Category = require("../models/Category");
+const { requireVendorParamWriteAccess } = require("../utils/vendorWriteAuth");
 
 // Middleware to log request + timing
 router.use((req, res, next) => {
@@ -39,7 +40,7 @@ async function buildCategoryPathNames(categoryId) {
 
 
 // ======================================================
-// GET all pricing for a vendor (creates default if not exists)
+// GET all pricing for a vendor. Missing defaults are synthesized without writing.
 // ======================================================
 router.get("/:vendorId", async (req, res) => {
   const { vendorId } = req.params;
@@ -53,9 +54,8 @@ router.get("/:vendorId", async (req, res) => {
 
     let record = await VendorCategoryPrice.findOne({ vendorId }).lean();
 
-    // If not found, create a new vendor pricing record with defaults
+    // Public reads must not create vendor-owned records.
     if (!record) {
-      console.log("No pricing found, creating default structure...");
       const categories = await Category.find().lean();
 
       // Compute structured pricing with path levels
@@ -70,15 +70,13 @@ router.get("/:vendorId", async (req, res) => {
         pricing.push(entry);
       }
 
-      record = await VendorCategoryPrice.create({
+      record = {
         vendorId,
         vendorName: vendor.contactName,
         businessName: vendor.businessName,
         phone: vendor.phone,
         pricing,
-      });
-
-      console.log("Default pricing created for vendor:", vendorId);
+      };
     }
 
     res.json(record);
@@ -95,7 +93,7 @@ router.get("/:vendorId", async (req, res) => {
 // ======================================================
 // PUT update a specific category price for a vendor (FIXED VERSION)
 // ======================================================
-router.put("/:vendorId/:categoryId", async (req, res) => {
+router.put("/:vendorId/:categoryId", requireVendorParamWriteAccess(), async (req, res) => {
   const { vendorId, categoryId } = req.params;
   const { price } = req.body;
 

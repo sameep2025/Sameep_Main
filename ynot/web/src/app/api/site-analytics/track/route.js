@@ -23,7 +23,6 @@ export async function POST(request) {
     return NextResponse.json(
       {
         message: "Site analytics track proxy failed",
-        error: error?.message || "Unknown error",
       },
       { status: 500 }
     );

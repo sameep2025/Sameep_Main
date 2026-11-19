@@ -360,6 +360,7 @@ export function normalizeCartItems(cartItems) {
     return {
       cartKey: String(item?.cartKey || item?.itemId || `cart-item-${index}`),
       itemId: String(item?.itemId || item?.categoryId || item?._id || item?.id || ""),
+      itemSource: String(item?.itemSource || "").trim(),
       categoryId: String(item?.categoryId || item?.itemId || item?._id || item?.id || ""),
       name: String(item?.name || "").trim(),
       label: getCartHierarchyLabel(item),

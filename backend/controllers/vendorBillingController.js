@@ -41,7 +41,8 @@ function buildBillFinancials(bill = {}, transaction = null) {
 
 exports.getVendorBills = async (req, res) => {
   try {
-    const { vendorId, from, to, limit = 100 } = req.query;
+    const { from, to, limit = 100 } = req.query;
+    const vendorId = String(req.vendorWriteAuth?.vendorId || "");
 
     if (!vendorId) {
       return res.status(400).json({ success: false, message: "vendorId required" });
@@ -128,6 +129,9 @@ exports.getBillDetails = async (req, res) => {
     const bill = await BillingSession.findById(billId).lean();
     if (!bill) {
       return res.status(404).json({ success: false, message: "Bill not found" });
+    }
+    if (String(bill.vendorId || "") !== String(req.vendorWriteAuth?.vendorId || "")) {
+      return res.status(403).json({ success: false, message: "Bill access denied" });
     }
 
     let customer = null;

@@ -26,6 +26,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { API_BASE_URL } from "../../../config";
+import { getVendorAuthHeaders } from "../../utils/vendorAuth";
 
 function BillingScreen({ vendorId: vendorIdProp, rootCategoryId: rootCategoryIdProp }) {
   const searchParams = useSearchParams();
@@ -90,7 +91,8 @@ function BillingScreen({ vendorId: vendorIdProp, rootCategoryId: rootCategoryIdP
       setLoading(true);
       try {
         const res = await fetch(
-          `${API_BASE_URL}/api/loyalty/vendor-rule/${encodeURIComponent(vendorId)}`
+          `${API_BASE_URL}/api/loyalty/vendor-rule/${encodeURIComponent(vendorId)}`,
+          { headers: getVendorAuthHeaders(vendorId) }
         );
         if (!res.ok) throw new Error("Failed to fetch loyalty rule");
         const data = await res.json();
@@ -161,7 +163,8 @@ function BillingScreen({ vendorId: vendorIdProp, rootCategoryId: rootCategoryIdP
 
     try {
       const res = await fetch(
-        `${API_BASE_URL}/api/loyalty/wallet?vendorId=${vendorId}&customerId=${cId}`
+        `${API_BASE_URL}/api/loyalty/wallet?vendorId=${vendorId}&customerId=${cId}`,
+        { headers: getVendorAuthHeaders(vendorId) }
       );
 
       const wallet = await res.json();
@@ -178,22 +181,23 @@ function BillingScreen({ vendorId: vendorIdProp, rootCategoryId: rootCategoryIdP
     try {
       setVerifyingCustomer(true);
 
-      const bypassPayload = {
-        mobileNumber: mobile,
-        countryCode: "+91",
-      };
-
-      const bypassRes = await fetch(
-        `${API_BASE_URL}/api/customers/bypass-otp`,
+      const customerRes = await fetch(
+        `${API_BASE_URL}/api/vendor/dashboard/customer/resolve`,
         {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(bypassPayload),
+          headers: {
+            "Content-Type": "application/json",
+            ...getVendorAuthHeaders(vendorId),
+          },
+          body: JSON.stringify({ vendorId, phone: mobile }),
         }
       );
 
-      const bypassData = await bypassRes.json();
-      const id = bypassData?.customerId || bypassData?._id;
+      const customerData = await customerRes.json();
+      if (!customerRes.ok || !customerData?.success) {
+        throw new Error(customerData?.message || "Unable to verify customer");
+      }
+      const id = customerData?.data?.customerId;
       setCustomerId(id || null);
       fetchWallet(id);
     } catch (err) {

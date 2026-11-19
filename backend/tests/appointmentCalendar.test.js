@@ -336,7 +336,7 @@ test('enquiry and calendar routes require existing vendor ownership or admin aut
   assert.match(source, /appointments\/month-summary', requireAppointmentListAccess/);
   assert.match(source, /appointments\/:id\/status'[\s\S]*requireOwnedDocumentVendorAccess\(Enquiry\)/);
   assert.match(source, /router\.put\('\/:id\/status', requireOwnedDocumentVendorAccess\(Enquiry\)/);
-  assert.match(source, /router\.post\('\/', async/);
+  assert.match(source, /router\.post\('\/', publicEnquiryLimiter, async/);
 });
 
 test('vendor authorization rejects missing and cross-vendor sessions and accepts owned vendor', async () => {

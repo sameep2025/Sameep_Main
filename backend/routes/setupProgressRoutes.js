@@ -1,10 +1,10 @@
 const express = require("express");
 const jwt = require("jsonwebtoken");
+const { getJwtSecret } = require("../utils/jwtSecrets");
 const SetupProgress = require("../models/SetupProgress");
 
 const router = express.Router();
 
-const JWT_SECRET = process.env.JWT_SECRET || "dev_jwt_secret_change_me";
 
 function getGoogleTokenFromRequest(req) {
   const auth = String(req.headers["authorization"] || "");
@@ -25,8 +25,9 @@ function requireGoogleAuth(req, res, next) {
 
     let decoded;
     try {
-      decoded = jwt.verify(token, JWT_SECRET);
+      decoded = jwt.verify(token, getJwtSecret());
     } catch (e) {
+      if (e?.code === "jwt_secret_missing") throw e;
       return res.status(401).json({ message: "Invalid google auth token" });
     }
 

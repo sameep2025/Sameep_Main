@@ -5,6 +5,8 @@ const DummyCategory = require("../models/dummyCategory");
 const DummySubcategory = require("../models/dummySubcategory");
 const { v4: uuidv4 } = require("uuid");
 const { uploadBufferToS3, deleteS3ObjectByUrl } = require("../utils/s3Upload");
+const { requireAdminAuth } = require("../utils/adminAuthMiddleware");
+const { requireVendorParamWriteAccess } = require("../utils/vendorWriteAuth");
 
 const router = express.Router();
 const upload = multer({ storage: multer.memoryStorage() });
@@ -35,7 +37,7 @@ function logApi(req, res, label) {
 }
 
 // Create
-router.post("/", uploadFields, (req, res, next) => {
+router.post("/", requireAdminAuth, uploadFields, (req, res, next) => {
   logApi(req, res, "create-dummy-category");
   ctrl.createCategory(req, res, next);
 });
@@ -47,13 +49,13 @@ router.get("/", (req, res, next) => {
 });
 
 // Update
-router.put("/:id", uploadFields, (req, res, next) => {
+router.put("/:id", requireAdminAuth, uploadFields, (req, res, next) => {
   logApi(req, res, "update-dummy-category");
   ctrl.updateCategory(req, res, next);
 });
 
 // Delete
-router.delete("/:id", (req, res, next) => {
+router.delete("/:id", requireAdminAuth, (req, res, next) => {
   logApi(req, res, "delete-dummy-category");
   ctrl.deleteCategory(req, res, next);
 });
@@ -152,7 +154,7 @@ router.get("/:categoryId/vendors/:vendorId/inventory", async (req, res) => {
   }
 });
 
-router.put("/:categoryId/vendors/:vendorId/inventory-selections", async (req, res) => {
+router.put("/:categoryId/vendors/:vendorId/inventory-selections", requireVendorParamWriteAccess(), async (req, res) => {
   logApi(req, res, "put-dummy-inventory-selections");
   try {
     const { vendorId, categoryId } = req.params;
@@ -212,6 +214,7 @@ router.put("/:categoryId/vendors/:vendorId/inventory-selections", async (req, re
 
 router.post(
   "/:categoryId/vendors/:vendorId/inventory/:entryKey/images",
+  requireVendorParamWriteAccess(),
   upload.any(),
   async (req, res) => {
     logApi(req, res, "post-dummy-inventory-images");
@@ -254,6 +257,7 @@ router.post(
 
 router.put(
   "/:categoryId/vendors/:vendorId/inventory/:entryKey/images/:index",
+  requireVendorParamWriteAccess(),
   upload.any(),
   async (req, res) => {
     logApi(req, res, "put-dummy-inventory-image");
@@ -299,7 +303,7 @@ router.put(
   }
 );
 
-router.delete("/:categoryId/vendors/:vendorId/inventory/:entryKey/images/:index", async (req, res) => {
+router.delete("/:categoryId/vendors/:vendorId/inventory/:entryKey/images/:index", requireVendorParamWriteAccess(), async (req, res) => {
   logApi(req, res, "delete-dummy-inventory-image");
   try {
     const { vendorId, categoryId, entryKey, index } = req.params;

@@ -34,7 +34,7 @@ function getAuthorizationMiddleware(path) {
     (candidate) => candidate.route?.path === path && candidate.route.methods.post
   );
   assert.ok(layer, `POST ${path} must exist`);
-  assert.equal(layer.route.stack.length, 2, `POST ${path} must run auth before its controller`);
+  assert.ok(layer.route.stack.length >= 2, `POST ${path} must run auth before its controller`);
   return layer.route.stack[0].handle;
 }
 

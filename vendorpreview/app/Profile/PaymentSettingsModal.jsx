@@ -2,6 +2,7 @@
 
 import "./Business.css";
 import { useEffect, useState } from "react";
+import { getVendorAuthHeaders } from "../utils/vendorAuth";
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL;
 
@@ -40,7 +41,9 @@ export default function PaymentSettingsModal({
       if (!vendorId) return;
       try {
         setLoading(true);
-        const response = await fetch(`${API_BASE_URL}/api/vendor-payment-config/${vendorId}`);
+        const response = await fetch(`${API_BASE_URL}/api/vendor-payment-config/${vendorId}`, {
+          headers: getVendorAuthHeaders(vendorId),
+        });
         const data = await response.json();
         if (!response.ok) {
           throw new Error(data?.message || "Failed to load payment settings");
@@ -97,6 +100,7 @@ export default function PaymentSettingsModal({
         method: "PUT",
         headers: {
           "Content-Type": "application/json",
+          ...getVendorAuthHeaders(vendorId),
         },
         body: JSON.stringify({
           paymentEnabled: form.paymentEnabled,

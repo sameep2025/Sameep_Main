@@ -1,5 +1,6 @@
 const express = require("express");
 const PreviewTemplate = require("../models/PreviewTemplate");
+const { requireAdminAuth } = require("../utils/adminAuthMiddleware");
 
 const router = express.Router();
 
@@ -101,13 +102,30 @@ async function syncSupportedTemplates() {
   }
 }
 
+async function readSupportedTemplates() {
+  const stored = await PreviewTemplate.find({}).sort({ sortOrder: 1, name: 1 }).lean();
+  const storedByKey = new Map(stored.map((template) => [template.key, template]));
+  const supportedKeys = new Set(SUPPORTED_PREVIEW_TEMPLATES.map((template) => template.key));
+
+  const supported = SUPPORTED_PREVIEW_TEMPLATES.map((template) => ({
+    ...template,
+    ...(storedByKey.get(template.key) || {}),
+  }));
+  const legacy = stored.filter((template) => !supportedKeys.has(template.key));
+
+  return [...supported, ...legacy].sort((a, b) => {
+    const order = Number(a.sortOrder || 0) - Number(b.sortOrder || 0);
+    return order || String(a.name || "").localeCompare(String(b.name || ""));
+  });
+}
+
 router.get("/", async (req, res) => {
   try {
-    await syncSupportedTemplates();
-
     const activeOnly = String(req.query.activeOnly || "").trim().toLowerCase() === "true";
-    const match = activeOnly ? { status: "Active" } : {};
-    const templates = await PreviewTemplate.find(match).sort({ sortOrder: 1, name: 1 }).lean();
+    const allTemplates = await readSupportedTemplates();
+    const templates = activeOnly
+      ? allTemplates.filter((template) => template.status === "Active")
+      : allTemplates;
     return res.json(templates);
   } catch (error) {
     console.error("GET /api/preview-templates error:", error);
@@ -117,12 +135,10 @@ router.get("/", async (req, res) => {
 
 router.get("/default", async (req, res) => {
   try {
-    await syncSupportedTemplates();
-
-    let defaultTemplate = await PreviewTemplate.findOne({ isDefault: true }).lean();
-    if (!defaultTemplate) {
-      defaultTemplate = await PreviewTemplate.findOne({ key: "classic" }).lean();
-    }
+    const templates = await readSupportedTemplates();
+    const defaultTemplate =
+      templates.find((template) => template.isDefault) ||
+      templates.find((template) => template.key === "classic");
 
     return res.json(defaultTemplate || null);
   } catch (error) {
@@ -131,7 +147,7 @@ router.get("/default", async (req, res) => {
   }
 });
 
-router.put("/:templateKey", async (req, res) => {
+router.put("/:templateKey", requireAdminAuth, async (req, res) => {
   try {
     await syncSupportedTemplates();
 

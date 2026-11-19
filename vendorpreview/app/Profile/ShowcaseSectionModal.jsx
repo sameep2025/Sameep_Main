@@ -4,6 +4,7 @@ import "./Business.css";
 import { useMemo, useState } from "react";
 import { API_BASE_URL } from "../../config";
 import { useVendor } from "@/app/context/VendorContext";
+import { getVendorAuthHeaders } from "@/app/utils/vendorAuth";
 
 const MAX_HEADING = 120;
 const MAX_SUBHEADING = 260;
@@ -116,7 +117,7 @@ export default function ShowcaseSectionModal({
   };
 
   async function uploadImage(file, index) {
-    const endpoint = `${API_BASE_URL}/api/upload`;
+    const endpoint = `${API_BASE_URL}/api/upload?vendorId=${encodeURIComponent(vendorId)}`;
     const formData = new FormData();
     formData.append("file", file);
     formData.append("folderType", "newvendor");
@@ -131,6 +132,7 @@ export default function ShowcaseSectionModal({
 
     const response = await fetch(endpoint, {
       method: "POST",
+      headers: getVendorAuthHeaders(vendorId),
       body: formData,
     });
     const json = await response.json().catch(() => ({}));

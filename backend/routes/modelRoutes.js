@@ -1,6 +1,7 @@
 const express = require("express");
 const router = express.Router();
 const Model = require("../models/Model");
+const { requireAdminAuth } = require("../utils/adminAuthMiddleware");
 
 // GET all models or filter by category
 // GET all models or filter by category
@@ -27,7 +28,7 @@ router.get("/", async (req, res) => {
 
 // CREATE model
 // CREATE model
-router.post("/", async (req, res) => {
+router.post("/", requireAdminAuth, async (req, res) => {
 console.log("🔥 HIT:", __filename);
 
   try {
@@ -46,7 +47,7 @@ console.log("🔥 HIT:", __filename);
 });
 
 // UPDATE model
-router.put("/:id", async (req, res) => {
+router.put("/:id", requireAdminAuth, async (req, res) => {
   try {
     const updated = await Model.findByIdAndUpdate(req.params.id, req.body, { new: true });
     if (!updated) return res.status(404).json({ message: "Model not found" });
@@ -58,7 +59,7 @@ router.put("/:id", async (req, res) => {
 
 
 // DELETE model
-router.delete("/:id", async (req, res) => {
+router.delete("/:id", requireAdminAuth, async (req, res) => {
   try {
     const deleted = await Model.findByIdAndDelete(req.params.id);
     if (!deleted) return res.status(404).json({ message: "Model not found" });

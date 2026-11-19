@@ -4,6 +4,7 @@ const Master = require("../models/Master");
 const multer = require("multer");
 const path = require("path");
 const { uploadBufferToS3, deleteS3ObjectByUrl } = require("../utils/s3Upload");
+const { requireAdminAuth } = require("../utils/adminAuthMiddleware");
 
 // --- Multer setup for file uploads (memory -> S3) ---
 const upload = multer({ storage: multer.memoryStorage() });
@@ -89,7 +90,7 @@ router.get("/", async (req, res) => {
 });
 
 // --- CREATE item ---
-router.post("/", upload.single("image"), async (req, res) => {
+router.post("/", requireAdminAuth, upload.single("image"), async (req, res) => {
 
 
   try {
@@ -158,7 +159,7 @@ router.post("/", upload.single("image"), async (req, res) => {
 
 
 // --- UPDATE item ---
-router.put("/:id", upload.single("image"), async (req, res) => {
+router.put("/:id", requireAdminAuth, upload.single("image"), async (req, res) => {
   try {
     const { name, type, fieldType, sequence, options, autoCalc, parent } = req.body;
 
@@ -218,7 +219,7 @@ router.put("/:id", upload.single("image"), async (req, res) => {
 });
 
 // --- DELETE item ---
-router.delete("/:id", async (req, res) => {
+router.delete("/:id", requireAdminAuth, async (req, res) => {
   try {
     const item = await Master.findById(req.params.id);
     if (!item) return res.status(404).json({ message: "Not found" });

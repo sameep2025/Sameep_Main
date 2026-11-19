@@ -3,6 +3,7 @@ const router = express.Router();
 const {
   getVendorCustomer,
   getVendorCustomerProfile,
+  resolveVendorCustomer,
   updateVendorCustomerName,
 } = require("../controllers/vendorCustomerController");
 const { requireVendorAccessFromExistingAuth } = require("../utils/vendorWriteAuth");
@@ -16,6 +17,11 @@ function resolveVendorBodyOrQueryId(req) {
 }
 
 router.get("/customer", requireVendorAccessFromExistingAuth(resolveVendorQueryId), getVendorCustomer);
+router.post(
+  "/customer/resolve",
+  requireVendorAccessFromExistingAuth(resolveVendorBodyOrQueryId),
+  resolveVendorCustomer
+);
 router.get(
   "/customer/profile",
   requireVendorAccessFromExistingAuth(resolveVendorQueryId),

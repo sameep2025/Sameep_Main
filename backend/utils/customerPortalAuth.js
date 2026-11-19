@@ -1,9 +1,9 @@
 const jwt = require("jsonwebtoken");
 const Session = require("../models/Session");
+const { getJwtSecret } = require("./jwtSecrets");
 
 const CUSTOMER_PORTAL_SESSION_TYPE = "CUSTOMER_PORTAL";
 const CUSTOMER_PORTAL_SESSION_DAYS = 30;
-const JWT_SECRET = process.env.JWT_SECRET || "dev_jwt_secret_change_me";
 
 function getTokenFromRequest(req) {
   const auth = req.headers?.authorization || "";
@@ -30,7 +30,7 @@ function signCustomerPortalToken({ customerId, sessionId }) {
       sessionId: String(sessionId || ""),
       sessionType: CUSTOMER_PORTAL_SESSION_TYPE,
     },
-    JWT_SECRET,
+    getJwtSecret(),
     { expiresIn: `${CUSTOMER_PORTAL_SESSION_DAYS}d` }
   );
 }
@@ -40,9 +40,9 @@ async function validateCustomerPortalSession(token) {
 
   let decoded;
   try {
-    decoded = jwt.verify(token, JWT_SECRET);
+    decoded = jwt.verify(token, getJwtSecret());
   } catch (err) {
-    return { ok: false, code: "invalid_token" };
+    return { ok: false, code: err?.code === "jwt_secret_missing" ? "jwt_secret_missing" : "invalid_token" };
   }
 
   const customerId = decoded.customerId;
@@ -97,9 +97,7 @@ async function requireCustomerPortalSession(req, res, next) {
     const result = await validateCustomerPortalSession(token);
 
     if (!result.ok) {
-      const status = ["no_token", "invalid_token", "invalid_portal_token", "no_session", "expired"].includes(result.code)
-        ? 401
-        : 401;
+      const status = result.code === "jwt_secret_missing" ? 500 : 401;
       return res.status(status).json({
         success: false,
         message: "Customer portal session invalid or expired",

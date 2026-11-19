@@ -4,9 +4,8 @@ import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import ServiceAreasStep from "../../components/onboarding/ServiceAreasStep";
 import {
-  bypassOtp,
+  authorizeOnboardingBypass,
   createVendor,
-  fetchAdminPasscode,
   fetchDummyCategories,
   fetchTrustQuestions,
   getGooglePlaceDetails,
@@ -145,19 +144,15 @@ function OnboardingFlow() {
   const [otpSent, setOtpSent] = useState(false);
   const [loadingOtp, setLoadingOtp] = useState(false);
   const [bypassOtpEnabled, setBypassOtpEnabled] = useState(false);
-  const [showAdminPopup, setShowAdminPopup] = useState(false);
-  const [adminPasscode, setAdminPasscode] = useState("");
-  const [verifyingPasscode, setVerifyingPasscode] = useState(false);
+  const [showBypassPasscode, setShowBypassPasscode] = useState(false);
+  const [bypassPasscode, setBypassPasscode] = useState("");
+  const [authorizingBypass, setAuthorizingBypass] = useState(false);
 
   const [vendorId, setVendorId] = useState(null);
   const [trustQuestions, setTrustQuestions] = useState([]);
   const [trustAnswers, setTrustAnswers] = useState({});
   const [serviceAreas, setServiceAreas] = useState(null);
   const [serviceSelectionMode, setServiceSelectionMode] = useState("standard");
-  const [menuUploadAdminUnlocked, setMenuUploadAdminUnlocked] = useState(false);
-  const [showMenuUploadAdminPopup, setShowMenuUploadAdminPopup] = useState(false);
-  const [menuUploadAdminPasscode, setMenuUploadAdminPasscode] = useState("");
-  const [verifyingMenuUploadAdmin, setVerifyingMenuUploadAdmin] = useState(false);
   const [menuUploadFile, setMenuUploadFile] = useState(null);
   const [uploadedMenuSections, setUploadedMenuSections] = useState([]);
   const [parsingMenuUpload, setParsingMenuUpload] = useState(false);
@@ -409,7 +404,10 @@ function OnboardingFlow() {
     }
   }
 
-  async function registerVendorAfterOtp() {
+  async function registerVendorAfterOtp(
+    customerId,
+    { onboardingAuthorization = "", onboardingPhone = "" } = {}
+  ) {
     const fallbackManualName = manualBusinessName.trim();
     const fallbackManualPhone = normalizePhone(manualPhone || mobile || "");
     const effectiveBusiness =
@@ -441,28 +439,24 @@ function OnboardingFlow() {
 
     setSelectedBusiness(effectiveBusiness);
 
-    const cleanPhone = normalizePhone(phoneNumber || manualPhone || "9999999999");
+    const cleanPhone = normalizePhone(
+      onboardingPhone || phoneNumber || manualPhone || mobile || "9999999999"
+    );
 
     try {
-      const bypassData = await bypassOtp({
-        countryCode,
-        phone: cleanPhone,
-      });
-
-      if (bypassData?.token) {
-        localStorage.setItem("authToken", bypassData.token);
-      }
-
-      const customerId =
-        bypassData?.customer?._id || bypassData?.customer?.id || "";
-
-      if (!customerId) {
+      if (!customerId && !onboardingAuthorization) {
         alert("Customer ID not received from backend");
         return;
       }
 
       const vendorPayload = {
         customerId,
+        ...(onboardingAuthorization
+          ? {
+              onboardingAuthorization,
+              onboardingCountryCode: countryCode,
+            }
+          : {}),
         phone: cleanPhone,
         businessName: effectiveBusiness?.name || manualBusinessName || "",
         contactName: effectiveBusiness?.name || manualBusinessName || "",
@@ -530,6 +524,10 @@ function OnboardingFlow() {
         return;
       }
 
+      if (vendorData?.onboardingSessionToken) {
+        localStorage.setItem("authToken", vendorData.onboardingSessionToken);
+      }
+
       const scopedSession = await scopeCustomerSession({
         vendorId: resolvedVendorId,
         categoryId: resolvedCategoryId,
@@ -583,7 +581,8 @@ function OnboardingFlow() {
       }
 
       setOtpSent(false);
-      await registerVendorAfterOtp();
+      const customerId = data?.customer?._id || data?.customer?.id || data?.customerId || "";
+      await registerVendorAfterOtp(customerId);
     } catch (error) {
       console.error(error);
       alert(error.message || "OTP verification failed");
@@ -592,60 +591,69 @@ function OnboardingFlow() {
     }
   }
 
-  async function handleVerifyAdminPasscode() {
-    if (!adminPasscode) {
-      alert("Enter admin passcode");
+  function getBypassMobile() {
+    return normalizePhone(
+      selectedBusiness?.internationalPhoneNumber ||
+        selectedBusiness?.phone ||
+        manualPhone ||
+        mobile ||
+        ""
+    );
+  }
+
+  async function handleAuthorizeOnboardingBypass() {
+    const normalizedPhone = getBypassMobile();
+    if (!normalizedPhone || normalizedPhone.length !== 10) {
+      alert("Please enter a valid 10 digit phone number");
+      return;
+    }
+    if (!bypassPasscode) {
+      alert("Enter the authorized admin passcode");
       return;
     }
 
     try {
-      setVerifyingPasscode(true);
-      const data = await fetchAdminPasscode();
-      const expectedPasscode = String(data?.adminPasscode || "").trim();
-
-      if (!expectedPasscode || adminPasscode.trim() !== expectedPasscode) {
-        alert("Invalid passcode");
-        return;
+      setAuthorizingBypass(true);
+      setMobile(normalizedPhone);
+      const data = await authorizeOnboardingBypass({
+        countryCode,
+        phone: normalizedPhone,
+        passcode: bypassPasscode,
+      });
+      if (!data?.authorization) {
+        throw new Error("Onboarding authorization was not issued");
       }
 
-      setBypassOtpEnabled(true);
-      setShowAdminPopup(false);
-      setAdminPasscode("");
-      await registerVendorAfterOtp();
+      setShowBypassPasscode(false);
+      setBypassPasscode("");
+      await registerVendorAfterOtp("", {
+        onboardingAuthorization: data.authorization,
+        onboardingPhone: normalizedPhone,
+      });
     } catch (error) {
       console.error(error);
-      alert(error.message || "Invalid passcode");
+      alert(error.message || "Admin authorization failed");
     } finally {
-      setVerifyingPasscode(false);
+      setAuthorizingBypass(false);
     }
   }
 
-  async function handleVerifyMenuUploadAdminPasscode() {
-    if (!menuUploadAdminPasscode) {
-      alert("Enter admin passcode");
-      return;
-    }
-
-    try {
-      setVerifyingMenuUploadAdmin(true);
-      const data = await fetchAdminPasscode();
-      const expectedPasscode = String(data?.adminPasscode || "").trim();
-
-      if (!expectedPasscode || menuUploadAdminPasscode.trim() !== expectedPasscode) {
-        alert("Invalid passcode");
-        return;
-      }
-
-      setMenuUploadAdminUnlocked(true);
-      setServiceSelectionMode("upload");
-      setShowMenuUploadAdminPopup(false);
-      setMenuUploadAdminPasscode("");
-    } catch (error) {
-      console.error(error);
-      alert(error.message || "Invalid passcode");
-    } finally {
-      setVerifyingMenuUploadAdmin(false);
-    }
+  function renderOtpBypassControl() {
+    return (
+      <label className="bypass-otp-checkbox">
+        <input
+          type="checkbox"
+          checked={bypassOtpEnabled}
+          onChange={(event) => {
+            const checked = event.target.checked;
+            setBypassOtpEnabled(checked);
+            setShowBypassPasscode(checked);
+            if (!checked) setBypassPasscode("");
+          }}
+        />
+        <span>Bypass OTP</span>
+      </label>
+    );
   }
 
   async function handleTrustContinue() {
@@ -1116,59 +1124,8 @@ function OnboardingFlow() {
               </button>
             </div>
 
-            <label className="bypass-otp-checkbox">
-              <input
-                type="checkbox"
-                checked={bypassOtpEnabled}
-                onChange={(event) => {
-                  if (event.target.checked) {
-                    setShowAdminPopup(true);
-                  } else {
-                    setBypassOtpEnabled(false);
-                  }
-                }}
-              />
-              <span>Bypass OTP</span>
-            </label>
+            {renderOtpBypassControl()}
 
-            {showAdminPopup ? (
-              <div className="admin-popup-overlay">
-                <div className="admin-popup-card">
-                  <h3>Admin Authorization</h3>
-                  <p className="muted-copy">Enter admin passcode to bypass OTP</p>
-
-                  <input
-                    type="password"
-                    className="flow-input"
-                    placeholder="Enter passcode"
-                    value={adminPasscode}
-                    onChange={(event) => setAdminPasscode(event.target.value)}
-                  />
-
-                  <div className="flow-actions">
-                    <button
-                      type="button"
-                      className="secondaryButton"
-                      onClick={() => {
-                        setShowAdminPopup(false);
-                        setAdminPasscode("");
-                        setBypassOtpEnabled(false);
-                      }}
-                    >
-                      Cancel
-                    </button>
-                    <button
-                      type="button"
-                      className="ctaButton"
-                      disabled={verifyingPasscode}
-                      onClick={handleVerifyAdminPasscode}
-                    >
-                      {verifyingPasscode ? "Verifying..." : "Continue"}
-                    </button>
-                  </div>
-                </div>
-              </div>
-            ) : null}
           </section>
         ) : null}
 
@@ -1360,59 +1317,8 @@ function OnboardingFlow() {
               </button>
             </div>
 
-            <label className="bypass-otp-checkbox">
-              <input
-                type="checkbox"
-                checked={bypassOtpEnabled}
-                onChange={(event) => {
-                  if (event.target.checked) {
-                    setShowAdminPopup(true);
-                  } else {
-                    setBypassOtpEnabled(false);
-                  }
-                }}
-              />
-              <span>Bypass OTP</span>
-            </label>
+            {renderOtpBypassControl()}
 
-            {showAdminPopup ? (
-              <div className="admin-popup-overlay">
-                <div className="admin-popup-card">
-                  <h3>Admin Authorization</h3>
-                  <p className="muted-copy">Enter admin passcode to bypass OTP</p>
-
-                  <input
-                    type="password"
-                    className="flow-input"
-                    placeholder="Enter passcode"
-                    value={adminPasscode}
-                    onChange={(event) => setAdminPasscode(event.target.value)}
-                  />
-
-                  <div className="flow-actions">
-                    <button
-                      type="button"
-                      className="secondaryButton"
-                      onClick={() => {
-                        setShowAdminPopup(false);
-                        setAdminPasscode("");
-                        setBypassOtpEnabled(false);
-                      }}
-                    >
-                      Cancel
-                    </button>
-                    <button
-                      type="button"
-                      className="ctaButton"
-                      disabled={verifyingPasscode}
-                      onClick={handleVerifyAdminPasscode}
-                    >
-                      {verifyingPasscode ? "Verifying..." : "Continue"}
-                    </button>
-                  </div>
-                </div>
-              </div>
-            ) : null}
           </section>
         ) : null}
 
@@ -1440,6 +1346,47 @@ function OnboardingFlow() {
               </button>
             </div>
           </section>
+        ) : null}
+
+        {showBypassPasscode ? (
+          <div className="admin-popup-overlay">
+            <div className="admin-popup-card">
+              <h3>Admin Authorization</h3>
+              <p className="muted-copy">
+                Enter the authorized admin passcode to continue without customer OTP.
+              </p>
+              <input
+                type="password"
+                className="flow-input"
+                placeholder="Enter admin passcode"
+                value={bypassPasscode}
+                onChange={(event) => setBypassPasscode(event.target.value)}
+                autoComplete="current-password"
+                autoFocus
+              />
+              <div className="flow-actions">
+                <button
+                  type="button"
+                  className="secondaryButton"
+                  onClick={() => {
+                    setShowBypassPasscode(false);
+                    setBypassOtpEnabled(false);
+                    setBypassPasscode("");
+                  }}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  className="ctaButton"
+                  disabled={authorizingBypass}
+                  onClick={handleAuthorizeOnboardingBypass}
+                >
+                  {authorizingBypass ? "Authorizing..." : "Continue"}
+                </button>
+              </div>
+            </div>
+          </div>
         ) : null}
 
         {step === "SUCCESS" ? (
@@ -1629,64 +1576,19 @@ function OnboardingFlow() {
                 type="button"
                 className={`service-mode-card ${
                   serviceSelectionMode === "upload" ? "active" : ""
-                } ${!menuUploadAdminUnlocked ? "locked" : ""}`}
+                }`}
                 aria-pressed={serviceSelectionMode === "upload"}
-                onClick={() => {
-                  if (!menuUploadAdminUnlocked) {
-                    setShowMenuUploadAdminPopup(true);
-                    return;
-                  }
-                  setServiceSelectionMode("upload");
-                }}
+                onClick={() => setServiceSelectionMode("upload")}
               >
                 <span className="service-mode-dot" aria-hidden="true" />
                 <span className="service-mode-copy">
                   <strong>Upload Menu</strong>
                   <small>
-                    {menuUploadAdminUnlocked
-                      ? "Upload a PDF or Excel file and we will read the menu next."
-                      : "Admin access required to upload a custom menu file."}
+                    Upload a PDF or Excel file and we will read the menu next.
                   </small>
                 </span>
               </button>
             </div>
-
-            {showMenuUploadAdminPopup ? (
-              <div className="admin-popup-overlay">
-                <div className="admin-popup-card">
-                  <h3>Admin verification</h3>
-                  <p className="muted-copy">Enter admin passcode to enable menu file upload</p>
-                  <input
-                    className="flow-input"
-                    type="password"
-                    placeholder="Admin passcode"
-                    value={menuUploadAdminPasscode}
-                    onChange={(event) => setMenuUploadAdminPasscode(event.target.value)}
-                    autoFocus
-                  />
-                  <div className="button-row">
-                    <button
-                      type="button"
-                      className="secondaryButton"
-                      onClick={() => {
-                        setShowMenuUploadAdminPopup(false);
-                        setMenuUploadAdminPasscode("");
-                      }}
-                    >
-                      Cancel
-                    </button>
-                    <button
-                      type="button"
-                      className="primaryButton"
-                      onClick={handleVerifyMenuUploadAdminPasscode}
-                      disabled={verifyingMenuUploadAdmin}
-                    >
-                      {verifyingMenuUploadAdmin ? "Verifying..." : "Unlock Upload"}
-                    </button>
-                  </div>
-                </div>
-              </div>
-            ) : null}
 
             {serviceSelectionMode === "standard" ? (
               <div className="service-tree">

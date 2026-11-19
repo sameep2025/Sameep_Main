@@ -45,6 +45,10 @@ import {
   ADMIN_OPEN_MENU_EVENT,
 } from "../utils/adminQuickActions";
 import { getVendorAuthHeaders } from "../utils/vendorAuth";
+import {
+  exchangeAdminHandoff,
+  persistAdminVendorSession,
+} from "../utils/adminVendorSession.mjs";
 import { getGstSummaryPercentages } from "./gstPreviewDisplay.mjs";
 import {
   hasEnabledGstBilling,
@@ -1554,7 +1558,7 @@ function ExploreContent({ onReady, onOpenServices }) {
   const finalTotal = Math.max(cartTotal - appliedDiscount, 0);
 
   const [showAdminPasscode, setShowAdminPasscode] = useState(false);
-  const [adminPasscode, setAdminPasscode] = useState("");
+  const [, setAdminPasscode] = useState("");
 
   const resetVendorPasscodeState = () => {
     setShowVendorPasscode(false);
@@ -2607,12 +2611,11 @@ function ExploreContent({ onReady, onOpenServices }) {
     setVendorMobile(getPrimaryVendorMobile(vendorInfo));
   }, [showVendorLogin, loginAsAdmin, showAdminPasscode, vendorInfo]);
 
-  const [verifyingPasscode, setVerifyingPasscode] = useState(false);
-
   const searchParams = useSearchParams();
   const queryRootCategoryId = searchParams.get("rootCategoryId");
   const queryVendorId = searchParams.get("vendorId");
   const queryTemplate = String(searchParams.get("template") || "").trim().toLowerCase();
+  const adminHandoffCode = String(searchParams.get("adminHandoff") || "").trim();
   const [defaultTemplateKey, setDefaultTemplateKey] = useState("classic");
   const activeTemplateKey =
     normalizePreviewTemplateKey(queryTemplate) ||
@@ -2627,6 +2630,38 @@ function ExploreContent({ onReady, onOpenServices }) {
     vendorInfo?._id ||
     vendorInfo?.vendor?._id ||
     null;
+  useEffect(() => {
+    if (!vendorId || !adminHandoffCode) return undefined;
+
+    let active = true;
+    exchangeAdminHandoff({
+      apiBaseUrl: API_BASE_URL,
+      handoffCode: adminHandoffCode,
+    })
+      .then((data) => {
+        if (!active) return;
+
+        persistAdminVendorSession({
+          storage: localStorage,
+          expectedVendorId: vendorId,
+          response: data,
+          randomUUID: globalThis.crypto?.randomUUID?.bind(globalThis.crypto),
+        });
+        setHasActiveVendorSession(true);
+        setShowVendorLogin(false);
+        persistViewMode("new-dashboard");
+        window.dispatchEvent(new Event("auth-changed"));
+
+        const cleanUrl = new URL(window.location.href);
+        cleanUrl.searchParams.delete("adminHandoff");
+        window.history.replaceState({}, "", cleanUrl.toString());
+      })
+      .catch((error) => {
+        if (active) alert(error.message || "Admin handoff failed");
+      });
+
+    return () => { active = false; };
+  }, [adminHandoffCode, vendorId]);
   const gstPreviewAvailable = isGstPreviewAvailable({
     status: gstDraftStatus,
     loadedVendorId: gstDraftVendorId,
@@ -3498,7 +3533,7 @@ function ExploreContent({ onReady, onOpenServices }) {
     async function loadSubscriptionPopup() {
       try {
         const [subscriptionRes, contactRes] = await Promise.all([
-          fetch(`${API_BASE_URL}/api/admin/vendor-subscriptions/${vendorId}`, {
+          fetch(`${API_BASE_URL}/api/public-vendors/${vendorId}/subscription-status`, {
             cache: "no-store",
           }),
           fetch(`${API_BASE_URL}/api/app-config/public-site-contact`, {
@@ -3512,9 +3547,9 @@ function ExploreContent({ onReady, onOpenServices }) {
         if (cancelled) return;
 
         const supportPhone = String(contactJson?.phone || "").trim();
-        const expiryValue = subscriptionJson?.data?.subscription?.expiryDate;
+        const expiryValue = subscriptionJson?.data?.expiryDate;
 
-        if (!subscriptionRes.ok || !subscriptionJson?.success) {
+        if (!subscriptionRes.ok || !subscriptionJson?.success || !subscriptionJson?.data?.exists) {
           setSubscriptionPopup({
             key: "expired:no-subscription",
             type: "expired",
@@ -3813,82 +3848,6 @@ function ExploreContent({ onReady, onOpenServices }) {
     [heroImages, vendorGalleryImages]
   );
 
-  const verifyAdminPasscode = async () => {
-    if (!adminPasscode) {
-      alert("Enter admin passcode");
-      return;
-    }
-
-    try {
-      setVerifyingPasscode(true);
-      const deviceId =
-        localStorage.getItem("deviceId") || getSafeDeviceId();
-
-      localStorage.setItem("deviceId", deviceId);
-
-      const res = await fetch(
-        `${API_BASE_URL}/api/customers/admin-impersonate`,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            passcode: adminPasscode,
-            vendorId: vendorId, // ✅ FIXED
-            deviceId,
-          }),
-        }
-      );
-      const data = await res.json().catch(() => ({}));
-      console.log("ADMIN RESPONSE:", data);
-
-      if (!res.ok) {
-        alert(data?.message || "Something went wrong");
-        return;
-      }
-
-      // ✅ SUCCESS
-      localStorage.setItem("isAdminLogin", "true");
-      localStorage.setItem("sessionDeviceId", deviceId);
-
-      if (data?.token) {
-        localStorage.setItem(`vendorToken:${vendorId}`, data.token);
-      }
-      localStorage.setItem("vendorLoginTime", Date.now());
-      if (vendorId) {
-        localStorage.setItem("vendorSessionVendorId", String(vendorId));
-      }
-
-      window.dispatchEvent(new Event("storage"));
-      window.dispatchEvent(new Event("auth-changed"));
-
-      setLoginAsAdmin(false);
-      setShowAdminPasscode(false);
-      setShowVendorLogin(false);
-      setAdminPasscode("");
-      setShowVendorOtp(false);
-      resetVendorPasscodeState();
-
-      if (pendingAction === "GENERATE_BILL") {
-        await handleGenerateBill();
-        setPendingAction(null);
-        setPendingLoginDestination(null);
-      } else if (pendingLoginDestination === "menu") {
-        enterVendorBilling();
-        setPendingLoginDestination(null);
-      } else {
-        persistViewMode("new-dashboard");
-        setPendingLoginDestination(null);
-      }
-
-    } catch (err) {
-      console.error(err);
-      alert("Something went wrong");
-    } finally {
-      setVerifyingPasscode(false);
-    }
-  };
   const [finalCategories, setFinalCategories] = useState([]);
   const orderedCategories = useMemo(() => {
     const offers = [];
@@ -4181,7 +4140,8 @@ function ExploreContent({ onReady, onOpenServices }) {
     const fetchVendorRule = async () => {
       try {
         const res = await fetch(
-          `${API_BASE_URL}/api/loyalty/vendor-rule/${encodeURIComponent(vendorId)}`
+          `${API_BASE_URL}/api/loyalty/vendor-rule/${encodeURIComponent(vendorId)}`,
+          { headers: getVendorAuthHeaders(vendorId) }
         );
 
         if (!res.ok) {
@@ -4605,7 +4565,8 @@ function ExploreContent({ onReady, onOpenServices }) {
 
     try {
       const res = await fetch(
-        `${API_BASE_URL}/api/loyalty/wallet?vendorId=${encodeURIComponent(vendorId)}&customerId=${encodeURIComponent(cId)}`
+        `${API_BASE_URL}/api/loyalty/wallet?vendorId=${encodeURIComponent(vendorId)}&customerId=${encodeURIComponent(cId)}`,
+        { headers: getVendorAuthHeaders(vendorId) }
       );
 
       const wallet = await res.json().catch(() => null);
@@ -4642,26 +4603,30 @@ function ExploreContent({ onReady, onOpenServices }) {
       setCheckingCustomer(true);
       setCustomerValidated(false);
 
-      const bypassPayload = {
-        countryCode: "91",
-        phone: mobile,
-      };
+      const vendorToken = localStorage.getItem(`vendorToken:${vendorId}`);
+      if (!vendorToken) throw new Error("Vendor authentication required");
 
-      const bypassRes = await fetch(
-        `${API_BASE_URL}/api/customers/bypass-otp`,
+      const customerRes = await fetch(
+        `${API_BASE_URL}/api/vendor/dashboard/customer/resolve`,
         {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(bypassPayload),
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${vendorToken}`,
+          },
+          body: JSON.stringify({ vendorId, phone: mobile }),
         }
       );
 
-      const bypassData = await bypassRes.json();
+      const customerData = await customerRes.json();
+      if (!customerRes.ok || !customerData?.success) {
+        throw new Error(customerData?.message || "Unable to verify customer");
+      }
       if (
         customerVerificationRequestRef.current !== requestId ||
         customerMobileLookupRef.current !== mobile
       ) return;
-      const id = bypassData?.customer?._id || null;
+      const id = customerData?.data?.customerId || null;
 
       setCustomerId(id);
       setCustomerValidated(Boolean(id));
@@ -8334,38 +8299,7 @@ function ExploreContent({ onReady, onOpenServices }) {
 
             <h3 className="vendor-login-title">Vendor Login</h3>
 
-            {/* ADMIN PASSCODE SCREEN */}
-            {showAdminPasscode ? (
-              <>
-                <input
-                  className="login-input vendor-login-input"
-                  placeholder="Enter Admin Passcode"
-                  value={adminPasscode}
-                  onChange={(e) => setAdminPasscode(e.target.value)}
-                />
-
-                <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-                  <button
-                    className="login-btn-secondary vendor-login-btn vendor-login-btn-secondary"
-                    onClick={() => {
-                      setShowAdminPasscode(false);
-                      setLoginAsAdmin(false);
-                      setAdminPasscode("");
-                      resetVendorPasscodeState();
-                    }}
-                  >
-                    Back
-                  </button>
-
-                  <button
-                    className="login-btn-main vendor-login-btn vendor-login-btn-primary"
-                    onClick={verifyAdminPasscode}
-                  >
-                    Next
-                  </button>
-                </div>
-              </>
-            ) : showVendorPasscode ? (
+            {showVendorPasscode ? (
 
               <>
                 <div className="vendor-passcode-copy">
@@ -8454,35 +8388,9 @@ function ExploreContent({ onReady, onOpenServices }) {
                   />
                 </div>
 
-                <label className="vendor-login-checkbox">
-                  <input
-                    type="checkbox"
-                    checked={loginAsAdmin}
-                    onChange={(e) => {
-                      const checked = e.target.checked;
-
-                      setLoginAsAdmin(checked);
-
-                      if (checked) {
-                        setVendorMobile("");       // clear mobile
-                        setShowAdminPasscode(true);
-                        setShowVendorOtp(false);
-                        resetVendorPasscodeState();
-                      } else {
-                        setShowAdminPasscode(false);
-                        setAdminPasscode("");
-                        setShowVendorOtp(false);
-                        resetVendorPasscodeState();
-                      }
-                    }}
-                  />
-                  Login as Admin
-                </label>
-
                 <button
                   className="login-btn-main vendor-login-btn vendor-login-btn-primary"
                   onClick={handleVendorLogin}
-                  disabled={loginAsAdmin}
                 >
                   Continue
                 </button>

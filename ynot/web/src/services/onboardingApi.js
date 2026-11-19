@@ -71,23 +71,10 @@ export function verifyOtp(payload) {
   });
 }
 
-export function bypassOtp(payload) {
-  return request("/api/customers/bypass-otp", {
+export function authorizeOnboardingBypass(payload) {
+  return request("/api/customers/onboarding-bypass/authorize", {
     method: "POST",
     body: JSON.stringify(payload),
-  });
-}
-
-export function adminImpersonate(payload) {
-  return request("/api/customers/admin-impersonate", {
-    method: "POST",
-    body: JSON.stringify(payload),
-  });
-}
-
-export function fetchAdminPasscode() {
-  return request("/api/app-config/admin-passcode", {
-    method: "GET",
   });
 }
 

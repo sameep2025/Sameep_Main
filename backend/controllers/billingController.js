@@ -1,6 +1,7 @@
 const axios = require("axios");
 const crypto = require("crypto");
 const jwt = require("jsonwebtoken");
+const { getJwtSecret } = require("../utils/jwtSecrets");
 const mongoose = require("mongoose");
 const BillingSession = require("../models/BillingSession");
 const Transaction = require("../models/Transaction");
@@ -74,7 +75,6 @@ const {
   verifyBillAccessToken,
 } = require("../utils/billLink");
 
-const JWT_SECRET = process.env.JWT_SECRET || "dev_jwt_secret_change_me";
 const CANCEL_BILL_OTP_SCOPE = "CANCEL_BILL";
 const CANCEL_BILL_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
 const CANCELLATION_REASONS = new Set([
@@ -457,7 +457,7 @@ function buildCancelOtpAttemptToken({
       note: String(note || ""),
       jti,
     },
-    JWT_SECRET,
+    getJwtSecret(),
     { expiresIn: "10m" }
   );
 }
@@ -471,7 +471,7 @@ function verifyCancelOtpAttemptToken({
   reason,
   note,
 }) {
-  const decoded = jwt.verify(String(token || ""), JWT_SECRET);
+  const decoded = jwt.verify(String(token || ""), getJwtSecret());
 
   if (
     decoded?.scope !== CANCEL_BILL_OTP_SCOPE ||
@@ -1557,8 +1557,15 @@ exports.getBillingSession = async (req, res) => {
     const { id } = req.params;
 
     const billing = await BillingSession.findById(id);
+    if (!billing) {
+      return res.status(404).json({ success: false, message: "Billing session not found" });
+    }
 
-    res.status(200).json({
+    if (String(billing.vendorId || "") !== String(req.vendorWriteAuth?.vendorId || "")) {
+      return res.status(403).json({ success: false, message: "Billing session access denied" });
+    }
+
+    return res.status(200).json({
       success: true,
       data: billing,
     });

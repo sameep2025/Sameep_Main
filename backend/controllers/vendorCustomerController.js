@@ -45,6 +45,28 @@ async function findCustomerByPhone(phone) {
   }).lean();
 }
 
+async function findOrCreateCustomerByPhone(phone) {
+  const digits = normalizePhoneQuery(phone);
+  const localPhone = digits.startsWith("91") && digits.length === 12 ? digits.slice(2) : digits;
+  if (!/^\d{10}$/.test(localPhone)) return null;
+
+  const existing = await findCustomerByPhone(localPhone);
+  if (existing) return existing;
+
+  const fullNumber = `91${localPhone}`;
+  return Customer.findOneAndUpdate(
+    { fullNumber },
+    {
+      $setOnInsert: {
+        countryCode: "91",
+        phone: localPhone,
+        fullNumber,
+      },
+    },
+    { new: true, upsert: true, setDefaultsOnInsert: true }
+  ).lean();
+}
+
 async function getVendorCustomerProfile(vendorId, customerId) {
   if (!vendorId || !customerId) return null;
   return VendorCustomerProfile.findOne({ vendorId, customerId }).lean();
@@ -459,6 +481,28 @@ exports.getVendorCustomer = async (req, res) => {
   } catch (err) {
     console.error("getVendorCustomer error:", err);
     res.status(500).json({ success: false, message: "Server error" });
+  }
+};
+
+exports.resolveVendorCustomer = async (req, res) => {
+  try {
+    const phone = req.body?.phone || req.body?.mobile || "";
+    const customer = await findOrCreateCustomerByPhone(phone);
+    if (!customer) {
+      return res.status(400).json({ success: false, message: "Valid customer mobile number required" });
+    }
+
+    return res.json({
+      success: true,
+      data: {
+        customerId: String(customer._id),
+        phone: customer.phone || "",
+        fullNumber: customer.fullNumber || "",
+      },
+    });
+  } catch (err) {
+    console.error("resolveVendorCustomer error:", err?.message || err);
+    return res.status(500).json({ success: false, message: "Unable to resolve customer" });
   }
 };
 

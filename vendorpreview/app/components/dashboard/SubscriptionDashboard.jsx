@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { API_BASE_URL } from "../../../config";
+import { getVendorAuthHeaders } from "../../utils/vendorAuth";
 import "./SubscriptionDashboard.css";
 
 export default function SubscriptionDashboard({ vendorId }) {
@@ -16,8 +17,8 @@ export default function SubscriptionDashboard({ vendorId }) {
         setLoading(true);
 
         const res = await fetch(
-          `${API_BASE_URL}/api/admin/vendor-subscriptions/${vendorId}`,
-          { cache: "no-store" }
+          `${API_BASE_URL}/api/vendor/subscription/${vendorId}`,
+          { cache: "no-store", headers: getVendorAuthHeaders(vendorId) }
         );
 
         const json = await res.json();

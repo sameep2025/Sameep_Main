@@ -1358,7 +1358,7 @@ exports.getStylistPerformance = async (req, res) => {
         netRevenue: Math.round(row.netRevenue * 100) / 100,
         revenue: Math.round(row.netRevenue * 100) / 100,
         services: row.services,
-        customersAttended: row.customerIdentities.size,
+        customersAttended: row.customerIdentities.size + row.unidentifiedBillIds.size,
         unidentifiedCustomerBills: row.unidentifiedBillIds.size,
       }))
       .sort((left, right) => right.netRevenue - left.netRevenue);

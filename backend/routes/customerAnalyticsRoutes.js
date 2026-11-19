@@ -26,6 +26,10 @@ router.get(
   getCustomerAnalyticsItems
 );
 
-router.get("/customers", getCustomerAnalytics);
+router.get(
+  "/customers",
+  requireVendorAccessFromExistingAuth(resolveVendorQueryId),
+  getCustomerAnalytics
+);
 
 module.exports = router;

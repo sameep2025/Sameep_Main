@@ -10,15 +10,28 @@ const LoginHistory = require("../models/LoginHistory");
 const DummyVendor = require("../models/DummyVendor");
 const Vendor = require("../models/Vendor");
 const { getSessionValidityHours } = require("../utils/sessionConfig");
-const { getAdminPasscode } = require("../utils/adminConfig");
 const { requireCustomerSession } = require("../utils/authMiddleware");
+const { requireAdminAuth } = require("../utils/adminAuthMiddleware");
+const { requireCustomerSelfOrAdmin } = require("../utils/customerRecordAuth");
 const { deductOTP, hasAvailableOTPBalance } = require("../services/vendorWalletService");
+const {
+  consumeAdminImpersonationHandoff,
+} = require("../services/adminImpersonationHandoffService");
+const { getJwtSecret } = require("../utils/jwtSecrets");
+const { onboardingBypassLimiter, otpRequestLimiter, otpVerifyLimiter } = require("../utils/securityLimiters");
+const { logAudit } = require("../utils/auditLogger");
+const {
+  createOnboardingBypassAuthorization,
+  isOnboardingBypassEnabled,
+  normalizeOnboardingMobile,
+  onboardingMobileFingerprint,
+  verifyOnboardingBypassPasscode,
+} = require("../services/onboardingBypassService");
 
 const router = express.Router();
 
 const MSG91_AUTH = process.env.MSG91_AUTHKEY;
 const MSG91_SENDER = process.env.MSG91_SENDER;
-const JWT_SECRET = process.env.JWT_SECRET || "dev_jwt_secret_change_me";
 
 if (!MSG91_AUTH) console.warn("MSG91_AUTHKEY not set in .env");
 if (!MSG91_SENDER) console.warn("MSG91_SENDER not set in .env");
@@ -51,10 +64,7 @@ function isValidVendorPasscode(value) {
 }
 
 function getRequesterKey(req) {
-  const forwardedFor = String(req.headers?.["x-forwarded-for"] || "")
-    .split(",")[0]
-    .trim();
-  return forwardedFor || req.ip || req.socket?.remoteAddress || "unknown";
+  return req.ip || req.socket?.remoteAddress || "unknown";
 }
 
 function getVendorPasscodeAttemptKey(req, mobile) {
@@ -100,13 +110,13 @@ function createLoginOtpAttemptToken({ vendorId, categoryId, mobile }) {
       mobile: String(mobile || ""),
       jti,
     },
-    JWT_SECRET,
+    getJwtSecret(),
     { expiresIn: "10m" }
   );
 }
 
 function verifyLoginOtpAttemptToken({ token, vendorId, categoryId, mobile }) {
-  const decoded = jwt.verify(token, JWT_SECRET);
+  const decoded = jwt.verify(token, getJwtSecret());
   const matchesCategory =
     !categoryId || !decoded.categoryId || String(decoded.categoryId) === String(categoryId);
 
@@ -212,7 +222,7 @@ async function createVendorSessionForCustomer({
     sessionId: String(session._id),
     authMethod: "PASSCODE",
   };
-  const token = jwt.sign(payload, JWT_SECRET, { expiresIn: `${hours}h` });
+  const token = jwt.sign(payload, getJwtSecret(), { expiresIn: `${hours}h` });
   await Session.updateOne({ _id: session._id }, { $set: { token } });
   session.token = token;
 
@@ -224,12 +234,12 @@ function logApi(req, res, label) {
   const start = Date.now();
   res.on("finish", () => {
     const duration = Date.now() - start;
-    console.log(`[API] ${req.method} ${req.originalUrl} - ${res.statusCode} - ${duration}ms ${label || ""}`);
+    console.log(`[API] ${req.method} ${req.path} - ${res.statusCode} - ${duration}ms ${label || ""}`);
   });
 }
 
 /* ---------------- 1) Request OTP ---------------- */
-router.post("/request-otp", async (req, res) => {
+router.post("/request-otp", otpRequestLimiter, async (req, res) => {
   logApi(req, res, "request-otp");
   try {
     const { countryCode, phone, vendorId, categoryId } = req.body;
@@ -278,8 +288,6 @@ router.post("/request-otp", async (req, res) => {
       }
     );
 
-    console.log("MSG91 OTP Response:", sendResp.data);
-
     if (sendResp.data.type && sendResp.data.type === "success") {
       return res.json({
         success: true,
@@ -290,185 +298,104 @@ router.post("/request-otp", async (req, res) => {
 
     return res.status(400).json({ message: sendResp.data.message || "Failed to send OTP" });
   } catch (err) {
-    console.error("request-otp error:", err?.response?.data || err.message);
-    const msg = err?.response?.data?.message || "Failed to request OTP";
-    res.status(500).json({ message: msg });
+    console.error("request-otp failed", {
+      code: err?.code || "",
+      providerStatus: err?.response?.status || null,
+    });
+    res.status(500).json({ message: "Failed to request OTP" });
   }
 });
 
-/* ---------------- 1a) Bypass OTP (dev only) ---------------- */
-router.post("/bypass-otp", async (req, res) => {
-  logApi(req, res, "bypass-otp");
-  
+/* ---------------- 1a) One-time administrator-authorized onboarding ---------------- */
+router.post("/onboarding-bypass/authorize", onboardingBypassLimiter, async (req, res) => {
+  logApi(req, res, "onboarding-bypass-authorize");
+  const { countryCode, phone, passcode } = req.body || {};
+  const fingerprint = onboardingMobileFingerprint(countryCode, phone);
+  const audit = (action, outcome, reason = "") => logAudit(req, {
+    action,
+    field: "otpBypass",
+    changedBy: "admin",
+    entityType: "OnboardingAuthorization",
+    entityId: fingerprint,
+    meta: { outcome, ...(reason ? { reason } : {}) },
+  });
 
   try {
-    // Safety: do not allow in production unless explicitly enabled
-    const allow =
-      process.env.ALLOW_OTP_BYPASS === "true" ||
-      String(process.env.NODE_ENV || "").toLowerCase() !== "production";
-    if (!allow) {
-      return res.status(403).json({ message: "OTP bypass disabled" });
+    if (!isOnboardingBypassEnabled()) {
+      await audit("onboarding_otp_bypass_failed", "rejected", "disabled");
+      return res.status(403).json({ message: "Administrator onboarding bypass is unavailable" });
     }
 
-    const { countryCode, phone, vendorId, categoryId } = req.body || {};
-    const cc = typeof countryCode === "string" ? countryCode.trim() : String(countryCode || "").trim();
-    const ph = typeof phone === "string" ? phone.trim() : String(phone || "").trim();
-    if (!cc || !ph) {
-      return res.status(400).json({ message: "countryCode and phone required" });
+    const mobile = normalizeOnboardingMobile(countryCode, phone);
+    if (!mobile || !passcode) {
+      await audit("onboarding_otp_bypass_failed", "rejected", "invalid_request");
+      return res.status(400).json({ message: "Mobile number and admin passcode are required" });
     }
 
-    const mobile = buildFull(cc, ph);
-    const fullNumber = mobile;
-
-    // Use upsert to avoid race/duplicate-key errors when multiple requests happen quickly.
-    let customer = null;
-    try {
-      customer = await Customer.findOneAndUpdate(
-        { fullNumber },
-        { $setOnInsert: { countryCode: cc, phone: ph, fullNumber } },
-        { new: true, upsert: true }
-      );
-    } catch (upErr) {
-      // If upsert hit a duplicate key race, fall back to a regular find.
-      customer = await Customer.findOne({ fullNumber });
-      if (!customer) throw upErr;
-    }
-
-    let session = null;
-    let token = null;
-    try {
-      const hours = await getSessionValidityHours(4);
-      const now = new Date();
-      const expiryTime = new Date(now.getTime() + hours * 60 * 60 * 1000);
-      const deviceInfo = req.headers["user-agent"] || "OTP bypass";
-
-      session = await Session.create({
-        userId: customer._id,
-        vendorId: vendorId ? String(vendorId) : "",
-        categoryId: categoryId ? String(categoryId) : "",
-        authMethod: "BYPASS",
-        loginTime: now,
-        expiryTime,
-        isActive: true,
-        deviceInfo,
-      });
-
-      token = jwt.sign(
-        {
-          customerId: String(customer._id),
-          vendorId: vendorId ? String(vendorId) : "",
-          categoryId: categoryId ? String(categoryId) : "",
-          sessionId: String(session._id),
-          authMethod: "BYPASS",
-        },
-        JWT_SECRET,
-        { expiresIn: `${hours}h` }
-      );
-
-      if (token) {
-        await Session.updateOne({ _id: session._id }, { $set: { token } });
-        session.token = token;
-      }
-    } catch (sessionErr) {
-      console.error("bypass-otp session error:", sessionErr?.message || sessionErr);
-    }
-
-    return res.json({ message: "bypassed", customer, session, token });
-  } catch (err) {
-    console.error("bypass-otp error:", err?.message || err);
-    return res.status(500).json({ message: err?.message || "Failed to bypass OTP" });
-  }
-});
-
-/* ---------------- 1b) Admin impersonation login (no OTP) ---------------- */
-router.post("/admin-impersonate", async (req, res) => {
-  logApi(req, res, "admin-impersonate");
-  try {
-    const { passcode, vendorId, categoryId } = req.body || {};
-    const code = typeof passcode === "string" ? passcode.trim() : "";
-
-    const expected = await getAdminPasscode("1234");
-    if (!/^\d{4}$/.test(code) || code !== expected) {
+    const credential = await verifyOnboardingBypassPasscode(passcode);
+    if (!credential) {
+      await audit("onboarding_otp_bypass_failed", "rejected", "invalid_credential");
       return res.status(401).json({ message: "Invalid admin passcode" });
     }
 
+    const cc = String(countryCode || "").replace(/\D/g, "");
+    const ph = String(phone || "").replace(/\D/g, "").replace(/^0+/, "");
+    let customer = await Customer.findOne({ fullNumber: mobile });
+    if (customer) {
+      const [dummyVendorExists, vendorExists] = await Promise.all([
+        DummyVendor.exists({ customerId: customer._id }),
+        Vendor.exists({ customerId: customer._id }),
+      ]);
+      if (dummyVendorExists || vendorExists) {
+        await audit("onboarding_otp_bypass_failed", "rejected", "existing_vendor_account");
+        return res.status(409).json({ message: "Existing vendor accounts must use normal login" });
+      }
+    } else {
+      customer = await Customer.findOneAndUpdate(
+        { fullNumber: mobile },
+        { $setOnInsert: { countryCode: cc, phone: ph, fullNumber: mobile } },
+        { new: true, upsert: true }
+      );
+    }
+
+    const authorization = await createOnboardingBypassAuthorization({
+      customerId: customer._id,
+      countryCode: cc,
+      phone: ph,
+      credentialVersion: credential.credentialVersion,
+    });
+    await audit("onboarding_otp_bypass_authorized", "success");
+    return res.json({
+      success: true,
+      authorization: authorization.authorization,
+      expiresAt: authorization.expiresAt,
+    });
+  } catch (error) {
+    await audit("onboarding_otp_bypass_failed", "error", "internal_error");
+    console.error("onboarding bypass authorization failed", { code: error?.code || "" });
+    return res.status(500).json({ message: "Failed to authorize onboarding bypass" });
+  }
+});
+
+/* ---------------- 1b) Admin impersonation one-time handoff ---------------- */
+router.post("/admin-impersonate", async (req, res) => {
+  logApi(req, res, "admin-impersonate");
+  try {
+    const handoffCode = String(req.body?.handoffCode || "").trim();
     const hours = await getSessionValidityHours(4);
     const now = new Date();
     const expiresAt = new Date(now.getTime() + hours * 60 * 60 * 1000);
-
-    if (!vendorId) {
-      return res.status(400).json({ message: "vendorId required for admin impersonation" });
+    const session = await consumeAdminImpersonationHandoff(handoffCode, {
+      sessionExpiresAt: expiresAt,
+      now,
+    });
+    if (!session) {
+      return res.status(401).json({ message: "Impersonation handoff is invalid or expired" });
     }
 
-    // Resolve underlying customer for this vendor (or dummy vendor)
-    let customerIdForHistory = null;
-    const vendor = await Vendor.findById(vendorId).lean().catch(() => null);
-    if (vendor && vendor.customerId) {
-      customerIdForHistory = vendor.customerId;
-    } else {
-      const dummyVendor = await DummyVendor.findById(vendorId).lean().catch(() => null);
-      if (dummyVendor && dummyVendor.customerId) {
-        customerIdForHistory = dummyVendor.customerId;
-      }
-    }
-
-    if (!customerIdForHistory) {
-      return res.status(400).json({ message: "No customer linked to this vendor for admin impersonation" });
-    }
-
-    // Expire any existing active LoginHistory rows for this customer first
-    try {
-      const activeHist = await LoginHistory.find({ userId: customerIdForHistory, status: "active" });
-      for (const h of activeHist) {
-        if (!h.logoutTime) h.logoutTime = now;
-        h.status = "expired";
-        await h.save();
-      }
-    } catch (histErr) {
-      console.error("Failed to expire existing LoginHistory on admin impersonation:", histErr?.message || histErr);
-    }
-
-    // Terminate ANY existing active sessions for this vendor/category scope,
-    // regardless of which customer originally created them. This ensures that
-    // there is only one active session for this page (vendor+category) at a
-    // time: if admin logs in while a vendor/customer session exists, that
-    // other session is terminated, and vice versa.
-    try {
-      const sessFilter = {
-        isActive: true,
-      };
-      if (vendorId) sessFilter.vendorId = String(vendorId);
-      if (categoryId) sessFilter.categoryId = String(categoryId);
-
-      const activeSess = await Session.find(sessFilter);
-      for (const s of activeSess) {
-        const logoutTime = now;
-        await Session.updateOne({ _id: s._id }, { $set: { isActive: false, expiryTime: logoutTime } });
-
-        const existingHist = await LoginHistory.findOne({
-          userId: customerIdForHistory,
-          loginTime: s.loginTime,
-          expiryTime: s.expiryTime,
-        });
-
-        if (existingHist) {
-          if (!existingHist.logoutTime) existingHist.logoutTime = logoutTime;
-          existingHist.status = "expired";
-          await existingHist.save();
-        } else {
-          await LoginHistory.create({
-            userId: customerIdForHistory,
-            loginTime: s.loginTime,
-            expiryTime: s.expiryTime || logoutTime,
-            logoutTime,
-            deviceInfo: s.deviceInfo || "",
-            status: "expired",
-          });
-        }
-      }
-    } catch (sessErr) {
-      console.error("Failed to terminate existing sessions on admin impersonation:", sessErr?.message || sessErr);
-    }
+    const customerIdForHistory = session.userId;
+    const vendorId = String(session.vendorId || "");
+    const categoryId = String(session.categoryId || "");
 
     // Create a new active LoginHistory row for this admin impersonation
     try {
@@ -484,20 +411,8 @@ router.post("/admin-impersonate", async (req, res) => {
       console.error("Failed to create LoginHistory for admin impersonation:", histCreateErr?.message || histCreateErr);
     }
 
-    // Create a new active session for this admin impersonation
     let token = null;
     try {
-      const session = await Session.create({
-        userId: customerIdForHistory,
-        vendorId: vendorId ? String(vendorId) : "",
-        categoryId: categoryId ? String(categoryId) : "",
-        authMethod: "ADMIN_IMPERSONATION",
-        loginTime: now,
-        expiryTime: expiresAt,
-        isActive: true,
-        deviceInfo: `Admin impersonation for vendor ${String(vendorId)}`,
-      });
-
       const payload = {
         customerId: String(customerIdForHistory),
         vendorId: vendorId ? String(vendorId) : "",
@@ -505,7 +420,7 @@ router.post("/admin-impersonate", async (req, res) => {
         sessionId: String(session._id),
         authMethod: "ADMIN_IMPERSONATION",
       };
-      token = jwt.sign(payload, JWT_SECRET, { expiresIn: `${hours}h` });
+      token = jwt.sign(payload, getJwtSecret(), { expiresIn: `${hours}h` });
       if (token) {
         await Session.updateOne({ _id: session._id }, { $set: { token } });
       }
@@ -516,8 +431,8 @@ router.post("/admin-impersonate", async (req, res) => {
     return res.json({
       message: "ok",
       role: "admin",
-      vendorId: vendorId || null,
-      categoryId: categoryId || null,
+      vendorId,
+      categoryId,
       expiresAt,
       token,
     });
@@ -587,7 +502,7 @@ router.post("/vendor-passcode", requireCustomerSession, async (req, res) => {
 });
 
 /* ---------------- 1d) Vendor quick-login passcode authentication ---------------- */
-router.post("/vendor-passcode-login", async (req, res) => {
+router.post("/vendor-passcode-login", otpVerifyLimiter, async (req, res) => {
   logApi(req, res, "vendor-passcode-login");
   try {
     const { countryCode, phone, vendorId, categoryId } = req.body || {};
@@ -671,7 +586,7 @@ router.post("/session-status-token", async (req, res) => {
 
     let decoded;
     try {
-      decoded = jwt.verify(token, JWT_SECRET);
+      decoded = jwt.verify(token, getJwtSecret());
     } catch (e) {
       return res.json({ status: "invalid_token" });
     }
@@ -740,7 +655,7 @@ router.post("/logout", async (req, res) => {
 
     let decoded;
     try {
-      decoded = jwt.verify(token, JWT_SECRET);
+      decoded = jwt.verify(token, getJwtSecret());
     } catch (e) {
       return res.status(400).json({ message: "Invalid token" });
     }
@@ -781,7 +696,7 @@ router.post("/logout", async (req, res) => {
 });
 
 /* ---------------- 2) Verify OTP ---------------- */
-router.post("/verify-otp", async (req, res) => {
+router.post("/verify-otp", otpVerifyLimiter, async (req, res) => {
   logApi(req, res, "verify-otp");
   try {
     const { countryCode, phone, otp, vendorId, categoryId, otpAttemptToken } = req.body;
@@ -800,8 +715,6 @@ router.post("/verify-otp", async (req, res) => {
         timeout: 10000,
       }
     );
-
-    console.log("MSG91 Verify Response:", verifyResp.data);
 
     if (verifyResp.data.type && verifyResp.data.type === "success") {
       let loginOtpAttempt = null;
@@ -964,7 +877,7 @@ router.post("/verify-otp", async (req, res) => {
           };
           // Align token expiry with session expiry in hours
           const hours = await getSessionValidityHours(4);
-          token = jwt.sign(payload, JWT_SECRET, { expiresIn: `${hours}h` });
+          token = jwt.sign(payload, getJwtSecret(), { expiresIn: `${hours}h` });
 
           // Persist token on the session document for audit/debug
           if (token) {
@@ -985,9 +898,11 @@ router.post("/verify-otp", async (req, res) => {
 
     return res.status(400).json({ message: verifyResp.data.message || "OTP verify failed" });
   } catch (err) {
-    console.error("verify-otp error:", err?.response?.data || err.message);
-    const msg = err?.response?.data?.message || "Failed to verify OTP";
-    res.status(500).json({ message: msg });
+    console.error("verify-otp failed", {
+      code: err?.code || "",
+      providerStatus: err?.response?.status || null,
+    });
+    res.status(500).json({ message: "Failed to verify OTP" });
   }
 });
 
@@ -1057,7 +972,7 @@ router.post("/scope-session", requireCustomerSession, async (req, res) => {
         sessionId: String(session._id),
         authMethod: req.auth?.authMethod || "UNKNOWN",
       },
-      JWT_SECRET,
+      getJwtSecret(),
       { expiresIn: `${hours}h` }
     );
 
@@ -1141,7 +1056,7 @@ router.get("/session-context", requireCustomerSession, async (req, res) => {
 });
 
 /* ---------------- 3) List customers ---------------- */
-router.get("/", async (req, res) => {
+router.get("/", requireAdminAuth, async (req, res) => {
   logApi(req, res, "list-customers");
   try {
     const customers = await Customer.find().sort({ createdAt: -1 });
@@ -1153,7 +1068,7 @@ router.get("/", async (req, res) => {
 });
 
 /* ---------------- 4) Current session status for a customer ---------------- */
-router.get("/:id/session-status", async (req, res) => {
+router.get("/:id/session-status", requireCustomerSelfOrAdmin(), async (req, res) => {
   logApi(req, res, "customer-session-status");
   try {
     const { id } = req.params;
@@ -1208,7 +1123,7 @@ router.get("/:id/session-status", async (req, res) => {
 });
 
 /* ---------------- 5) Login history for a customer ---------------- */
-router.get("/:id/login-history", async (req, res) => {
+router.get("/:id/login-history", requireCustomerSelfOrAdmin(), async (req, res) => {
   logApi(req, res, "customer-login-history");
   try {
     const { id } = req.params;

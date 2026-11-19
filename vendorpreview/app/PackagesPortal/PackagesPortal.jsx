@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import "./PackagesPortal.css";
 import { useVendor } from "../context/VendorContext";
 import ItemGstConfiguration from "./ItemGstConfiguration";
+import { getVendorAuthHeaders } from "../utils/vendorAuth";
 function fetchWithAuth(url, options = {}) {
   const sessionVendorId = localStorage.getItem("vendorSessionVendorId");
   const vendorToken = sessionVendorId ? localStorage.getItem(`vendorToken:${sessionVendorId}`) : "";
@@ -478,10 +479,6 @@ export default function PackagesPortal({ onClose, onLoaded, onPricingUpdated }) 
   const [uploadingMainImage, setUploadingMainImage] = useState(false);
   const [uploadingVariantIndex, setUploadingVariantIndex] = useState(null);
   const [switchingSource, setSwitchingSource] = useState(false);
-  const [menuImportAdminUnlocked, setMenuImportAdminUnlocked] = useState(false);
-  const [showMenuImportAdminModal, setShowMenuImportAdminModal] = useState(false);
-  const [menuImportAdminPasscode, setMenuImportAdminPasscode] = useState("");
-  const [verifyingMenuImportAdmin, setVerifyingMenuImportAdmin] = useState(false);
   const [importingMenuFile, setImportingMenuFile] = useState(false);
   const [menuImportMessage, setMenuImportMessage] = useState("");
   const [customForm, setCustomForm] = useState(defaultCustomForm());
@@ -704,40 +701,6 @@ if (missingLeafIds.length) {
       window.alert(error.message || "Failed to switch pricing source");
     } finally {
       setSwitchingSource(false);
-    }
-  }
-
-  async function handleVerifyMenuImportAdmin() {
-    if (!menuImportAdminPasscode.trim()) {
-      window.alert("Enter admin passcode");
-      return;
-    }
-
-    try {
-      setVerifyingMenuImportAdmin(true);
-      const response = await fetchWithAuth(
-        `${process.env.NEXT_PUBLIC_API_BASE_URL}/api/app-config/admin-passcode`,
-        { method: "GET" }
-      );
-      const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(data?.message || "Failed to verify admin passcode");
-      }
-
-      const expectedPasscode = String(data?.adminPasscode || "").trim();
-      if (!expectedPasscode || menuImportAdminPasscode.trim() !== expectedPasscode) {
-        window.alert("Invalid passcode");
-        return;
-      }
-
-      setMenuImportAdminUnlocked(true);
-      setShowMenuImportAdminModal(false);
-      setMenuImportAdminPasscode("");
-    } catch (error) {
-      window.alert(error.message || "Invalid passcode");
-    } finally {
-      setVerifyingMenuImportAdmin(false);
     }
   }
 
@@ -1202,7 +1165,7 @@ async function updateService(service, status) {
 
   async function uploadImageAndGetUrl(file) {
     if (!file || !vendorId) throw new Error("File or vendor missing");
-    const endpoint = `${process.env.NEXT_PUBLIC_API_BASE_URL}/api/upload`;
+    const endpoint = `${process.env.NEXT_PUBLIC_API_BASE_URL}/api/upload?vendorId=${encodeURIComponent(vendorId)}`;
     const formData = new FormData();
     formData.append("file", file);
     formData.append("folderType", "newvendor");
@@ -1211,7 +1174,11 @@ async function updateService(service, status) {
       String(vendorId),
       `asset-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
     ]));
-    const res = await fetch(endpoint, { method: "POST", body: formData });
+    const res = await fetch(endpoint, {
+      method: "POST",
+      headers: getVendorAuthHeaders(vendorId),
+      body: formData,
+    });
     const json = await res.json();
     if (!res.ok || json?.success === false) {
       throw new Error(json?.message || json?.error || "Upload failed");
@@ -1890,7 +1857,7 @@ async function updateService(service, status) {
               <div className="pricing-source-label">Menu Import</div>
               <div className="self-menu-import-title">Upload My Menu file</div>
               <p>
-                Admin-only option to replace the current self-managed menu with an Excel upload.
+                Replace the current self-managed menu with an Excel upload.
               </p>
               {menuImportMessage ? (
                 <p className="self-menu-import-message">{menuImportMessage}</p>
@@ -1898,25 +1865,15 @@ async function updateService(service, status) {
             </div>
 
             <div className="self-menu-import-actions">
-              {menuImportAdminUnlocked ? (
-                <label className={`self-menu-import-btn ${importingMenuFile ? "disabled" : ""}`}>
-                  <input
-                    type="file"
-                    accept=".xls,.xlsx,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                    disabled={importingMenuFile}
-                    onChange={handleImportSelfManagedMenuFile}
-                  />
-                  {importingMenuFile ? "Importing..." : "Choose Excel File"}
-                </label>
-              ) : (
-                <button
-                  type="button"
-                  className="self-menu-import-btn"
-                  onClick={() => setShowMenuImportAdminModal(true)}
-                >
-                  Admin Unlock
-                </button>
-              )}
+              <label className={`self-menu-import-btn ${importingMenuFile ? "disabled" : ""}`}>
+                <input
+                  type="file"
+                  accept=".xls,.xlsx,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                  disabled={importingMenuFile}
+                  onChange={handleImportSelfManagedMenuFile}
+                />
+                {importingMenuFile ? "Importing..." : "Choose Excel File"}
+              </label>
             </div>
           </div>
         ) : null}
@@ -3160,27 +3117,6 @@ async function updateService(service, status) {
           </Modal>
         )
       }
-      {showMenuImportAdminModal && (
-        <Modal title="Admin Verification" onClose={() => setShowMenuImportAdminModal(false)}>
-          <label className="modal-label">Admin Passcode</label>
-          <input
-            className="price-input"
-            type="password"
-            value={menuImportAdminPasscode}
-            onChange={e => setMenuImportAdminPasscode(e.target.value)}
-            placeholder="Enter admin passcode"
-            autoFocus
-          />
-
-          <button
-            className="btn-primary"
-            onClick={handleVerifyMenuImportAdmin}
-            disabled={verifyingMenuImportAdmin}
-          >
-            {verifyingMenuImportAdmin ? "Verifying..." : "Unlock Import"}
-          </button>
-        </Modal>
-      )}
       {showCustomModal && (
         <Modal
           title={customModalMode === "edit" ? customTypeConfig.editLabel : customTypeConfig.createLabel}

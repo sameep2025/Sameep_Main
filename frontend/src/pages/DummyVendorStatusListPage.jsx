@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import axios from "axios";
+import API from "../api";
 import API_BASE_URL, { PREVIEW_BASE_URL } from "../config";
 import DummyBusinessHoursModal from "../components/DummyBusinessHoursModal";
 import DummyBusinessLocationModal from "../components/DummyBusinessLocationModal";
@@ -98,7 +99,7 @@ export default function DummyVendorStatusListPage() {
   const refreshVendor = async (vendorId) => {
     try {
       // refetch the one vendor via byCategory filter to update row
-      const res = await axios.get(`${API_PREFIX}/api/dummy-vendors/byCategory/${categoryId}`, { params: { status } });
+      const res = await API.get(`${API_PREFIX}/api/dummy-vendors/byCategory/${categoryId}`, { params: { status } });
       const list = Array.isArray(res.data) ? res.data : [];
       setVendors(list);
     } catch {}
@@ -172,7 +173,7 @@ export default function DummyVendorStatusListPage() {
     } catch {}
     // Fallback: refetch list and pick first vendor
     try {
-      const res = await axios.get(`${API_PREFIX}/api/dummy-vendors/byCategory/${categoryId}`, { params: { status: String(status || '').trim() } });
+      const res = await API.get(`${API_PREFIX}/api/dummy-vendors/byCategory/${categoryId}`, { params: { status: String(status || '').trim() } });
       const list = Array.isArray(res.data) ? res.data : [];
       if (list.length) return list[0];
     } catch {}
@@ -247,7 +248,7 @@ export default function DummyVendorStatusListPage() {
     setLoading(true);
     setError("");
     try {
-      const res = await axios.get(`${API_PREFIX}/api/dummy-vendors/byCategory/${categoryId}`, { params: { status: String(status || '').trim() } });
+      const res = await API.get(`${API_PREFIX}/api/dummy-vendors/byCategory/${categoryId}`, { params: { status: String(status || '').trim() } });
       const vendorsData = Array.isArray(res.data) ? res.data : [];
       if (vendorsData.length === 0) {
         try {
@@ -413,9 +414,30 @@ export default function DummyVendorStatusListPage() {
     }
   };
 
+  const openAuthorizedVendorSession = async () => {
+    const vendor = vendors.find((item) => item._id === selectedVendorId);
+    if (!vendor) return alert("Please select a vendor first");
+    const domainUrl = getVendorDomainUrl(vendor);
+    if (!domainUrl) return alert("This vendor does not have a preview domain");
+
+    try {
+      const response = await API.post("/api/admin/impersonation-handoffs", {
+        vendorId: vendor._id,
+        categoryId,
+      });
+      const handoffCode = String(response.data?.handoffCode || "").trim();
+      if (!handoffCode) throw new Error("Missing handoff code");
+      const destination = new URL(domainUrl);
+      destination.searchParams.set("adminHandoff", handoffCode);
+      window.open(destination.toString(), "_blank", "noopener,noreferrer");
+    } catch (error) {
+      alert(error?.response?.data?.message || "Failed to open authorized vendor session");
+    }
+  };
+
   const loadPlans = async () => {
     try {
-      const res = await axios.get(`${API_PREFIX}/api/admin/plans`);
+      const res = await API.get(`${API_PREFIX}/api/admin/plans`);
       setPlans(res.data?.data || []);
     } catch {
       alert("Failed to load plans");
@@ -424,7 +446,7 @@ export default function DummyVendorStatusListPage() {
 
   const loadVendorSubscription = async (vendorId) => {
     try {
-      const res = await axios.get(
+      const res = await API.get(
         `${API_PREFIX}/api/admin/vendor-subscriptions/${vendorId}`
       );
       const data = res.data?.data || null;
@@ -446,7 +468,7 @@ export default function DummyVendorStatusListPage() {
 
   const assignPlan = async (planId) => {
     try {
-      await axios.post(`${API_PREFIX}/api/admin/vendor-subscriptions`, {
+      await API.post(`${API_PREFIX}/api/admin/vendor-subscriptions`, {
         vendorId: selectedVendorId,
         planId,
       });
@@ -473,7 +495,7 @@ export default function DummyVendorStatusListPage() {
 
     try {
       setSubscriptionSaving(true);
-      await axios.put(`${API_PREFIX}/api/admin/vendor-subscriptions/${selectedVendorId}`, {
+      await API.put(`${API_PREFIX}/api/admin/vendor-subscriptions/${selectedVendorId}`, {
         expiryDate: subscriptionExpiryDate,
       });
       await loadVendorSubscription(selectedVendorId);
@@ -493,7 +515,7 @@ export default function DummyVendorStatusListPage() {
 
     try {
       setSubscriptionSaving(true);
-      await axios.put(`${API_PREFIX}/api/admin/vendor-subscriptions/${selectedVendorId}`, {
+      await API.put(`${API_PREFIX}/api/admin/vendor-subscriptions/${selectedVendorId}`, {
         whatsappBalance: whatsappBalanceInput,
         otpBalance: otpBalanceInput,
       });
@@ -512,6 +534,10 @@ export default function DummyVendorStatusListPage() {
       {/* Top navbar actions for selected vendor */}
       <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', padding: 10, background: '#f8fafc', border: '1px solid #e5e7eb', borderRadius: 8, marginBottom: 12 }}>
         <div style={{ fontWeight: 600, color: '#334155', marginRight: 8 }}>Actions:</div>
+        <button
+          onClick={openAuthorizedVendorSession}
+          style={{ padding: '6px 12px', borderRadius: 6, background: '#92400e', color: '#fff', border: 'none' }}
+        >Open as Vendor</button>
         <button
           onClick={() => {
             const v = vendors.find((item) => item._id === selectedVendorId);

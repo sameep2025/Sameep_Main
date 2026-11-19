@@ -3,6 +3,7 @@
 import "./Business.css";
 import { useMemo, useState } from "react";
 import { useVendor } from "@/app/context/VendorContext";
+import { getVendorAuthHeaders } from "@/app/utils/vendorAuth";
 
 function normalizePhoneInput(value) {
   return String(value || "").replace(/\D/g, "").slice(-10);
@@ -48,7 +49,7 @@ export default function BrandingContactModal({
   };
 
   async function uploadLogo(file) {
-    const endpoint = `${process.env.NEXT_PUBLIC_API_BASE_URL}/api/upload`;
+    const endpoint = `${process.env.NEXT_PUBLIC_API_BASE_URL}/api/upload?vendorId=${encodeURIComponent(vendorId)}`;
     const formData = new FormData();
     formData.append("file", file);
     formData.append("folderType", "newvendor");
@@ -63,6 +64,7 @@ export default function BrandingContactModal({
 
     const response = await fetch(endpoint, {
       method: "POST",
+      headers: getVendorAuthHeaders(vendorId),
       body: formData,
     });
     const json = await response.json();

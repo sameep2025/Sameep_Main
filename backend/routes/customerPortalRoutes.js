@@ -4,11 +4,12 @@ const customerPortalBillsController = require("../controllers/customerPortalBill
 const customerPortalMembershipsController = require("../controllers/customerPortalMembershipsController");
 const customerPortalRewardsController = require("../controllers/customerPortalRewardsController");
 const { requireCustomerPortalSession } = require("../utils/customerPortalAuth");
+const { otpRequestLimiter, otpVerifyLimiter } = require("../utils/securityLimiters");
 
 const router = express.Router();
 
-router.post("/auth/request-otp", customerPortalAuthController.requestOtp);
-router.post("/auth/verify-otp", customerPortalAuthController.verifyOtp);
+router.post("/auth/request-otp", otpRequestLimiter, customerPortalAuthController.requestOtp);
+router.post("/auth/verify-otp", otpVerifyLimiter, customerPortalAuthController.verifyOtp);
 router.get("/me", requireCustomerPortalSession, customerPortalAuthController.me);
 router.patch("/me", requireCustomerPortalSession, customerPortalAuthController.updateProfile);
 router.post("/logout", requireCustomerPortalSession, customerPortalAuthController.logout);

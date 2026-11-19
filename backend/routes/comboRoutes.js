@@ -5,8 +5,16 @@ const { uploadBufferToS3 } = require("../utils/s3Upload");
 
 const Combo = require("../models/Combo");
 const Category = require("../models/Category");
+const { requireAdminAuth } = require("../utils/adminAuthMiddleware");
 
 const router = express.Router();
+
+router.use((req, res, next) => {
+  if (["POST", "PUT", "PATCH", "DELETE"].includes(req.method)) {
+    return requireAdminAuth(req, res, next);
+  }
+  return next();
+});
 
 // Upload middleware for icon and image (memory storage for S3)
 const upload = multer({ storage: multer.memoryStorage() });

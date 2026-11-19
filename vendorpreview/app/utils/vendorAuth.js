@@ -1,6 +1,7 @@
 export function getVendorToken(vendorId) {
-  if (typeof window === "undefined" || !vendorId) return "";
-  return localStorage.getItem(`vendorToken:${vendorId}`) || "";
+  if (typeof window === "undefined") return "";
+  return (vendorId ? localStorage.getItem(`vendorToken:${vendorId}`) : "") ||
+    localStorage.getItem("authToken") || "";
 }
 
 export function getVendorAuthHeaders(vendorId) {

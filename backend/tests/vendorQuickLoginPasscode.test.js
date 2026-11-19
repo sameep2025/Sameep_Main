@@ -363,7 +363,7 @@ test("successful vendor passcode login creates normal vendor session and JWT dur
   assert.match(helper, /Session\.updateOne\(\{ _id: s\._id \}/);
   assert.match(helper, /Session\.create\(\{/);
   assert.match(helper, /authMethod: "PASSCODE"/);
-  assert.match(helper, /jwt\.sign\(payload, JWT_SECRET, \{ expiresIn: `\$\{hours\}h` \}\)/);
+  assert.match(helper, /jwt\.sign\(payload, getJwtSecret\(\), \{ expiresIn: `\$\{hours\}h` \}\)/);
   assert.match(helper, /Session\.updateOne\(\{ _id: session\._id \}, \{ \$set: \{ token \} \}\)/);
   assert.match(route, /role: "vendor"/);
   assert.match(route, /displayName: dummyVendor\.businessName/);
@@ -381,14 +381,15 @@ test("vendor passcode login rate limits repeated failures by normalized mobile a
   assert.match(section, /clearVendorPasscodeFailures\(attemptKey\)/);
 });
 
-test("vendor passcode implementation does not modify OTP or central admin passcode routes", () => {
+test("vendor passcode implementation preserves OTP and uses one-time admin handoff", () => {
   const requestOtp = routeSection("/request-otp");
   const verifyOtp = routeSection("/verify-otp");
   const adminImpersonate = routeSection("/admin-impersonate");
 
   assert.match(requestOtp, /https:\/\/control\.msg91\.com\/api\/v5\/otp/);
   assert.match(verifyOtp, /https:\/\/control\.msg91\.com\/api\/v5\/otp\/verify/);
-  assert.match(adminImpersonate, /getAdminPasscode\("1234"\)/);
+  assert.match(adminImpersonate, /consumeAdminImpersonationHandoff\(handoffCode/);
+  assert.doesNotMatch(adminImpersonate, /getAdminPasscode|passcode\s*:/);
   assert.doesNotMatch(requestOtp, /vendorLogin|passcodeHash|bcrypt/);
   assert.doesNotMatch(verifyOtp, /vendorLogin|passcodeHash|bcrypt/);
   assert.doesNotMatch(adminImpersonate, /vendorLogin|passcodeHash|bcrypt/);

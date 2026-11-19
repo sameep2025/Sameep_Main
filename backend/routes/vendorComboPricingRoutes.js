@@ -3,6 +3,7 @@ const mongoose = require("mongoose");
 
 const VendorComboPricing = require("../models/vendorComboPricing");
 const DummyCombo = require("../models/dummyCombo");
+const { requireVendorParamWriteAccess } = require("../utils/vendorWriteAuth");
 
 const router = express.Router();
 
@@ -76,7 +77,7 @@ router.get("/:vendorId", async (req, res) => {
 
 // PUT /api/vendor-combo-pricing/:vendorId/:comboId
 // Body: { overrides: [{ sizeKey, price, status }] }
-router.put("/:vendorId/:comboId", async (req, res) => {
+router.put("/:vendorId/:comboId", requireVendorParamWriteAccess(), async (req, res) => {
   try {
     const { vendorId, comboId } = req.params;
     const vId = normId(vendorId);

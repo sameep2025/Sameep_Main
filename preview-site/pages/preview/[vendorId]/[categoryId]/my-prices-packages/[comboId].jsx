@@ -25,6 +25,12 @@ const checkAuthentication = (vendorId, categoryId) => {
   }
 };
 
+const getPreviewAuthHeaders = (vendorId, categoryId) => {
+  if (typeof window === "undefined") return {};
+  const token = window.localStorage.getItem(`previewToken:${vendorId}:${categoryId}`);
+  return token ? { Authorization: `Bearer ${token}` } : {};
+};
+
 // My Prices - single Package detail page
 // Mirrors DummyVendorCategoriesDetailPage combo logic for one combo:
 // - pricingStatusPerSize
@@ -218,7 +224,10 @@ export default function MyPackageDetailPage() {
         )}/${encodeURIComponent(String(id))}`,
         {
           method: "PUT",
-          headers: { "Content-Type": "application/json" },
+          headers: {
+            "Content-Type": "application/json",
+            ...getPreviewAuthHeaders(vendorId, categoryId),
+          },
           body: JSON.stringify({
             overrides: [
               {
@@ -267,7 +276,10 @@ export default function MyPackageDetailPage() {
         )}/${encodeURIComponent(String(id))}`,
         {
           method: "PUT",
-          headers: { "Content-Type": "application/json" },
+          headers: {
+            "Content-Type": "application/json",
+            ...getPreviewAuthHeaders(vendorId, categoryId),
+          },
           body: JSON.stringify({
             overrides: [
               {

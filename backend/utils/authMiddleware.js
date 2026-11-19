@@ -1,7 +1,6 @@
 const jwt = require("jsonwebtoken");
 const Session = require("../models/Session");
-
-const JWT_SECRET = process.env.JWT_SECRET || "dev_jwt_secret_change_me";
+const { getJwtSecret } = require("./jwtSecrets");
 
 // Extract token from Authorization: Bearer <token> or x-auth-token header or body.token
 function getTokenFromRequest(req) {
@@ -19,9 +18,9 @@ async function validateCustomerSession(token) {
 
   let decoded;
   try {
-    decoded = jwt.verify(token, JWT_SECRET);
+    decoded = jwt.verify(token, getJwtSecret());
   } catch (e) {
-    return { ok: false, code: "invalid_token" };
+    return { ok: false, code: e?.code === "jwt_secret_missing" ? "jwt_secret_missing" : "invalid_token" };
   }
 
   const customerId = decoded.customerId;
@@ -70,6 +69,7 @@ async function requireCustomerSession(req, res, next) {
         invalid_payload: 401,
         no_session: 401,
         expired: 401,
+        jwt_secret_missing: 500,
       };
       const status = map[result.code] || 401;
       return res.status(status).json({ message: "Session invalid or expired", code: result.code || "invalid" });

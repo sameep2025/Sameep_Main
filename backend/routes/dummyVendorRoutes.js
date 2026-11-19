@@ -13,8 +13,31 @@ const { logAudit } = require("../utils/auditLogger");
 const {
   buildPublishedCategoryCounts,
 } = require("../services/categoryPopularityService");
+const {
+  requireVendorCreationAccess,
+  requireVendorParamWriteAccess,
+} = require("../utils/vendorWriteAuth");
+const { requireAdminAuth } = require("../utils/adminAuthMiddleware");
+const {
+  finalizeOnboardingBypassSession,
+} = require("../services/onboardingBypassService");
 
 const router = express.Router();
+const requireLegacyVendorMutation = requireVendorParamWriteAccess();
+const PUBLIC_VENDOR_EXCLUSIONS =
+  "-whatsappBusiness -gstSettings -billingPreferences";
+
+function withoutVendorLogin(vendor) {
+  if (!vendor || typeof vendor !== "object") return vendor;
+  const safeVendor = { ...vendor };
+  delete safeVendor.vendorLogin;
+  return safeVendor;
+}
+
+router.use("/:vendorId", (req, res, next) => {
+  if (!["POST", "PUT", "PATCH", "DELETE"].includes(req.method)) return next();
+  return requireLegacyVendorMutation(req, res, next);
+});
 
 // Multer setup for dummy vendor images (memory -> S3)
 const upload = multer({ storage: multer.memoryStorage() });
@@ -422,7 +445,7 @@ router.get("/:vendorId/inventory/:categoryId/:entryKey/images", async (req, res)
 // Create dummy vendor
 // Create dummy vendor
 
-router.post("/", async (req, res) => {
+router.post("/", requireVendorCreationAccess, async (req, res) => {
   console.log("🔥 HIT:", __filename);
 
   try {
@@ -506,6 +529,11 @@ router.post("/", async (req, res) => {
        UPDATE EXISTING VENDOR
        =========================== */
     if (existing) {
+      if (req.vendorWriteAuth?.authType === "onboarding_bypass") {
+        return res.status(409).json({
+          message: "Existing vendor accounts must use normal login",
+        });
+      }
       existing.phone = normalizedPhone;
       existing.businessName = businessName;
       existing.contactName = contactName;
@@ -604,10 +632,20 @@ router.post("/", async (req, res) => {
     }
 
     const vendor = await DummyVendor.create(vendorPayload);
+    let onboardingSessionToken = "";
+    if (req.vendorWriteAuth?.authType === "onboarding_bypass") {
+      const finalized = await finalizeOnboardingBypassSession({
+        session: req.vendorWriteAuth.session,
+        vendorId: vendor._id,
+        categoryId,
+      });
+      onboardingSessionToken = finalized.token;
+    }
     return res.status(201).json({
       ...vendor.toObject(),
       success: true,
       existingVendor: false,
+      ...(onboardingSessionToken ? { onboardingSessionToken } : {}),
     });
 
   } catch (err) {
@@ -830,9 +868,11 @@ router.get("/:vendorId", async (req, res) => {
     if (!mongoose.Types.ObjectId.isValid(vendorId)) {
       return res.status(400).json({ message: "Invalid vendorId" });
     }
-    const v = await DummyVendor.findById(vendorId).lean();
+    const v = await DummyVendor.findById(vendorId)
+      .select(PUBLIC_VENDOR_EXCLUSIONS)
+      .lean();
     if (!v) return res.status(404).json({ message: "Vendor not found" });
-    return res.json(v);
+    return res.json(withoutVendorLogin(v));
   } catch (err) {
     console.error("GET /dummy-vendors/:vendorId error:", err);
     res.status(500).json({ message: "Server error" });
@@ -1208,7 +1248,7 @@ router.get("/categories/counts", async (req, res) => {
 
 // Vendors by category and optional status
 // GET /api/dummy-vendors/byCategory/:categoryId?status=Accepted
-router.get("/byCategory/:categoryId", async (req, res) => {
+router.get("/byCategory/:categoryId", requireAdminAuth, async (req, res) => {
   try {
     const { categoryId } = req.params;
     const { status } = req.query;
@@ -1220,11 +1260,12 @@ router.get("/byCategory/:categoryId", async (req, res) => {
     if (status) match.status = new RegExp(`^${status}$`, "i");
 
     const vendors = await DummyVendor.find(match)
+      .select(PUBLIC_VENDOR_EXCLUSIONS)
       .populate("customerId", "fullNumber phone")
       .populate("categoryId", "name price")
       .lean();
 
-    res.json(vendors);
+    res.json(vendors.map(withoutVendorLogin));
   } catch (err) {
     console.error("GET /dummy-vendors/byCategory error:", err);
     res.status(500).json({ message: "Server error" });

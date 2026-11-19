@@ -767,7 +767,7 @@ export default function EcommercePreviewTemplate({
     async function loadPaymentConfig() {
       try {
         const response = await fetch(
-          `${API_BASE_URL}/api/vendor-payment-config/${vendorId}`,
+          `${API_BASE_URL}/api/vendor-payment-config/public/${vendorId}`,
           { cache: "no-store" }
         );
 

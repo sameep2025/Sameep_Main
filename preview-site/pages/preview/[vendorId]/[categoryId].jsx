@@ -301,7 +301,6 @@ export default function PreviewPage() {
   const [setupOtpVerifying, setSetupOtpVerifying] = useState(false);
   const [setupOtpVerifyError, setSetupOtpVerifyError] = useState("");
   const [setupOtpVerified, setSetupOtpVerified] = useState(false);
-  const [setupOtpBypass, setSetupOtpBypass] = useState(false);
   const [setupMobileFlowOpen, setSetupMobileFlowOpen] = useState(false);
   const [setupMobileCountryCode, setSetupMobileCountryCode] = useState("91");
   const [setupMobilePhone, setSetupMobilePhone] = useState("");
@@ -377,7 +376,7 @@ const activeLeafCategoryIds = extractActiveLeafIds(
   const [otpLoading, setOtpLoading] = useState(false);
   const [otpError, setOtpError] = useState("");
   const [loginAsAdmin, setLoginAsAdmin] = useState(false);
-  const [adminPasscodeInput, setAdminPasscodeInput] = useState("");
+  const [, setAdminPasscodeInput] = useState("");
   const [sessionExpired, setSessionExpired] = useState(false);
   const [navIdentity, setNavIdentity] = useState({ role: "guest", displayName: "Guest", loggedIn: false });
   const [enquirySubmitted, setEnquirySubmitted] = useState(false);
@@ -690,7 +689,6 @@ console.log("🟢 Active leaf category IDs:", activeLeafCategoryIds);
       setSetupOtpVerifying(false);
       setSetupOtpVerifyError("");
       setSetupOtpVerified(false);
-      setSetupOtpBypass(false);
       setSetupMobileFlowOpen(false);
       setSetupMobileCountryCode("91");
       setSetupMobilePhone("");
@@ -760,7 +758,10 @@ console.log("🟢 Active leaf category IDs:", activeLeafCategoryIds);
 
       const dvRes = await fetch(`${API_BASE_URL}/api/dummy-vendors`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
         body: JSON.stringify({
           customerId: String(customerId),
           phone: String(phoneFull),
@@ -861,61 +862,6 @@ console.log("🟢 Active leaf category IDs:", activeLeafCategoryIds);
       }
     } finally {
       setSetupPlaceLoading(false);
-    }
-  };
-
-  const handleSetupBypassOtp = async (phoneInfoOverride) => {
-    const phoneInfo = phoneInfoOverride || setupOtpPhoneInfo;
-    if (!phoneInfo) {
-      setSetupOtpSendError("Please enter a valid phone number");
-      return;
-    }
-    try {
-      setSetupOtpVerifying(true);
-      setSetupOtpSendError("");
-      setSetupOtpVerifyError("");
-
-      const bypassRes = await fetch(`${process.env.NEXT_PUBLIC_API_BASE_URL}/api/customers/bypass-otp`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          countryCode: phoneInfo.countryCode,
-          phone: phoneInfo.phone,
-        }),
-      });
-      const bypassJson = await bypassRes.json().catch(() => ({}));
-      if (!bypassRes.ok) {
-        const msg = bypassJson?.message || `OTP bypass failed (status ${bypassRes.status})`;
-        throw new Error(msg);
-      }
-
-      const customerId = bypassJson?.customer?._id || bypassJson?.customer?.id || "";
-      const token = bypassJson && bypassJson.token ? String(bypassJson.token) : "";
-      setSetupVerifiedCustomerId(customerId ? String(customerId) : "");
-      setSetupVerifiedToken(token);
-
-      setSetupOtpVerified(true);
-      setSetupOtpBypass(true);
-      setSetupOtpSent(false);
-      setSetupOtpCode("");
-
-      try {
-        if (setupSelectedPlace && customerId && !setupGeneratedDummyVendorId) {
-          await persistSetupDummyVendor(setupSelectedPlace);
-        }
-        if (!setupSelectedPlace) setSetupShowPlacesStep(true);
-      } catch {}
-    } catch (e) {
-      console.error("Setup My Business bypass OTP error", e);
-      setSetupOtpSendError(e?.message || "OTP bypass failed");
-      setSetupOtpBypass(false);
-      if (!setupGeneratedDummyVendorId) {
-        setSetupOtpVerified(false);
-        setSetupVerifiedCustomerId("");
-        setSetupVerifiedToken("");
-      }
-    } finally {
-      setSetupOtpVerifying(false);
     }
   };
 
@@ -1433,9 +1379,9 @@ const filteredChildren = Array.isArray(children) ? children : [];
     }
   }, []);
 
-  const getPreviewAuthHeaders = useCallback(() => {
+  const getPreviewAuthHeaders = useCallback((venId = vendorId, catId = categoryId) => {
     if (typeof window === "undefined") return {};
-    const token = window.localStorage.getItem(makePreviewTokenKey(vendorId, categoryId));
+    const token = window.localStorage.getItem(makePreviewTokenKey(venId, catId));
     return token ? { Authorization: `Bearer ${token}` } : {};
   }, [categoryId, makePreviewTokenKey, vendorId]);
 
@@ -1503,62 +1449,6 @@ const filteredChildren = Array.isArray(children) ? children : [];
       setVendorComboOverrides({});
     }
   }, [vendorId, categoryId]);
-
-  const handleAdminLogin = async () => {
-    const code = (adminPasscodeInput || "").trim();
-    if (!/^\d{4}$/.test(code)) {
-      setOtpError("Invalid admin passcode");
-      return;
-    }
-    try {
-      setOtpLoading(true);
-      setOtpError("");
-      const res = await fetch(`${API_BASE_URL}/api/customers/admin-impersonate`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ passcode: code, vendorId, categoryId }),
-      });
-      if (!res.ok) {
-        const errJson = await res.json().catch(() => ({}));
-        setOtpError(errJson?.message || "Invalid admin passcode");
-        return;
-      }
-
-      const json = await res.json().catch(() => null);
-      const adminExpiresAt = json && json.expiresAt ? json.expiresAt : null;
-
-      // Treat admin impersonation as a vendor identity for this preview page
-      try {
-        if (typeof window !== "undefined") {
-          const role = "vendor";
-          const displayName = (vendor?.businessName && String(vendor.businessName).trim())
-            ? `${String(vendor.businessName).trim()} (Admin)`
-            : "Admin";
-          const identity = { role, displayName, loggedIn: true, adminExpiresAt };
-          const identityKey = makePreviewIdentityKey(vendorId, categoryId);
-          try {
-            window.localStorage.setItem(identityKey, JSON.stringify(identity));
-          } catch {}
-          try {
-            if (json && json.token) {
-              const tokenKey = makePreviewTokenKey(vendorId, categoryId);
-              window.localStorage.setItem(tokenKey, json.token);
-            }
-          } catch {}
-          setNavIdentity(identity);
-        }
-      } catch {}
-
-      handleCloseOtpModal();
-    } catch (err) {
-      console.error("admin login error (preview)", err);
-      if (!otpError) {
-        setOtpError("Invalid admin passcode");
-      }
-    } finally {
-      setOtpLoading(false);
-    }
-  };
 
   // Fetch country codes when OTP modal is opened the first time
   useEffect(() => {
@@ -2383,7 +2273,7 @@ const filteredChildren = Array.isArray(children) ? children : [];
     const payload = { items };
     await fetch(`${API_BASE_URL}/api/dummy-categories/${cid}/vendors/${vid}/inventory-selections`, {
       method: "PUT",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...getPreviewAuthHeaders(vid, cid) },
       body: JSON.stringify(payload),
     });
     return true;
@@ -8249,7 +8139,7 @@ console.log("✅ Total dummy categories count:", list.length);
 
       const res = await fetch(`${API_BASE_URL}/api/vendors/${vendorId}/location`, {
         method: "PUT",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...getPreviewAuthHeaders() },
         body: JSON.stringify({ lat: pos.lat, lng: pos.lng, areaCity, address: areaCity }),
       });
 
@@ -8281,7 +8171,7 @@ console.log("✅ Total dummy categories count:", list.length);
 
           await fetch(`${API_BASE_URL}/api/dummy-vendors/${vendorId}/location`, {
             method: "PUT",
-            headers: { "Content-Type": "application/json" },
+            headers: { "Content-Type": "application/json", ...getPreviewAuthHeaders() },
             body: JSON.stringify({
               lat: pos.lat,
               lng: pos.lng,
@@ -9471,12 +9361,11 @@ console.log("✅ Total dummy categories count:", list.length);
                                       }
                                       const info = { countryCode: cc, phone: ph, full: `+${cc}${ph}` };
                                       setSetupOtpPhoneInfo(info);
-                                      setSetupOtpBypass(false);
                                       setSetupOtpVerified(false);
                                       handleSetupSendOtp(info);
                                     } catch {}
                                   }}
-                                  disabled={setupOtpSending || setupOtpBypass}
+                                  disabled={setupOtpSending}
                                   style={{
                                     padding: "8px 14px",
                                     borderRadius: 999,
@@ -9485,59 +9374,11 @@ console.log("✅ Total dummy categories count:", list.length);
                                     color: "#fff",
                                     fontSize: 13,
                                     fontWeight: 600,
-                                    cursor: setupOtpSending || setupOtpBypass ? "not-allowed" : "pointer",
+                                    cursor: setupOtpSending ? "not-allowed" : "pointer",
                                   }}
                                 >
                                   {setupOtpSending ? "Sending..." : "Send OTP"}
                                 </button>
-                                <label
-                                  style={{
-                                    display: "flex",
-                                    alignItems: "center",
-                                    gap: 8,
-                                    marginTop: 10,
-                                    fontSize: 12,
-                                    color: "#111827",
-                                    userSelect: "none",
-                                  }}
-                                >
-                                  <input
-                                    type="checkbox"
-                                    checked={setupOtpBypass}
-                                    onChange={(e) => {
-                                      const checked = !!e.target.checked;
-                                      setSetupOtpBypass(checked);
-                                      if (!checked) {
-                                        if (!setupGeneratedDummyVendorId) {
-                                          setSetupOtpVerified(false);
-                                          setSetupVerifiedCustomerId("");
-                                          setSetupVerifiedToken("");
-                                        }
-                                        return;
-                                      }
-
-                                      try {
-                                        const cc = String(setupMobileCountryCode || "").trim();
-                                        const ph = String(setupMobilePhone || "").trim();
-                                        if (!cc || !ph) {
-                                          setSetupOtpSendError("Please enter country code and phone");
-                                          setSetupOtpBypass(false);
-                                          return;
-                                        }
-                                        const info = { countryCode: cc, phone: ph, full: `+${cc}${ph}` };
-                                        setSetupOtpPhoneInfo(info);
-                                        setSetupOtpSent(false);
-                                        setSetupOtpSending(false);
-                                        setSetupOtpSendError("");
-                                        setSetupOtpCode("");
-                                        setSetupOtpVerifyError("");
-                                        setSetupOtpVerified(false);
-                                        handleSetupBypassOtp(info);
-                                      } catch {}
-                                    }}
-                                  />
-                                  Bypass OTP
-                                </label>
                               </>
                             ) : (
                               <>
@@ -9548,7 +9389,6 @@ console.log("✅ Total dummy categories count:", list.length);
                                     onChange={(e) => setSetupOtpCode(e.target.value)}
                                     placeholder="Enter OTP"
                                     maxLength={6}
-                                    disabled={setupOtpBypass}
                                     style={{
                                       flex: 1,
                                       padding: 8,
@@ -9561,7 +9401,7 @@ console.log("✅ Total dummy categories count:", list.length);
                                   <button
                                     type="button"
                                     onClick={handleSetupVerifyOtp}
-                                    disabled={setupOtpVerifying || setupOtpBypass}
+                                    disabled={setupOtpVerifying}
                                     style={{
                                       padding: "8px 14px",
                                       borderRadius: 999,
@@ -9570,60 +9410,12 @@ console.log("✅ Total dummy categories count:", list.length);
                                       color: "#fff",
                                       fontSize: 13,
                                       fontWeight: 600,
-                                      cursor: setupOtpVerifying || setupOtpBypass ? "not-allowed" : "pointer",
+                                      cursor: setupOtpVerifying ? "not-allowed" : "pointer",
                                     }}
                                   >
                                     {setupOtpVerifying ? "Verifying..." : "Verify"}
                                   </button>
                                 </div>
-                                <label
-                                  style={{
-                                    display: "flex",
-                                    alignItems: "center",
-                                    gap: 8,
-                                    marginTop: 10,
-                                    fontSize: 12,
-                                    color: "#111827",
-                                    userSelect: "none",
-                                  }}
-                                >
-                                  <input
-                                    type="checkbox"
-                                    checked={setupOtpBypass}
-                                    onChange={(e) => {
-                                      const checked = !!e.target.checked;
-                                      setSetupOtpBypass(checked);
-                                      if (!checked) {
-                                        if (!setupGeneratedDummyVendorId) {
-                                          setSetupOtpVerified(false);
-                                          setSetupVerifiedCustomerId("");
-                                          setSetupVerifiedToken("");
-                                        }
-                                        return;
-                                      }
-
-                                      try {
-                                        const cc = String(setupMobileCountryCode || "").trim();
-                                        const ph = String(setupMobilePhone || "").trim();
-                                        if (!cc || !ph) {
-                                          setSetupOtpSendError("Please enter country code and phone");
-                                          setSetupOtpBypass(false);
-                                          return;
-                                        }
-                                        const info = { countryCode: cc, phone: ph, full: `+${cc}${ph}` };
-                                        setSetupOtpPhoneInfo(info);
-                                        setSetupOtpSent(false);
-                                        setSetupOtpSending(false);
-                                        setSetupOtpSendError("");
-                                        setSetupOtpCode("");
-                                        setSetupOtpVerifyError("");
-                                        setSetupOtpVerified(false);
-                                        handleSetupBypassOtp(info);
-                                      } catch {}
-                                    }}
-                                  />
-                                  Bypass OTP
-                                </label>
                               </>
                             )}
                             {setupOtpSendError && (
@@ -9643,7 +9435,7 @@ console.log("✅ Total dummy categories count:", list.length);
                             )}
                           </div>
                         )}
-                        {setupShowPlacesStep && (!setupMobileFlowOpen || setupOtpVerified || setupOtpBypass) && (
+                        {setupShowPlacesStep && (!setupMobileFlowOpen || setupOtpVerified) && (
                           <div
                             style={{
                               marginTop: 12,
@@ -9789,7 +9581,7 @@ console.log("✅ Total dummy categories count:", list.length);
                                         <button
                                           type="button"
                                           onClick={() => handleSetupSendOtp()}
-                                          disabled={setupOtpSending || setupOtpBypass}
+                                          disabled={setupOtpSending}
                                           style={{
                                             padding: "8px 14px",
                                             borderRadius: 999,
@@ -9803,126 +9595,6 @@ console.log("✅ Total dummy categories count:", list.length);
                                         >
                                           {setupOtpSending ? "Sending..." : "Send OTP"}
                                         </button>
-                                        <label
-                                          style={{
-                                            display: "flex",
-                                            alignItems: "center",
-                                            gap: 8,
-                                            marginTop: 10,
-                                            fontSize: 12,
-                                            color: "#111827",
-                                            userSelect: "none",
-                                          }}
-                                        >
-                                          <input
-                                            type="checkbox"
-                                            checked={setupOtpBypass}
-                                            onChange={(e) => {
-                                              const checked = !!e.target.checked;
-                                              setSetupOtpBypass(checked);
-                                              if (checked) {
-                                                setSetupOtpSent(false);
-                                                setSetupOtpSending(false);
-                                                setSetupOtpSendError("");
-                                                setSetupOtpCode("");
-                                                setSetupOtpVerifying(false);
-                                                setSetupOtpVerifyError("");
-                                                (async () => {
-                                                  try {
-                                                    if (!setupOtpPhoneInfo) {
-                                                      setSetupOtpSendError("Phone number not available from Google");
-                                                      return;
-                                                    }
-                                                    const bypassRes = await fetch(`${process.env.NEXT_PUBLIC_API_BASE_URL}/api/customers/bypass-otp`, {
-                                                      method: "POST",
-                                                      headers: { "Content-Type": "application/json" },
-                                                      body: JSON.stringify({
-                                                        countryCode: setupOtpPhoneInfo.countryCode,
-                                                        phone: setupOtpPhoneInfo.phone,
-                                                      }),
-                                                    });
-                                                    const bypassJson = await bypassRes.json().catch(() => ({}));
-                                                    if (!bypassRes.ok) {
-                                                      const msg =
-                                                        bypassJson?.message ||
-                                                        `OTP bypass failed (status ${bypassRes.status})`;
-                                                      throw new Error(msg);
-                                                    }
-
-                                                    const customerId = bypassJson?.customer?._id || bypassJson?.customer?.id || null;
-                                                    const catId = setupSelectedCategory?._id || setupSelectedCategory?.id || null;
-                                                    const businessName = setupSelectedPlace?.name || "";
-                                                    const placeLocation = setupSelectedPlace?.location || null;
-                                                    const placeAddress = setupSelectedPlace?.address || "";
-                                                    const openingHoursText = Array.isArray(setupSelectedPlace?.openingHoursText)
-                                                      ? setupSelectedPlace.openingHoursText
-                                                      : [];
-                                                    const phoneFull = setupOtpPhoneInfo
-                                                      ? `+${setupOtpPhoneInfo.countryCode}${setupOtpPhoneInfo.phone}`
-                                                      : "";
-
-                                                    if (customerId && catId && businessName && phoneFull) {
-                                                      const dvRes = await fetch(`${API_BASE_URL}/api/dummy-vendors`, {
-                                                        method: "POST",
-                                                        headers: { "Content-Type": "application/json" },
-                                                        body: JSON.stringify({
-                                                          customerId: String(customerId),
-                                                          phone: String(phoneFull),
-                                                          businessName: String(businessName),
-                                                          contactName: String(businessName),
-                                                          categoryId: String(catId),
-                                                          status: "Registered",
-                                                          location: {
-                                                            lat: typeof placeLocation?.lat === "number" ? placeLocation.lat : undefined,
-                                                            lng: typeof placeLocation?.lng === "number" ? placeLocation.lng : undefined,
-                                                            address: String(placeAddress || ""),
-                                                          },
-                                                          openingHoursText,
-                                                        }),
-                                                      });
-                                                      const dvJson = await dvRes.json().catch(() => ({}));
-                                                      const dvId = dvJson?._id || dvJson?.id || "";
-                                                      if (dvId) {
-                                                        setSetupGeneratedDummyVendorId(String(dvId));
-                                                        try {
-                                                          if (typeof window !== "undefined") {
-                                                            const token = bypassJson && bypassJson.token ? String(bypassJson.token) : "";
-                                                            if (token) {
-                                                              window.localStorage.setItem(`previewToken:${dvId}:${catId}`, token);
-                                                            }
-                                                            const identityKey = `previewIdentity:${dvId}:${catId}`;
-                                                            const existingIdentity = window.localStorage.getItem(identityKey);
-                                                            if (!existingIdentity) {
-                                                              window.localStorage.setItem(
-                                                                identityKey,
-                                                                JSON.stringify({
-                                                                  role: "vendor",
-                                                                  displayName: businessName || "Vendor",
-                                                                  loggedIn: true,
-                                                                })
-                                                              );
-                                                            }
-                                                          }
-                                                        } catch {}
-                                                      }
-                                                    }
-
-                                                    setSetupOtpVerified(true);
-                                                    setShowSetupPreviewPrompt(true);
-                                                  } catch (err) {
-                                                    console.error("Bypass OTP flow failed", err);
-                                                    setSetupOtpSendError(err?.message || "OTP bypass failed");
-                                                    setSetupOtpBypass(false);
-                                                    setSetupOtpVerified(false);
-                                                  }
-                                                })();
-                                              } else {
-                                                setSetupOtpVerified(false);
-                                              }
-                                            }}
-                                          />
-                                          Bypass OTP
-                                        </label>
                                         {setupOtpSendError && (
                                           <div style={{ color: "#b91c1c", fontSize: 11, marginTop: 4 }}>
                                             {setupOtpSendError}
@@ -10295,7 +9967,7 @@ Object.keys(setupSelectedSubcategories).forEach((nodeId) => {
                         try {
                           await fetch(`${API_BASE_URL}/api/dummy-vendors/${dvId}`, {
                             method: "PUT",
-                            headers: { "Content-Type": "application/json" },
+                            headers: { "Content-Type": "application/json", ...getPreviewAuthHeaders(dvId, catId) },
                             body: JSON.stringify({ nodePricingStatus }),
                           });
                           const activeLeafIds = Object.keys(nodePricingStatus);
@@ -10312,7 +9984,7 @@ console.log(
                         try {
                           await fetch(`${API_BASE_URL}/api/dummy-vendors/${dvId}`, {
                             method: "PUT",
-                            headers: { "Content-Type": "application/json" },
+                            headers: { "Content-Type": "application/json", ...getPreviewAuthHeaders(dvId, catId) },
                             body: JSON.stringify({ status: "Profile Setup" }),
                           });
                           console.log("Status updated to Profile Setup");
@@ -10513,7 +10185,7 @@ console.log(
                         try {
                           await fetch(`${API_BASE_URL}/api/dummy-vendors/${dvId}`, {
                             method: "PUT",
-                            headers: { "Content-Type": "application/json" },
+                            headers: { "Content-Type": "application/json", ...getPreviewAuthHeaders(dvId, catId) },
                             body: JSON.stringify({ nodePricingStatus, vehicleCounts: setupVehicleCounts }),
                           });
                         } catch (e) {
@@ -10574,7 +10246,7 @@ console.log(
                             // Update vendor status to "Profile Setup"
                             await fetch(`${API_BASE_URL}/api/dummy-vendors/${dvId}`, {
                               method: "PUT",
-                              headers: { "Content-Type": "application/json" },
+                              headers: { "Content-Type": "application/json", ...getPreviewAuthHeaders(dvId, catId) },
                               body: JSON.stringify({ status: "Profile Setup" }),
                             });
                             console.log("Status updated to Profile Setup");
@@ -11008,7 +10680,7 @@ console.log(
                                 try {
                                   const vendorRes = await fetch(`${API_BASE_URL}/api/dummy-vendors/${dvId}`, {
                                     method: "PUT",
-                                    headers: { "Content-Type": "application/json" },
+                                    headers: { "Content-Type": "application/json", ...getPreviewAuthHeaders(dvId, catId) },
                                     body: JSON.stringify({
                                       businessName: String(businessName),
                                       contactName: String(businessName),
@@ -11054,7 +10726,7 @@ console.log(
                                     // Use same format as saveDummyInventorySelections: inventorySelections: { [categoryId]: items }
                                     const inventoryRes = await fetch(`${API_BASE_URL}/api/dummy-vendors/${dvId}`, {
                                       method: "PUT",
-                                      headers: { "Content-Type": "application/json" },
+                                      headers: { "Content-Type": "application/json", ...getPreviewAuthHeaders(dvId, catId) },
                                       body: JSON.stringify({ inventorySelections: { [catId]: allItems } }),
                                     });
                                     console.log("Inventory save response:", inventoryRes.status);
@@ -11067,7 +10739,7 @@ console.log(
                                 try {
                                   await fetch(`${API_BASE_URL}/api/dummy-vendors/${dvId}`, {
                                     method: "PUT",
-                                    headers: { "Content-Type": "application/json" },
+                                    headers: { "Content-Type": "application/json", ...getPreviewAuthHeaders(dvId, catId) },
                                     body: JSON.stringify({ status: "Profile Setup" }),
                                   });
                                   console.log("Status updated to Profile Setup");
@@ -11252,7 +10924,7 @@ console.log(
                         try {
                           await fetch(`${API_BASE_URL}/api/dummy-vendors/${dvId}`, {
                             method: "PUT",
-                            headers: { "Content-Type": "application/json" },
+                            headers: { "Content-Type": "application/json", ...getPreviewAuthHeaders(dvId, catId) },
                             body: JSON.stringify({ status: "Preview" }),
                           });
                           console.log("Status updated to Preview");
@@ -11401,25 +11073,6 @@ console.log(
                           </div>
                         </div>
 
-                        <div style={{ marginTop: 4, marginBottom: 8, display: "flex", alignItems: "center", gap: 8 }}>
-                          <input
-                            id="login-as-admin-checkbox"
-                            type="checkbox"
-                            checked={loginAsAdmin}
-                            onChange={(e) => {
-                              setLoginAsAdmin(e.target.checked);
-                              setOtpError("");
-                            }}
-                            style={{ width: 14, height: 14 }}
-                          />
-                          <label
-                            htmlFor="login-as-admin-checkbox"
-                            style={{ fontSize: 12, color: "#374151", cursor: "pointer" }}
-                          >
-                            Login as Admin
-                          </label>
-                        </div>
-
                         {otpError && (
                           <div style={{ color: "#b91c1c", marginBottom: 8, fontSize: 13 }}>{otpError}</div>
                         )}
@@ -11446,58 +11099,6 @@ console.log(
                       </>
                     )}
 
-                    {loginAsAdmin && (
-                      <>
-                        <div style={{ marginBottom: 12 }}>
-                          <label style={{ display: "block", marginBottom: 4, fontSize: 13, color: "#374151" }}>
-                            Enter Admin Passcode
-                          </label>
-                          <input
-                            type="password"
-                            maxLength={4}
-                            value={adminPasscodeInput}
-                            onChange={(e) => {
-                              const v = e.target.value.replace(/[^0-9]/g, "");
-                              setAdminPasscodeInput(v.slice(0, 4));
-                            }}
-                            placeholder="4-digit code"
-                            style={{
-                              width: "100%",
-                              padding: 10,
-                              borderRadius: 999,
-                              border: "1px solid #e5e7eb",
-                              textAlign: "center",
-                              letterSpacing: 4,
-                              fontSize: 16,
-                            }}
-                          />
-                        </div>
-
-                        {otpError && (
-                          <div style={{ color: "#b91c1c", marginBottom: 8, fontSize: 13 }}>{otpError}</div>
-                        )}
-
-                        <button
-                          type="button"
-                          onClick={handleAdminLogin}
-                          style={{
-                            width: "100%",
-                            marginTop: 8,
-                            padding: 10,
-                            borderRadius: 999,
-                            border: "none",
-                            background: "#059669",
-                            color: "#fff",
-                            fontWeight: 600,
-                            cursor: "pointer",
-                            fontSize: 14,
-                          }}
-                          disabled={otpLoading}
-                        >
-                          {otpLoading ? "Checking..." : "Login as Admin"}
-                        </button>
-                      </>
-                    )}
 
                     <button
                       type="button"
@@ -12134,6 +11735,7 @@ console.log(
                                                       `${API_BASE_URL}/api/dummy-categories/${categoryId}/vendors/${vendorId}/inventory/${keyId}/images/${i}`,
                                                       {
                                                         method: "DELETE",
+                                                        headers: getPreviewAuthHeaders(),
                                                       }
                                                     );
                                                     const json = await res
@@ -12231,6 +11833,7 @@ console.log(
                                                 `${API_BASE_URL}/api/dummy-categories/${categoryId}/vendors/${vendorId}/inventory/${keyId}/images`,
                                                 {
                                                   method: "POST",
+                                                  headers: getPreviewAuthHeaders(),
                                                   body: form,
                                                 }
                                               );

@@ -2,6 +2,7 @@ const express = require("express");
 const mongoose = require("mongoose");
 const DummyVendor = require("../models/DummyVendor");
 const VendorPaymentConfig = require("../models/VendorPaymentConfig");
+const { requireVendorAccessFromExistingAuth } = require("../utils/vendorWriteAuth");
 
 const router = express.Router();
 
@@ -57,17 +58,83 @@ function sanitizePaymentConfig(doc) {
   };
 }
 
-router.get("/:vendorId", async (req, res) => {
+function sanitizePublicPaymentConfig(doc) {
+  const config = doc && typeof doc.toObject === "function" ? doc.toObject() : doc || {};
+  const active = getModeScopedCredentials(config);
+  const enabled = Boolean(
+    config.paymentEnabled &&
+    config.provider === "razorpay" &&
+    active.keyId &&
+    active.keySecret
+  );
+
+  return {
+    paymentEnabled: enabled,
+    provider: enabled ? "razorpay" : "",
+    razorpay: {
+      accountName: enabled ? String(config?.razorpay?.accountName || "") : "",
+      mode: active.mode,
+      keyId: enabled ? active.keyId : "",
+    },
+  };
+}
+
+function assertAllowedKeys(value, allowed, fieldName) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return;
+  const unexpected = Object.keys(value).filter((key) => !allowed.includes(key));
+  if (unexpected.length) {
+    const error = new Error(`${fieldName} contains unsupported fields`);
+    error.status = 400;
+    throw error;
+  }
+}
+
+function validateCredential(value, fieldName, maxLength) {
+  const normalized = String(value || "").trim();
+  if (normalized.length > maxLength || /[\u0000-\u001f\u007f]/.test(normalized)) {
+    const error = new Error(`${fieldName} is invalid`);
+    error.status = 400;
+    throw error;
+  }
+  return normalized;
+}
+
+async function loadVendor(vendorId) {
+  if (!mongoose.Types.ObjectId.isValid(vendorId)) {
+    const error = new Error("Invalid vendorId");
+    error.status = 400;
+    throw error;
+  }
+  const vendor = await DummyVendor.findById(vendorId).lean();
+  if (!vendor) {
+    const error = new Error("Vendor not found");
+    error.status = 404;
+    throw error;
+  }
+  return vendor;
+}
+
+router.get("/public/:vendorId", async (req, res) => {
   try {
     const { vendorId } = req.params;
-    if (!mongoose.Types.ObjectId.isValid(vendorId)) {
-      return res.status(400).json({ success: false, message: "Invalid vendorId" });
-    }
+    await loadVendor(vendorId);
+    const config = await VendorPaymentConfig.findOne({ vendorId }).lean();
+    return res.json({ success: true, vendorId, config: sanitizePublicPaymentConfig(config) });
+  } catch (err) {
+    return res.status(err.status || 500).json({
+      success: false,
+      message: err.status ? err.message : "Server error",
+    });
+  }
+});
 
-    const vendor = await DummyVendor.findById(vendorId).lean();
-    if (!vendor) {
-      return res.status(404).json({ success: false, message: "Vendor not found" });
-    }
+router.get(
+  "/:vendorId",
+  requireVendorAccessFromExistingAuth((req) => req.params.vendorId),
+  async (req, res) => {
+  try {
+    const { vendorId } = req.params;
+    await loadVendor(vendorId);
 
     const config = await VendorPaymentConfig.findOne({ vendorId }).lean();
     return res.json({
@@ -77,35 +144,60 @@ router.get("/:vendorId", async (req, res) => {
     });
   } catch (err) {
     console.error("GET /vendor-payment-config/:vendorId error:", err);
-    return res.status(500).json({ success: false, message: "Server error" });
+    return res.status(err.status || 500).json({
+      success: false,
+      message: err.status ? err.message : "Server error",
+    });
   }
 });
 
-router.put("/:vendorId", async (req, res) => {
+router.put(
+  "/:vendorId",
+  requireVendorAccessFromExistingAuth((req) => req.params.vendorId),
+  async (req, res) => {
   try {
     const { vendorId } = req.params;
-    if (!mongoose.Types.ObjectId.isValid(vendorId)) {
-      return res.status(400).json({ success: false, message: "Invalid vendorId" });
-    }
+    await loadVendor(vendorId);
 
-    const vendor = await DummyVendor.findById(vendorId).lean();
-    if (!vendor) {
-      return res.status(404).json({ success: false, message: "Vendor not found" });
+    assertAllowedKeys(req.body, ["paymentEnabled", "provider", "razorpay"], "Payment configuration");
+    assertAllowedKeys(req.body?.razorpay, ["accountName", "mode", "environments"], "Razorpay configuration");
+    assertAllowedKeys(req.body?.razorpay?.environments, ["test", "live"], "Razorpay environments");
+    assertAllowedKeys(req.body?.razorpay?.environments?.test, ["keyId", "keySecret"], "Razorpay test credentials");
+    assertAllowedKeys(req.body?.razorpay?.environments?.live, ["keyId", "keySecret"], "Razorpay live credentials");
+
+    if (typeof req.body?.paymentEnabled !== "boolean") {
+      return res.status(400).json({ success: false, message: "paymentEnabled must be boolean" });
+    }
+    if (!["", "razorpay"].includes(String(req.body?.provider || "").trim().toLowerCase())) {
+      return res.status(400).json({ success: false, message: "Unsupported payment provider" });
+    }
+    if (!["test", "live"].includes(String(req.body?.razorpay?.mode || "").trim().toLowerCase())) {
+      return res.status(400).json({ success: false, message: "Razorpay mode must be test or live" });
     }
 
     const paymentEnabled = Boolean(req.body?.paymentEnabled);
     const provider = String(req.body?.provider || "").trim().toLowerCase() === "razorpay" ? "razorpay" : "";
-    const accountName = String(req.body?.razorpay?.accountName || "").trim();
+    const accountName = validateCredential(req.body?.razorpay?.accountName, "Razorpay account name", 120);
     const mode = String(req.body?.razorpay?.mode || "").trim().toLowerCase() === "live" ? "live" : "test";
-    const incomingTestKeyId = String(req.body?.razorpay?.environments?.test?.keyId || "").trim();
-    const incomingTestKeySecret = String(req.body?.razorpay?.environments?.test?.keySecret || "").trim();
-    const incomingLiveKeyId = String(req.body?.razorpay?.environments?.live?.keyId || "").trim();
-    const incomingLiveKeySecret = String(req.body?.razorpay?.environments?.live?.keySecret || "").trim();
+    const incomingTestKeyId = validateCredential(req.body?.razorpay?.environments?.test?.keyId, "Razorpay test key ID", 200);
+    const incomingTestKeySecret = validateCredential(req.body?.razorpay?.environments?.test?.keySecret, "Razorpay test key secret", 500);
+    const incomingLiveKeyId = validateCredential(req.body?.razorpay?.environments?.live?.keyId, "Razorpay live key ID", 200);
+    const incomingLiveKeySecret = validateCredential(req.body?.razorpay?.environments?.live?.keySecret, "Razorpay live key secret", 500);
 
     const existing = await VendorPaymentConfig.findOne({ vendorId });
     const nextDoc = existing || new VendorPaymentConfig({ vendorId });
     const existingTest = getModeScopedCredentials(existing || {}, "test");
     const existingLive = getModeScopedCredentials(existing || {}, "live");
+    const activeKeyId = mode === "live" ? incomingLiveKeyId || existingLive.keyId : incomingTestKeyId || existingTest.keyId;
+    const activeKeySecret = mode === "live"
+      ? incomingLiveKeySecret || existingLive.keySecret
+      : incomingTestKeySecret || existingTest.keySecret;
+    if (paymentEnabled && provider === "razorpay" && (!activeKeyId || !activeKeySecret)) {
+      return res.status(400).json({
+        success: false,
+        message: `Complete Razorpay ${mode} credentials before enabling payments`,
+      });
+    }
 
     nextDoc.paymentEnabled = paymentEnabled;
     nextDoc.provider = provider;
@@ -131,7 +223,10 @@ router.put("/:vendorId", async (req, res) => {
     });
   } catch (err) {
     console.error("PUT /vendor-payment-config/:vendorId error:", err);
-    return res.status(500).json({ success: false, message: "Server error" });
+    return res.status(err.status || 500).json({
+      success: false,
+      message: err.status ? err.message : "Server error",
+    });
   }
 });
 

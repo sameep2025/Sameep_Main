@@ -42,7 +42,7 @@ export default function LoyaltySettings({ vendorId, rootCategoryId, onBack }) {
         setLoadingRule(true);
         const res = await fetch(
           `${API_BASE_URL}/api/loyalty/vendor-rule/${encodeURIComponent(vendorId)}`,
-          { cache: "no-store" }
+          { cache: "no-store", headers: getVendorAuthHeaders(vendorId) }
         );
 
         if (!res.ok) {
@@ -143,7 +143,7 @@ export default function LoyaltySettings({ vendorId, rootCategoryId, onBack }) {
 
       const loyaltySave = fetch(`${API_BASE_URL}/api/loyalty/vendor-rule`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...getVendorAuthHeaders(vendorId) },
         body: JSON.stringify(payload),
       });
 

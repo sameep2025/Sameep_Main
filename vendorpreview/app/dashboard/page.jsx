@@ -99,7 +99,8 @@ export default function VendorDashboardPage() {
         setCustomerLoading(true);
 
         const res = await fetch(
-          `${API_BASE_URL}/api/vendor/dashboard/customers?vendorId=${vendorId}`
+          `${API_BASE_URL}/api/vendor/dashboard/customers?vendorId=${vendorId}`,
+          { headers: getVendorAuthHeaders(vendorId) }
         );
 
         const json = await res.json();

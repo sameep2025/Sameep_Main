@@ -8,6 +8,7 @@ const VendorCategoryPrice = require("../models/VendorCategoryPrice");
 const Customer = require("../models/Customer"); // 
 const getCategoryModel = require("../utils/getCategoryModel");
 const VendorLocation = require("../models/VendorLocation");
+const BillingSession = require("../models/BillingSession");
 const { getVendorBills, getBillDetails } = require("../controllers/vendorBillingController");
 
 const router = express.Router();
@@ -15,6 +16,20 @@ const multer = require("multer");
 const path = require("path");
 const { uploadBufferToS3, uploadBufferToS3WithLabel, deleteS3ObjectByUrl } = require("../utils/s3Upload");
 const { v4: uuidv4 } = require("uuid");
+const {
+  requireVendorCreationAccess,
+  requireVendorAccessFromExistingAuth,
+  requireVendorParamWriteAccess,
+} = require("../utils/vendorWriteAuth");
+
+const requireLegacyVendorMutation = requireVendorParamWriteAccess();
+const PUBLIC_VENDOR_EXCLUSIONS = "-whatsappBusiness -gstSettings";
+
+router.use("/:vendorId", (req, res, next) => {
+  if (!["POST", "PUT", "PATCH", "DELETE"].includes(req.method)) return next();
+  if (req.params.vendorId === "vendor-locations") return next();
+  return requireLegacyVendorMutation(req, res, next);
+});
 
 // Multer setup for vendor images (memory -> S3)
 const upload = multer({ storage: multer.memoryStorage() });
@@ -497,7 +512,7 @@ async function buildVendorPreviewTree(categoryId, vendorId) {
  */
 router.get("/", async (req, res) => {
   try {
-    const vendors = await Vendor.find().lean();
+    const vendors = await Vendor.find().select(PUBLIC_VENDOR_EXCLUSIONS).lean();
 
     const safeVendors = await Promise.all(
       vendors.map(async (v) => {
@@ -601,6 +616,7 @@ router.get("/byCategory/:categoryId", async (req, res) => {
     }
 
     const vendors = await Vendor.find(match)
+      .select(PUBLIC_VENDOR_EXCLUSIONS)
       .populate("customerId", "fullNumber phone")
       .populate("categoryId", "name price")
       .lean();
@@ -623,6 +639,7 @@ router.get("/byCategory/:categoryId", async (req, res) => {
 router.get("/:id", async (req, res) => {
   try {
     const vendor = await Vendor.findById(req.params.id)
+      .select(PUBLIC_VENDOR_EXCLUSIONS)
       .populate("customerId", "fullNumber phone")
       .populate("categoryId", "name price");
 
@@ -891,6 +908,7 @@ router.get("/byStatus/:status", async (req, res) => {
 
     // Use case-insensitive exact match
     const vendors = await Vendor.find({ status: new RegExp(`^${status}$`, "i") })
+      .select(PUBLIC_VENDOR_EXCLUSIONS)
       .populate("customerId", "fullNumber phone")
       .populate("categoryId", "name")
       .lean();
@@ -1136,7 +1154,7 @@ router.get("/:vendorId/preview/:categoryId", async (req, res) => {
 /**
  * CREATE vendor
  */
-router.post("/", async (req, res) => {
+router.post("/", requireVendorCreationAccess, async (req, res) => {
   console.log("🔥 HIT:", __filename);
 
   try {
@@ -1273,7 +1291,7 @@ router.put("/:vendorId/location", async (req, res) => {
 
 
 // POST add nearby location
-router.post("/vendor-locations/:vendorId/nearby", async (req, res) => {
+router.post("/vendor-locations/:vendorId/nearby", requireVendorParamWriteAccess(), async (req, res) => {
   try {
     const { location } = req.body;
     const vendorLocation = await VendorLocation.findOne({ vendorId: req.params.vendorId });
@@ -1292,7 +1310,7 @@ router.post("/vendor-locations/:vendorId/nearby", async (req, res) => {
 });
 
 // PUT update nearby location
-router.put("/vendor-locations/:vendorId/nearby/:index", async (req, res) => {
+router.put("/vendor-locations/:vendorId/nearby/:index", requireVendorParamWriteAccess(), async (req, res) => {
   try {
     const { vendorId, index } = req.params;
     const { location } = req.body;
@@ -1309,7 +1327,7 @@ router.put("/vendor-locations/:vendorId/nearby/:index", async (req, res) => {
 });
 
 // DELETE nearby location
-router.delete("/vendor-locations/:vendorId/nearby/:index", async (req, res) => {
+router.delete("/vendor-locations/:vendorId/nearby/:index", requireVendorParamWriteAccess(), async (req, res) => {
   try {
     const { vendorId, index } = req.params;
 
@@ -1360,7 +1378,20 @@ router.put("/:id/business-hours", async (req, res) => {
 // --------------------
 // Dashboard Bills
 // --------------------
-router.get("/dashboard/bills", getVendorBills);
-router.get("/dashboard/bills/:billId", getBillDetails);
+router.get(
+  "/dashboard/bills",
+  requireVendorAccessFromExistingAuth((req) => req.query?.vendorId),
+  getVendorBills
+);
+router.get(
+  "/dashboard/bills/:billId",
+  requireVendorAccessFromExistingAuth(async (req) => {
+    const billId = req.params?.billId;
+    if (!mongoose.Types.ObjectId.isValid(billId)) return "";
+    const bill = await BillingSession.findById(billId).select("vendorId").lean();
+    return bill?.vendorId || "";
+  }),
+  getBillDetails
+);
 
 module.exports = router;

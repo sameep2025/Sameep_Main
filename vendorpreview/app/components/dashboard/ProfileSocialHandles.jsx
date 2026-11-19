@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import { SOCIAL_ICONS } from "../../Icons/SocialIcons";
 import { useVendor } from "@/app/context/VendorContext";
+import { getVendorToken } from "../../utils/vendorAuth";
 import "./ProfileSocialHandles.css";
 export default function ProfileSocialHandles({
   showTitle = true,
@@ -125,7 +126,7 @@ export default function ProfileSocialHandles({
       if (!vendorId) return;
 
       setSaving(true);
-      const token = localStorage.getItem("token");
+      const token = getVendorToken(vendorId);
       const normalizedValue = normalizeSocialUrl(socialValue, socialType);
       const nextSocialLinks = {
         ...socialLinks,

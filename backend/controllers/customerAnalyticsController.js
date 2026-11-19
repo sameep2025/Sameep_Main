@@ -439,7 +439,7 @@ exports.getCustomerAnalyticsItems = async (req, res) => {
 
 exports.getCustomerAnalytics = async (req, res) => {
   try {
-    const { vendorId } = req.query;
+    const vendorId = getAuthorizedVendorId(req);
 
     if (!vendorId) {
       return res.status(400).json({ success: false, message: "vendorId required" });

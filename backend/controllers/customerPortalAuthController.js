@@ -59,8 +59,7 @@ function normalizePortalPhone(input = {}) {
 }
 
 function getRequestIp(req) {
-  const forwarded = String(req.headers?.["x-forwarded-for"] || "").split(",")[0].trim();
-  return forwarded || req.ip || req.socket?.remoteAddress || "unknown";
+  return req.ip || req.socket?.remoteAddress || "unknown";
 }
 
 function pruneWindow(state, now, windowMs) {
@@ -183,7 +182,10 @@ async function requestOtp(req, res) {
       message: "If this mobile number can receive OTP, an OTP has been sent.",
     });
   } catch (err) {
-    console.error("customer portal request OTP error:", err?.response?.data || err?.message || err);
+    console.error("customer portal request OTP failed", {
+      code: err?.code || "",
+      providerStatus: err?.response?.status || null,
+    });
     return res.status(500).json({
       success: false,
       message: "Unable to request OTP right now.",
@@ -289,7 +291,10 @@ async function verifyOtp(req, res) {
       },
     });
   } catch (err) {
-    console.error("customer portal verify OTP error:", err?.response?.data || err?.message || err);
+    console.error("customer portal verify OTP failed", {
+      code: err?.code || "",
+      providerStatus: err?.response?.status || null,
+    });
     return res.status(500).json({
       success: false,
       message: "Unable to verify OTP right now.",

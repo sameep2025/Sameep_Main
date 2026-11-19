@@ -1,13 +1,29 @@
-const express = require('express');
-const { S3Client, PutObjectCommand } = require('@aws-sdk/client-s3');
-const multer = require('multer');
-const mime = require('mime-types');
-const { v4: uuidv4 } = require('uuid');
+const express = require("express");
+const { S3Client, PutObjectCommand } = require("@aws-sdk/client-s3");
+const multer = require("multer");
+const { v4: uuidv4 } = require("uuid");
+
+const { validateAdminTokenFromRequest } = require("../utils/adminAuthMiddleware");
+const { validateVendorRequestFromExistingAuth } = require("../utils/vendorWriteAuth");
+const { buildSafeObjectKey, validateImageUpload } = require("../utils/uploadSecurity");
 
 const router = express.Router();
-const REGION = process.env.AWS_REGION || process.env.AWS_DEFAULT_REGION || 'ap-south-1';
+const REGION = process.env.AWS_REGION || process.env.AWS_DEFAULT_REGION || "ap-south-1";
 const hasStaticCreds = Boolean(process.env.AWS_ACCESS_KEY_ID && process.env.AWS_SECRET_ACCESS_KEY);
-const s3 = new S3Client({ 
+const configuredUploadMb = Number(process.env.MAX_UPLOAD_MB);
+const maxUploadMb = Math.min(Math.max(Number.isFinite(configuredUploadMb) ? configuredUploadMb : 5, 1), 10);
+const maxUploadBytes = maxUploadMb * 1024 * 1024;
+const allowedDeclaredTypes = new Set([
+  "image/jpeg",
+  "image/jpg",
+  "image/png",
+  "image/webp",
+  "image/gif",
+  "image/heic",
+  "image/heif",
+]);
+
+const s3 = new S3Client({
   region: REGION,
   credentials: hasStaticCreds
     ? {
@@ -19,93 +35,129 @@ const s3 = new S3Client({
 
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: (Number(process.env.MAX_UPLOAD_MB) || 5) * 1024 * 1024 },
-  fileFilter: (req, file, cb) => {
-    const allowed = ['image/jpeg', 'image/png', 'image/webp', 'image/gif', 'image/svg+xml', 'image/heic', 'image/heif'];
-    if (!allowed.includes(file.mimetype)) return cb(new Error('Invalid file type'), false);
-    cb(null, true);
-  }
+  limits: { fileSize: maxUploadBytes, files: 1 },
+  fileFilter: (req, file, callback) => {
+    if (!allowedDeclaredTypes.has(String(file.mimetype || "").toLowerCase())) {
+      const error = new Error("Unsupported image type");
+      error.code = "UNSUPPORTED_UPLOAD_TYPE";
+      return callback(error, false);
+    }
+    return callback(null, true);
+  },
 });
 
-// POST /api/upload  (multipart/form-data)
-// fields: file (File), folderType (vendor|category|master|newvendor|newcategory)
-router.post('/upload', upload.single('file'), async (req, res) => {
-  try {
-    if (!hasStaticCreds && !process.env.AWS_CONTAINER_CREDENTIALS_RELATIVE_URI && !process.env.AWS_PROFILE) {
-      console.warn('AWS credentials not found in env; relying on default provider chain (instance role or shared config).');
-    }
-    const folderType = (req.body.folderType || req.query.folderType || '').toLowerCase();
-    const validFolders = ['vendor', 'category', 'master', 'newvendor', 'newcategory'];
-    if (!validFolders.includes(folderType)) {
-      return res.status(400).json({ error: 'Invalid folderType' });
-    }
-    if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
-    if (!process.env.S3_BUCKET_NAME) return res.status(500).json({ error: 'S3 bucket not configured' });
+async function requireUploadAccess(req, res, next) {
+  const adminResult = validateAdminTokenFromRequest(req);
+  if (adminResult.ok) {
+    req.uploadAuth = { authType: "admin", admin: adminResult.admin, vendorId: "" };
+    return next();
+  }
 
-    const extension = mime.extension(req.file.mimetype) || 'bin';
+  const vendorId = String(req.query?.vendorId || "").trim();
+  const vendorResult = await validateVendorRequestFromExistingAuth(req, vendorId);
+  if (!vendorResult.ok) {
+    return res.status(vendorResult.status || 403).json({
+      error: vendorResult.message || "Upload access denied",
+      code: vendorResult.code || "forbidden",
+    });
+  }
 
-    const readMaybeArray = (v) => Array.isArray(v) ? v : (v ? [v] : []);
-    let segments = [];
-    const b = req.body || {};
-    const q = req.query || {};
-    let rawHierarchy = b.hierarchy ?? q.hierarchy;
-    if (typeof rawHierarchy === 'string') {
-      try {
-        const parsed = JSON.parse(rawHierarchy);
-        if (Array.isArray(parsed)) segments = parsed;
-        else segments = String(rawHierarchy).split('/');
-      } catch {
-        segments = String(rawHierarchy).split('/');
-      }
-    } else if (Array.isArray(rawHierarchy)) {
-      segments = rawHierarchy;
-    }
-    if (!segments.length) {
-      const pathStr = b.path || q.path || b.folderPath || q.folderPath || '';
-      if (pathStr) segments = String(pathStr).split('/');
-    }
-    if (!segments.length) {
-      const alt = readMaybeArray(b.segments || q.segments);
-      if (alt.length) segments = alt;
-    }
-    if (!segments.length) {
-      const levels = ['level1','level2','level3','level4','level5'].map(k => b[k] || q[k]).filter(Boolean);
-      if (levels.length) segments = levels;
-    }
-    segments = (segments || []).map(s => String(s || '').replace(/^\/+|\/+$/g,'').trim()).filter(Boolean);
+  req.uploadAuth = vendorResult;
+  return next();
+}
 
-    const rawLabel = (b.labelName || q.labelName || '').toString();
-    const leafLabel = segments.length ? segments[segments.length - 1] : rawLabel;
-    const baseForFile = leafLabel || uuidv4();
-    const slug = baseForFile
-      .toLowerCase()
-      .replace(/\s+/g, '-')
-      .replace(/[^a-z0-9\-]/g, '-')
-      .replace(/-+/g, '-')
-      .replace(/^-|-$/g, '');
-    const fileName = `${slug}.${extension}`;
-    const dirPath = segments.length ? segments.join('/') + '/' : '';
-    const Key = `${folderType}/${dirPath}${fileName}`;
-
-    await s3.send(new PutObjectCommand({
-      Bucket: process.env.S3_BUCKET_NAME,
-      Key,
-      Body: req.file.buffer,
-      ContentType: req.file.mimetype,
-      CacheControl: 'public, max-age=31536000, immutable'
-    }));
-
-    const url = `https://${process.env.S3_BUCKET_NAME}.s3.${REGION}.amazonaws.com/${Key}`;
-    return res.json({ key: Key, url, fileName });
-  } catch (err) {
-  console.error("❌ Upload error:", err);
-  return res.status(500).json({ 
-    error: "Upload failed", 
-    message: err.message, 
-    stack: err.stack 
+function parseSingleUpload(req, res, next) {
+  upload.single("file")(req, res, (error) => {
+    if (!error) return next();
+    if (error instanceof multer.MulterError && error.code === "LIMIT_FILE_SIZE") {
+      return res.status(413).json({ error: `File exceeds the ${maxUploadMb} MB limit` });
+    }
+    return res.status(400).json({
+      error: "Unsupported or invalid upload",
+      code: error.code || "invalid_upload",
+    });
   });
 }
 
+function readSegments(body = {}, query = {}) {
+  let rawHierarchy = body.hierarchy ?? query.hierarchy;
+  if (typeof rawHierarchy === "string") {
+    try {
+      const parsed = JSON.parse(rawHierarchy);
+      rawHierarchy = Array.isArray(parsed) ? parsed : rawHierarchy.split("/");
+    } catch {
+      rawHierarchy = rawHierarchy.split("/");
+    }
+  }
+  if (Array.isArray(rawHierarchy)) return rawHierarchy;
+
+  const pathValue = body.path || query.path || body.folderPath || query.folderPath;
+  if (pathValue) return String(pathValue).split("/");
+
+  const rawSegments = body.segments || query.segments;
+  if (Array.isArray(rawSegments)) return rawSegments;
+  if (typeof rawSegments === "string") {
+    try {
+      const parsed = JSON.parse(rawSegments);
+      if (Array.isArray(parsed)) return parsed;
+    } catch {
+      return rawSegments.split("/");
+    }
+  }
+
+  return ["level1", "level2", "level3", "level4", "level5"]
+    .map((key) => body[key] || query[key])
+    .filter(Boolean);
+}
+
+router.post("/upload", requireUploadAccess, parseSingleUpload, async (req, res) => {
+  try {
+    const folderType = String(req.body?.folderType || req.query?.folderType || "").toLowerCase();
+    const validFolders = new Set(["vendor", "category", "master", "newvendor", "newcategory"]);
+    if (!validFolders.has(folderType)) {
+      return res.status(400).json({ error: "Invalid folderType" });
+    }
+    if (req.uploadAuth?.authType !== "admin" && !["vendor", "newvendor"].includes(folderType)) {
+      return res.status(403).json({ error: "Vendor uploads must use a vendor folder" });
+    }
+    if (!req.file) return res.status(400).json({ error: "No file uploaded" });
+    if (!process.env.S3_BUCKET_NAME) return res.status(500).json({ error: "S3 bucket not configured" });
+
+    const validation = validateImageUpload(req.file);
+    if (!validation.ok) {
+      return res.status(400).json({
+        error: "Uploaded file content is not a permitted image",
+        code: validation.code,
+      });
+    }
+
+    const key = buildSafeObjectKey({
+      folderType,
+      segments: readSegments(req.body, req.query),
+      labelName: req.body?.labelName || req.query?.labelName,
+      vendorId: req.uploadAuth?.authType === "vendor" ? req.uploadAuth.vendorId : "",
+      extension: validation.extension,
+      uniqueId: uuidv4(),
+    });
+
+    await s3.send(
+      new PutObjectCommand({
+        Bucket: process.env.S3_BUCKET_NAME,
+        Key: key,
+        Body: req.file.buffer,
+        ContentType: validation.mimeType,
+        CacheControl: "public, max-age=31536000, immutable",
+      })
+    );
+
+    const url = `https://${process.env.S3_BUCKET_NAME}.s3.${REGION}.amazonaws.com/${key}`;
+    return res.json({ key, url, fileName: key.split("/").at(-1) });
+  } catch (error) {
+    console.error("Upload error:", error?.message || error);
+    return res.status(500).json({ error: "Upload failed" });
+  }
 });
 
 module.exports = router;
+module.exports.requireUploadAccess = requireUploadAccess;
+module.exports.maxUploadBytes = maxUploadBytes;

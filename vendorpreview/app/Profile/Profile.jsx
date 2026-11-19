@@ -7,7 +7,7 @@ import BusinessLocationsModal from "./BusinessLocationsModal";
 import BusinessHoursModal from "./BusinessHoursModal";
 import { SOCIAL_ICONS } from "../Icons/SocialIcons";
 import { useVendor } from "@/app/context/VendorContext";
-import { getVendorAuthHeaders } from "../utils/vendorAuth";
+import { getVendorAuthHeaders, getVendorToken } from "../utils/vendorAuth";
 
 export default function ProfileModal({ onClose, onOpenServices }) {
   const { vendorInfo } = useVendor();
@@ -149,7 +149,7 @@ useEffect(() => {
       if (!vendorId) return;
 
       setSaving(true);
-      const token = localStorage.getItem("token");
+      const token = getVendorToken(vendorId);
 
       const updatedSocials = {
         ...socialLinks,

@@ -1,3 +1,4 @@
+const mongoose = require("mongoose");
 const LoyaltyLedger = require("../models/LoyaltyLedger");
 const VendorLoyaltyRule = require("../models/VendorLoyaltyRule");
 const {
@@ -9,9 +10,10 @@ const {
 exports.upsertVendorRule = async (req, res) => {
   try {
     const payload = req.body;
+    const vendorId = req.vendorWriteAuth?.vendorId;
 
     const normalizedRule = {
-      vendorId: payload.vendorId,
+      vendorId,
       isEnabled: payload.isEnabled ?? true,
       minBillAmount: payload.minBillAmount ?? 0,
       rounding: payload.rounding ?? "FLOOR",
@@ -32,7 +34,7 @@ exports.upsertVendorRule = async (req, res) => {
     delete normalizedRule.expiryDays;
 
     const rule = await VendorLoyaltyRule.findOneAndUpdate(
-      { vendorId: payload.vendorId },
+      { vendorId },
       normalizedRule,
       { upsert: true, new: true }
     );
@@ -48,9 +50,14 @@ exports.upsertVendorRule = async (req, res) => {
 // ✅ Get Vendor Loyalty Rule
 exports.getVendorRule = async (req, res) => {
   try {
-    const { vendorId } = req.params;
+    const vendorId = String(req.params?.vendorId || "").trim();
+    if (!mongoose.Types.ObjectId.isValid(vendorId)) {
+      return res.status(400).json({ success: false, message: "Valid vendorId required" });
+    }
 
-    const rule = await VendorLoyaltyRule.findOne({ vendorId });
+    const rule = await VendorLoyaltyRule.findOne({ vendorId })
+      .select("isEnabled minBillAmount rounding earn expiry redeem")
+      .lean();
 
     res.status(200).json({ success: true, data: rule });
   } catch (err) {
@@ -63,7 +70,8 @@ exports.getVendorRule = async (req, res) => {
 // ✅ Wallet API (Expiry-aware)
 exports.getWallet = async (req, res) => {
   try {
-    const { customerId, vendorId } = req.query;
+    const { customerId } = req.query;
+    const vendorId = req.vendorWriteAuth?.vendorId;
 
     const earns = await LoyaltyLedger.find({
       customerId,

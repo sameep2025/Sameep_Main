@@ -61,9 +61,11 @@ function AppConfigurationsPage() {
   const [selectedHour, setSelectedHour] = useState(null);
   const [showModal, setShowModal] = useState(false);
   const [newHour, setNewHour] = useState("");
-  const [adminPasscode, setAdminPasscode] = useState("1234");
+  const [adminPasscode, setAdminPasscode] = useState("");
+  const [adminPasscodeConfigured, setAdminPasscodeConfigured] = useState(false);
   const [savingAdminPasscode, setSavingAdminPasscode] = useState(false);
   const [adminPasscodeError, setAdminPasscodeError] = useState("");
+  const [adminPasscodeMessage, setAdminPasscodeMessage] = useState("");
   const [publicSiteContact, setPublicSiteContact] = useState({
     addressLine1: "",
     addressLine2: "",
@@ -185,12 +187,10 @@ function AppConfigurationsPage() {
 
       try {
         const res = await API.get("/api/app-config/admin-passcode");
-        const code = res.data?.adminPasscode;
-        if (typeof code === "string" && code.trim()) {
-          setAdminPasscode(code.trim());
-        }
+        setAdminPasscodeConfigured(Boolean(res.data?.configured));
+        setAdminPasscode("");
       } catch (err) {
-        console.error("Failed to load admin passcode", err);
+        console.error("Failed to load admin passcode status", err);
       }
 
       try {
@@ -252,9 +252,13 @@ function AppConfigurationsPage() {
       return;
     }
     setAdminPasscodeError("");
+    setAdminPasscodeMessage("");
     try {
       setSavingAdminPasscode(true);
       await API.post("/api/app-config/admin-passcode", { adminPasscode: code });
+      setAdminPasscode("");
+      setAdminPasscodeConfigured(true);
+      setAdminPasscodeMessage("Passcode saved securely.");
     } catch (err) {
       console.error("Failed to save admin passcode", err);
       setAdminPasscodeError("Failed to save passcode");
@@ -566,12 +570,18 @@ function AppConfigurationsPage() {
           Set a 4-digit passcode used for sensitive admin actions. This can be
           changed at any time.
         </p>
+        <p style={{ marginBottom: "10px", color: "#555", fontSize: "13px" }}>
+          Status: {adminPasscodeConfigured ? "Configured" : "Not configured"}
+        </p>
 
         <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "8px" }}>
           <input
-            type="text"
+            type="password"
             maxLength={4}
             value={adminPasscode}
+            placeholder="••••"
+            autoComplete="new-password"
+            aria-label="New admin passcode"
             onChange={(e) => {
               const v = e.target.value.replace(/[^0-9]/g, "");
               setAdminPasscode(v.slice(0, 4));
@@ -605,6 +615,9 @@ function AppConfigurationsPage() {
         </div>
         {adminPasscodeError && (
           <div style={{ color: "#b91c1c", fontSize: "13px" }}>{adminPasscodeError}</div>
+        )}
+        {adminPasscodeMessage && (
+          <div style={{ color: "#166534", fontSize: "13px" }}>{adminPasscodeMessage}</div>
         )}
       </div>
 

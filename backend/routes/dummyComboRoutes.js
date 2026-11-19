@@ -5,8 +5,16 @@ const { uploadBufferToS3, uploadBufferToS3WithLabel } = require("../utils/s3Uplo
 const DummyCombo = require("../models/dummyCombo");
 const DummyCategory = require("../models/dummyCategory");
 const { logAudit } = require("../utils/auditLogger");
+const { requireAdminAuth } = require("../utils/adminAuthMiddleware");
 
 const router = express.Router();
+
+router.use((req, res, next) => {
+  if (["POST", "PUT", "PATCH", "DELETE"].includes(req.method)) {
+    return requireAdminAuth(req, res, next);
+  }
+  return next();
+});
 
 const upload = multer({ storage: multer.memoryStorage() });
 const uploadAny = upload.any();

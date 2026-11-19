@@ -3,6 +3,10 @@ const router = express.Router();
 const AppConfig = require("../models/AppConfig");
 const { requireAdminAuth } = require("../utils/adminAuthMiddleware");
 const {
+  getAdminPasscodeStatus,
+  setAdminPasscode,
+} = require("../services/adminPasscodeService");
+const {
   getAllowedTemplateProfiles,
   getStoredWhatsAppBillingConfig,
   normalizeWhatsAppBillingConfig,
@@ -82,18 +86,12 @@ router.get("/session-validity", async (req, res) => {
   }
 });
 
-// GET current admin passcode
-// Returns: { adminPasscode: string }
-router.get("/admin-passcode", async (req, res) => {
+// Returns configuration state only; credentials never leave the backend.
+router.get("/admin-passcode", requireAdminAuth, async (req, res) => {
   try {
-    const value = await getConfigValue("adminPasscode");
-    let adminPasscode = "1234";
-    if (typeof value === "string" && /^\d{4}$/.test(value)) {
-      adminPasscode = value;
-    }
-    res.json({ adminPasscode });
+    res.json(await getAdminPasscodeStatus());
   } catch (err) {
-    res.status(500).json({ message: err.message });
+    res.status(500).json({ message: "Failed to load admin passcode status" });
   }
 });
 
@@ -157,15 +155,10 @@ router.post("/admin-passcode", requireAdminAuth, async (req, res) => {
         .json({ message: "adminPasscode must be a 4-digit numeric code" });
     }
 
-    const updated = await AppConfig.findOneAndUpdate(
-      { key: "adminPasscode" },
-      { key: "adminPasscode", value: code },
-      { new: true, upsert: true }
-    ).lean();
-
-    res.json({ adminPasscode: updated.value });
+    await setAdminPasscode(code);
+    res.json({ configured: true });
   } catch (err) {
-    res.status(400).json({ message: err.message });
+    res.status(400).json({ message: err.message || "Failed to save admin passcode" });
   }
 });
 

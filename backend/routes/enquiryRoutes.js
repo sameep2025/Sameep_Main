@@ -4,6 +4,7 @@ const { createEnquiryAndNotify } = require('../services/enquiryCreationService')
 const appointmentController = require('../controllers/appointmentController');
 const { buildPublicEnquiryPayload, AppointmentValidationError } = require('../services/appointmentService');
 const { validateAdminTokenFromRequest } = require('../utils/adminAuthMiddleware');
+const { publicEnquiryLimiter } = require('../utils/securityLimiters');
 const {
   requireOwnedDocumentVendorAccess,
   requireVendorAccessFromExistingAuth,
@@ -11,7 +12,7 @@ const {
 
 const router = express.Router();
 
-router.post('/', async (req, res) => {
+router.post('/', publicEnquiryLimiter, async (req, res) => {
   try {
     const payload = await buildPublicEnquiryPayload(req.body || {});
     let doc;

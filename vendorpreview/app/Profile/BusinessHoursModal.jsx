@@ -3,6 +3,7 @@
 import "./Business.css";
 import { useEffect, useState } from "react";
 import { useVendor } from "@/app/context/VendorContext";
+import { getVendorToken } from "../utils/vendorAuth";
 const DAYS = [
   "Sunday",
   "Monday",
@@ -142,7 +143,7 @@ const handleSave = async () => {
     if (!vendorId) return alert("Vendor ID missing");
 
     setSaving(true);
-    const token = localStorage.getItem("token");
+    const token = getVendorToken(vendorId);
 
     const payload = hours
       .map((item) => ({

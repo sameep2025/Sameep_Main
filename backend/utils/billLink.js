@@ -3,11 +3,7 @@ const jwt = require("jsonwebtoken");
 const BillingSession = require("../models/BillingSession");
 const Vendor = require("../models/DummyVendor");
 const { getWhatsAppBillingConfig } = require("./whatsappBillingConfig");
-
-const BILL_LINK_SECRET =
-  process.env.BILL_LINK_SECRET ||
-  process.env.JWT_SECRET ||
-  "dev_jwt_secret_change_me";
+const { getBillLinkSecret } = require("./jwtSecrets");
 
 function generateShortCode() {
   return crypto
@@ -90,7 +86,7 @@ async function createBillAccessToken({ billingId }) {
 }
 
 function verifyBillAccessToken(token) {
-  return jwt.verify(token, BILL_LINK_SECRET);
+  return jwt.verify(token, getBillLinkSecret());
 }
 
 async function findBillingIdByCode(code) {

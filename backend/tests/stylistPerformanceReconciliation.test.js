@@ -93,6 +93,8 @@ test("one ambiguous bill does not hide valid stylist performance", async () => {
   assert.equal(res.statusCode, 200);
   assert.equal(res.payload.data.length, 1);
   assert.equal(res.payload.data[0].stylist, "Ravi");
+  assert.equal(res.payload.data[0].customersAttended, 1);
+  assert.equal(res.payload.data[0].unidentifiedCustomerBills, 1);
   assert.deepEqual(res.payload.reconciliation, {
     complete: false,
     unreconciledBillCount: 1,

@@ -1,6 +1,7 @@
 "use client";
 import "./BusinessLocation.css";
 import { useEffect, useState } from "react";
+import { getVendorToken } from "../utils/vendorAuth";
 
 const INPUT_COUNT = 5;
 
@@ -40,7 +41,7 @@ export default function BusinessLocationsModal({
       const cleaned = normalizeLocations(updatedLocations);
 
       setSavingIndex(index);
-      const token = localStorage.getItem("token");
+      const token = getVendorToken(vendorId);
 
       const response = await fetch(
         `${process.env.NEXT_PUBLIC_API_BASE_URL}/api/dummy-vendors/${vendorId}/location`,

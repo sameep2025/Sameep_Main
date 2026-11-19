@@ -5,13 +5,45 @@ const SiteAnalyticsEvent = require("../models/SiteAnalyticsEvent");
 const DummyVendor = require("../models/DummyVendor");
 const { requireAdminAuth } = require("../utils/adminAuthMiddleware");
 const { validateVendorWriteRequest } = require("../utils/vendorWriteAuth");
+const { analyticsIngestionLimiter } = require("../utils/securityLimiters");
+const { safeErrorForLog } = require("../utils/httpSecurity");
 
 const router = express.Router();
 const IST_TIMEZONE = "Asia/Kolkata";
 const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
 
-function normalizeText(value) {
-  return String(value || "").trim();
+function normalizeText(value, maxLength = 2048) {
+  return String(value || "").trim().slice(0, maxLength);
+}
+
+function safeOrigin(value) {
+  try {
+    return new URL(normalizeText(value, 512)).origin.toLowerCase();
+  } catch {
+    return "";
+  }
+}
+
+function buildAnalyticsEventInput(body = {}, userAgentHeader = "") {
+  return {
+    visitorId: normalizeText(body.visitorId, 128),
+    sessionId: normalizeText(body.sessionId, 128),
+    href: normalizeText(body.href, 2048),
+    origin: normalizeText(body.origin, 512),
+    hostname: normalizeText(body.hostname, 255).toLowerCase(),
+    pathname: normalizeText(body.pathname, 1024),
+    referrer: normalizeText(body.referrer, 2048),
+    utmSource: normalizeText(body.utmSource, 256),
+    utmMedium: normalizeText(body.utmMedium, 256),
+    utmCampaign: normalizeText(body.utmCampaign, 256),
+    utmContent: normalizeText(body.utmContent, 256),
+    utmTerm: normalizeText(body.utmTerm, 256),
+    gclid: normalizeText(body.gclid, 256),
+    fbclid: normalizeText(body.fbclid, 256),
+    msclkid: normalizeText(body.msclkid, 256),
+    deviceType: normalizeText(body.deviceType, 32),
+    userAgent: normalizeText(userAgentHeader, 512),
+  };
 }
 
 function inferSourceLabel(referrer, utmSource) {
@@ -193,14 +225,16 @@ async function buildVendorSummaryResponse(vendorId, days) {
   };
 }
 
-router.post("/track", async (req, res) => {
+router.post("/track", analyticsIngestionLimiter, async (req, res) => {
   try {
+    if (Buffer.byteLength(JSON.stringify(req.body || {}), "utf8") > 16 * 1024) {
+      return res.status(413).json({ message: "Analytics payload is too large" });
+    }
+
     const pageType = normalizeText(req.body?.pageType);
     const eventType = normalizeText(req.body?.eventType || "page_view");
     const vendorId = normalizeText(req.body?.vendorId);
-    const userAgent =
-      normalizeText(req.body?.userAgent) ||
-      normalizeText(req.headers["user-agent"]);
+    const eventInput = buildAnalyticsEventInput(req.body, req.headers["user-agent"]);
 
     if (!["ynot_home", "vendor_preview"].includes(pageType)) {
       return res.status(400).json({ message: "Invalid pageType" });
@@ -210,42 +244,49 @@ router.post("/track", async (req, res) => {
       return res.status(400).json({ message: "Invalid eventType" });
     }
 
-    if (pageType === "vendor_preview" && vendorId && !mongoose.Types.ObjectId.isValid(vendorId)) {
+    if (pageType === "vendor_preview" && !mongoose.Types.ObjectId.isValid(vendorId)) {
       return res.status(400).json({ message: "Invalid vendorId" });
+    }
+
+    let vendor = null;
+    if (pageType === "vendor_preview") {
+      vendor = await DummyVendor.findOne({ _id: vendorId, status: "Published" })
+        .select("_id subdomain")
+        .lean();
+      if (!vendor) return res.status(404).json({ message: "Published vendor not found" });
+
+      const headerOrigin = safeOrigin(req.headers.origin);
+      const payloadOrigin = safeOrigin(eventInput.origin);
+      if (headerOrigin && payloadOrigin && headerOrigin !== payloadOrigin) {
+        return res.status(400).json({ message: "Analytics origin mismatch" });
+      }
+
+      const effectiveOrigin = headerOrigin || payloadOrigin;
+      if (effectiveOrigin) {
+        const originHost = new URL(effectiveOrigin).hostname.toLowerCase();
+        if (originHost.endsWith(".sameep.app")) {
+          const expectedHost = `${normalizeText(vendor.subdomain, 128).toLowerCase()}.sameep.app`;
+          if (!vendor.subdomain || originHost !== expectedHost) {
+            return res.status(403).json({ message: "Analytics vendor origin mismatch" });
+          }
+        }
+      }
     }
 
     const event = await SiteAnalyticsEvent.create({
       pageType,
       eventType,
-      vendorId:
-        pageType === "vendor_preview" && vendorId && mongoose.Types.ObjectId.isValid(vendorId)
-          ? vendorId
-          : null,
-      visitorId: normalizeText(req.body?.visitorId),
-      sessionId: normalizeText(req.body?.sessionId),
-      href: normalizeText(req.body?.href),
-      origin: normalizeText(req.body?.origin),
-      hostname: normalizeText(req.body?.hostname),
-      pathname: normalizeText(req.body?.pathname),
-      referrer: normalizeText(req.body?.referrer),
-      utmSource: normalizeText(req.body?.utmSource),
-      utmMedium: normalizeText(req.body?.utmMedium),
-      utmCampaign: normalizeText(req.body?.utmCampaign),
-      utmContent: normalizeText(req.body?.utmContent),
-      utmTerm: normalizeText(req.body?.utmTerm),
-      gclid: normalizeText(req.body?.gclid),
-      fbclid: normalizeText(req.body?.fbclid),
-      msclkid: normalizeText(req.body?.msclkid),
-      sourceLabel: inferSourceLabel(req.body?.referrer, req.body?.utmSource),
-      browser: detectBrowser(userAgent),
-      os: detectOs(userAgent),
-      deviceType: detectDeviceType(userAgent, req.body?.deviceType),
-      userAgent,
+      vendorId: pageType === "vendor_preview" ? vendorId : null,
+      ...eventInput,
+      sourceLabel: inferSourceLabel(eventInput.referrer, eventInput.utmSource),
+      browser: detectBrowser(eventInput.userAgent),
+      os: detectOs(eventInput.userAgent),
+      deviceType: detectDeviceType(eventInput.userAgent, eventInput.deviceType),
     });
 
     return res.status(201).json({ success: true, eventId: event._id });
   } catch (error) {
-    console.error("site analytics track error", error);
+    console.error("site analytics track error", safeErrorForLog(error));
     return res.status(500).json({ message: "Failed to record analytics event" });
   }
 });
@@ -449,7 +490,7 @@ router.get("/admin/summary", requireAdminAuth, async (req, res) => {
       })),
     });
   } catch (error) {
-    console.error("site analytics summary error", error);
+    console.error("site analytics summary error", safeErrorForLog(error));
     return res.status(500).json({ message: "Failed to load analytics summary" });
   }
 });
@@ -487,7 +528,7 @@ router.get("/admin/vendor-summary", requireAdminAuth, async (req, res) => {
       },
     });
   } catch (error) {
-    console.error("admin vendor site analytics summary error", error);
+    console.error("admin vendor site analytics summary error", safeErrorForLog(error));
     return res.status(500).json({ message: "Failed to load vendor analytics summary" });
   }
 });
@@ -507,9 +548,11 @@ router.get("/vendor/summary", async (req, res) => {
     const summary = await buildVendorSummaryResponse(vendorId, days);
     return res.json(summary);
   } catch (error) {
-    console.error("vendor site analytics summary error", error);
+    console.error("vendor site analytics summary error", safeErrorForLog(error));
     return res.status(500).json({ message: "Failed to load vendor analytics summary" });
   }
 });
 
 module.exports = router;
+module.exports.buildAnalyticsEventInput = buildAnalyticsEventInput;
+module.exports.safeOrigin = safeOrigin;

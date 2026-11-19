@@ -1,5 +1,8 @@
 require("dotenv").config();
 
+const { assertJwtConfiguration } = require("./utils/jwtSecrets");
+assertJwtConfiguration();
+
 const express = require("express");
 const cors = require("cors");
 const path = require("path");
@@ -8,6 +11,13 @@ const mongoose = require("mongoose");
 const axios = require("axios");
 
 const connectDB = require("./config/db");
+const { corsOrigin } = require("./utils/corsPolicy");
+const {
+  isTrustedProxyAddress,
+  safeErrorForLog,
+  sanitizeErrorResponses,
+  securityHeaders,
+} = require("./utils/httpSecurity");
 
 // 🔹 IMPORTANT: load model ONCE before routes
 require("./models/VendorPriceNode");
@@ -68,6 +78,7 @@ const vendorWhatsappMarketingRoutes = require("./routes/vendorWhatsappMarketingR
 const metaWhatsappWebhookRoutes = require("./routes/metaWhatsappWebhookRoutes");
 const customerPortalRoutes = require("./routes/customerPortalRoutes");
 const publicVendorHighlightsRoutes = require("./routes/publicVendorHighlightsRoutes");
+const vendorSubscriptionRoutes = require("./routes/vendorSubscriptionRoutes");
 
 const vendorPriceNodeRoutes = require(
   path.resolve(__dirname, "routes", "vendorPriceNodeRoutes")
@@ -77,6 +88,7 @@ const vendorPriceNodeRoutes = require(
 // App init
 // --------------------
 const app = express();
+app.disable("x-powered-by");
 
 // --------------------
 // ✅ SAFE UNIVERSAL CORS CONFIG (LOCAL + AWS + OLD ADMIN)
@@ -92,38 +104,19 @@ const allowedHeaders = [
   "x-actor-role",
 ];
 
-const allowedOrigins = [
-  "http://localhost:3000",
-  "http://localhost:3001",
-  "http://localhost:3002",
-  "http://localhost:4000",
-  "https://newsameep.go-kar.net",
-  "https://main.d2vss5b9fy3xv.amplifyapp.com",
-  "https://main.d18xuzvz5wtiup.amplifyapp.com",
-  "https://main.d3t45ap4sbsqgp.amplifyapp.com",
-];
-
 app.use(
   cors({
-    origin: function (origin, callback) {
-      // allow Postman / mobile apps
-      if (!origin) return callback(null, true);
-
-      if (allowedOrigins.includes(origin)) {
-        return callback(null, true);
-      }
-
-      // 🚀 TEMP SAFE MODE — allow unknown origins
-      return callback(null, true);
-    },
+    origin: corsOrigin,
     methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allowedHeaders,
     credentials: false,
   })
 );
+app.use(securityHeaders);
+app.use(sanitizeErrorResponses);
 
-// Trust proxy (important behind Amplify / nginx)
-app.set("trust proxy", 1);
+// Trust only the private/loopback reverse proxies used by Elastic Beanstalk.
+app.set("trust proxy", isTrustedProxyAddress);
 
 // --------------------
 // Connect DB
@@ -137,7 +130,7 @@ app.use((req, res, next) => {
   const start = Date.now();
   res.on("finish", () => {
     console.log(
-      `${req.method} ${req.originalUrl} -> ${res.statusCode} (${Date.now() - start}ms)`
+      `${req.method} ${req.path} -> ${res.statusCode} (${Date.now() - start}ms)`
     );
   });
   next();
@@ -199,7 +192,6 @@ app.use("/api/billing", billingRoutes);
 app.use("/api/loyalty", loyaltyRoutes);
 app.use("/api/trust", trustProfileRoutes);
 app.use("/api/location", require("./routes/locationRoutes"));
-app.use("/api/test", require("./routes/test"));
 app.use("/api/vendor-resources", vendorResourceRoutes);
 app.use("/api/vendor-custom-packages", vendorCustomPackageRoutes);
 app.use("/api/preview-templates", previewTemplateRoutes);
@@ -219,6 +211,7 @@ app.use("/api/vendor/gst-reports", vendorGstReportRoutes);
 app.use("/api/vendor/membership-plans", vendorMembershipPlanRoutes);
 app.use("/api/vendor/customer-memberships", vendorCustomerMembershipRoutes);
 app.use("/api/vendor/prepaid-wallets", vendorPrepaidWalletRoutes);
+app.use("/api/vendor/subscription", vendorSubscriptionRoutes);
 // Vendor Dashboard APIs
 app.use("/api/vendor/dashboard", require("./routes/vendorDashboardRoutes"));
 app.use("/api/vendor/dashboard", require("./routes/customerAnalyticsRoutes"));
@@ -235,26 +228,12 @@ app.use("/api/vendor-price-nodes", vendorPriceNodeRoutes);
 app.use("/", authRoutes);
 
 // --------------------
-// Debug DB
-// --------------------
-app.get("/api/_debug/db", (req, res) => {
-  const conn = mongoose.connection;
-  res.json({
-    readyState: conn.readyState,
-    dbName: conn.db?.databaseName,
-    host: conn.host,
-  });
-});
-
-// --------------------
 // Error handler
 // --------------------
 app.use((err, req, res, next) => {
-  console.error(err.stack || err.message);
-  res.status(500).json({
-    message: "Internal Server Error",
-    error: err.message,
-  });
+  const statusCode = Number(err?.statusCode) || 500;
+  console.error("Unhandled request error", safeErrorForLog(err));
+  res.status(statusCode).json({ message: statusCode === 403 ? "Origin not allowed" : "Internal Server Error" });
 });
 
 // --------------------

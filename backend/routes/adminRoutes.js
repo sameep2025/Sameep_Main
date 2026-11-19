@@ -8,6 +8,10 @@ const DummyCategory = require("../models/dummyCategory");
 const DummySubcategory = require("../models/dummySubcategory");
 const VendorMenuNode = require("../models/VendorMenuNode");
 const { requireAdminAuth } = require("../utils/adminAuthMiddleware");
+const { adminLoginLimiter } = require("../utils/securityLimiters");
+const {
+  createAdminImpersonationHandoff,
+} = require("../services/adminImpersonationHandoffService");
 const { buildTree } = require("../utils/treeBuilder");
 const {
   getPlans,
@@ -257,7 +261,7 @@ async function createVendorMenuTreeForTarget({
   }
 }
 
-router.post("/login", async (req, res) => {
+router.post("/login", adminLoginLimiter, async (req, res) => {
   try {
     if (!JWT_SECRET) {
       return res.status(500).json({ message: "JWT_SECRET not configured" });
@@ -315,6 +319,33 @@ router.get("/me", requireAdminAuth, async (req, res) => {
   } catch (err) {
     console.error("GET /api/admin/me error:", err.message || err);
     return res.status(500).json({ message: "Failed to load admin" });
+  }
+});
+
+router.post("/impersonation-handoffs", requireAdminAuth, async (req, res) => {
+  try {
+    const vendorId = String(req.body?.vendorId || "").trim();
+    const categoryId = String(req.body?.categoryId || "").trim();
+    if (!mongoose.Types.ObjectId.isValid(vendorId)) {
+      return res.status(400).json({ message: "Valid vendorId is required" });
+    }
+
+    const handoff = await createAdminImpersonationHandoff({
+      adminId: req.admin.id,
+      vendorId,
+      categoryId,
+    });
+    return res.status(201).json({
+      success: true,
+      handoffCode: handoff.code,
+      expiresAt: handoff.expiresAt,
+    });
+  } catch (error) {
+    return res.status(error.statusCode || 500).json({
+      success: false,
+      message: error.statusCode ? error.message : "Failed to create impersonation handoff",
+      code: error.code || "impersonation_handoff_failed",
+    });
   }
 });
 
@@ -706,14 +737,14 @@ router.post("/vendor-menu-copy/execute", requireAdminAuth, async (req, res) => {
   }
 });
 
-router.get("/plans", getPlans);
-router.post("/plans", createPlan);
-router.put("/plans/:id", updatePlan);
-router.delete("/plans/:id", deletePlan);
+router.get("/plans", requireAdminAuth, getPlans);
+router.post("/plans", requireAdminAuth, createPlan);
+router.put("/plans/:id", requireAdminAuth, updatePlan);
+router.delete("/plans/:id", requireAdminAuth, deletePlan);
 
-router.post("/vendor-subscriptions", assignVendorPlan);
-router.get("/vendor-subscriptions/:vendorId", getVendorSubscription);
-router.put("/vendor-subscriptions/:vendorId", updateVendorSubscription);
+router.post("/vendor-subscriptions", requireAdminAuth, assignVendorPlan);
+router.get("/vendor-subscriptions/:vendorId", requireAdminAuth, getVendorSubscription);
+router.put("/vendor-subscriptions/:vendorId", requireAdminAuth, updateVendorSubscription);
 
 router.get("/trust-questionnaires", listTrustQuestionnaireConfigs);
 router.post("/trust-questionnaires", createTrustQuestionnaireConfig);

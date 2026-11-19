@@ -184,6 +184,7 @@ function buildFindResult(query, state) {
 
 async function callController(handler, queryOverrides = {}) {
   const req = {
+    vendorWriteAuth: { vendorId: VENDOR_ID },
     query: {
       vendorId: VENDOR_ID,
       from: "2026-09-18T00:00:00.000Z",
@@ -1266,7 +1267,7 @@ test("stylist performance uses persisted net item revenue with allocation fallba
   assert.equal(res.payload.data[1].revenue, 475);
 });
 
-test("stylist performance counts distinct identifiable customers per performing stylist", async () => {
+test("stylist performance counts identified customers and anonymous bill visits per stylist", async () => {
   const originalFind = BillingSession.find;
   const originalTransactionFind = Transaction.find;
   const raviId = new mongoose.Types.ObjectId("652000000000000000000011");
@@ -1329,6 +1330,15 @@ test("stylist performance counts distinct identifiable customers per performing 
         makeItem("Unassigned service", null, ""),
       ],
     },
+    {
+      _id: new mongoose.Types.ObjectId(),
+      customerId: null,
+      customerPhoneSnapshot: "",
+      cartItems: [
+        makeItem("Anonymous haircut", raviId, "Ravi"),
+        makeItem("Anonymous shave", raviId, "Ravi"),
+      ],
+    },
   ];
 
   BillingSession.find = (query) => {
@@ -1363,12 +1373,12 @@ test("stylist performance counts distinct identifiable customers per performing 
   const veena = res.payload.data.find((row) => row.stylist === "Veena");
   const unassigned = res.payload.data.find((row) => row.stylist === "No Stylist Selected");
 
-  assert.equal(ravi.services, 8);
-  assert.equal(ravi.customersAttended, 2);
-  assert.equal(ravi.unidentifiedCustomerBills, 1);
+  assert.equal(ravi.services, 10);
+  assert.equal(ravi.customersAttended, 4);
+  assert.equal(ravi.unidentifiedCustomerBills, 2);
   assert.equal(veena.customersAttended, 2);
   assert.equal(veena.unidentifiedCustomerBills, 0);
-  assert.equal(unassigned.customersAttended, 0);
+  assert.equal(unassigned.customersAttended, 1);
   assert.equal(unassigned.unidentifiedCustomerBills, 1);
 });
 

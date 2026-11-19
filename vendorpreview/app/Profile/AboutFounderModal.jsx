@@ -4,6 +4,7 @@ import "./Business.css";
 import { useMemo, useState } from "react";
 import { API_BASE_URL } from "../../config";
 import { useVendor } from "@/app/context/VendorContext";
+import { getVendorAuthHeaders } from "@/app/utils/vendorAuth";
 
 const MAX_HEADING = 120;
 const MAX_BODY = 2000;
@@ -49,7 +50,7 @@ export default function AboutFounderModal({
   };
 
   async function uploadFounderImage(file) {
-    const endpoint = `${API_BASE_URL}/api/upload`;
+    const endpoint = `${API_BASE_URL}/api/upload?vendorId=${encodeURIComponent(vendorId)}`;
     const formData = new FormData();
     formData.append("file", file);
     formData.append("folderType", "newvendor");
@@ -64,6 +65,7 @@ export default function AboutFounderModal({
 
     const response = await fetch(endpoint, {
       method: "POST",
+      headers: getVendorAuthHeaders(vendorId),
       body: formData,
     });
     const json = await response.json().catch(() => ({}));

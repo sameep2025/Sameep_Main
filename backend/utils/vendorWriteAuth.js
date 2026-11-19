@@ -3,6 +3,9 @@ const DummyVendor = require("../models/DummyVendor");
 const Vendor = require("../models/Vendor");
 const { getTokenFromRequest, validateCustomerSession } = require("./authMiddleware");
 const { validateAdminTokenFromRequest } = require("./adminAuthMiddleware");
+const {
+  consumeOnboardingBypassAuthorization,
+} = require("../services/onboardingBypassService");
 
 function normalizeId(value) {
   return value === undefined || value === null ? "" : String(value).trim();
@@ -61,7 +64,8 @@ async function validateVendorWriteRequest(req, vendorId) {
     };
   }
 
-  if (normalizeId(sessionResult.vendorId) !== normalizedVendorId) {
+  const sessionVendorId = normalizeId(sessionResult.vendorId);
+  if (sessionVendorId && sessionVendorId !== normalizedVendorId) {
     return {
       ok: false,
       status: 403,
@@ -220,6 +224,81 @@ function requireVendorBodyWriteAccess(fieldName = "vendorId") {
   return requireVendorWriteAccess((req) => req.body?.[fieldName]);
 }
 
+function requireVendorCreationAccess(req, res, next) {
+  const adminResult = validateAdminTokenFromRequest(req);
+  if (adminResult.ok) {
+    req.vendorWriteAuth = {
+      ok: true,
+      authType: "admin",
+      admin: adminResult.admin,
+    };
+    return next();
+  }
+
+  return (async () => {
+    const onboardingAuthorization = normalizeId(req.body?.onboardingAuthorization);
+    if (onboardingAuthorization) {
+      const onboardingSession = await consumeOnboardingBypassAuthorization({
+        authorization: onboardingAuthorization,
+        countryCode: req.body?.onboardingCountryCode,
+        phone: req.body?.phone,
+      });
+      if (!onboardingSession) {
+        return res.status(401).json({
+          message: "Onboarding authorization is invalid, expired, or already used",
+          code: "invalid_onboarding_authorization",
+        });
+      }
+
+      req.body = {
+        ...(req.body || {}),
+        customerId: normalizeId(onboardingSession.userId),
+      };
+      delete req.body.onboardingAuthorization;
+      delete req.body.onboardingCountryCode;
+      req.vendorWriteAuth = {
+        ok: true,
+        authType: "onboarding_bypass",
+        customerId: normalizeId(onboardingSession.userId),
+        sessionId: normalizeId(onboardingSession._id),
+        session: onboardingSession,
+      };
+      return next();
+    }
+
+    const sessionResult = await validateCustomerSession(getTokenFromRequest(req));
+    if (!sessionResult.ok) {
+      return res.status(401).json({
+        message: "Vendor session invalid or expired",
+        code: sessionResult.code || "invalid_session",
+      });
+    }
+
+    const requestedCustomerId = normalizeId(req.body?.customerId);
+    if (requestedCustomerId && requestedCustomerId !== normalizeId(sessionResult.customerId)) {
+      return res.status(403).json({
+        message: "Session does not match this customer",
+        code: "customer_mismatch",
+      });
+    }
+
+    req.body = {
+      ...(req.body || {}),
+      customerId: normalizeId(sessionResult.customerId),
+    };
+    req.vendorWriteAuth = {
+      ok: true,
+      authType: "vendor",
+      customerId: normalizeId(sessionResult.customerId),
+      sessionId: sessionResult.sessionId,
+    };
+    return next();
+  })().catch((error) => {
+    console.error("Vendor creation auth error:", error.message || error);
+    return res.status(500).json({ message: "Failed to validate vendor creation access" });
+  });
+}
+
 function requireOwnedDocumentVendorAccess(Model, idParam = "id") {
   return requireVendorWriteAccess(async (req) => {
     const id = req.params[idParam];
@@ -237,5 +316,6 @@ module.exports = {
   requireVendorWriteAccess,
   requireVendorParamWriteAccess,
   requireVendorBodyWriteAccess,
+  requireVendorCreationAccess,
   requireOwnedDocumentVendorAccess,
 };

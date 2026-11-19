@@ -5,14 +5,9 @@ const CheckoutAttempt = require("../models/CheckoutAttempt");
 const VendorPaymentConfig = require("../models/VendorPaymentConfig");
 const { buildRazorpayClient, verifyRazorpaySignature } = require("../services/razorpayService");
 const { createEnquiryAndNotify } = require("../services/enquiryCreationService");
+const { resolveAuthoritativeCheckout } = require("../services/razorpayCheckoutPricingService");
 
 const router = express.Router();
-
-function toPaise(amount) {
-  const numeric = Number(amount || 0);
-  if (!Number.isFinite(numeric) || numeric <= 0) return 0;
-  return Math.round(numeric * 100);
-}
 
 async function getVendorPaymentConfig(vendorId) {
   const config = await VendorPaymentConfig.findOne({ vendorId });
@@ -93,13 +88,19 @@ router.post("/razorpay/order", async (req, res) => {
     const payload = sanitizeAttemptPayload(req.body || {});
     const { vendorId } = payload;
     const currency = String(req.body?.currency || "INR").trim().toUpperCase() || "INR";
-    const notes = req.body?.notes && typeof req.body.notes === "object" ? req.body.notes : {};
+    const submissionKey = String(req.body?.submissionKey || "").trim();
 
     if (!mongoose.Types.ObjectId.isValid(String(vendorId || ""))) {
       return res.status(400).json({ success: false, message: "Valid vendorId is required" });
     }
     if (!mongoose.Types.ObjectId.isValid(String(payload.categoryId || ""))) {
       return res.status(400).json({ success: false, message: "Valid categoryId is required" });
+    }
+    if (currency !== "INR") {
+      return res.status(400).json({ success: false, message: "Only INR checkout is supported" });
+    }
+    if (!/^[A-Za-z0-9-]{16,128}$/.test(submissionKey)) {
+      return res.status(400).json({ success: false, message: "Valid submissionKey is required" });
     }
 
     const vendor = await DummyVendor.findById(vendorId).lean();
@@ -109,11 +110,46 @@ router.post("/razorpay/order", async (req, res) => {
 
     const paymentConfig = await getVendorPaymentConfig(String(vendorId));
     const client = buildRazorpayClient(paymentConfig);
-    const amountInPaise = toPaise(payload.price);
+    const checkout = await resolveAuthoritativeCheckout({
+      vendorId: String(vendorId),
+      categoryId: String(payload.categoryId),
+      cartItems: payload?.meta?.cartItems,
+      claimedTotal: payload.price,
+    });
+    const amountInPaise = checkout.amountInPaise;
 
-    if (amountInPaise <= 0) {
-      return res.status(400).json({ success: false, message: "A positive order amount is required" });
+    const existingAttempt = await CheckoutAttempt.findOne({
+      vendorId: String(vendorId),
+      "meta.submissionKey": submissionKey,
+    }).sort({ createdAt: -1 });
+    if (existingAttempt) {
+      if (String(existingAttempt?.meta?.cartFingerprint || "") !== checkout.fingerprint) {
+        return res.status(409).json({ success: false, message: "Submission key belongs to a different checkout" });
+      }
+      if (existingAttempt?.payment?.razorpayOrderId) {
+        return res.json({
+          success: true,
+          idempotent: true,
+          order: {
+            checkoutAttemptId: String(existingAttempt._id),
+            razorpayOrderId: String(existingAttempt.payment.razorpayOrderId),
+            amount: Math.round(Number(existingAttempt.payment.amount || 0) * 100),
+            currency: String(existingAttempt.payment.currency || "INR"),
+            keyId: String(paymentConfig?.razorpay?.keyId || ""),
+            vendorName: String(paymentConfig?.accountName || vendor.businessName || "Vendor"),
+          },
+        });
+      }
+      return res.status(409).json({ success: false, message: "An earlier checkout attempt is incomplete" });
     }
+
+    payload.price = amountInPaise / 100;
+    payload.meta = {
+      ...(payload.meta || {}),
+      submissionKey,
+      cartFingerprint: checkout.fingerprint,
+      cartItems: checkout.authoritativeItems,
+    };
 
     const attempt = new CheckoutAttempt({
       ...payload,
@@ -144,7 +180,6 @@ router.post("/razorpay/order", async (req, res) => {
         vendorId: String(vendorId),
         checkoutAttemptId: String(attempt._id),
         businessName: String(vendor.businessName || ""),
-        ...(notes || {}),
       },
     });
 
@@ -174,14 +209,16 @@ router.post("/razorpay/order", async (req, res) => {
     });
   } catch (err) {
     console.error("POST /payments/razorpay/order error:", err);
-    return res.status(500).json({
+    return res.status(err?.status || 500).json({
       success: false,
       message: err?.message || "Failed to create Razorpay order",
+      code: err?.code || "razorpay_order_failed",
     });
   }
 });
 
 router.post("/razorpay/verify", async (req, res) => {
+  let claimedAttemptId = "";
   try {
     const {
       vendorId,
@@ -198,7 +235,7 @@ router.post("/razorpay/verify", async (req, res) => {
       return res.status(400).json({ success: false, message: "Valid checkoutAttemptId is required" });
     }
 
-    const attempt = await CheckoutAttempt.findById(checkoutAttemptId);
+    let attempt = await CheckoutAttempt.findById(checkoutAttemptId);
     if (!attempt) {
       return res.status(404).json({ success: false, message: "Checkout attempt not found" });
     }
@@ -216,6 +253,28 @@ router.post("/razorpay/verify", async (req, res) => {
           razorpayPaymentId: String(attempt?.payment?.razorpayPaymentId || razorpayPaymentId || ""),
         },
       });
+    }
+
+    const storedOrderId = String(attempt?.payment?.razorpayOrderId || "").trim();
+    const storedCurrency = String(attempt?.payment?.currency || "").trim().toUpperCase();
+    const storedStatus = String(attempt?.payment?.status || "").trim().toLowerCase();
+    if (!storedOrderId || storedOrderId !== String(razorpayOrderId || "").trim()) {
+      return res.status(400).json({ success: false, message: "Payment order does not match this checkout" });
+    }
+    if (storedCurrency !== "INR") {
+      return res.status(409).json({ success: false, message: "Checkout currency is invalid" });
+    }
+    if (storedStatus !== "created") {
+      return res.status(409).json({ success: false, message: "Checkout is not awaiting payment verification" });
+    }
+
+    const duplicatePayment = await CheckoutAttempt.findOne({
+      _id: { $ne: attempt._id },
+      "payment.razorpayPaymentId": String(razorpayPaymentId || "").trim(),
+      "payment.status": "paid",
+    }).select("_id").lean();
+    if (duplicatePayment) {
+      return res.status(409).json({ success: false, message: "Payment has already been applied" });
     }
 
     const paymentConfig = await getVendorPaymentConfig(String(vendorId));
@@ -241,6 +300,41 @@ router.post("/razorpay/verify", async (req, res) => {
 
       return res.status(400).json({ success: false, message: "Payment verification failed" });
     }
+
+    const claimedAttempt = await CheckoutAttempt.findOneAndUpdate(
+      {
+        _id: attempt._id,
+        finalEnquiryId: "",
+        "payment.status": "created",
+        "payment.razorpayOrderId": storedOrderId,
+      },
+      {
+        $set: {
+          "payment.status": "verifying",
+          "payment.razorpayPaymentId": String(razorpayPaymentId || ""),
+          "payment.razorpaySignature": String(razorpaySignature || ""),
+          "payment.lastError": "",
+        },
+      },
+      { new: true }
+    );
+    if (!claimedAttempt) {
+      const current = await CheckoutAttempt.findById(attempt._id).lean();
+      if (current?.finalEnquiryId && current?.payment?.status === "paid") {
+        return res.json({
+          success: true,
+          payment: {
+            status: "paid",
+            ynotOrderId: String(current.finalEnquiryId),
+            razorpayOrderId: String(current.payment.razorpayOrderId || ""),
+            razorpayPaymentId: String(current.payment.razorpayPaymentId || ""),
+          },
+        });
+      }
+      return res.status(409).json({ success: false, message: "Payment verification is already in progress" });
+    }
+    attempt = claimedAttempt;
+    claimedAttemptId = String(attempt._id);
 
     const enquiryPayload = {
       vendorId: attempt.vendorId,
@@ -293,6 +387,7 @@ router.post("/razorpay/verify", async (req, res) => {
     attempt.finalizedAt = new Date();
     appendStatusHistory(attempt, "Paid");
     await attempt.save();
+    claimedAttemptId = "";
 
     return res.json({
       success: true,
@@ -305,6 +400,17 @@ router.post("/razorpay/verify", async (req, res) => {
       enquiry,
     });
   } catch (err) {
+    if (claimedAttemptId) {
+      await CheckoutAttempt.updateOne(
+        { _id: claimedAttemptId, "payment.status": "verifying", finalEnquiryId: "" },
+        {
+          $set: {
+            "payment.status": "created",
+            "payment.lastError": "Payment finalization failed",
+          },
+        }
+      ).catch(() => {});
+    }
     console.error("POST /payments/razorpay/verify error:", err);
     return res.status(500).json({
       success: false,
@@ -341,6 +447,9 @@ router.post("/razorpay/cancel", async (req, res) => {
           ynotOrderId: String(attempt.finalEnquiryId || ""),
         },
       });
+    }
+    if (String(attempt?.payment?.status || "").trim().toLowerCase() === "verifying") {
+      return res.status(409).json({ success: false, message: "Payment verification is in progress" });
     }
 
     attempt.payment = {

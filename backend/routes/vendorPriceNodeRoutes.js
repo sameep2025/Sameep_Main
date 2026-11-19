@@ -1,7 +1,10 @@
 const express = require("express");
 const mongoose = require("mongoose");
 const axios = require("axios");
-const { validateVendorWriteRequest } = require("../utils/vendorWriteAuth");
+const {
+  requireVendorBodyWriteAccess,
+  validateVendorWriteRequest,
+} = require("../utils/vendorWriteAuth");
 const {
   applyOfferDateFields,
   isOfferCurrentlyValid,
@@ -115,7 +118,7 @@ function filterPublicOfferNodes(nodes = []) {
 /* =========================================================
    STEP 4: SYNC + AUTO LINK HIERARCHY
 ========================================================= */
-router.post("/sync", async (req, res) => {
+router.post("/sync", requireVendorBodyWriteAccess(), async (req, res) => {
   try {
     const { vendorId, rootCategoryId, activeLeafCategoryIds = [] } = req.body;
 
@@ -299,7 +302,7 @@ router.post("/sync", async (req, res) => {
 /* =========================================================
    ADD MISSING LEAF NODES
 ========================================================= */
-router.post("/add-missing-leaves", async (req, res) => {
+router.post("/add-missing-leaves", requireVendorBodyWriteAccess(), async (req, res) => {
   try {
     const { vendorId, rootCategoryId, leafCategoryIds } = req.body;
 

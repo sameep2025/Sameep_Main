@@ -1,11 +1,13 @@
 const express = require("express");
 const { google } = require("googleapis");
 const jwt = require("jsonwebtoken");
+const { getJwtSecret } = require("../utils/jwtSecrets");
 const GoogleUser = require("../models/GoogleUser");
+const { oauthStartLimiter } = require("../utils/securityLimiters");
+const { safeErrorForLog } = require("../utils/httpSecurity");
 
 const router = express.Router();
 
-const JWT_SECRET = process.env.JWT_SECRET || "dev_jwt_secret_change_me";
 
 function getOAuthClient() {
   const clientId = process.env.GOOGLE_CLIENT_ID;
@@ -20,7 +22,7 @@ function getOAuthClient() {
 }
 
 // Start Google OAuth login
-router.get("/auth/google/login", async (req, res) => {
+router.get("/auth/google/login", oauthStartLimiter, async (req, res) => {
   try {
     const { vendorId, categoryId } = req.query || {};
 
@@ -46,7 +48,7 @@ router.get("/auth/google/login", async (req, res) => {
 
     return res.redirect(url);
   } catch (err) {
-    console.error("[AUTH] /auth/google/login error:", err);
+    console.error("[AUTH] /auth/google/login error", safeErrorForLog(err));
     return res.status(500).send("Failed to start Google login");
   }
 });
@@ -101,7 +103,7 @@ router.get("/auth/google/callback", async (req, res) => {
 
     const googleAuthToken = jwt.sign(
       { googleId },
-      JWT_SECRET,
+      getJwtSecret(),
       { expiresIn: "30d" }
     );
 
@@ -132,7 +134,7 @@ router.get("/auth/google/callback", async (req, res) => {
     const url = `${redirectBase.replace(/\/$/, "")}/preview/${encodeURIComponent(String(safeState.vendorId || ""))}/${encodeURIComponent(String(safeState.categoryId || ""))}?${params.toString()}`;
     return res.redirect(url);
   } catch (err) {
-    console.error("[AUTH] /auth/google/callback error:", err);
+    console.error("[AUTH] /auth/google/callback error", safeErrorForLog(err));
     return res.status(500).send("Failed to complete Google login");
   }
 });

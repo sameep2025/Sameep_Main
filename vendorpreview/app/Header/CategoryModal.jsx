@@ -6,6 +6,7 @@ import { useCategoryTree } from "./CategoryModal2";
 import './CategoryModal2.css';
 import { API_BASE_URL } from "../../config";
 import ServiceAreasStep from "../components/ServiceAreasStep";
+import { getVendorAuthHeaders } from "../utils/vendorAuth";
 // adjust path if needed: ../config or ../../config
 
 const CATEGORY_API =
@@ -58,12 +59,6 @@ const [serviceAreas, setServiceAreas] = useState(null);
   const [otpAttemptToken, setOtpAttemptToken] = useState("");
   const [otpSent, setOtpSent] = useState(false);
   const [loadingOtp, setLoadingOtp] = useState(false);
-
-const [bypassOtp, setBypassOtp] = useState(false);
-
-const [showAdminPopup, setShowAdminPopup] = useState(false);
-const [adminPasscode, setAdminPasscode] = useState("");
-const [verifyingPasscode, setVerifyingPasscode] = useState(false);
 
   const rating = selectedBusiness?.rating;
   const totalReviews = selectedBusiness?.userRatingsTotal;
@@ -245,7 +240,7 @@ const normalizePhone = (phone) => {
     }
   };
 
-  const handleContinueWithoutOtp = async () => {
+  const handleContinueAfterOtp = async (verifiedCustomerId, verifiedToken) => {
     if (!selected?._id || !selectedBusiness?.name) {
       alert("Missing required data");
       return;
@@ -254,38 +249,13 @@ const normalizePhone = (phone) => {
     const cleanPhone = normalizePhone(phoneNumber || "9999999999");
 
     try {
-      /* ================= 1️⃣ BYPASS OTP ================= */
-      const bypassPayload = {
-        countryCode: "91",
-        phone: cleanPhone,
-      };
-
-      const bypassRes = await fetch(
-        `${API_BASE_URL}/api/customers/bypass-otp`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(bypassPayload),
-        }
-      );
-
-      const bypassJson = await bypassRes.json(); // ✅ FIRST parse response
-
-      if (!bypassRes.ok) {
-        alert(bypassJson.message || "OTP bypass failed");
-        return;
-      }
-
-      // ✅ NOW extract customerId
-      const customerId =
-        bypassJson?.customer?._id ||
-        bypassJson?.customer?.id ||
-        "";
+      const customerId = String(verifiedCustomerId || "").trim();
 
       if (!customerId) {
         alert("Customer ID not received from backend");
         return;
       }
+      if (verifiedToken) localStorage.setItem("authToken", verifiedToken);
 
 
       /* ================= 2️⃣ REGISTER VENDOR ================= */
@@ -343,7 +313,7 @@ const normalizePhone = (phone) => {
         `${API_BASE_URL}/api/dummy-vendors`,
         {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: { "Content-Type": "application/json", ...getVendorAuthHeaders(exploreVendorId) },
           body: JSON.stringify(vendorPayload),
         }
       );
@@ -630,52 +600,6 @@ const normalizePhone = (phone) => {
       setLoadingOtp(false);
     }
   };
-  const verifyAdminPasscode = async () => {
-  if (!adminPasscode) {
-    alert("Enter admin passcode");
-    return;
-  }
-
-  try {
-    setVerifyingPasscode(true);
-
-    const res = await fetch(
-      `${API_BASE_URL}/api/customers/admin-impersonate`,
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-           categoryId: confirmedCategory?._id,
-          passcode: adminPasscode,
-          vendorId: exploreVendorId,
-        }),
-      }
-    );
-
-    const data = await res.json();
-
-    if (!res.ok) {
-      alert(data.message || "Invalid passcode");
-      return;
-    }
-
-    // success
-    setBypassOtp(true);
-    setShowAdminPopup(false);
-
-    // go to next screen (skip OTP)
-    await handleContinueWithoutOtp();
-
-  } catch (err) {
-    console.error(err);
-    alert("Server error");
-  } finally {
-    setVerifyingPasscode(false);
-  }
-};
-
   const verifyOtp = async () => {
     if (!otp || otp.length < 4) {
       alert("Enter valid OTP");
@@ -710,14 +634,11 @@ const normalizePhone = (phone) => {
         return;
       }
 
-      if (data?.token) {
-        localStorage.setItem("otpVerified", "true");
-       
-      
-      }
+      if (data?.token) localStorage.setItem("otpVerified", "true");
 
       setOtpSent(false);
-      await handleContinueWithoutOtp();
+      const customerId = data?.customer?._id || data?.customer?.id || data?.customerId || "";
+      await handleContinueAfterOtp(customerId, data?.token);
     } catch (err) {
       console.error(err);
       alert("Server error");
@@ -1059,59 +980,6 @@ onChange={(e) =>
             >
               {loadingOtp ? "Please wait..." : "Send OTP"}
             </button>
-           <label className="bypass-otp-checkbox">
-  <input
-    type="checkbox"
-    checked={bypassOtp}
-    onChange={(e) => {
-      if (e.target.checked) {
-        setShowAdminPopup(true);   // open popup
-      } else {
-        setBypassOtp(false);
-      }
-    }}
-  />
-  Bypass OTP
-</label>
-{showAdminPopup && (
-  <div className="admin-popup-overlay">
-    <div className="admin-popup-card">
-
-      <h3>Admin Authorization</h3>
-      <p>Enter admin passcode to bypass OTP</p>
-
-      <input
-        type="password"
-        className="google-input"
-        placeholder="Enter passcode"
-        value={adminPasscode}
-        onChange={(e) => setAdminPasscode(e.target.value)}
-      />
-
-     <div className="admin-popup-actions">
-  <button
-    className="admin-cancel-btn"
-    onClick={() => {
-      setShowAdminPopup(false);
-      setAdminPasscode("");
-      setBypassOtp(false);
-    }}
-  >
-    Cancel
-  </button>
-
-  <button
-    className="admin-continue-btn"
-    onClick={verifyAdminPasscode}
-    disabled={verifyingPasscode}
-  >
-    {verifyingPasscode ? "Verifying..." : "Continue"}
-  </button>
-</div>
-
-    </div>
-  </div>
-)}
           </div>
         )}
 
@@ -1332,7 +1200,7 @@ onChange={(e) =>
 
                 await fetch(`${API_BASE_URL}/api/vendor/service-areas`, {
                   method: "POST",
-                  headers: { "Content-Type": "application/json" },
+                  headers: { "Content-Type": "application/json", ...getVendorAuthHeaders(vendorId) },
                   body: JSON.stringify({
                     vendorId,
                     primaryLocality: data.primaryLocality,
@@ -1403,7 +1271,7 @@ onChange={(e) =>
                       `${API_BASE_URL}/api/vendor-price-nodes/sync`,
                       {
                         method: "POST",
-                        headers: { "Content-Type": "application/json" },
+                        headers: { "Content-Type": "application/json", ...getVendorAuthHeaders(vendorId) },
                         body: JSON.stringify({
                           vendorId,
                           rootCategoryId: confirmedCategory?._id,
@@ -1416,7 +1284,7 @@ onChange={(e) =>
                       `${API_BASE_URL}/api/dummy-vendors/${vendorId}`,
                       {
                         method: "PUT",
-                        headers: { "Content-Type": "application/json" },
+                        headers: { "Content-Type": "application/json", ...getVendorAuthHeaders(vendorId) },
                         body: JSON.stringify({ status: "Profile Setup" }),
                       }
                     );
@@ -1492,7 +1360,7 @@ onChange={(e) =>
                       `${API_BASE_URL}/api/vendor/${vendorId}/set-subdomain`,
                       {
                         method: "POST",
-                        headers: { "Content-Type": "application/json" },
+                        headers: { "Content-Type": "application/json", ...getVendorAuthHeaders(vendorId) },
                         body: JSON.stringify({ subdomain: selectedSubdomain }),
                       }
                     );
@@ -1547,7 +1415,7 @@ onChange={(e) =>
                       `${API_BASE_URL}/api/dummy-vendors/${vendorId}`,
                       {
                         method: "PUT",
-                        headers: { "Content-Type": "application/json" },
+                        headers: { "Content-Type": "application/json", ...getVendorAuthHeaders(vendorId) },
                         body: JSON.stringify({ status: "Preview" }),
                       }
                     );

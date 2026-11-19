@@ -8,9 +8,10 @@ const BillingSession = require("../models/BillingSession");
 const {
   requireVendorAccessFromExistingAuth,
 } = require("../utils/vendorWriteAuth");
+const { otpRequestLimiter, otpVerifyLimiter } = require("../utils/securityLimiters");
 
 async function resolveBillVendorId(req) {
-  const id = req.params.billingSessionId;
+  const id = req.params.billingSessionId || req.params.id || req.params.billId;
   if (!id || !mongoose.Types.ObjectId.isValid(id)) return "";
   const bill = await BillingSession.findById(id).select("vendorId").lean();
   return bill?.vendorId || "";
@@ -68,6 +69,7 @@ router.post(
 router.post(
   "/:billingSessionId/cancel/request-otp",
   requireVendorAccessFromExistingAuth(resolveBillVendorId),
+  otpRequestLimiter,
   billingController.requestCancelBillOtp
 );
 router.post(
@@ -78,18 +80,25 @@ router.post(
 router.post(
   "/:billingSessionId/cancel/verify-otp",
   requireVendorAccessFromExistingAuth(resolveBillVendorId),
+  otpVerifyLimiter,
   billingController.verifyCancelBillOtp
 );
-router.get("/:id", billingController.getBillingSession);
+router.get(
+  "/:id",
+  requireVendorAccessFromExistingAuth(resolveBillVendorId),
+  billingController.getBillingSession
+);
 
 router.post(
   "/request-otp",
   requireVendorAccessFromExistingAuth(resolveBillVendorIdFromBody),
+  otpRequestLimiter,
   billingController.requestRedeemOTP
 );
 router.post(
   "/verify-otp",
   requireVendorAccessFromExistingAuth(resolveBillVendorIdFromBody),
+  otpVerifyLimiter,
   billingController.verifyRedeemOTP
 );
 

@@ -25,6 +25,12 @@ const checkAuthentication = (vendorId, categoryId) => {
   }
 };
 
+const getPreviewAuthHeaders = (vendorId, categoryId) => {
+  if (typeof window === "undefined") return {};
+  const token = window.localStorage.getItem(`previewToken:${vendorId}:${categoryId}`);
+  return token ? { Authorization: `Bearer ${token}` } : {};
+};
+
 // Final My Individual Services page for a specific LVL1 and LVL2 combination.
 // Reuses the same dummy vendor/category + inventory logic as the admin page,
 // but renders a mobile-friendly UI with Active/Inactive tabs and price editing.
@@ -76,6 +82,7 @@ export default function MyIndividualServicesDetailPage() {
       method: "PUT",
       headers: {
         "Content-Type": "application/json",
+        ...getPreviewAuthHeaders(vid, cid),
         "x-actor-role": "vendor",
         "x-vendor-id": vid,
         "x-root-category-id": cid,
@@ -546,6 +553,7 @@ export default function MyIndividualServicesDetailPage() {
           method: "PUT",
           headers: {
             "Content-Type": "application/json",
+            ...getPreviewAuthHeaders(vendorId, categoryId),
             "x-actor-role": "vendor",
             "x-vendor-id": vendorId,
             "x-root-category-id": categoryId,
@@ -567,6 +575,7 @@ export default function MyIndividualServicesDetailPage() {
           method: "PUT",
           headers: {
             "Content-Type": "application/json",
+            ...getPreviewAuthHeaders(vendorId, categoryId),
             "x-actor-role": "vendor",
             "x-vendor-id": vendorId,
             "x-root-category-id": categoryId,
