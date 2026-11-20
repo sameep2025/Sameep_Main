@@ -47,6 +47,7 @@ function normalizeSummary(source) {
     totalBills: getNumber(summary.totalBills ?? summary.totalOrders),
     onlineCollected: getNumber(summary.onlineCollected),
     cashCollected: getNumber(summary.cashCollected),
+    cardCollected: getNumber(summary.cardCollected),
     notRecordedCollected: getNumber(summary.notRecordedCollected),
     pointsDistributed: getNumber(summary.pointsDistributed ?? summary.totalDistributed),
   };
@@ -200,14 +201,15 @@ function renderSnapshotToPngBlob({
     color: "#f5d97a",
   });
 
-  const paymentTotal = data.onlineCollected + data.cashCollected + data.notRecordedCollected;
+  const paymentTotal = data.onlineCollected + data.cashCollected + data.cardCollected + data.notRecordedCollected;
   const payments = [
     ["Online", data.onlineCollected],
     ["Cash", data.cashCollected],
+    ["Card", data.cardCollected],
     ["Not Recorded", data.notRecordedCollected],
   ];
   payments.forEach(([label, value], index) => {
-    const cellWidth = (width - 184) / 3;
+    const cellWidth = (width - 184) / 4;
     const x = 92 + index * cellWidth;
     drawText(context, label.toUpperCase(), x, y + 66, {
       size: 16,
@@ -305,7 +307,7 @@ export default function RevenueSnapshot({
 
   const data = normalizeSummary(summary);
   const averageBill = data.totalBills > 0 ? data.netCollected / data.totalBills : 0;
-  const paymentTotal = data.onlineCollected + data.cashCollected + data.notRecordedCollected;
+  const paymentTotal = data.onlineCollected + data.cashCollected + data.cardCollected + data.notRecordedCollected;
   const metrics = [
     { label: "Bill Value", value: currencyFmt.format(data.billValue) },
     { label: "Discounts Given", value: currencyFmt.format(data.discountsGiven) },
@@ -458,6 +460,11 @@ export default function RevenueSnapshot({
                 <span>Cash</span>
                 <strong>{currencyFmt.format(data.cashCollected)}</strong>
                 <small>{formatPercent(data.cashCollected, paymentTotal)}</small>
+              </div>
+              <div className="revenue-snapshot-breakdown-cell">
+                <span>Card</span>
+                <strong>{currencyFmt.format(data.cardCollected)}</strong>
+                <small>{formatPercent(data.cardCollected, paymentTotal)}</small>
               </div>
               <div className="revenue-snapshot-breakdown-cell">
                 <span>Not Recorded</span>

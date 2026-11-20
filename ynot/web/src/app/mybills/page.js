@@ -58,10 +58,15 @@ function formatPaise(value) {
 function formatPaymentAllocation(bill = {}) {
   const breakdown = bill.paymentBreakdown || {};
   if (bill.paymentMode === "SPLIT") {
-    return `Cash ${formatPaise(breakdown.cashAmountPaise)} + Online ${formatPaise(breakdown.onlineAmountPaise)}`;
+    return [
+      Number(breakdown.cashAmountPaise) > 0 ? `Cash ${formatPaise(breakdown.cashAmountPaise)}` : "",
+      Number(breakdown.onlineAmountPaise) > 0 ? `Online ${formatPaise(breakdown.onlineAmountPaise)}` : "",
+      Number(breakdown.cardAmountPaise) > 0 ? `Card ${formatPaise(breakdown.cardAmountPaise)}` : "",
+    ].filter(Boolean).join(" + ") || "Split Payment";
   }
   if (bill.paymentMode === "CASH") return "Cash";
   if (bill.paymentMode === "ONLINE") return "Online";
+  if (bill.paymentMode === "CARD") return "Card";
   if (bill.paymentMode === "PREPAID_VALUE" && bill.prepaidSettlement) return "Prepaid Wallet";
   if (bill.paymentMode === "PREPAID_SESSIONS" && bill.prepaidSettlement) return "Prepaid Package";
   return "";

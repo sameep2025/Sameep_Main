@@ -252,6 +252,10 @@ export default function YearRevenue({
       (acc, month) => acc + getNumber(month?.cashCollected),
       0
     );
+    const cardCollected = months.reduce(
+      (acc, month) => acc + getNumber(month?.cardCollected),
+      0
+    );
     const notRecordedCollected = months.reduce(
       (acc, month) => acc + getNumber(month?.notRecordedCollected),
       0
@@ -275,6 +279,7 @@ export default function YearRevenue({
       netCollected,
       onlineCollected,
       cashCollected,
+      cardCollected,
       notRecordedCollected,
       totalOrders,
       activeMonths: months.filter((month) =>
@@ -328,6 +333,7 @@ export default function YearRevenue({
           totalBills: totals.totalOrders,
           onlineCollected: totals.onlineCollected,
           cashCollected: totals.cashCollected,
+          cardCollected: totals.cardCollected,
           notRecordedCollected: totals.notRecordedCollected,
         }}
         showPointsDistributed={false}
@@ -426,6 +432,10 @@ export default function YearRevenue({
               <div className="revenue-panel-payment-row">
                 <span>Cash</span>
                 <strong>{currencyFmt.format(totals.cashCollected || 0)}</strong>
+              </div>
+              <div className="revenue-panel-payment-row">
+                <span>Card</span>
+                <strong>{currencyFmt.format(totals.cardCollected || 0)}</strong>
               </div>
               <div className="revenue-panel-payment-row">
                 <span>Not Recorded</span>

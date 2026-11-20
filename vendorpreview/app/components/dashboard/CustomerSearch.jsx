@@ -90,10 +90,15 @@ function formatPayment(detail = {}) {
   }
   const breakdown = detail.paymentBreakdown || {};
   if (detail.paymentMode === "SPLIT") {
-    return `Cash ${formatPaise(breakdown.cashAmountPaise)} + Online ${formatPaise(breakdown.onlineAmountPaise)}`;
+    return [
+      Number(breakdown.cashAmountPaise) > 0 ? `Cash ${formatPaise(breakdown.cashAmountPaise)}` : "",
+      Number(breakdown.onlineAmountPaise) > 0 ? `Online ${formatPaise(breakdown.onlineAmountPaise)}` : "",
+      Number(breakdown.cardAmountPaise) > 0 ? `Card ${formatPaise(breakdown.cardAmountPaise)}` : "",
+    ].filter(Boolean).join(" + ") || "Split Payment";
   }
   if (detail.paymentMode === "CASH") return "Cash";
   if (detail.paymentMode === "ONLINE") return "Online";
+  if (detail.paymentMode === "CARD") return "Card";
   return "Not Recorded";
 }
 

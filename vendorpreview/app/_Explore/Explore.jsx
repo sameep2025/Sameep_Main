@@ -65,6 +65,13 @@ import {
   getMembershipVerificationGate,
   resolveSelectedDiscountMembershipId,
 } from "./membershipVerificationUi.mjs";
+import MultiStylistSelector from "./components/MultiStylistSelector";
+import {
+  getCartStylistAllocationError,
+  serializeStylistAllocations,
+  toggleStylistAllocation,
+  updateStylistAllocationPercent,
+} from "./stylistAllocation.mjs";
 const FOOTER_GALLERY_OPEN_EVENT = "ynot-footer-open-gallery";
 const CART_ORIGIN_PUBLIC = "PUBLIC_ENQUIRY";
 const CART_ORIGIN_BILLING = "VENDOR_BILLING";
@@ -88,7 +95,15 @@ function formatPaymentPaiseInput(paise) {
   return (normalized / 100).toFixed(2);
 }
 
-function getBalancedPaymentInputs({ editedField, value, totalPaise }) {
+function getBalancedPaymentInputs({
+  editedField,
+  value,
+  totalPaise,
+  cashInput = "0.00",
+  onlineInput = "0.00",
+  cardInput = "0.00",
+  lastNonCardField = "cash",
+}) {
   const parsed = parsePaymentAmountToPaise(value);
   if (!parsed.valid) {
     return {
@@ -98,16 +113,35 @@ function getBalancedPaymentInputs({ editedField, value, totalPaise }) {
         : "Enter a valid amount with at most two decimal places.",
     };
   }
-  if (parsed.paise > totalPaise) {
-    return { valid: false, error: "Payment amount cannot exceed the final payable amount." };
+  const balanceField = editedField === "cash"
+    ? "online"
+    : editedField === "online"
+      ? "cash"
+      : lastNonCardField === "online" ? "cash" : "online";
+  const inputs = { cash: cashInput, online: onlineInput, card: cardInput };
+  const amounts = {};
+  for (const field of ["cash", "online", "card"]) {
+    if (field === balanceField) continue;
+    const fieldValue = field === editedField ? value : inputs[field];
+    const fieldAmount = field === editedField ? parsed : parsePaymentAmountToPaise(fieldValue);
+    if (!fieldAmount.valid) {
+      return { valid: false, error: `Enter a valid ${field} amount with at most two decimal places.` };
+    }
+    amounts[field] = fieldAmount.paise;
   }
-  const otherPaise = totalPaise - parsed.paise;
+  const fixedPaise = Object.values(amounts).reduce((sum, amount) => sum + amount, 0);
+  if (fixedPaise > totalPaise) {
+    return { valid: false, error: "Payment amounts cannot exceed the final payable amount." };
+  }
+  amounts[balanceField] = totalPaise - fixedPaise;
   return {
     valid: true,
-    cashInput: editedField === "cash" ? value : formatPaymentPaiseInput(otherPaise),
-    onlineInput: editedField === "online" ? value : formatPaymentPaiseInput(otherPaise),
-    cashAmountPaise: editedField === "cash" ? parsed.paise : otherPaise,
-    onlineAmountPaise: editedField === "online" ? parsed.paise : otherPaise,
+    cashInput: editedField === "cash" ? value : formatPaymentPaiseInput(amounts.cash),
+    onlineInput: editedField === "online" ? value : formatPaymentPaiseInput(amounts.online),
+    cardInput: editedField === "card" ? value : formatPaymentPaiseInput(amounts.card),
+    cashAmountPaise: amounts.cash,
+    onlineAmountPaise: amounts.online,
+    cardAmountPaise: amounts.card,
   };
 }
 
@@ -1359,11 +1393,14 @@ function ExploreContent({ onReady, onOpenServices }) {
   const [showDiscountPopup, setShowDiscountPopup] = useState(false);
   const [cashAmountInput, setCashAmountInput] = useState("");
   const [onlineAmountInput, setOnlineAmountInput] = useState("");
+  const [cardAmountInput, setCardAmountInput] = useState("");
   const [paymentAllocationError, setPaymentAllocationError] = useState("");
   const cashAmountInputRef = useRef("");
   const onlineAmountInputRef = useRef("");
+  const cardAmountInputRef = useRef("");
   const paymentHasUserEditedRef = useRef(false);
   const lastEditedPaymentFieldRef = useRef("cash");
+  const [standardPaymentMode, setStandardPaymentMode] = useState("ONLINE");
   const [selectedPaymentMode, setSelectedPaymentMode] = useState("STANDARD");
   const [prepaidCapabilities, setPrepaidCapabilities] = useState(null);
   const [prepaidWallets, setPrepaidWallets] = useState([]);
@@ -1624,7 +1661,9 @@ function ExploreContent({ onReady, onOpenServices }) {
   };
 
   const buildBillingCartItemsSnapshot = () => {
-    return cartItems.map((item) => ({
+    return cartItems.map((item) => {
+      const stylistAllocations = serializeStylistAllocations(item);
+      return {
         itemId: item.itemId,
         itemSource: item.itemSource,
         itemType: item.itemType,
@@ -1633,13 +1672,15 @@ function ExploreContent({ onReady, onOpenServices }) {
         price: Number(item.price) || 0,
         qty: Number(item.qty) || 1,
         total: (Number(item.price) || 0) * (Number(item.qty) || 1),
-        resourceId: item.resourceId || null,
+        resourceId: stylistAllocations.length === 1 ? stylistAllocations[0].resourceId : null,
         resourceName: item.resourceName || "",
+        stylistAllocations,
         parentId: item.parentId || null,
         rootCategoryId: item.rootCategoryId || null,
         nodePath: item.nodePath || [],
         categoryPathIds: item.categoryPathIds || [],
-    }));
+      };
+    });
   };
 
   const buildMembershipPreviewItems = () =>
@@ -1734,6 +1775,7 @@ function ExploreContent({ onReady, onOpenServices }) {
     setMembershipPreviewError("");
     setMembershipPreviewErrorKey("");
     setMembershipPreviewLoading(false);
+    setStandardPaymentMode("ONLINE");
     setSelectedPaymentMode("STANDARD");
     setPrepaidWallets([]);
     setPrepaidWallet(null);
@@ -1858,6 +1900,7 @@ function ExploreContent({ onReady, onOpenServices }) {
     if (nextCustomerId) {
       fetchWallet(nextCustomerId, nextMobile);
     }
+    setStandardPaymentMode("ONLINE");
     setSelectedPaymentMode("STANDARD");
     if (prepaidSelectionAction === "RESET") {
       prepaidWalletRequestRef.current += 1;
@@ -2709,6 +2752,32 @@ function ExploreContent({ onReady, onOpenServices }) {
   );
 
   useEffect(() => {
+    if (selectedPaymentMode !== "PREPAID_SESSIONS") return;
+    setRedeemPoints(0);
+    setShowOtpInput(false);
+    setOtp("");
+  }, [selectedPaymentMode]);
+
+  useEffect(() => {
+    if (standardPaymentMode !== "SPLIT") {
+      const cashInput = standardPaymentMode === "CASH"
+        ? formatPaymentPaiseInput(paymentFinalPayablePaise)
+        : "0.00";
+      const onlineInput = standardPaymentMode === "ONLINE"
+        ? formatPaymentPaiseInput(paymentFinalPayablePaise)
+        : "0.00";
+      const cardInput = standardPaymentMode === "CARD"
+        ? formatPaymentPaiseInput(paymentFinalPayablePaise)
+        : "0.00";
+      cashAmountInputRef.current = cashInput;
+      onlineAmountInputRef.current = onlineInput;
+      cardAmountInputRef.current = cardInput;
+      setCashAmountInput(cashInput);
+      setOnlineAmountInput(onlineInput);
+      setCardAmountInput(cardInput);
+      setPaymentAllocationError("");
+      return;
+    }
     const editedField = paymentHasUserEditedRef.current
       ? lastEditedPaymentFieldRef.current
       : "cash";
@@ -2721,36 +2790,51 @@ function ExploreContent({ onReady, onOpenServices }) {
       editedField,
       value: editedValue || formatPaymentPaiseInput(paymentFinalPayablePaise),
       totalPaise: paymentFinalPayablePaise,
+      cashInput: cashAmountInputRef.current || "0.00",
+      onlineInput: onlineAmountInputRef.current || "0.00",
+      cardInput: paymentHasUserEditedRef.current
+        ? cardAmountInputRef.current || "0.00"
+        : "0.00",
+      lastNonCardField: lastEditedPaymentFieldRef.current,
     });
 
     if (!balanced.valid) {
       setPaymentAllocationError(
-        "Final payable changed. Review the Cash and Online amounts before completing the bill."
+        "Final payable changed. Review the Cash, Online and Card amounts before completing the bill."
       );
       return;
     }
     cashAmountInputRef.current = balanced.cashInput;
     onlineAmountInputRef.current = balanced.onlineInput;
+    cardAmountInputRef.current = balanced.cardInput;
     setCashAmountInput(balanced.cashInput);
     setOnlineAmountInput(balanced.onlineInput);
+    setCardAmountInput(balanced.cardInput);
     setPaymentAllocationError("");
-  }, [paymentFinalPayablePaise]);
+  }, [paymentFinalPayablePaise, standardPaymentMode]);
 
   const handlePaymentAmountChange = (field, value) => {
     paymentHasUserEditedRef.current = true;
-    lastEditedPaymentFieldRef.current = field;
+    if (field !== "card") lastEditedPaymentFieldRef.current = field;
     if (field === "cash") {
       cashAmountInputRef.current = value;
       setCashAmountInput(value);
-    } else {
+    } else if (field === "online") {
       onlineAmountInputRef.current = value;
       setOnlineAmountInput(value);
+    } else {
+      cardAmountInputRef.current = value;
+      setCardAmountInput(value);
     }
 
     const balanced = getBalancedPaymentInputs({
       editedField: field,
       value,
       totalPaise: paymentFinalPayablePaise,
+      cashInput: cashAmountInputRef.current || "0.00",
+      onlineInput: onlineAmountInputRef.current || "0.00",
+      cardInput: cardAmountInputRef.current || "0.00",
+      lastNonCardField: lastEditedPaymentFieldRef.current,
     });
     if (!balanced.valid) {
       setPaymentAllocationError(balanced.error);
@@ -2758,27 +2842,59 @@ function ExploreContent({ onReady, onOpenServices }) {
     }
     cashAmountInputRef.current = balanced.cashInput;
     onlineAmountInputRef.current = balanced.onlineInput;
+    cardAmountInputRef.current = balanced.cardInput;
     setCashAmountInput(balanced.cashInput);
     setOnlineAmountInput(balanced.onlineInput);
+    setCardAmountInput(balanced.cardInput);
     setPaymentAllocationError("");
   };
 
   const getValidatedPaymentSubmission = () => {
+    if (standardPaymentMode === "CARD") {
+      setPaymentAllocationError("");
+      return {
+        paymentMode: "CARD",
+        paymentBreakdown: {
+          cashAmountPaise: 0,
+          onlineAmountPaise: 0,
+          cardAmountPaise: paymentFinalPayablePaise,
+        },
+      };
+    }
+    if (standardPaymentMode === "CASH" || standardPaymentMode === "ONLINE") {
+      setPaymentAllocationError("");
+      return {
+        paymentMode: standardPaymentMode,
+        paymentBreakdown: {
+          cashAmountPaise: standardPaymentMode === "CASH" ? paymentFinalPayablePaise : 0,
+          onlineAmountPaise: standardPaymentMode === "ONLINE" ? paymentFinalPayablePaise : 0,
+        },
+      };
+    }
     const cash = parsePaymentAmountToPaise(cashAmountInput);
     const online = parsePaymentAmountToPaise(onlineAmountInput);
-    if (!cash.valid || !online.valid) {
-      setPaymentAllocationError("Enter valid Cash and Online amounts with at most two decimal places.");
+    const card = parsePaymentAmountToPaise(cardAmountInput);
+    if (!cash.valid || !online.valid || !card.valid) {
+      setPaymentAllocationError("Enter valid Cash, Online and Card amounts with at most two decimal places.");
       return null;
     }
-    if (cash.paise + online.paise !== paymentFinalPayablePaise) {
-      setPaymentAllocationError("Cash and Online amounts must equal the final payable amount.");
+    const positiveMethodCount = [cash.paise, online.paise, card.paise]
+      .filter((amount) => amount > 0).length;
+    if (positiveMethodCount < 2) {
+      setPaymentAllocationError("Split payment requires at least two payment methods with positive amounts.");
+      return null;
+    }
+    if (cash.paise + online.paise + card.paise !== paymentFinalPayablePaise) {
+      setPaymentAllocationError("Cash, Online and Card amounts must equal the final payable amount.");
       return null;
     }
     setPaymentAllocationError("");
     return {
+      paymentMode: "SPLIT",
       paymentBreakdown: {
         cashAmountPaise: cash.paise,
         onlineAmountPaise: online.paise,
+        cardAmountPaise: card.paise,
       },
     };
   };
@@ -3082,7 +3198,6 @@ function ExploreContent({ onReady, onOpenServices }) {
   const hrDashboardTitle = `My ${hrPluralLabel}`;
   const hrDashboardDescription = `View and manage ${resources.length} ${hrPluralLabel.toLowerCase()} records.`;
   const hrSelectorLabel = hrSingularLabel;
-  const hrSelectorPlaceholder = `Select ${hrSingularLabel}`;
   const hrPerformanceTitle = `${hrSingularLabel} Performance`;
   const renderPaymentModeSelector = () => {
     const otpExpiresIn = prepaidAuthorization?.expiresAt
@@ -3097,20 +3212,9 @@ function ExploreContent({ onReady, onOpenServices }) {
         <span>Final Payable Amount</span>
         <strong>{formatPaymentPaiseInput(paymentFinalPayablePaise)}</strong>
       </div>
-      <div className="quick-billing-payment-options" role="radiogroup" aria-label="Payment method">
-        <label className={selectedPaymentMode === "STANDARD" ? "selected" : ""}>
-          <input
-            type="radio"
-            name="quick-billing-payment-mode"
-            checked={selectedPaymentMode === "STANDARD"}
-            onChange={() => {
-              setSelectedPaymentMode("STANDARD");
-              clearPrepaidAuthorization();
-            }}
-          />
-          Cash / Online / Split
-        </label>
-        {prepaidWalletPaymentAvailable ? prepaidWallets.map((wallet) => {
+      {prepaidWalletPaymentAvailable ? (
+        <div className="quick-billing-payment-options" role="radiogroup" aria-label="Prepaid payment method">
+          {prepaidWallets.map((wallet) => {
           const selected = selectedPaymentMode === wallet.walletType && prepaidWallet?.id === wallet.id;
           const balance = wallet.walletType === "PREPAID_VALUE"
             ? `₹${formatPaymentPaiseInput(wallet.remainingAmountPaise)}`
@@ -3137,12 +3241,38 @@ function ExploreContent({ onReady, onOpenServices }) {
               </span>
             </label>
           );
-        }) : null}
+          })}
+        </div>
+      ) : null}
+
+      <div className="quick-billing-standard-methods" role="radiogroup" aria-label="Payment method">
+        {[
+              ["ONLINE", "UPI"],
+              ["CASH", "Cash"],
+              ["CARD", "Card"],
+              ["SPLIT", "Split"],
+            ].map(([mode, label]) => (
+              <label key={mode} className={selectedPaymentMode === "STANDARD" && standardPaymentMode === mode ? "selected" : ""}>
+                <input
+                  type="radio"
+                  name="quick-billing-standard-payment-mode"
+                  checked={selectedPaymentMode === "STANDARD" && standardPaymentMode === mode}
+                  onChange={() => {
+                    setSelectedPaymentMode("STANDARD");
+                    setStandardPaymentMode(mode);
+                    paymentHasUserEditedRef.current = false;
+                    setPaymentAllocationError("");
+                    clearPrepaidAuthorization();
+                  }}
+                />
+                {label}
+              </label>
+            ))}
       </div>
 
       {selectedPaymentMode === "STANDARD" ? (
         <>
-          <div className="quick-billing-payment-inputs">
+          {standardPaymentMode === "SPLIT" ? <div className="quick-billing-payment-inputs">
             <label>
               <span>Cash Amount</span>
               <input
@@ -3150,6 +3280,16 @@ function ExploreContent({ onReady, onOpenServices }) {
                 inputMode="decimal"
                 value={cashAmountInput}
                 onChange={(event) => handlePaymentAmountChange("cash", event.target.value)}
+                aria-invalid={Boolean(paymentAllocationError)}
+              />
+            </label>
+            <label>
+              <span>Card Amount</span>
+              <input
+                type="text"
+                inputMode="decimal"
+                value={cardAmountInput}
+                onChange={(event) => handlePaymentAmountChange("card", event.target.value)}
                 aria-invalid={Boolean(paymentAllocationError)}
               />
             </label>
@@ -3163,7 +3303,7 @@ function ExploreContent({ onReady, onOpenServices }) {
                 aria-invalid={Boolean(paymentAllocationError)}
               />
             </label>
-          </div>
+          </div> : null}
           {paymentAllocationError ? (
             <div className="quick-billing-payment-error" role="alert">
               {paymentAllocationError}
@@ -3265,12 +3405,14 @@ function ExploreContent({ onReady, onOpenServices }) {
       setViewMode("new-dashboard");
     }
   }, [hrEnabled, viewMode]);
+  const stylistAllocationError = getCartStylistAllocationError(cartItems);
   const canGenerateBill =
     cartItems.length > 0 &&
     !!vendorId &&
     !showOtpInput &&
     !prepaidAuthorization &&
     !membershipVerification.blocked &&
+    !stylistAllocationError &&
     !processingBill;
   useEffect(() => {
     if (pendingAction === "GENERATE_BILL") return;
@@ -4718,6 +4860,7 @@ function ExploreContent({ onReady, onOpenServices }) {
           total: (Number(node.price) || 0) * minQty,
           resourceId: null,
           resourceName: "",
+          stylistAllocations: [],
 
           parentId: node.parentId || null,
           rootCategoryId: rootCategoryId || node.rootCategoryId || null,
@@ -4794,9 +4937,12 @@ function ExploreContent({ onReady, onOpenServices }) {
     paymentHasUserEditedRef.current = false;
     cashAmountInputRef.current = "";
     onlineAmountInputRef.current = "";
+    cardAmountInputRef.current = "";
     setCashAmountInput("");
     setOnlineAmountInput("");
+    setCardAmountInput("");
     setPaymentAllocationError("");
+    setStandardPaymentMode("ONLINE");
     setSelectedPaymentMode("STANDARD");
     setPrepaidWallets([]);
     setPrepaidWallet(null);
@@ -4846,6 +4992,10 @@ function ExploreContent({ onReady, onOpenServices }) {
   }, [viewMode]);
 
   async function handleGenerateBill() {
+    if (stylistAllocationError) {
+      alert(stylistAllocationError);
+      return;
+    }
     if (processingBillRef.current || processingBill) return;
 
     if (cartOriginRef.current !== CART_ORIGIN_BILLING) {
@@ -5224,19 +5374,30 @@ function ExploreContent({ onReady, onOpenServices }) {
     setCartItems(prev => prev.filter(i => (i.cartKey || i.itemId) !== cartKey));
   };
 
-  const updateItemStylist = (cartKey, resourceId) => {
-    const resource = resources.find(r => String(r._id) === String(resourceId));
-
+  const updateItemStylists = (cartKey, resource) => {
     setCartItems(prev =>
-      prev.map(item =>
-        (item.cartKey || item.itemId) === cartKey
-          ? {
-            ...item,
-            resourceId: resourceId || null,
-            resourceName: resource?.name || "",
-          }
-          : item
-      )
+      prev.map(item => {
+        if ((item.cartKey || item.itemId) !== cartKey) return item;
+        const stylistAllocations = toggleStylistAllocation(item, resource);
+        return {
+          ...item,
+          stylistAllocations,
+          resourceId: stylistAllocations.length === 1 ? stylistAllocations[0].resourceId : null,
+          resourceName: stylistAllocations.map(({ resourceName }) => resourceName).join(", "),
+        };
+      })
+    );
+  };
+
+  const updateItemStylistPercentage = (cartKey, resourceId, value) => {
+    setCartItems(prev =>
+      prev.map(item => {
+        if ((item.cartKey || item.itemId) !== cartKey) return item;
+        return {
+          ...item,
+          stylistAllocations: updateStylistAllocationPercent(item, resourceId, value),
+        };
+      })
     );
   };
 
@@ -6635,11 +6796,6 @@ function ExploreContent({ onReady, onOpenServices }) {
                                   ₹ {item.total}
                                 </span>
                               </div>
-                              {hrEnabled && item.resourceName ? (
-                                <div style={{ fontSize: 12, color: "rgba(255,255,255,0.7)" }}>
-                                  {hrSelectorLabel}: {item.resourceName}
-                                </div>
-                              ) : null}
                               <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                                 <span style={{ minWidth: 40, color: "rgba(255,255,255,0.8)" }}>
                                   x{item.qty}
@@ -6693,40 +6849,15 @@ function ExploreContent({ onReady, onOpenServices }) {
                                 </div>
                               </div>
                               {hrEnabled ? (
-                              <div style={{ marginTop: 8 }}>
-                                <div
-                                  style={{
-                                    fontSize: 13,
-                                    color: "#F5D97A",
-                                    fontWeight: 500,
-                                    marginBottom: 4,
-                                  }}
-                                >
-                                  {hrSelectorLabel}
-                                </div>
-                                <select
-                                  value={item.resourceId || ""}
-                                  onChange={(e) => updateItemStylist(item.cartKey || item.itemId, e.target.value)}
-                                  style={{
-                                    width: "100%",
-                                    marginTop: 6,
-                                    background: "#111",
-                                    border: "1px solid #444",
-                                    color: "#fff",
-                                    padding: "8px",
-                                    borderRadius: 6,
-                                  }}
-                                >
-                                  <option value="">{hrSelectorPlaceholder}</option>
-                                  {resources
-                                    .filter((r) => r.status === "Active")
-                                    .map((r) => (
-                                      <option key={r._id} value={r._id}>
-                                        {r.name}
-                                      </option>
-                                    ))}
-                                </select>
-                              </div>
+                                <MultiStylistSelector
+                                  item={item}
+                                  resources={resources.filter((resource) => resource.status === "Active")}
+                                  resourceLabel={hrSelectorLabel}
+                                  onToggle={(resource) => updateItemStylists(item.cartKey || item.itemId, resource)}
+                                  onPercentChange={(resourceId, value) =>
+                                    updateItemStylistPercentage(item.cartKey || item.itemId, resourceId, value)
+                                  }
+                                />
                               ) : null}
                             </div>
                           ))}
@@ -6890,7 +7021,7 @@ function ExploreContent({ onReady, onOpenServices }) {
                                         Available Points: {availablePoints}
                                       </div>
                                     )}
-                                    {loyaltyWalletStatus === "ready" && availablePoints > 0 && (
+                                    {selectedPaymentMode !== "PREPAID_SESSIONS" && loyaltyWalletStatus === "ready" && availablePoints > 0 && (
                                       <div style={{ marginTop: 8 }}>
                                         <div style={{ fontSize: "12px", color: "#aaa" }}>
                                           Redeem Points
@@ -7153,11 +7284,6 @@ function ExploreContent({ onReady, onOpenServices }) {
                                     ₹ {item.total}
                                   </span>
                                 </div>
-                                {hrEnabled && item.resourceName ? (
-                                  <div style={{ fontSize: 12, color: "rgba(255,255,255,0.7)" }}>
-                                    {hrSelectorLabel}: {item.resourceName}
-                                  </div>
-                                ) : null}
                                 <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                                   <span style={{ minWidth: 40, color: "rgba(255,255,255,0.8)" }}>
                                     x{item.qty}
@@ -7211,40 +7337,15 @@ function ExploreContent({ onReady, onOpenServices }) {
                                   </div>
                                 </div>
                                 {hrEnabled ? (
-                                <div style={{ marginTop: 8 }}>
-                                  <div
-                                    style={{
-                                      fontSize: 13,
-                                      color: "#F5D97A",
-                                      fontWeight: 500,
-                                      marginBottom: 4,
-                                    }}
-                                  >
-                                    {hrSelectorLabel}
-                                  </div>
-                                  <select
-                                    value={item.resourceId || ""}
-                                    onChange={(e) => updateItemStylist(item.cartKey || item.itemId, e.target.value)}
-                                    style={{
-                                      width: "100%",
-                                      marginTop: 6,
-                                      background: "#111",
-                                      border: "1px solid #444",
-                                      color: "#fff",
-                                      padding: "8px",
-                                      borderRadius: 6,
-                                    }}
-                                  >
-                                    <option value="">{hrSelectorPlaceholder}</option>
-                                    {resources
-                                      .filter((r) => r.status === "Active")
-                                      .map((r) => (
-                                        <option key={r._id} value={r._id}>
-                                          {r.name}
-                                        </option>
-                                      ))}
-                                  </select>
-                                </div>
+                                  <MultiStylistSelector
+                                    item={item}
+                                    resources={resources.filter((resource) => resource.status === "Active")}
+                                    resourceLabel={hrSelectorLabel}
+                                    onToggle={(resource) => updateItemStylists(item.cartKey || item.itemId, resource)}
+                                    onPercentChange={(resourceId, value) =>
+                                      updateItemStylistPercentage(item.cartKey || item.itemId, resourceId, value)
+                                    }
+                                  />
                                 ) : null}
                               </div>
                             ))}
@@ -7408,7 +7509,7 @@ function ExploreContent({ onReady, onOpenServices }) {
                                           Available Points: {availablePoints}
                                         </div>
                                       )}
-                                      {loyaltyWalletStatus === "ready" && availablePoints > 0 && (
+                                      {selectedPaymentMode !== "PREPAID_SESSIONS" && loyaltyWalletStatus === "ready" && availablePoints > 0 && (
                                         <div style={{ marginTop: 8 }}>
                                           <div style={{ fontSize: "12px", color: "#aaa" }}>
                                             Redeem Points

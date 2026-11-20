@@ -8,6 +8,7 @@ const { calculateMembershipBillingPreview } = require("../utils/membershipBillin
 const { getStoredPaymentAllocation } = require("../services/paymentAllocationService");
 const {
   StylistRevenueAllocationError,
+  expandStylistRevenueLine,
   reconcileStylistBillRevenue,
 } = require("../services/stylistRevenueAllocationService");
 const {
@@ -289,14 +290,15 @@ function buildBillFinancials(bill = {}, transaction = null) {
 function getPaymentModeLabel(paymentMode) {
   if (paymentMode === "ONLINE") return "Online";
   if (paymentMode === "CASH") return "Cash";
-  if (paymentMode === "SPLIT") return "Cash + Online";
+  if (paymentMode === "CARD") return "Card";
+  if (paymentMode === "SPLIT") return "Split Payment";
   if (paymentMode === "PREPAID_VALUE") return "Prepaid Value Wallet";
   if (paymentMode === "PREPAID_SESSIONS") return "Prepaid Sessions Wallet";
   return "Not Recorded";
 }
 
 function getNormalizedPaymentMode(paymentMode) {
-  return ["ONLINE", "CASH", "SPLIT", "PREPAID_VALUE", "PREPAID_SESSIONS"].includes(paymentMode)
+  return ["ONLINE", "CASH", "CARD", "SPLIT", "PREPAID_VALUE", "PREPAID_SESSIONS"].includes(paymentMode)
     ? paymentMode
     : null;
 }
@@ -560,14 +562,17 @@ function getFinancialAccumulatorStage() {
       { $eq: ["$paymentMode", "SPLIT"] },
       { $isNumber: "$paymentBreakdown.cashAmountPaise" },
       { $isNumber: "$paymentBreakdown.onlineAmountPaise" },
+      { $isNumber: { $ifNull: ["$paymentBreakdown.cardAmountPaise", 0] } },
       { $gte: ["$paymentBreakdown.cashAmountPaise", 0] },
       { $gte: ["$paymentBreakdown.onlineAmountPaise", 0] },
+      { $gte: [{ $ifNull: ["$paymentBreakdown.cardAmountPaise", 0] }, 0] },
       {
         $eq: [
           {
             $add: [
               "$paymentBreakdown.cashAmountPaise",
               "$paymentBreakdown.onlineAmountPaise",
+              { $ifNull: ["$paymentBreakdown.cardAmountPaise", 0] },
             ],
           },
           netCollectedPaiseExpression,
@@ -615,12 +620,27 @@ function getFinancialAccumulatorStage() {
         ],
       },
     },
+    cardCollected: {
+      $sum: {
+        $cond: [
+          { $eq: ["$paymentMode", "CARD"] },
+          netCollectedExpression,
+          {
+            $cond: [
+              validSplitExpression,
+              { $divide: [{ $ifNull: ["$paymentBreakdown.cardAmountPaise", 0] }, 100] },
+              0,
+            ],
+          },
+        ],
+      },
+    },
     notRecordedCollected: {
       $sum: {
         $cond: [
           {
             $or: [
-              { $in: ["$paymentMode", ["ONLINE", "CASH"]] },
+              { $in: ["$paymentMode", ["ONLINE", "CASH", "CARD"]] },
               validSplitExpression,
             ],
           },
@@ -669,6 +689,7 @@ function buildFinancialSummary(row = {}) {
     netCollected: row.netCollected || 0,
     onlineCollected: row.onlineCollected || 0,
     cashCollected: row.cashCollected || 0,
+    cardCollected: row.cardCollected || 0,
     notRecordedCollected: row.notRecordedCollected || 0,
     totalBills: row.totalBills || row.orders || 0,
     pointsDistributed: row.pointsDistributed || 0,
@@ -774,6 +795,7 @@ exports.getDashboardSummary = async (req, res) => {
         todayNetCollected: todayFinancials.netCollected,
         todayOnlineCollected: todayFinancials.onlineCollected,
         todayCashCollected: todayFinancials.cashCollected,
+        todayCardCollected: todayFinancials.cardCollected,
         todayNotRecordedCollected: todayFinancials.notRecordedCollected,
         todayPrepaidReporting,
         monthRevenue,
@@ -786,6 +808,7 @@ exports.getDashboardSummary = async (req, res) => {
         monthNetCollected: monthFinancials.netCollected,
         monthOnlineCollected: monthFinancials.onlineCollected,
         monthCashCollected: monthFinancials.cashCollected,
+        monthCardCollected: monthFinancials.cardCollected,
         monthNotRecordedCollected: monthFinancials.notRecordedCollected,
         monthPrepaidReporting,
         loyaltyEarned: loyaltyRow.earned || 0,
@@ -860,6 +883,7 @@ exports.getFinancialYearMonthly = async (req, res) => {
         netCollected: m.netCollected || 0,
         onlineCollected: m.onlineCollected || 0,
         cashCollected: m.cashCollected || 0,
+        cardCollected: m.cardCollected || 0,
         notRecordedCollected: m.notRecordedCollected || 0,
         totalBills: m.totalBills || m.orders || 0,
         orders: m.orders || 0,
@@ -888,6 +912,7 @@ exports.getFinancialYearMonthly = async (req, res) => {
         netCollected: row.netCollected || 0,
         onlineCollected: row.onlineCollected || 0,
         cashCollected: row.cashCollected || 0,
+        cardCollected: row.cardCollected || 0,
         notRecordedCollected: row.notRecordedCollected || 0,
         totalBills: row.totalBills || row.orders || 0,
         orders: row.orders || 0,
@@ -1020,10 +1045,12 @@ exports.getDailyTrend = async (req, res) => {
         netCollected: summary.netCollected,
         onlineCollected: summary.onlineCollected,
         cashCollected: summary.cashCollected,
+        cardCollected: summary.cardCollected,
         notRecordedCollected: summary.notRecordedCollected,
         paymentBreakdown: {
           onlineCollected: summary.onlineCollected,
           cashCollected: summary.cashCollected,
+          cardCollected: summary.cardCollected,
           notRecordedCollected: summary.notRecordedCollected,
         },
         prepaidReporting: prepaidDaily.get(date) || normalizeReportingRows(),
@@ -1203,6 +1230,7 @@ exports.getBillsSummary = async (req, res) => {
         pointsDistributed: summary.pointsDistributed,
         onlineCollected: summary.onlineCollected,
         cashCollected: summary.cashCollected,
+        cardCollected: summary.cardCollected,
         notRecordedCollected: summary.notRecordedCollected,
         prepaidReporting,
       },
@@ -1299,14 +1327,15 @@ exports.getStylistPerformance = async (req, res) => {
 
     for (const bill of reportingBills) {
       const performedStylistKeys = new Set();
-      let allocation;
+      let attributedLines;
       try {
         const breakdown = buildReportItemBreakdown(bill, membershipMap);
-        allocation = reconcileStylistBillRevenue({
+        const allocation = reconcileStylistBillRevenue({
           bill,
           lineBreakdown: breakdown.lines,
           membershipAllocationUnavailable: breakdown.membershipAllocationUnavailable,
         });
+        attributedLines = allocation.lines.flatMap(expandStylistRevenueLine);
       } catch (error) {
         if (!(error instanceof StylistRevenueAllocationError)) throw error;
         const financials = buildUnreconciledBillFinancials(bill);
@@ -1317,7 +1346,7 @@ exports.getStylistPerformance = async (req, res) => {
         });
         continue;
       }
-      for (const { item, grossRevenue, allocatedDiscounts, netRevenue } of allocation.lines) {
+      for (const { item, grossRevenue, allocatedDiscounts, netRevenue } of attributedLines) {
         const key = getStylistRowKey(item);
         const existing = grouped.get(key) || {
           _id: key,

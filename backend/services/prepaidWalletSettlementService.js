@@ -111,9 +111,10 @@ function assertPrepaidRequestContract({ paymentMode, paymentBreakdown, authoriza
   if (paymentBreakdown != null) {
     const cash = Number(paymentBreakdown?.cashAmountPaise || 0);
     const online = Number(paymentBreakdown?.onlineAmountPaise || 0);
-    if (cash !== 0 || online !== 0) {
+    const card = Number(paymentBreakdown?.cardAmountPaise || 0);
+    if (cash !== 0 || online !== 0 || card !== 0) {
       throw createPublicError(
-        "Wallet payment cannot be combined with Cash or Online payment",
+        "Wallet payment cannot be combined with Cash, Online, or Card payment",
         "mixed_prepaid_payment_not_supported"
       );
     }

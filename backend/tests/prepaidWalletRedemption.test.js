@@ -379,6 +379,11 @@ test("prepaid value permits a consistent manual discount but rejects stacking an
     billing: { pointsRedeemed: 10, discountAmount: 0 },
     authoritativeFinancials: { discountAmount: 0 },
   }), (error) => error.code === "prepaid_discounts_or_rewards_not_allowed");
+  assert.throws(() => assertNoPrepaidDiscountsOrRewards({
+    paymentMode: "PREPAID_SESSIONS",
+    billing: { pointsRedeemed: 10, discountAmount: 0 },
+    authoritativeFinancials: { discountAmount: 0 },
+  }), (error) => error.code === "prepaid_discounts_or_rewards_not_allowed");
 });
 
 test("prepaid settlement snapshot is validated and persisted exactly once in the transaction", async () => {

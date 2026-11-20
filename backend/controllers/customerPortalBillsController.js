@@ -23,7 +23,7 @@ function hasStoredNumber(value) {
 }
 
 function normalizePaymentMode(paymentMode) {
-  return ["ONLINE", "CASH", "SPLIT", "PREPAID_VALUE", "PREPAID_SESSIONS"].includes(paymentMode)
+  return ["ONLINE", "CASH", "CARD", "SPLIT", "PREPAID_VALUE", "PREPAID_SESSIONS"].includes(paymentMode)
     ? paymentMode
     : null;
 }

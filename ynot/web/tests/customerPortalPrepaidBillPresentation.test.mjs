@@ -27,5 +27,7 @@ test("Customer Portal keeps standard payment modes and amount-paid presentation"
   assert.match(pageSource, /if \(bill\.paymentMode === "SPLIT"\)/);
   assert.match(pageSource, /if \(bill\.paymentMode === "CASH"\) return "Cash"/);
   assert.match(pageSource, /if \(bill\.paymentMode === "ONLINE"\) return "Online"/);
+  assert.match(pageSource, /if \(bill\.paymentMode === "CARD"\) return "Card"/);
+  assert.match(pageSource, /Number\(breakdown\.cardAmountPaise\) > 0/);
   assert.match(pageSource, /bill\.prepaidSettlement \? "Balance Due" : "Amount Paid"/);
 });

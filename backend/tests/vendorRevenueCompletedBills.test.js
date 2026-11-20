@@ -1746,6 +1746,38 @@ test("billing completion accepts ONLINE paymentMode without changing financials"
   });
 });
 
+test("billing completion persists CARD independently from Online and Cash", async () => {
+  const billing = buildCompletionBilling();
+
+  await withMockedCompletionFlow(billing, async (state) => {
+    const res = buildCompletionResponse();
+    await billingController.completeBillingSession(
+      {
+        body: {
+          billingId: COMPLETED_BILL_ID,
+          paymentMode: "CARD",
+          paymentBreakdown: {
+            cashAmountPaise: 0,
+            onlineAmountPaise: 0,
+            cardAmountPaise: 80000,
+          },
+        },
+      },
+      res
+    );
+
+    assert.equal(res.statusCode, 200);
+    assert.equal(state.closeUpdate.paymentMode, "CARD");
+    assert.deepEqual(state.closeUpdate.paymentBreakdown, {
+      cashAmountPaise: 0,
+      onlineAmountPaise: 0,
+      cardAmountPaise: 80000,
+    });
+    assert.equal(state.transactionPayload.paymentMode, "CARD");
+    assert.deepEqual(state.transactionPayload.paymentBreakdown, state.closeUpdate.paymentBreakdown);
+  });
+});
+
 test("billing completion derives SPLIT and persists the same allocation atomically", async () => {
   const billing = buildCompletionBilling();
 
@@ -1769,6 +1801,38 @@ test("billing completion derives SPLIT and persists the same allocation atomical
     });
     assert.deepEqual(state.transactionPayload.paymentBreakdown, state.closeUpdate.paymentBreakdown);
     assert.equal(state.transactionPayload.paymentMode, "SPLIT");
+  });
+});
+
+test("billing completion persists Cash, Online and Card split allocations atomically", async () => {
+  const billing = buildCompletionBilling();
+
+  await withMockedCompletionFlow(billing, async (state) => {
+    const res = buildCompletionResponse();
+    await billingController.completeBillingSession(
+      {
+        body: {
+          billingId: COMPLETED_BILL_ID,
+          paymentMode: "SPLIT",
+          paymentBreakdown: {
+            cashAmountPaise: 30000,
+            onlineAmountPaise: 20000,
+            cardAmountPaise: 30000,
+          },
+        },
+      },
+      res
+    );
+
+    assert.equal(res.statusCode, 200);
+    assert.equal(state.closeUpdate.paymentMode, "SPLIT");
+    assert.deepEqual(state.closeUpdate.paymentBreakdown, {
+      cashAmountPaise: 30000,
+      onlineAmountPaise: 20000,
+      cardAmountPaise: 30000,
+    });
+    assert.equal(state.transactionPayload.paymentMode, "SPLIT");
+    assert.deepEqual(state.transactionPayload.paymentBreakdown, state.closeUpdate.paymentBreakdown);
   });
 });
 

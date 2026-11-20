@@ -18,9 +18,17 @@ export function formatReceiptPayment(receiptSnapshot = {}) {
   const breakdown = receiptSnapshot.paymentBreakdown || {};
   const cash = formatReceiptPaise(breakdown.cashAmountPaise);
   const online = formatReceiptPaise(breakdown.onlineAmountPaise);
-  if (mode === "SPLIT" && cash && online) return `Cash ${cash} + Online ${online}`;
+  const card = formatReceiptPaise(breakdown.cardAmountPaise);
+  if (mode === "SPLIT") {
+    return [
+      Number(breakdown.cashAmountPaise) > 0 ? `Cash ${cash}` : "",
+      Number(breakdown.onlineAmountPaise) > 0 ? `Online ${online}` : "",
+      Number(breakdown.cardAmountPaise) > 0 ? `Card ${card}` : "",
+    ].filter(Boolean).join(" + ") || "Split Payment";
+  }
   if (mode === "CASH") return cash ? `Cash ${cash}` : "Cash";
   if (mode === "ONLINE") return online ? `Online ${online}` : "Online";
+  if (mode === "CARD") return "Card";
   if (mode === "PREPAID_VALUE" && receiptSnapshot.prepaidSettlement) return "Prepaid Wallet";
   if (mode === "PREPAID_SESSIONS" && receiptSnapshot.prepaidSettlement) return "Prepaid Package";
   return "Not Recorded";

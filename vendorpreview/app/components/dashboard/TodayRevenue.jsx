@@ -100,12 +100,20 @@ function getBillFinancials(bill) {
 
 function getPaymentModeLabel(bill) {
   if (bill?.paymentMode === "SPLIT" && bill?.paymentBreakdown) {
-    return `Cash ${currencyFmt.format(Number(bill.paymentBreakdown.cashAmountPaise || 0) / 100)} + Online ${currencyFmt.format(Number(bill.paymentBreakdown.onlineAmountPaise || 0) / 100)}`;
+    return [
+      Number(bill.paymentBreakdown.cashAmountPaise) > 0
+        ? `Cash ${currencyFmt.format(Number(bill.paymentBreakdown.cashAmountPaise) / 100)}` : "",
+      Number(bill.paymentBreakdown.onlineAmountPaise) > 0
+        ? `Online ${currencyFmt.format(Number(bill.paymentBreakdown.onlineAmountPaise) / 100)}` : "",
+      Number(bill.paymentBreakdown.cardAmountPaise) > 0
+        ? `Card ${currencyFmt.format(Number(bill.paymentBreakdown.cardAmountPaise) / 100)}` : "",
+    ].filter(Boolean).join(" + ") || "Split Payment";
   }
   if (bill?.paymentModeLabel) return bill.paymentModeLabel;
   if (bill?.paymentMode === "ONLINE") return "Online";
   if (bill?.paymentMode === "CASH") return "Cash";
-  if (bill?.paymentMode === "SPLIT") return "Cash + Online";
+  if (bill?.paymentMode === "CARD") return "Card";
+  if (bill?.paymentMode === "SPLIT") return "Split Payment";
   return "Not Recorded";
 }
 
@@ -126,6 +134,7 @@ function createEmptyRevenueSummary() {
     netCollected: 0,
     onlineCollected: 0,
     cashCollected: 0,
+    cardCollected: 0,
     notRecordedCollected: 0,
     pointsDistributed: 0,
     prepaidReporting: {},
@@ -142,6 +151,7 @@ function normalizeRevenueSummary(source) {
     netCollected: getNumber(summary.netCollected),
     onlineCollected: getNumber(summary.onlineCollected),
     cashCollected: getNumber(summary.cashCollected),
+    cardCollected: getNumber(summary.cardCollected),
     notRecordedCollected: getNumber(summary.notRecordedCollected),
     pointsDistributed: getNumber(summary.pointsDistributed),
     prepaidReporting: summary.prepaidReporting || {},
@@ -403,6 +413,10 @@ function TodayRevenue({
               <div className="today-revenue-payment-row">
                 <span>Cash</span>
                 <strong>{currencyFmt.format(summary.cashCollected || 0)}</strong>
+              </div>
+              <div className="today-revenue-payment-row">
+                <span>Card</span>
+                <strong>{currencyFmt.format(summary.cardCollected || 0)}</strong>
               </div>
               <div className="today-revenue-payment-row">
                 <span>Not Recorded</span>

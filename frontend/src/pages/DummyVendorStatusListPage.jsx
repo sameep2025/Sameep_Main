@@ -532,7 +532,7 @@ export default function DummyVendorStatusListPage() {
     <div>
       <h2>Vendors - {decodeURIComponent(status || "")} </h2>
       {/* Top navbar actions for selected vendor */}
-      <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', padding: 10, background: '#f8fafc', border: '1px solid #e5e7eb', borderRadius: 8, marginBottom: 12 }}>
+      <div style={{ position: 'sticky', top: 0, zIndex: 20, display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', padding: 10, background: '#f8fafc', border: '1px solid #e5e7eb', borderRadius: 8, marginBottom: 12, boxShadow: '0 4px 10px rgba(15, 23, 42, 0.08)' }}>
         <div style={{ fontWeight: 600, color: '#334155', marginRight: 8 }}>Actions:</div>
         <button
           onClick={openAuthorizedVendorSession}

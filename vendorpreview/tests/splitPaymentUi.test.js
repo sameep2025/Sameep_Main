@@ -46,6 +46,34 @@ test("editing either amount auto-balances the other in paise", () => {
   assert.equal(online.onlineAmountPaise, 35025);
 });
 
+test("Card participates in two-way and three-way split auto-balancing", () => {
+  const cashAndCard = getBalancedPaymentInputs({
+    editedField: "card",
+    value: "300",
+    totalPaise: 50000,
+    cashInput: "200.00",
+    onlineInput: "300.00",
+    cardInput: "0.00",
+    lastNonCardField: "cash",
+  });
+  assert.equal(cashAndCard.cashAmountPaise, 20000);
+  assert.equal(cashAndCard.onlineAmountPaise, 0);
+  assert.equal(cashAndCard.cardAmountPaise, 30000);
+
+  const threeWay = getBalancedPaymentInputs({
+    editedField: "card",
+    value: "100",
+    totalPaise: 450000,
+    cashInput: "1500.00",
+    onlineInput: "3000.00",
+    cardInput: "0.00",
+    lastNonCardField: "cash",
+  });
+  assert.equal(threeWay.cashAmountPaise, 150000);
+  assert.equal(threeWay.onlineAmountPaise, 290000);
+  assert.equal(threeWay.cardAmountPaise, 10000);
+});
+
 test("edited allocation rebalances when discounts, rewards or GST change the payable", () => {
   const discounted = getBalancedPaymentInputs({
     editedField: "cash",
@@ -74,13 +102,35 @@ test("empty, over-payable and excess-decimal input remains invalid without clamp
   assert.match(excessive.error, /cannot exceed/);
 });
 
-test("payment UI uses two mobile-friendly amount inputs and no mode buttons", () => {
+test("payment UI defaults to Online and adds Card while preserving split inputs", () => {
+  assert.match(source, /useState\("ONLINE"\)/);
+  assert.match(source, /\["ONLINE", "UPI"\]/);
+  assert.match(source, /\["CARD", "Card"\]/);
+  assert.match(source, /standardPaymentMode === "SPLIT"/);
   assert.match(source, /Cash Amount/);
   assert.match(source, /Online \/ UPI Amount/);
+  assert.match(source, /Card Amount/);
   assert.match(source, /inputMode="decimal"/);
-  assert.equal(source.includes('setPaymentMode('), false);
+  assert.match(source, /cardAmountPaise: paymentFinalPayablePaise/);
   assert.match(css, /\.quick-billing-payment-inputs/);
+  assert.match(css, /\.quick-billing-standard-methods/);
+  assert.doesNotMatch(source, /Cash \/ Online \/ Card \/ Split/);
+  assert.doesNotMatch(source, /payment selected\./);
+  assert.match(source, /setSelectedPaymentMode\("STANDARD"\);[\s\S]*setStandardPaymentMode\(mode\)/);
+  assert.doesNotMatch(
+    css,
+    /\.quick-billing-payment-options,\s*\.quick-billing-standard-methods,\s*\.quick-billing-payment-inputs/
+  );
   assert.match(css, /min-height:\s*44px/);
   assert.match(receiptSource, /mode === "SPLIT"/);
-  assert.match(receiptSource, /Cash \$\{cash\} \+ Online \$\{online\}/);
+  assert.match(receiptSource, /mode === "CARD"/);
+  assert.match(receiptSource, /Number\(breakdown\.cardAmountPaise\) > 0/);
+});
+
+test("prepaid package selection clears and hides loyalty redemption", () => {
+  assert.match(source, /selectedPaymentMode !== "PREPAID_SESSIONS"/);
+  assert.match(
+    source,
+    /if \(selectedPaymentMode !== "PREPAID_SESSIONS"\) return;[\s\S]*setRedeemPoints\(0\)/
+  );
 });

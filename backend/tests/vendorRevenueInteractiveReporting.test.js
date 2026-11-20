@@ -125,6 +125,7 @@ test("daily trend uses authoritative IST financial buckets and fills zero-activi
     assert.deepEqual(res.payload.data[0].paymentBreakdown, {
       onlineCollected: 40,
       cashCollected: 60,
+      cardCollected: 0,
       notRecordedCollected: 0,
     });
     assert.equal(res.payload.data[0].prepaidReporting.valueWalletUsed, 50);

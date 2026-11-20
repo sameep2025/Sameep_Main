@@ -35,6 +35,84 @@ test("derives cash, online and split modes from integer-paise allocations", () =
   );
 });
 
+test("records standalone Card and all supported split combinations", () => {
+  assert.deepEqual(
+    buildPaymentAllocation({
+      finalPaidAmount: 500,
+      paymentMode: "CARD",
+      paymentBreakdown: {
+        cashAmountPaise: 0,
+        onlineAmountPaise: 0,
+        cardAmountPaise: 50000,
+      },
+    }),
+    {
+      paymentMode: "CARD",
+      paymentBreakdown: {
+        cashAmountPaise: 0,
+        onlineAmountPaise: 0,
+        cardAmountPaise: 50000,
+      },
+      finalPayablePaise: 50000,
+    }
+  );
+  for (const paymentBreakdown of [
+    { cashAmountPaise: 10000, onlineAmountPaise: 0, cardAmountPaise: 40000 },
+    { cashAmountPaise: 0, onlineAmountPaise: 10000, cardAmountPaise: 40000 },
+    { cashAmountPaise: 10000, onlineAmountPaise: 15000, cardAmountPaise: 25000 },
+  ]) {
+    const allocation = buildPaymentAllocation({
+      finalPaidAmount: 500,
+      paymentMode: "SPLIT",
+      paymentBreakdown,
+    });
+    assert.equal(allocation.paymentMode, "SPLIT");
+    assert.deepEqual(allocation.paymentBreakdown, paymentBreakdown);
+  }
+  assert.throws(
+    () => buildPaymentAllocation({
+      finalPaidAmount: 500,
+      paymentMode: "SPLIT",
+      paymentBreakdown: {
+        cashAmountPaise: 0,
+        onlineAmountPaise: 0,
+        cardAmountPaise: 50000,
+      },
+    }),
+    (error) => error.code === "split_requires_multiple_methods"
+  );
+  assert.deepEqual(
+    getStoredPaymentAllocation({ paymentMode: "CARD", finalPaidAmount: 125.5 }),
+    {
+      paymentMode: "CARD",
+      paymentBreakdown: {
+        cashAmountPaise: 0,
+        onlineAmountPaise: 0,
+        cardAmountPaise: 12550,
+      },
+    }
+  );
+  assert.deepEqual(
+    getStoredPaymentAllocation({
+      paymentMode: "SPLIT",
+      finalPaidAmount: 500,
+      paymentBreakdown: {
+        cashAmountPaise: 10000,
+        onlineAmountPaise: 15000,
+        cardAmountPaise: 25000,
+      },
+    }),
+    {
+      paymentMode: "SPLIT",
+      paymentBreakdown: {
+        cashAmountPaise: 10000,
+        onlineAmountPaise: 15000,
+        cardAmountPaise: 25000,
+      },
+    }
+  );
+});
+
 test("supports decimal payable amounts without floating-point equality", () => {
   const result = buildPaymentAllocation({
     finalPaidAmount: 1700.55,

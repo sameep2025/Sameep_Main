@@ -120,6 +120,7 @@ const TransactionSchema = new mongoose.Schema(
     paymentBreakdown: {
       cashAmountPaise: { type: Number, min: 0, default: undefined },
       onlineAmountPaise: { type: Number, min: 0, default: undefined },
+      cardAmountPaise: { type: Number, min: 0, default: undefined },
     },
 
     prepaidSettlementSnapshot: {

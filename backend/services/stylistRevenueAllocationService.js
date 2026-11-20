@@ -63,6 +63,90 @@ function allocateProportionally(totalPaise, weights) {
   return allocations.map((row) => row.paise);
 }
 
+function allocateByBasisPoints(totalPaise, allocations = []) {
+  if (!Number.isSafeInteger(totalPaise) || totalPaise < 0) {
+    throw new StylistRevenueAllocationError(
+      "Stylist revenue must use non-negative integer paise",
+      "invalid_stylist_revenue"
+    );
+  }
+  const totalBps = allocations.reduce((sum, allocation) => {
+    const allocationBps = Number(allocation?.allocationBps);
+    if (!Number.isInteger(allocationBps) || allocationBps < 0 || allocationBps > 10000) {
+      throw new StylistRevenueAllocationError(
+        "Persisted stylist allocation percentage is invalid",
+        "invalid_stylist_percentage"
+      );
+    }
+    return sum + allocationBps;
+  }, 0);
+  if (allocations.length === 0 || totalBps !== 10000) {
+    throw new StylistRevenueAllocationError(
+      "Persisted stylist allocation percentages do not total 100%",
+      "stylist_percentage_total_invalid"
+    );
+  }
+
+  const denominator = 10000n;
+  const rows = allocations.map((allocation, index) => {
+    const numerator = BigInt(totalPaise) * BigInt(allocation.allocationBps);
+    return {
+      index,
+      paise: Number(numerator / denominator),
+      remainder: numerator % denominator,
+    };
+  });
+  let remaining = totalPaise - rows.reduce((sum, row) => sum + row.paise, 0);
+  [...rows]
+    .sort((left, right) => {
+      if (left.remainder === right.remainder) return left.index - right.index;
+      return left.remainder > right.remainder ? -1 : 1;
+    })
+    .forEach((row) => {
+      if (remaining <= 0) return;
+      rows[row.index].paise += 1;
+      remaining -= 1;
+    });
+  return rows.map(({ paise }) => paise);
+}
+
+function expandStylistRevenueLine(line = {}) {
+  const allocations = Array.isArray(line.item?.stylistAllocations)
+    ? line.item.stylistAllocations
+    : [];
+  if (allocations.length === 0) return [line];
+  const resourceIds = new Set();
+  allocations.forEach((allocation) => {
+    const resourceId = String(allocation?.resourceId || "").trim();
+    if (!resourceId || resourceIds.has(resourceId)) {
+      throw new StylistRevenueAllocationError(
+        "Persisted stylist assignment is invalid",
+        resourceId ? "duplicate_stylist" : "invalid_stylist_id"
+      );
+    }
+    resourceIds.add(resourceId);
+  });
+
+  const grossAllocations = allocateByBasisPoints(
+    toPaise(line.grossRevenue, "line.grossRevenue"),
+    allocations
+  );
+  const discountAllocations = allocateByBasisPoints(
+    toPaise(line.allocatedDiscounts, "line.allocatedDiscounts"),
+    allocations
+  );
+  return allocations.map((allocation, index) => ({
+    item: {
+      ...line.item,
+      resourceId: allocation.resourceId,
+      resourceName: allocation.resourceName,
+    },
+    grossRevenue: fromPaise(grossAllocations[index]),
+    allocatedDiscounts: fromPaise(discountAllocations[index]),
+    netRevenue: fromPaise(grossAllocations[index] - discountAllocations[index]),
+  }));
+}
+
 function reconcileStylistBillRevenue({
   bill = {},
   lineBreakdown = [],
@@ -170,6 +254,8 @@ function reconcileStylistBillRevenue({
 
 module.exports = {
   StylistRevenueAllocationError,
+  allocateByBasisPoints,
   allocateProportionally,
+  expandStylistRevenueLine,
   reconcileStylistBillRevenue,
 };

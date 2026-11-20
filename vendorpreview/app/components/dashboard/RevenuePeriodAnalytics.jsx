@@ -37,6 +37,7 @@ function emptySummary() {
     netCollected: 0,
     onlineCollected: 0,
     cashCollected: 0,
+    cardCollected: 0,
     notRecordedCollected: 0,
     prepaidReporting: {},
   };
@@ -52,6 +53,7 @@ function normalizeSummary(source) {
     netCollected: Number(summary.netCollected || 0),
     onlineCollected: Number(summary.onlineCollected || 0),
     cashCollected: Number(summary.cashCollected || 0),
+    cardCollected: Number(summary.cardCollected || 0),
     notRecordedCollected: Number(summary.notRecordedCollected || 0),
     prepaidReporting: summary.prepaidReporting || {},
   };
@@ -90,7 +92,14 @@ function getBillFinancials(bill) {
 
 function getPaymentLabel(bill) {
   if (bill?.paymentMode === "SPLIT" && bill?.paymentBreakdown) {
-    return `Cash ${currencyFmt.format(Number(bill.paymentBreakdown.cashAmountPaise || 0) / 100)} + Online ${currencyFmt.format(Number(bill.paymentBreakdown.onlineAmountPaise || 0) / 100)}`;
+    return [
+      Number(bill.paymentBreakdown.cashAmountPaise) > 0
+        ? `Cash ${currencyFmt.format(Number(bill.paymentBreakdown.cashAmountPaise) / 100)}` : "",
+      Number(bill.paymentBreakdown.onlineAmountPaise) > 0
+        ? `Online ${currencyFmt.format(Number(bill.paymentBreakdown.onlineAmountPaise) / 100)}` : "",
+      Number(bill.paymentBreakdown.cardAmountPaise) > 0
+        ? `Card ${currencyFmt.format(Number(bill.paymentBreakdown.cardAmountPaise) / 100)}` : "",
+    ].filter(Boolean).join(" + ") || "Split Payment";
   }
   return bill?.paymentModeLabel || bill?.paymentMode || "Not Recorded";
 }
@@ -124,6 +133,7 @@ function SummaryGrid({ summary, title }) {
       <div className="revenue-analytics-payment-grid">
         <span>Cash <strong>{currencyFmt.format(summary.cashCollected)}</strong></span>
         <span>Online <strong>{currencyFmt.format(summary.onlineCollected)}</strong></span>
+        <span>Card <strong>{currencyFmt.format(summary.cardCollected)}</strong></span>
         <span>Not Recorded <strong>{currencyFmt.format(summary.notRecordedCollected)}</strong></span>
       </div>
     </div>

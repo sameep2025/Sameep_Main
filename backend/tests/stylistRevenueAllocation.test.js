@@ -4,6 +4,7 @@ const test = require("node:test");
 const vendorDashboardController = require("../controllers/vendorDashboardController");
 const {
   StylistRevenueAllocationError,
+  expandStylistRevenueLine,
   reconcileStylistBillRevenue,
 } = require("../services/stylistRevenueAllocationService");
 
@@ -108,6 +109,47 @@ test("loyalty redemption and prepaid settlement are not stylist discounts", () =
     assert.equal(result.totals.allocatedDiscounts, 0);
     assert.equal(result.totals.netRevenue, 500);
   }
+});
+
+test("splits reconciled stylist revenue by saved percentages without duplication", () => {
+  const line = {
+    item: item(1000, {
+      qty: 1,
+      stylistAllocations: [
+        { resourceId: "a", resourceName: "A", allocationBps: 6000 },
+        { resourceId: "b", resourceName: "B", allocationBps: 4000 },
+      ],
+    }),
+    grossRevenue: 1000,
+    allocatedDiscounts: 100,
+    netRevenue: 900,
+  };
+  const split = expandStylistRevenueLine(line);
+  assert.deepEqual(split.map((row) => row.grossRevenue), [600, 400]);
+  assert.deepEqual(split.map((row) => row.allocatedDiscounts), [60, 40]);
+  assert.deepEqual(split.map((row) => row.netRevenue), [540, 360]);
+  assert.equal(split.reduce((sum, row) => sum + row.netRevenue, 0), 900);
+});
+
+test("three-way stylist allocation rounds paise deterministically and historical lines remain unchanged", () => {
+  const line = {
+    item: item(10.01, {
+      stylistAllocations: [
+        { resourceId: "a", resourceName: "A", allocationBps: 3333 },
+        { resourceId: "b", resourceName: "B", allocationBps: 3333 },
+        { resourceId: "c", resourceName: "C", allocationBps: 3334 },
+      ],
+    }),
+    grossRevenue: 10.01,
+    allocatedDiscounts: 0,
+    netRevenue: 10.01,
+  };
+  const split = expandStylistRevenueLine(line);
+  assert.deepEqual(split.map((row) => row.netRevenue), [3.34, 3.33, 3.34]);
+  assert.equal(split.reduce((sum, row) => sum + row.netRevenue, 0), 10.01);
+
+  const historical = { item: item(500, { resourceId: "legacy", resourceName: "Legacy" }), grossRevenue: 500, allocatedDiscounts: 0, netRevenue: 500 };
+  assert.deepEqual(expandStylistRevenueLine(historical), [historical]);
 });
 
 test("uses exact GST line discount snapshots for inclusive and exclusive bills", () => {

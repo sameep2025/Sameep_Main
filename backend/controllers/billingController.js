@@ -68,6 +68,9 @@ const {
   buildPrepaidBillingPresentation,
 } = require("../services/prepaidBillingPresentation");
 const {
+  normalizeCartStylistAllocations,
+} = require("../services/billingStylistAllocationService");
+const {
   buildPublicBillPath,
   buildPublicBillUrl,
   createBillAccessToken,
@@ -1453,7 +1456,7 @@ exports.updateBillingCart = async (req, res) => {
     }
 
     let cartSubtotal = 0;
-    const normalizedCartItems = [];
+    let normalizedCartItems = [];
 
     cartItems.forEach((item) => {
       const qty = normalizeBillingQuantity(item?.qty);
@@ -1480,6 +1483,11 @@ exports.updateBillingCart = async (req, res) => {
     if (normalizedCartItems.length !== cartItems.length) {
       return res.status(400).json({ success: false, message: "Invalid billing item quantity or price" });
     }
+
+    normalizedCartItems = await normalizeCartStylistAllocations({
+      cartItems: normalizedCartItems,
+      vendorId: req.vendorWriteAuth?.vendorId,
+    });
 
     const hasFinancialSnapshot =
       grossAmount !== undefined || discountAmount !== undefined;
@@ -1546,6 +1554,13 @@ exports.updateBillingCart = async (req, res) => {
     });
   } catch (err) {
     console.error(err);
+    if (err?.statusCode === 400) {
+      return res.status(400).json({
+        success: false,
+        message: err.publicMessage || err.message,
+        code: err.code || "invalid_billing_cart",
+      });
+    }
     res.status(500).json({ success: false, message: "Failed to update cart" });
   }
 };

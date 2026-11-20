@@ -49,6 +49,7 @@ function createEmptyRevenueSummary() {
     netCollected: 0,
     onlineCollected: 0,
     cashCollected: 0,
+    cardCollected: 0,
     notRecordedCollected: 0,
     totalDistributed: 0,
     prepaidReporting: {},
@@ -65,6 +66,7 @@ function normalizeRevenueSummary(source) {
     netCollected: getNumber(summary.netCollected),
     onlineCollected: getNumber(summary.onlineCollected),
     cashCollected: getNumber(summary.cashCollected),
+    cardCollected: getNumber(summary.cardCollected),
     notRecordedCollected: getNumber(summary.notRecordedCollected),
     totalDistributed: getNumber(summary.pointsDistributed),
     prepaidReporting: summary.prepaidReporting || {},
@@ -302,6 +304,10 @@ export default function MonthRevenue({
               <div className="revenue-panel-payment-row">
                 <span>Cash</span>
                 <strong>{currencyFmt.format(summary.cashCollected || 0)}</strong>
+              </div>
+              <div className="revenue-panel-payment-row">
+                <span>Card</span>
+                <strong>{currencyFmt.format(summary.cardCollected || 0)}</strong>
               </div>
               <div className="revenue-panel-payment-row">
                 <span>Not Recorded</span>

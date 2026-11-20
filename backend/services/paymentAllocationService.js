@@ -1,4 +1,4 @@
-const PAYMENT_MODES = Object.freeze(["CASH", "ONLINE", "SPLIT"]);
+const PAYMENT_MODES = Object.freeze(["CASH", "ONLINE", "CARD", "SPLIT"]);
 
 class PaymentAllocationError extends Error {
   constructor(message, code = "invalid_payment_allocation") {
@@ -21,7 +21,7 @@ function moneyToPaise(value) {
 function normalizeLegacyPaymentMode(value) {
   if (value === undefined || value === null || value === "") return "ONLINE";
   if (typeof value !== "string") return null;
-  return ["ONLINE", "CASH"].includes(value) ? value : null;
+  return ["ONLINE", "CASH", "CARD"].includes(value) ? value : null;
 }
 
 function parseSubmittedPaise(value, label) {
@@ -37,10 +37,18 @@ function parseSubmittedPaise(value, label) {
   return value;
 }
 
-function derivePaymentMode(cashAmountPaise, onlineAmountPaise, zeroPayableMode = "ONLINE") {
-  if (cashAmountPaise > 0 && onlineAmountPaise > 0) return "SPLIT";
+function derivePaymentMode(
+  cashAmountPaise,
+  onlineAmountPaise,
+  cardAmountPaise = 0,
+  zeroPayableMode = "ONLINE"
+) {
+  const positiveMethodCount = [cashAmountPaise, onlineAmountPaise, cardAmountPaise]
+    .filter((amount) => amount > 0).length;
+  if (positiveMethodCount >= 2) return "SPLIT";
   if (cashAmountPaise > 0) return "CASH";
   if (onlineAmountPaise > 0) return "ONLINE";
+  if (cardAmountPaise > 0) return "CARD";
   return normalizeLegacyPaymentMode(zeroPayableMode) || "ONLINE";
 }
 
@@ -50,13 +58,14 @@ function buildPaymentAllocation({ finalPaidAmount, paymentMode, paymentBreakdown
   if (paymentBreakdown === undefined || paymentBreakdown === null) {
     const legacyMode = normalizeLegacyPaymentMode(paymentMode);
     if (!legacyMode) {
-      throw new PaymentAllocationError("Invalid payment mode. Please choose Online or Cash.");
+      throw new PaymentAllocationError("Invalid payment mode. Please choose Online, Cash or Card.");
     }
     return {
       paymentMode: legacyMode,
       paymentBreakdown: {
         cashAmountPaise: legacyMode === "CASH" ? finalPayablePaise : 0,
         onlineAmountPaise: legacyMode === "ONLINE" ? finalPayablePaise : 0,
+        ...(legacyMode === "CARD" ? { cardAmountPaise: finalPayablePaise } : {}),
       },
       finalPayablePaise,
     };
@@ -68,17 +77,38 @@ function buildPaymentAllocation({ finalPaidAmount, paymentMode, paymentBreakdown
 
   const cashAmountPaise = parseSubmittedPaise(paymentBreakdown.cashAmountPaise, "Cash");
   const onlineAmountPaise = parseSubmittedPaise(paymentBreakdown.onlineAmountPaise, "Online");
+  const cardAmountPaise = paymentBreakdown.cardAmountPaise == null
+    ? 0
+    : parseSubmittedPaise(paymentBreakdown.cardAmountPaise, "Card");
 
-  if (cashAmountPaise + onlineAmountPaise !== finalPayablePaise) {
+  if (cashAmountPaise + onlineAmountPaise + cardAmountPaise !== finalPayablePaise) {
     throw new PaymentAllocationError(
-      "Cash and Online amounts must equal the current final payable amount. Please review the payment split and try again.",
+      "Payment amounts must equal the current final payable amount. Please review the payment method and try again.",
       "payment_allocation_mismatch"
     );
   }
 
+  const derivedMode = derivePaymentMode(
+    cashAmountPaise,
+    onlineAmountPaise,
+    cardAmountPaise,
+    paymentMode
+  );
+  if (paymentMode === "SPLIT" && derivedMode !== "SPLIT") {
+    throw new PaymentAllocationError(
+      "Split payment requires at least two payment methods with positive amounts.",
+      "split_requires_multiple_methods"
+    );
+  }
   return {
-    paymentMode: derivePaymentMode(cashAmountPaise, onlineAmountPaise, paymentMode),
-    paymentBreakdown: { cashAmountPaise, onlineAmountPaise },
+    paymentMode: derivedMode,
+    paymentBreakdown: {
+      cashAmountPaise,
+      onlineAmountPaise,
+      ...(derivedMode === "CARD" || (derivedMode === "SPLIT" && cardAmountPaise > 0)
+        ? { cardAmountPaise }
+        : {}),
+    },
     finalPayablePaise,
   };
 }
@@ -88,19 +118,47 @@ function getStoredPaymentAllocation({ paymentMode, paymentBreakdown, finalPaidAm
   const mode = PAYMENT_MODES.includes(paymentMode) ? paymentMode : null;
   const cashAmountPaise = paymentBreakdown?.cashAmountPaise;
   const onlineAmountPaise = paymentBreakdown?.onlineAmountPaise;
+  const cardAmountPaise = paymentBreakdown?.cardAmountPaise ?? 0;
+  const derivedMode = derivePaymentMode(
+    Number.isInteger(cashAmountPaise) ? cashAmountPaise : 0,
+    Number.isInteger(onlineAmountPaise) ? onlineAmountPaise : 0,
+    Number.isInteger(cardAmountPaise) ? cardAmountPaise : 0,
+    mode
+  );
   const hasValidBreakdown =
     Number.isInteger(cashAmountPaise) && cashAmountPaise >= 0 &&
     Number.isInteger(onlineAmountPaise) && onlineAmountPaise >= 0 &&
-    cashAmountPaise + onlineAmountPaise === finalPayablePaise;
+    Number.isInteger(cardAmountPaise) && cardAmountPaise >= 0 &&
+    cashAmountPaise + onlineAmountPaise + cardAmountPaise === finalPayablePaise &&
+    derivedMode === mode;
 
   if (hasValidBreakdown && mode) {
-    return { paymentMode: mode, paymentBreakdown: { cashAmountPaise, onlineAmountPaise } };
+    return {
+      paymentMode: mode,
+      paymentBreakdown: {
+        cashAmountPaise,
+        onlineAmountPaise,
+        ...(mode === "CARD" || (mode === "SPLIT" && cardAmountPaise > 0)
+          ? { cardAmountPaise }
+          : {}),
+      },
+    };
   }
   if (mode === "CASH") {
     return { paymentMode: mode, paymentBreakdown: { cashAmountPaise: finalPayablePaise, onlineAmountPaise: 0 } };
   }
   if (mode === "ONLINE") {
     return { paymentMode: mode, paymentBreakdown: { cashAmountPaise: 0, onlineAmountPaise: finalPayablePaise } };
+  }
+  if (mode === "CARD") {
+    return {
+      paymentMode: mode,
+      paymentBreakdown: {
+        cashAmountPaise: 0,
+        onlineAmountPaise: 0,
+        cardAmountPaise: finalPayablePaise,
+      },
+    };
   }
   return { paymentMode: null, paymentBreakdown: null };
 }

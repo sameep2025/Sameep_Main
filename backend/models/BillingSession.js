@@ -2,6 +2,19 @@ const mongoose = require("mongoose");
 const GstInvoiceSnapshotSchema = require("./gstInvoiceSnapshotSchema");
 const PrepaidSettlementSnapshotSchema = require("./prepaidSettlementSnapshotSchema");
 
+const StylistAllocationSchema = new mongoose.Schema(
+  {
+    resourceId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "VendorResource",
+      required: true,
+    },
+    resourceName: { type: String, trim: true, required: true },
+    allocationBps: { type: Number, min: 0, max: 10000, required: true },
+  },
+  { _id: false }
+);
+
 const BillingItemSchema = new mongoose.Schema(
   {
     itemId: mongoose.Schema.Types.ObjectId,
@@ -36,6 +49,10 @@ const BillingItemSchema = new mongoose.Schema(
     resourceName: {
       type: String,
       default: "",
+    },
+    stylistAllocations: {
+      type: [StylistAllocationSchema],
+      default: undefined,
     },
 
     membershipEligible: {
@@ -223,13 +240,14 @@ const BillingSessionSchema = new mongoose.Schema(
 
     paymentMode: {
       type: String,
-      enum: ["ONLINE", "CASH", "SPLIT", "PREPAID_VALUE", "PREPAID_SESSIONS"],
+      enum: ["ONLINE", "CASH", "CARD", "SPLIT", "PREPAID_VALUE", "PREPAID_SESSIONS"],
       default: undefined,
     },
 
     paymentBreakdown: {
       cashAmountPaise: { type: Number, min: 0, default: undefined },
       onlineAmountPaise: { type: Number, min: 0, default: undefined },
+      cardAmountPaise: { type: Number, min: 0, default: undefined },
     },
 
     otpVerified: {
