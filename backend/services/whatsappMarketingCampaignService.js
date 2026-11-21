@@ -133,6 +133,7 @@ async function resolveCampaignRecipients({
   const variableOrder = Array.isArray(template?.submittedSnapshot?.variableOrder)
     ? template.submittedSnapshot.variableOrder
     : [];
+  const requiresCustomerName = variableOrder.includes("customer_name");
   const seenPhones = new Set();
   const recipients = selectedRows.map((row) => {
     const phone = normalizeWhatsappRecipientPhone(row.phone);
@@ -144,8 +145,10 @@ async function resolveCampaignRecipients({
     if (phone.valid) seenPhones.add(phone.value);
     if (consentStatus === "OPTED_OUT") exclusionReasons.push("MARKETING_OPT_OUT");
     else if (consentStatus !== "OPTED_IN") exclusionReasons.push("MARKETING_CONSENT_REQUIRED");
+    const storedCustomerName = String(row.name || "").trim();
+    const resolvedCustomerName = storedCustomerName || (requiresCustomerName ? "Customer" : "");
     const personalization = {
-      customer_name: String(row.name || "").trim(),
+      customer_name: resolvedCustomerName,
       salon_name: vendor.businessName,
       offer_details: String(offerDetails || "").trim(),
     };
@@ -155,7 +158,7 @@ async function resolveCampaignRecipients({
     return {
       customerId: row.customerId,
       normalizedPhone: phone.valid ? phone.value : "",
-      displayName: String(row.name || "").trim(),
+      displayName: resolvedCustomerName,
       consentStatus,
       consentSource: String(consent?.source || "UNKNOWN"),
       eligible: exclusionReasons.length === 0,

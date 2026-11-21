@@ -22,16 +22,21 @@ const {
 const { requireVendorAccessFromExistingAuth } = require("../utils/vendorWriteAuth");
 const {
   createCampaignDraft,
+  cancelCampaign,
   getCampaignDraft,
   listApprovedTemplates,
   listCampaignDrafts,
   previewRecipients,
+  runCampaign,
   updateCampaignDraft,
 } = require("../controllers/vendorWhatsappMarketingCampaignController");
 const {
   listMarketingTestSends,
   sendMarketingTestMessage,
 } = require("../controllers/vendorWhatsappMarketingTestSendController");
+const {
+  recordMarketingPermission,
+} = require("../controllers/vendorWhatsappMarketingConsentController");
 
 const router = express.Router();
 const resolveVendorId = (req) => req.params.vendorId;
@@ -82,10 +87,13 @@ router.post("/:vendorId/templates/:templateId/refresh-status", refreshTemplateAp
 router.post("/:vendorId/templates/:templateId/revise", reviseRejectedTemplate);
 router.get("/:vendorId/campaign-templates", listApprovedTemplates);
 router.post("/:vendorId/campaign-recipient-preview", express.json(), previewRecipients);
+router.put("/:vendorId/marketing-consents/:customerId", express.json(), recordMarketingPermission);
 router.get("/:vendorId/campaigns", listCampaignDrafts);
 router.post("/:vendorId/campaigns", express.json(), createCampaignDraft);
 router.get("/:vendorId/campaigns/:campaignId", getCampaignDraft);
 router.patch("/:vendorId/campaigns/:campaignId", express.json(), updateCampaignDraft);
+router.post("/:vendorId/campaigns/:campaignId/run", express.json(), runCampaign);
+router.post("/:vendorId/campaigns/:campaignId/cancel", express.json(), cancelCampaign);
 router.get("/:vendorId/marketing-test-sends", listMarketingTestSends);
 router.post("/:vendorId/marketing-test-sends", express.json(), sendMarketingTestMessage);
 

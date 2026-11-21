@@ -1,4 +1,5 @@
 const WhatsappMarketingCampaign = require("../models/WhatsappMarketingCampaign");
+const WhatsappMarketingCampaignRecipient = require("../models/WhatsappMarketingCampaignRecipient");
 const WhatsappMarketingTemplate = require("../models/WhatsappMarketingTemplate");
 const {
   WhatsappMarketingCampaignError,
@@ -8,6 +9,11 @@ const {
   renderRecipientPreview,
   resolveCampaignRecipients,
 } = require("../services/whatsappMarketingCampaignService");
+const {
+  cancelCampaignExecution,
+  queueCampaignExecution,
+  refreshCampaignDeliverySummary,
+} = require("../services/whatsappMarketingCampaignExecutionService");
 const {
   loadVendorMetaConnection,
 } = require("./vendorWhatsappMarketingController");
@@ -43,6 +49,23 @@ function serializeCampaign(campaign) {
       preview: renderRecipientPreview(source.templateSnapshot, recipient.personalization),
     })),
     counts: source.counts,
+    deliveryCounts: source.deliveryCounts || {
+      total: 0,
+      queued: 0,
+      sent: 0,
+      delivered: 0,
+      read: 0,
+      failed: 0,
+      cancelled: 0,
+    },
+    execution: source.execution ? {
+      queuedAt: source.execution.queuedAt || null,
+      startedAt: source.execution.startedAt || null,
+      completedAt: source.execution.completedAt || null,
+      cancelledAt: source.execution.cancelledAt || null,
+      failureCode: source.execution.failureCode || "",
+      failureMessage: source.execution.failureMessage || "",
+    } : null,
     createdAt: source.createdAt,
     updatedAt: source.updatedAt,
   };
@@ -213,12 +236,9 @@ async function updateCampaignDraft(req, res) {
 
 async function listCampaignDrafts(req, res) {
   try {
-    const campaigns = await WhatsappMarketingCampaign.find({
-      vendorId: getVendorId(req),
-      status: "DRAFT",
-    })
+    const campaigns = await WhatsappMarketingCampaign.find({ vendorId: getVendorId(req) })
       .sort({ updatedAt: -1, _id: -1 })
-      .select("campaignName status sourceSegment counts templateSnapshot updatedAt createdAt")
+      .select("campaignName status sourceSegment counts deliveryCounts templateSnapshot execution updatedAt createdAt")
       .lean();
     return res.json({
       success: true,
@@ -234,24 +254,87 @@ async function getCampaignDraft(req, res) {
     const campaign = await WhatsappMarketingCampaign.findOne({
       _id: req.params.campaignId,
       vendorId: getVendorId(req),
-      status: "DRAFT",
     }).lean();
     if (!campaign) {
       return res.status(404).json({ success: false, message: "Campaign draft not found" });
     }
-    return res.json({ success: true, data: { campaign: serializeCampaign(campaign) } });
+    if (["QUEUED", "RUNNING"].includes(campaign.status)) {
+      await refreshCampaignDeliverySummary(campaign._id);
+      Object.assign(
+        campaign,
+        await WhatsappMarketingCampaign.findById(campaign._id).select("status deliveryCounts execution").lean()
+      );
+    }
+    const failures = await WhatsappMarketingCampaignRecipient.find({
+      campaignId: campaign._id,
+      status: { $in: ["FAILED", "CANCELLED"] },
+    })
+      .sort({ updatedAt: -1, _id: -1 })
+      .limit(20)
+      .select("displayName status failureCode failureMessage ambiguousFailure updatedAt")
+      .lean();
+    return res.json({
+      success: true,
+      data: {
+        campaign: serializeCampaign(campaign),
+        failures: failures.map((failure) => ({
+          id: String(failure._id),
+          displayName: failure.displayName || "",
+          status: failure.status,
+          failureCode: failure.failureCode || "",
+          failureMessage: failure.failureMessage || "",
+          ambiguousFailure: Boolean(failure.ambiguousFailure),
+          updatedAt: failure.updatedAt || null,
+        })),
+      },
+    });
   } catch (error) {
     return sendCampaignError(res, error, "Unable to load campaign draft");
   }
 }
 
+async function runCampaign(req, res) {
+  try {
+    const campaign = await queueCampaignExecution({
+      vendorId: getVendorId(req),
+      campaignId: req.params.campaignId,
+      confirmed: req.body?.confirmed === true,
+    });
+    return res.status(202).json({
+      success: true,
+      message: "Campaign queued for delivery",
+      data: { campaign: serializeCampaign(campaign) },
+    });
+  } catch (error) {
+    return sendCampaignError(res, error, "Unable to run campaign");
+  }
+}
+
+async function cancelCampaign(req, res) {
+  try {
+    const campaign = await cancelCampaignExecution({
+      vendorId: getVendorId(req),
+      campaignId: req.params.campaignId,
+    });
+    return res.json({
+      success: true,
+      message: "Campaign cancellation recorded",
+      data: { campaign: serializeCampaign(campaign) },
+    });
+  } catch (error) {
+    return sendCampaignError(res, error, "Unable to cancel campaign");
+  }
+}
+
 module.exports = {
   buildCampaignDraftPayload,
+  cancelCampaign,
   createCampaignDraft,
   getCampaignDraft,
   listApprovedTemplates,
   listCampaignDrafts,
   previewRecipients,
+  runCampaign,
   serializeCampaign,
   updateCampaignDraft,
 };

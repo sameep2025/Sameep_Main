@@ -228,9 +228,25 @@ test("customer analytics endpoints are mounted behind vendor auth", () => {
   assert.match(serverSource, /app\.use\("\/api\/vendor\/dashboard"/);
 });
 
-test("customer analytics formatting keeps missing customer names empty and calculates inactive days", () => {
+test("customer analytics formatting prefers vendor names and falls back to the customer name", () => {
   const { formatCustomerRow, formatItemRow } = controller._private;
+  const source = {
+    _id: new mongoose.Types.ObjectId(CUSTOMER_ID),
+    customer: { fullNumber: "919999999999", displayName: "  Global Name  " },
+    totalSpend: 500,
+    visitCount: 1,
+    lastVisit: new Date("2026-09-01T00:00:00.000Z"),
+  };
   const row = formatCustomerRow(
+    source,
+    new Date("2026-10-01T00:00:00.000Z"),
+    new Map([[CUSTOMER_ID, "  Salon Name  "]])
+  );
+  const globalFallback = formatCustomerRow(
+    source,
+    new Date("2026-10-01T00:00:00.000Z")
+  );
+  const missingName = formatCustomerRow(
     {
       _id: new mongoose.Types.ObjectId(CUSTOMER_ID),
       customer: { fullNumber: "919999999999" },
@@ -241,7 +257,9 @@ test("customer analytics formatting keeps missing customer names empty and calcu
     new Date("2026-10-01T00:00:00.000Z")
   );
 
-  assert.equal(row.name, "");
+  assert.equal(row.name, "Salon Name");
+  assert.equal(globalFallback.name, "Global Name");
+  assert.equal(missingName.name, "");
   assert.equal(row.phone, "919999999999");
   assert.equal(row.daysSinceLastVisit, 30);
 

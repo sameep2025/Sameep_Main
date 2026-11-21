@@ -190,6 +190,7 @@ async function loadVendorMetaConnection(vendorId, dependencies = {}) {
   const VendorModel = dependencies.VendorModel || Vendor;
   const decryptToken = dependencies.decryptMetaAccessToken || decryptMetaAccessToken;
   const getAccount = dependencies.getWhatsAppBusinessAccount || getWhatsAppBusinessAccount;
+  const verifyAccount = dependencies.verifyAccount !== false;
   let vendor = await DummyVendorModel.findById(vendorId).select("whatsappBusiness").lean();
   if (!vendor) vendor = await VendorModel.findById(vendorId).select("whatsappBusiness").lean();
   if (!vendor) {
@@ -230,13 +231,15 @@ async function loadVendorMetaConnection(vendorId, dependencies = {}) {
     );
   }
 
-  const account = await getAccount(wabaId, accessToken);
-  if (!account || String(account.id || "") !== wabaId) {
-    throw createMarketingControllerError(
-      "Unable to verify the connected WhatsApp Business account",
-      "meta_waba_verification_failed",
-      409
-    );
+  if (verifyAccount) {
+    const account = await getAccount(wabaId, accessToken);
+    if (!account || String(account.id || "") !== wabaId) {
+      throw createMarketingControllerError(
+        "Unable to verify the connected WhatsApp Business account",
+        "meta_waba_verification_failed",
+        409
+      );
+    }
   }
   return {
     wabaId,

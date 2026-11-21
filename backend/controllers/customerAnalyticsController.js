@@ -218,11 +218,13 @@ function formatCustomerRow(row, now = new Date(), nameMap = new Map()) {
   const daysSinceLastVisit = lastVisit
     ? Math.max(0, Math.floor((now.getTime() - lastVisit.getTime()) / 86400000))
     : null;
+  const vendorDisplayName = String(nameMap.get(String(row?._id || "")) || "").trim();
+  const customerDisplayName = String(row?.customer?.displayName || "").trim();
 
   return {
     customerId: row?._id ? String(row._id) : "",
     phone: row?.customer?.fullNumber || row?.customer?.phone || "",
-    name: nameMap.get(String(row?._id || "")) || "",
+    name: vendorDisplayName || customerDisplayName,
     totalSpend: Number(row?.totalSpend || 0),
     visitCount: Number(row?.visitCount || 0),
     firstVisit: row?.firstVisit || null,

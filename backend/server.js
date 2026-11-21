@@ -76,6 +76,9 @@ const vendorPrepaidWalletRoutes = require("./routes/vendorPrepaidWalletRoutes");
 const vendorWhatsappBusinessRoutes = require("./routes/vendorWhatsappBusinessRoutes");
 const vendorWhatsappMarketingRoutes = require("./routes/vendorWhatsappMarketingRoutes");
 const metaWhatsappWebhookRoutes = require("./routes/metaWhatsappWebhookRoutes");
+const {
+  initializeWhatsappMarketingCampaignWorker,
+} = require("./services/whatsappMarketingCampaignWorker");
 const customerPortalRoutes = require("./routes/customerPortalRoutes");
 const publicVendorHighlightsRoutes = require("./routes/publicVendorHighlightsRoutes");
 const vendorSubscriptionRoutes = require("./routes/vendorSubscriptionRoutes");
@@ -121,6 +124,9 @@ app.set("trust proxy", isTrustedProxyAddress);
 // --------------------
 // Connect DB
 // --------------------
+mongoose.connection.once("open", () => {
+  initializeWhatsappMarketingCampaignWorker();
+});
 connectDB();
 
 // --------------------

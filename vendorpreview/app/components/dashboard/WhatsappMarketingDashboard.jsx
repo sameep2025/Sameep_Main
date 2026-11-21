@@ -494,14 +494,15 @@ export default function WhatsappMarketingDashboard({ vendorId }) {
         <div>
           <span className="wa-marketing-kicker">Phase 3A</span>
           <h3>Campaign Drafts</h3>
-          <p>Recipients and approved content are saved here. Sending is not enabled.</p>
+          <p>Prepare, run, and monitor approved customer campaigns.</p>
         </div>
         {campaignDrafts.length ? (
           <div className="wa-marketing-campaign-list">
             {campaignDrafts.map((campaign) => (
               <button type="button" key={campaign.id} onClick={() => setEditingCampaignId(campaign.id)}>
                 <strong>{campaign.campaignName}</strong>
-                <span>{campaign.counts?.eligible || 0} eligible of {campaign.counts?.selected || 0}</span>
+                <span>{campaign.status || "DRAFT"} · {campaign.counts?.eligible || 0} eligible</span>
+                {campaign.deliveryCounts?.total ? <small>{campaign.deliveryCounts.sent || 0} sent · {campaign.deliveryCounts.failed || 0} failed</small> : null}
                 <small>Updated {campaign.updatedAt ? new Date(campaign.updatedAt).toLocaleDateString("en-IN") : "recently"}</small>
               </button>
             ))}

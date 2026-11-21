@@ -54,6 +54,11 @@ export default function WhatsappCampaignComposer({
   const [loading, setLoading] = useState(true);
   const [resolving, setResolving] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [campaignStatus, setCampaignStatus] = useState("DRAFT");
+  const [deliveryCounts, setDeliveryCounts] = useState(null);
+  const [failures, setFailures] = useState([]);
+  const [executing, setExecuting] = useState(false);
+  const [recordingPermissionCustomerId, setRecordingPermissionCustomerId] = useState("");
   const [error, setError] = useState("");
 
   useEffect(() => {
@@ -68,19 +73,50 @@ export default function WhatsappCampaignComposer({
           const data = await request(vendorId, `/campaigns/${encodeURIComponent(campaignId)}`);
           if (cancelled) return;
           const campaign = data.campaign;
-          setCampaignName(campaign.campaignName || "");
-          setTemplateId(campaign.templateId || "");
-          setOfferDetails(campaign.offerDetails || "");
-          setSelection({
+          const savedStatus = campaign.status || "DRAFT";
+          const savedTemplateId = campaign.templateId || "";
+          const savedOfferDetails = campaign.offerDetails || "";
+          const savedSelection = {
             mode: campaign.selection.mode,
             segment: campaign.sourceSegment.segment,
             filters: campaign.sourceSegment.filters,
             selectedCustomerIds: campaign.selection.selectedCustomerIds,
             excludedCustomerIds: campaign.selection.excludedCustomerIds,
-          });
+          };
+          setCampaignStatus(savedStatus);
+          setDeliveryCounts(campaign.deliveryCounts || null);
+          setFailures(data.failures || []);
+          setCampaignName(campaign.campaignName || "");
+          setTemplateId(savedTemplateId);
+          setOfferDetails(savedOfferDetails);
+          setSelection(savedSelection);
           setRecipients(campaign.recipients || []);
           setCounts(campaign.counts || {});
           setPreviewCustomerId(campaign.recipients?.[0]?.customerId || "");
+          if (savedStatus === "DRAFT") {
+            try {
+              setResolving(true);
+              const refreshed = await request(vendorId, "/campaign-recipient-preview", {
+                method: "POST",
+                body: JSON.stringify({
+                  selection: savedSelection,
+                  templateId: savedTemplateId || undefined,
+                  offerDetails: savedOfferDetails,
+                }),
+              });
+              if (cancelled) return;
+              setRecipients(refreshed.recipients || []);
+              setCounts(refreshed.counts || {});
+              setPreviewCustomerId(refreshed.recipients?.[0]?.customerId || "");
+            } catch (refreshError) {
+              if (!cancelled) {
+                setCounts((current) => ({ ...current, eligible: 0 }));
+                setError(refreshError.message || "Campaign loaded, but recipient eligibility could not be refreshed");
+              }
+            } finally {
+              if (!cancelled) setResolving(false);
+            }
+          }
         }
       } catch (loadError) {
         if (!cancelled) setError(loadError.message || "Unable to load campaign builder");
@@ -91,6 +127,28 @@ export default function WhatsappCampaignComposer({
     load();
     return () => { cancelled = true; };
   }, [campaignId, vendorId]);
+
+  useEffect(() => {
+    if (!campaignId || !["QUEUED", "RUNNING"].includes(campaignStatus)) return undefined;
+    let cancelled = false;
+    const refresh = async () => {
+      try {
+        const data = await request(vendorId, `/campaigns/${encodeURIComponent(campaignId)}`);
+        if (cancelled) return;
+        setCampaignStatus(data.campaign?.status || "DRAFT");
+        setDeliveryCounts(data.campaign?.deliveryCounts || null);
+        setFailures(data.failures || []);
+        onSaved?.(data.campaign);
+      } catch (refreshError) {
+        if (!cancelled) setError(refreshError.message || "Unable to refresh campaign progress");
+      }
+    };
+    const timer = window.setInterval(refresh, 3000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [campaignId, campaignStatus, onSaved, vendorId]);
 
   async function resolveRecipients(nextSelection = selection, nextTemplateId = templateId) {
     if (!nextSelection) return;
@@ -112,8 +170,10 @@ export default function WhatsappCampaignComposer({
           ? current
           : data.recipients?.[0]?.customerId || ""
       ));
+      return data;
     } catch (resolveError) {
       setError(resolveError.message || "Unable to resolve recipients");
+      return null;
     } finally {
       setResolving(false);
     }
@@ -135,6 +195,27 @@ export default function WhatsappCampaignComposer({
     };
     setSelection(nextSelection);
     resolveRecipients(nextSelection, templateId);
+  }
+
+  async function recordMarketingPermission(recipient) {
+    if (!window.confirm(`Confirm that ${recipient.displayName || "this customer"} has already granted WhatsApp marketing permission to this salon.`)) return;
+    try {
+      setRecordingPermissionCustomerId(recipient.customerId);
+      setError("");
+      await request(
+        vendorId,
+        `/marketing-consents/${encodeURIComponent(recipient.customerId)}`,
+        {
+          method: "PUT",
+          body: JSON.stringify({ permissionConfirmed: true }),
+        }
+      );
+      await resolveRecipients();
+    } catch (permissionError) {
+      setError(permissionError.message || "Unable to record marketing permission");
+    } finally {
+      setRecordingPermissionCustomerId("");
+    }
   }
 
   async function saveDraft() {
@@ -162,16 +243,69 @@ export default function WhatsappCampaignComposer({
     }
   }
 
+  async function runCampaign() {
+    if (!campaignId || campaignStatus !== "DRAFT") return;
+    const fresh = await resolveRecipients();
+    if (!fresh) return;
+    const eligible = Number(fresh.counts?.eligible || 0);
+    const ineligible = Number(fresh.counts?.ineligible || 0);
+    const excluded = Number(fresh.counts?.excluded || 0);
+    if (!templateId) {
+      setError("Select an approved WhatsApp template before running the campaign.");
+      return;
+    }
+    if (!eligible) {
+      setError("No eligible opted-in recipients are available for this campaign.");
+      return;
+    }
+    if (!window.confirm(`Run this campaign for ${eligible} eligible recipient${eligible === 1 ? "" : "s"}? ${ineligible} ineligible and ${excluded} manually excluded.`)) return;
+    try {
+      setExecuting(true);
+      setError("");
+      const data = await request(vendorId, `/campaigns/${encodeURIComponent(campaignId)}/run`, {
+        method: "POST",
+        body: JSON.stringify({ confirmed: true }),
+      });
+      setCampaignStatus(data.campaign?.status || "QUEUED");
+      setDeliveryCounts(data.campaign?.deliveryCounts || null);
+      onSaved?.(data.campaign);
+    } catch (runError) {
+      setError(runError.message || "Unable to run campaign");
+    } finally {
+      setExecuting(false);
+    }
+  }
+
+  async function cancelCampaign() {
+    if (!window.confirm("Cancel all campaign messages that have not started sending?")) return;
+    try {
+      setExecuting(true);
+      setError("");
+      const data = await request(vendorId, `/campaigns/${encodeURIComponent(campaignId)}/cancel`, {
+        method: "POST",
+        body: JSON.stringify({ confirmed: true }),
+      });
+      setCampaignStatus(data.campaign?.status || "CANCELLED");
+      setDeliveryCounts(data.campaign?.deliveryCounts || null);
+      onSaved?.(data.campaign);
+    } catch (cancelError) {
+      setError(cancelError.message || "Unable to cancel campaign");
+    } finally {
+      setExecuting(false);
+    }
+  }
+
   const selectedTemplate = templates.find((template) => template.id === templateId);
   const needsOfferDetails = selectedTemplate?.templateSnapshot?.variableOrder?.includes("offer_details");
   const previewRecipient = recipients.find((item) => item.customerId === previewCustomerId) || recipients[0];
+  const editable = campaignStatus === "DRAFT";
 
   return (
     <div className="wa-campaign-overlay" role="dialog" aria-modal="true" aria-labelledby="wa-campaign-title">
       <div className="wa-campaign-card">
         <header>
           <div>
-            <span>Campaign draft</span>
+            <span>{campaignStatus === "DRAFT" ? "Campaign draft" : `Campaign ${campaignStatus.toLowerCase().replaceAll("_", " ")}`}</span>
             <h2 id="wa-campaign-title">{campaignId ? "Edit Campaign" : "Create Marketing Campaign"}</h2>
           </div>
           <button type="button" aria-label="Close campaign builder" onClick={onClose}>×</button>
@@ -180,11 +314,12 @@ export default function WhatsappCampaignComposer({
         {loading ? <div className="wa-campaign-state">Loading campaign...</div> : (
           <div className="wa-campaign-body">
             <section className="wa-campaign-fields">
-              <label>Campaign name<input value={campaignName} maxLength={100} onChange={(event) => setCampaignName(event.target.value)} /></label>
+              <label>Campaign name<input value={campaignName} maxLength={100} disabled={!editable} onChange={(event) => setCampaignName(event.target.value)} /></label>
               <label>
                 Approved WhatsApp template
                 <select
                   value={templateId}
+                  disabled={!editable}
                   onChange={(event) => {
                     setTemplateId(event.target.value);
                     resolveRecipients(selection, event.target.value);
@@ -198,12 +333,37 @@ export default function WhatsappCampaignComposer({
                 <p className="wa-campaign-guidance">Your campaign can be saved as a draft. Select an approved WhatsApp template when it becomes available.</p>
               ) : null}
               {needsOfferDetails ? (
-                <label>Offer details<input value={offerDetails} maxLength={240} onChange={(event) => setOfferDetails(event.target.value)} placeholder="20% off this week" /></label>
+                <label>Offer details<input value={offerDetails} maxLength={240} disabled={!editable} onChange={(event) => setOfferDetails(event.target.value)} placeholder="20% off this week" /></label>
               ) : null}
-              <button type="button" className="wa-campaign-secondary" onClick={() => resolveRecipients()} disabled={resolving}>
+              <button type="button" className="wa-campaign-secondary" onClick={() => resolveRecipients()} disabled={resolving || !editable}>
                 {resolving ? "Checking recipients..." : "Refresh Eligibility & Preview"}
               </button>
             </section>
+
+            {deliveryCounts ? (
+              <section className="wa-campaign-delivery" aria-label="Campaign delivery progress">
+                <h3>Delivery progress</h3>
+                <div>
+                  <span>Total <b>{deliveryCounts.total || 0}</b></span>
+                  <span>Queued <b>{deliveryCounts.queued || 0}</b></span>
+                  <span>Sent <b>{deliveryCounts.sent || 0}</b></span>
+                  <span>Delivered <b>{deliveryCounts.delivered || 0}</b></span>
+                  <span>Read <b>{deliveryCounts.read || 0}</b></span>
+                  <span>Failed <b>{deliveryCounts.failed || 0}</b></span>
+                </div>
+                {failures.length ? (
+                  <details>
+                    <summary>View recent exclusions and failures</summary>
+                    {failures.map((failure) => (
+                      <p key={failure.id}>
+                        <strong>{failure.displayName || "Recipient"}</strong>
+                        <span>{failure.failureMessage || reasonLabel(failure.failureCode)}</span>
+                      </p>
+                    ))}
+                  </details>
+                ) : null}
+              </section>
+            ) : null}
 
             <section className="wa-campaign-summary">
               <strong>{selection?.segment?.replaceAll("_", " ") || "Customer"} segment</strong>
@@ -220,7 +380,20 @@ export default function WhatsappCampaignComposer({
                       <small>{recipient.normalizedPhone ? `+${recipient.normalizedPhone}` : "Invalid phone"}</small>
                       {!recipient.eligible ? <em>{recipient.exclusionReasons.map(reasonLabel).join(", ")}</em> : <em>Eligible</em>}
                     </button>
-                    <button type="button" aria-label={`Remove ${recipient.displayName || "customer"}`} onClick={() => removeRecipient(recipient.customerId)}>Remove</button>
+                    {editable ? (
+                      <div className="wa-campaign-recipient-actions">
+                        {recipient.exclusionReasons?.includes("MARKETING_CONSENT_REQUIRED") ? (
+                          <button
+                            type="button"
+                            onClick={() => recordMarketingPermission(recipient)}
+                            disabled={recordingPermissionCustomerId === recipient.customerId}
+                          >
+                            {recordingPermissionCustomerId === recipient.customerId ? "Recording..." : "Record permission"}
+                          </button>
+                        ) : null}
+                        <button type="button" aria-label={`Remove ${recipient.displayName || "customer"}`} onClick={() => removeRecipient(recipient.customerId)}>Remove</button>
+                      </div>
+                    ) : null}
                   </div>
                 ))}
                 {!recipients.length ? <p>No recipients selected.</p> : null}
@@ -240,9 +413,15 @@ export default function WhatsappCampaignComposer({
         )}
         <footer>
           <button type="button" className="wa-campaign-secondary" onClick={onClose}>Cancel</button>
-          <button type="button" className="wa-campaign-primary" onClick={saveDraft} disabled={saving || loading}>
+          {editable ? <button type="button" className="wa-campaign-primary" onClick={saveDraft} disabled={saving || loading || executing}>
             {saving ? "Saving..." : "Save Campaign Draft"}
-          </button>
+          </button> : null}
+          {editable && campaignId ? <button type="button" className="wa-campaign-primary" onClick={runCampaign} disabled={executing || resolving || !templateId || Number(counts.eligible || 0) <= 0}>
+            {executing ? "Starting..." : "Run Campaign"}
+          </button> : null}
+          {["QUEUED", "RUNNING"].includes(campaignStatus) ? <button type="button" className="wa-campaign-secondary danger" onClick={cancelCampaign} disabled={executing}>
+            {executing ? "Cancelling..." : "Cancel Campaign"}
+          </button> : null}
         </footer>
       </div>
     </div>

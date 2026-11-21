@@ -41,7 +41,20 @@ const whatsappMarketingCampaignSchema = new mongoose.Schema(
       index: true,
     },
     campaignName: { type: String, required: true, trim: true, maxlength: 100 },
-    status: { type: String, enum: ["DRAFT"], default: "DRAFT", required: true },
+    status: {
+      type: String,
+      enum: [
+        "DRAFT",
+        "QUEUED",
+        "RUNNING",
+        "COMPLETED",
+        "PARTIALLY_FAILED",
+        "FAILED",
+        "CANCELLED",
+      ],
+      default: "DRAFT",
+      required: true,
+    },
     sourceSegment: {
       segment: {
         type: String,
@@ -99,6 +112,26 @@ const whatsappMarketingCampaignSchema = new mongoose.Schema(
       wabaId: { type: String, default: "", trim: true },
       verifiedAt: { type: Date, default: null },
     },
+    execution: {
+      runId: { type: String, default: undefined, trim: true },
+      phoneNumberId: { type: String, default: "", trim: true },
+      queuedAt: { type: Date, default: null },
+      preparedAt: { type: Date, default: null },
+      startedAt: { type: Date, default: null },
+      completedAt: { type: Date, default: null },
+      cancelledAt: { type: Date, default: null },
+      failureCode: { type: String, default: "", trim: true, maxlength: 80 },
+      failureMessage: { type: String, default: "", trim: true, maxlength: 240 },
+    },
+    deliveryCounts: {
+      total: { type: Number, default: 0, min: 0 },
+      queued: { type: Number, default: 0, min: 0 },
+      sent: { type: Number, default: 0, min: 0 },
+      delivered: { type: Number, default: 0, min: 0 },
+      read: { type: Number, default: 0, min: 0 },
+      failed: { type: Number, default: 0, min: 0 },
+      cancelled: { type: Number, default: 0, min: 0 },
+    },
   },
   { timestamps: true }
 );
@@ -106,6 +139,18 @@ const whatsappMarketingCampaignSchema = new mongoose.Schema(
 whatsappMarketingCampaignSchema.index(
   { vendorId: 1, updatedAt: -1, _id: -1 },
   { name: "whatsapp_marketing_campaign_vendor_updated" }
+);
+whatsappMarketingCampaignSchema.index(
+  { status: 1, "execution.preparedAt": 1, updatedAt: 1 },
+  { name: "whatsapp_marketing_campaign_worker_status" }
+);
+whatsappMarketingCampaignSchema.index(
+  { "execution.runId": 1 },
+  {
+    unique: true,
+    partialFilterExpression: { "execution.runId": { $type: "string" } },
+    name: "whatsapp_marketing_campaign_run_unique",
+  }
 );
 
 module.exports = mongoose.model("WhatsappMarketingCampaign", whatsappMarketingCampaignSchema);

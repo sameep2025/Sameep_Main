@@ -121,7 +121,7 @@ test("unknown consent and opt-out remain ineligible without assuming billing con
   assert.equal(result.counts.eligible, 0);
 });
 
-test("missing personalization blocks only affected recipients and preview uses frozen values", async () => {
+test("missing customer names use a neutral template fallback without hiding other missing variables", async () => {
   const snapshot = {
     messageBody: "Hi {{customer_name}}, {{offer_details}} at {{salon_name}}.",
   };
@@ -149,10 +149,30 @@ test("missing personalization blocks only affected recipients and preview uses f
       VendorModel: modelReturningVendor(),
     },
   });
-  assert.deepEqual(result.recipients[0].exclusionReasons, [
-    "MISSING_CUSTOMER_NAME",
-    "MISSING_OFFER_DETAILS",
-  ]);
+  assert.equal(result.recipients[0].displayName, "Customer");
+  assert.equal(result.recipients[0].personalization.customer_name, "Customer");
+  assert.deepEqual(result.recipients[0].exclusionReasons, ["MISSING_OFFER_DETAILS"]);
+});
+
+test("neutral customer name is not introduced when the approved template does not require it", async () => {
+  const result = await resolveCampaignRecipients({
+    vendorId: VENDOR_ID,
+    selection: { mode: "EXPLICIT", segment: "top_spenders", selectedCustomerIds: [CUSTOMER_A] },
+    template: { submittedSnapshot: { variableOrder: ["salon_name"] } },
+    dependencies: {
+      resolveCustomerAnalyticsSegment: async () => [
+        { customerId: CUSTOMER_A, phone: "9666060396", name: "   " },
+      ],
+      WhatsappMarketingConsentModel: consentModel([
+        { customerId: CUSTOMER_A, status: "OPTED_IN", source: "VENDOR_RECORDED" },
+      ]),
+      DummyVendorModel: modelReturningVendor(),
+      VendorModel: modelReturningVendor(),
+    },
+  });
+  assert.equal(result.recipients[0].displayName, "");
+  assert.equal(result.recipients[0].personalization.customer_name, "");
+  assert.equal(result.recipients[0].eligible, true);
 });
 
 test("campaign templates require the same vendor and dual persisted approval status", async () => {

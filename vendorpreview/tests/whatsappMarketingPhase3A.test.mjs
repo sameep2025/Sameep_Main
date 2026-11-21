@@ -30,11 +30,11 @@ test("campaign composer permits only approved template selection and frozen prev
   assert.doesNotMatch(composer, /Send Campaign|Schedule Campaign|Send Test/);
 });
 
-test("saved campaign drafts reopen from WhatsApp Marketing without a send action", () => {
-  assert.match(marketing, /Campaign Drafts/);
+test("saved campaign drafts reopen from WhatsApp Marketing with the Phase 4 run action", () => {
+  assert.match(marketing, /Campaigns/);
   assert.match(marketing, /setEditingCampaignId/);
-  assert.match(marketing, /Sending is not enabled/);
-  assert.doesNotMatch(marketing, /Send Campaign/);
+  assert.match(composer, /Run Campaign/);
+  assert.match(composer, /campaigns\/\$\{encodeURIComponent\(campaignId\)\}\/run/);
 });
 
 test("campaign builder remains opaque and mobile responsive", () => {
