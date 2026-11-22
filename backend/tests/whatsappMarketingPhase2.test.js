@@ -202,6 +202,167 @@ test("Meta media samples use the resumable upload handle required for template h
   }
 });
 
+test("Meta media upload failures preserve sanitized provider details and exact stages", async () => {
+  const previousAppId = process.env.META_APP_ID;
+  process.env.META_APP_ID = "meta-app-1";
+  const metaFailure = (message) => Object.assign(new Error(message), {
+    response: {
+      status: 400,
+      data: {
+        error: {
+          code: 100,
+          error_subcode: 2388001,
+          message,
+          fbtrace_id: "trace-1",
+        },
+      },
+    },
+  });
+  try {
+    await assert.rejects(
+      uploadTemplateMediaSample({
+        accessToken: "secret",
+        fileName: "offer.jpg",
+        fileType: "image/jpeg",
+        buffer: Buffer.from("image"),
+        httpClient: { post: async () => { throw metaFailure("session rejected"); } },
+      }),
+      (error) => {
+        assert.equal(error.submissionStage, "MEDIA_SESSION_CREATE");
+        assert.equal(error.metaError.status, 400);
+        assert.equal(error.metaError.code, 100);
+        assert.equal(error.metaError.subcode, 2388001);
+        assert.equal(error.metaError.fbtraceId, "trace-1");
+        return true;
+      }
+    );
+
+    let calls = 0;
+    await assert.rejects(
+      uploadTemplateMediaSample({
+        accessToken: "secret",
+        fileName: "offer.jpg",
+        fileType: "image/jpeg",
+        buffer: Buffer.from("image"),
+        httpClient: {
+          post: async () => {
+            calls += 1;
+            if (calls === 1) return { status: 200, data: { id: "upload-session-1" } };
+            throw metaFailure("binary upload rejected");
+          },
+        },
+      }),
+      (error) => error.submissionStage === "MEDIA_BINARY_UPLOAD" && error.metaError.code === 100
+    );
+
+    calls = 0;
+    await assert.rejects(
+      uploadTemplateMediaSample({
+        accessToken: "secret",
+        fileName: "offer.jpg",
+        fileType: "image/jpeg",
+        buffer: Buffer.from("image"),
+        httpClient: {
+          post: async () => {
+            calls += 1;
+            return calls === 1
+              ? { status: 200, data: { id: "upload-session-1" } }
+              : { status: 200, data: {} };
+          },
+        },
+      }),
+      (error) => (
+        error.submissionStage === "HEADER_HANDLE_VALIDATE" &&
+        error.code === "meta_template_media_handle_missing" &&
+        error.metaError.status === 200
+      )
+    );
+  } finally {
+    if (previousAppId === undefined) delete process.env.META_APP_ID;
+    else process.env.META_APP_ID = previousAppId;
+  }
+});
+
+test("image submission identifies S3 and template creation failure stages", async () => {
+  const media = {
+    key: "marketing/offer.jpg",
+    url: "https://example.test/offer.jpg",
+    mimeType: "image/jpeg",
+    sizeBytes: 1200,
+    originalName: "offer.jpg",
+  };
+  const template = marketingTemplate({
+    media: {
+      images: [media],
+      brochure: null,
+      primary: { type: "IMAGE", key: media.key },
+    },
+  });
+  const baseDependencies = {
+    findTemplateByName: async () => null,
+    uploadTemplateMediaSample: async () => ({ handle: "header-handle" }),
+  };
+  await assert.rejects(
+    submitMarketingTemplateToMeta({
+      template,
+      vendorId: VENDOR_ID,
+      wabaId: "waba-1",
+      accessToken: "secret",
+      dependencies: {
+        ...baseDependencies,
+        getS3ObjectByKey: async () => { throw new Error("object unavailable"); },
+      },
+    }),
+    (error) => error.submissionStage === "S3_READ"
+  );
+  await assert.rejects(
+    submitMarketingTemplateToMeta({
+      template,
+      vendorId: VENDOR_ID,
+      wabaId: "waba-1",
+      accessToken: "secret",
+      dependencies: {
+        ...baseDependencies,
+        getS3ObjectByKey: async () => ({
+          buffer: Buffer.from("image"),
+          contentType: "image/jpeg",
+        }),
+        createTemplate: async () => { throw new Error("create failed"); },
+      },
+    }),
+    (error) => error.submissionStage === "TEMPLATE_CREATE"
+  );
+});
+
+test("template submission diagnostics are sanitized and retain provider identifiers", () => {
+  const error = new Error("Bearer secret-token\nprovider failed");
+  error.code = "meta_template_media_upload_failed";
+  error.submissionStage = "MEDIA_BINARY_UPLOAD";
+  error.metaError = {
+    status: 400,
+    code: 100,
+    subcode: 2388001,
+    fbtraceId: "trace-1",
+    message: "Bearer secret-token\nprovider failed",
+  };
+  assert.deepEqual(controller.buildTemplateSubmissionDiagnostic(error, marketingTemplate()._id), {
+    stage: "MEDIA_BINARY_UPLOAD",
+    templateId: marketingTemplate()._id,
+    code: "meta_template_media_upload_failed",
+    httpStatus: 400,
+    metaCode: "100",
+    metaSubcode: "2388001",
+    traceId: "trace-1",
+    message: "[REDACTED] provider failed",
+  });
+  const source = fs.readFileSync(
+    path.join(__dirname, "../controllers/vendorWhatsappMarketingController.js"),
+    "utf8"
+  );
+  assert.match(source, /TEMPLATE_PERSIST/);
+  assert.match(source, /WhatsApp Marketing Template Submission Error/);
+});
+
 test("submission retries retain a deterministic versioned Meta name", async () => {
   const template = marketingTemplate();
   const expected = buildMarketingMetaTemplateName({

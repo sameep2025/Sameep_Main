@@ -29,6 +29,11 @@ class WhatsappMarketingMetaError extends Error {
   }
 }
 
+function withSubmissionStage(error, stage) {
+  if (error && !error.submissionStage) error.submissionStage = stage;
+  return error;
+}
+
 function normalizeMetaMarketingTemplateName(value) {
   return String(value || "")
     .trim()
@@ -153,36 +158,61 @@ async function submitMarketingTemplateToMeta({
     draftVersion: template.draftVersion,
   });
 
-  const existing = await findByName({ wabaId, accessToken, name });
+  let existing;
+  try {
+    existing = await findByName({ wabaId, accessToken, name });
+  } catch (error) {
+    throw withSubmissionStage(error, "TEMPLATE_CREATE");
+  }
   if (existing) {
     return { metaTemplate: existing, name, snapshot, reused: true, payload: null };
   }
 
   let headerHandle = "";
   if (snapshot.primaryMedia) {
-    const object = await readS3(snapshot.primaryMedia.key, {
-      maxBytes: Number(snapshot.primaryMedia.sizeBytes || 10 * 1024 * 1024),
-    });
+    let object;
+    try {
+      object = await readS3(snapshot.primaryMedia.key, {
+        maxBytes: Number(snapshot.primaryMedia.sizeBytes || 10 * 1024 * 1024),
+      });
+    } catch (error) {
+      throw withSubmissionStage(error, "S3_READ");
+    }
     if (
       object.contentType &&
       String(object.contentType).toLowerCase() !== String(snapshot.primaryMedia.mimeType).toLowerCase()
     ) {
-      throw new WhatsappMarketingMetaError(
+      throw withSubmissionStage(new WhatsappMarketingMetaError(
         "Stored media type does not match the template",
         "marketing_media_type_mismatch"
-      );
+      ), "S3_READ");
     }
-    const upload = await uploadSample({
-      accessToken,
-      fileName: snapshot.primaryMedia.originalName || "marketing-media",
-      fileType: snapshot.primaryMedia.mimeType,
-      buffer: object.buffer,
-    });
+    let upload;
+    try {
+      upload = await uploadSample({
+        accessToken,
+        fileName: snapshot.primaryMedia.originalName || "marketing-media",
+        fileType: snapshot.primaryMedia.mimeType,
+        buffer: object.buffer,
+      });
+    } catch (error) {
+      throw withSubmissionStage(error, "MEDIA_SESSION_CREATE");
+    }
     headerHandle = upload.handle;
   }
 
-  const payload = buildMarketingMetaPayload({ name, snapshot, headerHandle });
-  const metaTemplate = await create({ wabaId, accessToken, payload });
+  let payload;
+  try {
+    payload = buildMarketingMetaPayload({ name, snapshot, headerHandle });
+  } catch (error) {
+    throw withSubmissionStage(error, "HEADER_HANDLE_VALIDATE");
+  }
+  let metaTemplate;
+  try {
+    metaTemplate = await create({ wabaId, accessToken, payload });
+  } catch (error) {
+    throw withSubmissionStage(error, "TEMPLATE_CREATE");
+  }
   return { metaTemplate, name, snapshot, reused: false, payload };
 }
 

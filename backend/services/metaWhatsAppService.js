@@ -39,6 +39,26 @@ function getSafeMetaErrorDetails(error) {
   };
 }
 
+function createMetaTemplateSubmissionError({ message, code, stage, error = null, response = null }) {
+  const wrapped = new Error(message);
+  wrapped.code = code;
+  wrapped.submissionStage = stage;
+  wrapped.metaError = error
+    ? getSafeMetaErrorDetails(error)
+    : {
+        status: response?.status || null,
+        type: "",
+        code: "",
+        subcode: "",
+        message,
+        errorUserTitle: "",
+        errorUserMessage: "",
+        fbtraceId: "",
+        hasErrorData: false,
+      };
+  return wrapped;
+}
+
 function getMetaOAuthExchangeErrorDetails(error) {
   const metaError = error?.response?.data?.error || {};
 
@@ -702,10 +722,12 @@ async function createTemplate({ wabaId, accessToken, payload }) {
 
     return response.data || {};
   } catch (error) {
-    console.error("[Meta Template Create Error]", getSafeMetaErrorDetails(error));
+    const metaError = getSafeMetaErrorDetails(error);
+    console.error("[Meta Template Create Error]", metaError);
     const wrapped = new Error("Unable to submit WhatsApp template to Meta");
     wrapped.code = "meta_template_submission_failed";
-    wrapped.metaError = getSafeMetaError(error);
+    wrapped.submissionStage = "TEMPLATE_CREATE";
+    wrapped.metaError = metaError;
     throw wrapped;
   }
 }
@@ -723,11 +745,13 @@ async function uploadTemplateMediaSample({
   if (!appId || !accessToken || !safeFileName || !mimeType || !Buffer.isBuffer(buffer) || !buffer.length) {
     const error = new Error("Meta app, access token, and media file are required");
     error.code = "meta_template_media_payload_invalid";
+    error.submissionStage = "MEDIA_SESSION_CREATE";
     throw error;
   }
 
+  let sessionResponse;
   try {
-    const sessionResponse = await httpClient.post(graphUrl(`${appId}/uploads`), null, {
+    sessionResponse = await httpClient.post(graphUrl(`${appId}/uploads`), null, {
       headers: { Authorization: `Bearer ${accessToken}` },
       params: {
         file_name: safeFileName,
@@ -735,14 +759,27 @@ async function uploadTemplateMediaSample({
         file_type: mimeType,
       },
     });
-    const sessionId = String(sessionResponse?.data?.id || "").trim();
-    if (!sessionId) {
-      const error = new Error("Meta did not create a media upload session");
-      error.code = "meta_template_media_session_missing";
-      throw error;
-    }
+  } catch (error) {
+    throw createMetaTemplateSubmissionError({
+      message: "Unable to create Meta template media upload session",
+      code: "meta_template_media_upload_failed",
+      stage: "MEDIA_SESSION_CREATE",
+      error,
+    });
+  }
+  const sessionId = String(sessionResponse?.data?.id || "").trim();
+  if (!sessionId) {
+    throw createMetaTemplateSubmissionError({
+      message: "Meta did not create a media upload session",
+      code: "meta_template_media_session_missing",
+      stage: "MEDIA_SESSION_CREATE",
+      response: sessionResponse,
+    });
+  }
 
-    const uploadResponse = await httpClient.post(graphUrl(sessionId), buffer, {
+  let uploadResponse;
+  try {
+    uploadResponse = await httpClient.post(graphUrl(sessionId), buffer, {
       headers: {
         Authorization: `OAuth ${accessToken}`,
         file_offset: "0",
@@ -750,25 +787,24 @@ async function uploadTemplateMediaSample({
       },
       maxBodyLength: Infinity,
     });
-    const handle = String(uploadResponse?.data?.h || "").trim();
-    if (!handle) {
-      const error = new Error("Meta did not return a media sample handle");
-      error.code = "meta_template_media_handle_missing";
-      throw error;
-    }
-    return { handle, sessionId };
   } catch (error) {
-    if (
-      error.code === "meta_template_media_session_missing" ||
-      error.code === "meta_template_media_handle_missing"
-    ) {
-      throw error;
-    }
-    const wrapped = new Error("Unable to upload template media sample to Meta");
-    wrapped.code = "meta_template_media_upload_failed";
-    wrapped.metaError = getSafeMetaError(error);
-    throw wrapped;
+    throw createMetaTemplateSubmissionError({
+      message: "Unable to upload template media sample to Meta",
+      code: "meta_template_media_upload_failed",
+      stage: "MEDIA_BINARY_UPLOAD",
+      error,
+    });
   }
+  const handle = String(uploadResponse?.data?.h || "").trim();
+  if (!handle) {
+    throw createMetaTemplateSubmissionError({
+      message: "Meta did not return a media sample handle",
+      code: "meta_template_media_handle_missing",
+      stage: "HEADER_HANDLE_VALIDATE",
+      response: uploadResponse,
+    });
+  }
+  return { handle, sessionId };
 }
 
 async function findTemplateByName({ wabaId, accessToken, name }) {

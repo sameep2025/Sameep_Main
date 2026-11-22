@@ -23,6 +23,7 @@ const {
   deleteS3ObjectByKey,
   uploadBufferToS3WithLabel,
 } = require("../utils/s3Upload");
+const { redactText } = require("../utils/httpSecurity");
 const { decryptMetaAccessToken } = require("../services/metaTokenStorage");
 const { getWhatsAppBusinessAccount } = require("../services/metaWhatsAppService");
 const {
@@ -33,6 +34,14 @@ const {
 } = require("../services/whatsappMarketingMetaService");
 
 const CONNECTED_META_STATUSES = new Set(["connected", "template_pending", "ready"]);
+const TEMPLATE_SUBMISSION_STAGES = new Set([
+  "S3_READ",
+  "MEDIA_SESSION_CREATE",
+  "MEDIA_BINARY_UPLOAD",
+  "HEADER_HANDLE_VALIDATE",
+  "TEMPLATE_CREATE",
+  "TEMPLATE_PERSIST",
+]);
 
 function getAuthorizedVendorId(req) {
   return String(req.vendorWriteAuth?.vendorId || req.params?.vendorId || "").trim();
@@ -176,6 +185,40 @@ function sendError(res, error, fallbackMessage) {
   }
   console.error(fallbackMessage, { code: error?.code || "whatsapp_marketing_error" });
   return res.status(500).json({ success: false, message: fallbackMessage });
+}
+
+function withTemplateSubmissionStage(error, stage) {
+  if (error && !error.submissionStage) error.submissionStage = stage;
+  return error;
+}
+
+function buildTemplateSubmissionDiagnostic(error, templateId) {
+  const metaError = error?.metaError || {};
+  const awsMetadata = error?.$metadata || {};
+  const stage = TEMPLATE_SUBMISSION_STAGES.has(error?.submissionStage)
+    ? error.submissionStage
+    : "TEMPLATE_CREATE";
+  const httpStatus = Number(metaError.status || awsMetadata.httpStatusCode || 0) || null;
+  return {
+    stage,
+    templateId: String(templateId || "").slice(0, 64),
+    code: String(error?.code || "whatsapp_marketing_submission_failed").slice(0, 80),
+    httpStatus,
+    metaCode: String(metaError.code || "").slice(0, 80),
+    metaSubcode: String(metaError.subcode || "").slice(0, 80),
+    traceId: String(metaError.fbtraceId || awsMetadata.requestId || "").slice(0, 160),
+    message: redactText(metaError.message || error?.message || "Template submission failed")
+      .replace(/[\r\n\t\0]/g, " ")
+      .trim()
+      .slice(0, 300),
+  };
+}
+
+function logTemplateSubmissionFailure(error, templateId, logger = console) {
+  logger.error(
+    "[WhatsApp Marketing Template Submission Error]",
+    buildTemplateSubmissionDiagnostic(error, templateId)
+  );
 }
 
 function createMarketingControllerError(message, code, statusCode) {
@@ -636,46 +679,56 @@ async function submitTemplateForApproval(req, res) {
     const status = mapMetaMarketingStatus(result.metaTemplate?.status, "SUBMITTING");
     const rejectionReason = getMetaRejectionReason(result.metaTemplate);
     const metaTemplateId = String(result.metaTemplate?.id || "");
-    const updateResult = await WhatsappMarketingTemplate.updateOne(
-      { _id: lockedTemplate._id, vendorId, status: "SUBMITTING" },
-      {
-        $set: {
-          status,
-          submittedSnapshot: result.snapshot,
-          "metaTemplate.templateId": metaTemplateId,
-          "metaTemplate.templateName": result.name,
-          "metaTemplate.category": String(result.metaTemplate?.category || "MARKETING"),
-          "metaTemplate.language": String(
-            result.metaTemplate?.language || result.snapshot.language || "en"
-          ),
-          "metaTemplate.status": status,
-          "metaTemplate.submittedAt": lockedTemplate.metaTemplate?.submittedAt || now,
-          "metaTemplate.lastSyncedAt": now,
-          "metaTemplate.reviewedAt": ["APPROVED", "REJECTED"].includes(status) ? now : null,
-          "metaTemplate.rejectionReason": rejectionReason,
-          "metaTemplate.lastSubmissionError": "",
-        },
-        $push: {
-          approvalHistory: {
+    let updateResult;
+    try {
+      updateResult = await WhatsappMarketingTemplate.updateOne(
+        { _id: lockedTemplate._id, vendorId, status: "SUBMITTING" },
+        {
+          $set: {
             status,
-            metaTemplateId,
-            metaTemplateName: result.name,
-            reason: rejectionReason,
-            snapshot: result.snapshot,
-            recordedAt: now,
+            submittedSnapshot: result.snapshot,
+            "metaTemplate.templateId": metaTemplateId,
+            "metaTemplate.templateName": result.name,
+            "metaTemplate.category": String(result.metaTemplate?.category || "MARKETING"),
+            "metaTemplate.language": String(
+              result.metaTemplate?.language || result.snapshot.language || "en"
+            ),
+            "metaTemplate.status": status,
+            "metaTemplate.submittedAt": lockedTemplate.metaTemplate?.submittedAt || now,
+            "metaTemplate.lastSyncedAt": now,
+            "metaTemplate.reviewedAt": ["APPROVED", "REJECTED"].includes(status) ? now : null,
+            "metaTemplate.rejectionReason": rejectionReason,
+            "metaTemplate.lastSubmissionError": "",
+          },
+          $push: {
+            approvalHistory: {
+              status,
+              metaTemplateId,
+              metaTemplateName: result.name,
+              reason: rejectionReason,
+              snapshot: result.snapshot,
+              recordedAt: now,
+            },
           },
         },
-      },
-      { runValidators: true }
-    );
+        { runValidators: true }
+      );
+    } catch (error) {
+      throw withTemplateSubmissionStage(error, "TEMPLATE_PERSIST");
+    }
     if (updateResult.modifiedCount !== 1) {
-      throw createMarketingControllerError(
+      throw withTemplateSubmissionStage(createMarketingControllerError(
         "Template state changed while it was being submitted",
         "marketing_template_submission_conflict",
         409
-      );
+      ), "TEMPLATE_PERSIST");
     }
-    const saved = await WhatsappMarketingTemplate.findById(lockedTemplate._id).lean();
+    let saved;
+    try {
+      saved = await WhatsappMarketingTemplate.findById(lockedTemplate._id).lean();
+    } catch (error) {
+      throw withTemplateSubmissionStage(error, "TEMPLATE_PERSIST");
+    }
     return res.json({
       success: true,
       message: result.reused
@@ -684,6 +737,9 @@ async function submitTemplateForApproval(req, res) {
       data: { template: serializeTemplate(saved) },
     });
   } catch (error) {
+    if (lockedTemplate?._id) {
+      logTemplateSubmissionFailure(error, lockedTemplate._id);
+    }
     if (lockedTemplate?._id) {
       const reason = String(error?.message || "Meta submission failed").slice(0, 1000);
       await WhatsappMarketingTemplate.updateOne(
@@ -842,6 +898,7 @@ async function reviseRejectedTemplate(req, res) {
 }
 
 module.exports = {
+  buildTemplateSubmissionDiagnostic,
   createTemplate,
   deleteUploadedMedia,
   deleteTemplate,
