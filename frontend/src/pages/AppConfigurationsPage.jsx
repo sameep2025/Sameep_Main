@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from "react";
 import API from "../api";
+import PromotionalPostersConfig from "../components/PromotionalPostersConfig";
 
 const WHATSAPP_BILLING_VARIABLE_OPTIONS = [
   { value: "customerName", label: "Customer Name" },
@@ -620,6 +621,8 @@ function AppConfigurationsPage() {
           <div style={{ color: "#166534", fontSize: "13px" }}>{adminPasscodeMessage}</div>
         )}
       </div>
+
+      <PromotionalPostersConfig />
 
       <div
         style={{

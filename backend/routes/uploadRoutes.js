@@ -113,7 +113,14 @@ function readSegments(body = {}, query = {}) {
 router.post("/upload", requireUploadAccess, parseSingleUpload, async (req, res) => {
   try {
     const folderType = String(req.body?.folderType || req.query?.folderType || "").toLowerCase();
-    const validFolders = new Set(["vendor", "category", "master", "newvendor", "newcategory"]);
+    const validFolders = new Set([
+      "vendor",
+      "category",
+      "master",
+      "newvendor",
+      "newcategory",
+      "promotional",
+    ]);
     if (!validFolders.has(folderType)) {
       return res.status(400).json({ error: "Invalid folderType" });
     }

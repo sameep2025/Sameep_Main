@@ -214,6 +214,7 @@ export default function Home() {
           </button>
 
           <nav className="siteNav" aria-label="Primary">
+            <a href="/salon-management-software">Salon software</a>
             <button type="button" onClick={() => scrollToSection("how-it-works")}>
               How it works
             </button>
@@ -609,6 +610,7 @@ export default function Home() {
 
           <div className="footerLinks">
             <h3>Platform</h3>
+            <a href="/salon-management-software">Salon management software</a>
             <a href="/onboarding">Set up business</a>
             <a href="/onboarding">Get started</a>
             <a href="/onboarding">Launch online</a>

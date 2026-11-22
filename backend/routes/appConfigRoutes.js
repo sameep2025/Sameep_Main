@@ -15,6 +15,13 @@ const {
   getStoredWhatsAppEnquiryConfig,
   normalizeWhatsAppEnquiryConfig,
 } = require("../utils/whatsappEnquiryConfig");
+const { deleteS3ObjectByKey } = require("../utils/s3Upload");
+const {
+  buildPublicPromotionalPosters,
+  collectRemovedPosterKeys,
+  isManagedPosterKey,
+  normalizePromotionalPosters,
+} = require("../services/promotionalPosterConfig");
 
 // Helper to get a config value by key, or null if not set
 async function getConfigValue(key) {
@@ -103,6 +110,73 @@ router.get("/public-site-contact", async (req, res) => {
     res.json(normalizePublicSiteContact(value));
   } catch (err) {
     res.status(500).json({ message: err.message });
+  }
+});
+
+router.get("/promotional-posters/public", async (req, res) => {
+  try {
+    const value = await getConfigValue("promotionalPosters");
+    return res.json({ posters: buildPublicPromotionalPosters(value) });
+  } catch (err) {
+    return res.status(500).json({ message: "Failed to load promotional posters" });
+  }
+});
+
+router.get("/promotional-posters", requireAdminAuth, async (req, res) => {
+  try {
+    const value = await getConfigValue("promotionalPosters");
+    return res.json({
+      posters: normalizePromotionalPosters(Array.isArray(value) ? value : []),
+    });
+  } catch (err) {
+    return res.status(500).json({ message: "Failed to load promotional poster configuration" });
+  }
+});
+
+router.put("/promotional-posters", requireAdminAuth, async (req, res) => {
+  try {
+    const previousValue = await getConfigValue("promotionalPosters");
+    const posters = normalizePromotionalPosters(req.body?.posters, { createIds: true });
+    const removedKeys = collectRemovedPosterKeys(previousValue, posters);
+
+    await AppConfig.findOneAndUpdate(
+      { key: "promotionalPosters" },
+      { key: "promotionalPosters", value: posters },
+      { new: true, upsert: true, runValidators: true }
+    ).lean();
+
+    const cleanupResults = await Promise.allSettled(
+      removedKeys.map((key) => deleteS3ObjectByKey(key))
+    );
+    const cleanupFailed = cleanupResults.filter((result) => result.status === "rejected").length;
+
+    return res.json({ posters, cleanupFailed });
+  } catch (err) {
+    return res.status(400).json({
+      message: err?.message || "Failed to save promotional posters",
+    });
+  }
+});
+
+router.delete("/promotional-posters/upload", requireAdminAuth, async (req, res) => {
+  try {
+    const key = String(req.body?.key || "").trim();
+    if (!isManagedPosterKey(key)) {
+      return res.status(400).json({ message: "Invalid promotional poster object key" });
+    }
+    const configuredPosters = await getConfigValue("promotionalPosters");
+    if (
+      Array.isArray(configuredPosters) &&
+      configuredPosters.some((poster) => String(poster?.key || "").trim() === key)
+    ) {
+      return res.status(409).json({
+        message: "Configured promotional posters must be removed through poster management",
+      });
+    }
+    await deleteS3ObjectByKey(key);
+    return res.json({ removed: true });
+  } catch (err) {
+    return res.status(500).json({ message: "Failed to remove promotional poster upload" });
   }
 });
 

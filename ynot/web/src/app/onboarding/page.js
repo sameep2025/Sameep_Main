@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useEffect, useMemo, useRef, useState } from "react";
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import ServiceAreasStep from "../../components/onboarding/ServiceAreasStep";
 import {
@@ -26,6 +26,7 @@ import {
 } from "../../services/onboardingApi";
 import { PREVIEW_BASE_URL } from "../../utils/config";
 import { getSelectedLeafIds, useCategoryTree } from "../../utils/categoryTree";
+import { resolveRequestedCategory } from "../../utils/onboardingCategory.mjs";
 
 const STEP_PROGRESS = {
   CATEGORY: 8,
@@ -112,6 +113,7 @@ function OnboardingFlow() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const initialCategoryId = searchParams.get("categoryId");
+  const initialCategorySlug = searchParams.get("category");
 
   const [categories, setCategories] = useState([]);
   const [loadingCategories, setLoadingCategories] = useState(true);
@@ -119,6 +121,14 @@ function OnboardingFlow() {
   const [selected, setSelected] = useState(null);
   const [confirmedCategory, setConfirmedCategory] = useState(null);
   const [step, setStep] = useState("CATEGORY");
+  const directCategoryHandledRef = useRef(false);
+
+  const confirmCategory = useCallback((category) => {
+    if (!category) return;
+    setSelected(category);
+    setConfirmedCategory(category);
+    setStep("CONNECT");
+  }, []);
 
   const [elapsed, setElapsed] = useState(0);
   const [globalLoading, setGlobalLoading] = useState(false);
@@ -197,19 +207,27 @@ function OnboardingFlow() {
   }, []);
 
   useEffect(() => {
-    if (!initialCategoryId || categories.length === 0 || confirmedCategory) return;
-
-    const matched = categories.find((category) => {
-      const id = category._id || category.id || category.categoryId;
-      return id === initialCategoryId;
-    });
-
-    if (matched) {
-      setSelected(matched);
-      setConfirmedCategory(matched);
-      setStep("CONNECT");
+    if (
+      loadingCategories ||
+      directCategoryHandledRef.current ||
+      (!initialCategorySlug && !initialCategoryId)
+    ) {
+      return;
     }
-  }, [categories, initialCategoryId, confirmedCategory]);
+
+    directCategoryHandledRef.current = true;
+    const matched = resolveRequestedCategory(categories, {
+      categorySlug: initialCategorySlug,
+      categoryId: initialCategoryId,
+    });
+    if (matched) confirmCategory(matched);
+  }, [
+    categories,
+    confirmCategory,
+    initialCategoryId,
+    initialCategorySlug,
+    loadingCategories,
+  ]);
 
   useEffect(() => {
     if (step !== "TRUST" || !confirmedCategory?.name) return;
@@ -1006,10 +1024,7 @@ function OnboardingFlow() {
                 type="button"
                 className="ctaButton"
                 disabled={!selected}
-                onClick={() => {
-                  setConfirmedCategory(selected);
-                  setStep("CONNECT");
-                }}
+                onClick={() => confirmCategory(selected)}
               >
                 Continue
               </button>
