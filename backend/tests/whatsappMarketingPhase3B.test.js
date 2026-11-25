@@ -122,7 +122,52 @@ test("Meta provider failures are sanitized and do not expose access tokens", asy
       (error) => (
         error.code === "meta_test_send_failed" &&
         error.metaError.code === 131026 &&
+        error.metaRequestAttempted === true &&
+        error.metaOutcomeUnknown === false &&
         !JSON.stringify(error).includes("secret-token")
+      )
+    );
+  } finally {
+    console.error = originalError;
+  }
+});
+
+test("Meta sender distinguishes local validation from an unknown transport outcome", async () => {
+  await assert.rejects(
+    sendMetaTemplateMessage({
+      phoneNumberId: "",
+      accessToken: "secret",
+      recipientPhoneNumber: "+919666060396",
+      templateName: "ynot_festive_offer",
+    }),
+    (error) => (
+      error.code === "meta_test_send_payload_invalid" &&
+      error.metaRequestAttempted === false &&
+      error.metaOutcomeUnknown === false
+    )
+  );
+
+  const originalError = console.error;
+  console.error = () => {};
+  try {
+    await assert.rejects(
+      sendMetaTemplateMessage({
+        phoneNumberId: "phone-1",
+        accessToken: "secret",
+        recipientPhoneNumber: "+919666060396",
+        templateName: "ynot_festive_offer",
+        httpClient: {
+          post: async () => {
+            const error = new Error("request timed out");
+            error.code = "ETIMEDOUT";
+            throw error;
+          },
+        },
+      }),
+      (error) => (
+        error.code === "meta_test_send_failed" &&
+        error.metaRequestAttempted === true &&
+        error.metaOutcomeUnknown === true
       )
     );
   } finally {

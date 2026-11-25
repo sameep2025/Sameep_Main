@@ -85,6 +85,38 @@ function recipient() {
   };
 }
 
+function runnableCampaign() {
+  return {
+    ...campaignDraft(),
+    status: "RUNNING",
+    execution: { runId: "run-1", phoneNumberId: "phone-1" },
+    templateSnapshot: {
+      ...approvedTemplate().submittedSnapshot,
+      metaTemplateId: "meta-template-1",
+      metaTemplateName: "ynot_offer",
+      language: "en",
+    },
+  };
+}
+
+function processingDependencies(overrides = {}) {
+  return {
+    CampaignModel: {
+      findOne: () => ({ lean: async () => runnableCampaign() }),
+    },
+    RecipientModel: { updateOne: async () => ({ modifiedCount: 1 }) },
+    ConsentModel: { findOne: () => ({ lean: async () => ({ status: "OPTED_IN" }) }) },
+    TemplateModel: { findOne: () => ({ lean: async () => approvedTemplate() }) },
+    loadVendorMetaConnection: async () => ({
+      wabaId: "waba-1",
+      phoneNumberId: "phone-1",
+      accessToken: "secret",
+    }),
+    sendMetaTemplateMessage: async () => ({ messages: [{ id: "wamid.campaign" }] }),
+    ...overrides,
+  };
+}
+
 test("campaign and recipient schemas provide durable lifecycle and duplicate-send indexes", () => {
   const campaign = new WhatsappMarketingCampaign({
     ...campaignDraft(),
@@ -184,6 +216,197 @@ test("known safe Meta failures retry but ambiguous timeouts never do", () => {
   assert.equal(ambiguous.code, "META_REQUEST_OUTCOME_UNKNOWN");
 });
 
+test("token decryption failures remain deterministic and never contact Meta", async () => {
+  let sendCalls = 0;
+  let mutation;
+  const diagnostics = [];
+  const tokenError = new Error("The WhatsApp Business connection must be reconnected");
+  tokenError.code = "meta_whatsapp_token_unavailable";
+  tokenError.statusCode = 409;
+
+  const result = await processClaimedCampaignRecipient(recipient(), {
+    logger: { error: (_label, details) => diagnostics.push(details) },
+    dependencies: processingDependencies({
+      loadVendorMetaConnection: async () => { throw tokenError; },
+      sendMetaTemplateMessage: async () => { sendCalls += 1; },
+      RecipientModel: {
+        updateOne: async (_query, update) => {
+          mutation = update;
+          return { modifiedCount: 1 };
+        },
+      },
+    }),
+  });
+
+  assert.equal(result.status, "FAILED");
+  assert.equal(sendCalls, 0);
+  assert.equal(mutation.$set.failureCode, "meta_whatsapp_token_unavailable");
+  assert.equal(mutation.$set.ambiguousFailure, false);
+  assert.equal(diagnostics[0].stage, "PRE_REQUEST");
+  assert.equal(diagnostics[0].status, 409);
+  assert.equal(diagnostics[0].metaSubmissionAttempted, false);
+  assert.equal(diagnostics[0].outcomeUnknown, false);
+});
+
+test("deterministic personalization failures are not reported as unknown Meta outcomes", async () => {
+  let sendCalls = 0;
+  let mutation;
+  const invalidRecipient = recipient();
+  invalidRecipient.personalization = { ...invalidRecipient.personalization, customer_name: "" };
+  const result = await processClaimedCampaignRecipient(invalidRecipient, {
+    logger: { error: () => {} },
+    dependencies: processingDependencies({
+      sendMetaTemplateMessage: async () => { sendCalls += 1; },
+      RecipientModel: {
+        updateOne: async (_query, update) => {
+          mutation = update;
+          return { modifiedCount: 1 };
+        },
+      },
+    }),
+  });
+
+  assert.equal(result.status, "FAILED");
+  assert.equal(sendCalls, 0);
+  assert.equal(mutation.$set.failureCode, "campaign_personalization_missing");
+  assert.equal(mutation.$set.ambiguousFailure, false);
+});
+
+test("preflight database failures remain pre-request and do not contact Meta", async () => {
+  let sendCalls = 0;
+  let mutation;
+  const diagnostics = [];
+  const result = await processClaimedCampaignRecipient(recipient(), {
+    logger: { error: (_label, details) => diagnostics.push(details) },
+    dependencies: processingDependencies({
+      CampaignModel: {
+        findOne: () => ({
+          lean: async () => {
+            const error = new Error("campaign lookup unavailable");
+            error.code = "DB_READ_FAILED";
+            throw error;
+          },
+        }),
+      },
+      sendMetaTemplateMessage: async () => { sendCalls += 1; },
+      RecipientModel: {
+        updateOne: async (_query, update) => {
+          mutation = update;
+          return { modifiedCount: 1 };
+        },
+      },
+    }),
+  });
+
+  assert.equal(result.status, "FAILED");
+  assert.equal(sendCalls, 0);
+  assert.equal(mutation.$set.failureCode, "DB_READ_FAILED");
+  assert.equal(mutation.$set.ambiguousFailure, false);
+  assert.equal(diagnostics[0].stage, "PRE_REQUEST");
+  assert.equal(diagnostics[0].metaSubmissionAttempted, false);
+});
+
+test("Meta timeouts remain unknown and are never retried automatically", async () => {
+  let mutation;
+  const timeout = new Error("request timed out");
+  timeout.code = "ETIMEDOUT";
+  timeout.metaRequestAttempted = true;
+  timeout.metaOutcomeUnknown = true;
+  const result = await processClaimedCampaignRecipient(recipient(), {
+    maxAttempts: 3,
+    logger: { error: () => {} },
+    dependencies: processingDependencies({
+      sendMetaTemplateMessage: async () => { throw timeout; },
+      RecipientModel: {
+        updateOne: async (_query, update) => {
+          mutation = update;
+          return { modifiedCount: 1 };
+        },
+      },
+    }),
+  });
+
+  assert.equal(result.status, "FAILED");
+  assert.equal(result.ambiguous, true);
+  assert.equal(mutation.$set.failureCode, "META_REQUEST_OUTCOME_UNKNOWN");
+  assert.equal(mutation.$set.ambiguousFailure, true);
+});
+
+test("known safe Meta HTTP failures retain bounded retry behavior", async () => {
+  let mutation;
+  const providerError = new Error("Meta unavailable");
+  providerError.code = "meta_test_send_failed";
+  providerError.metaError = {
+    status: 503,
+    code: 2,
+    subcode: 1363030,
+    fbtraceId: "trace-1",
+    message: "Service temporarily unavailable",
+  };
+  providerError.metaRequestAttempted = true;
+  providerError.metaOutcomeUnknown = false;
+  const diagnostics = [];
+  const result = await processClaimedCampaignRecipient(recipient(), {
+    maxAttempts: 3,
+    logger: { error: (_label, details) => diagnostics.push(details) },
+    dependencies: processingDependencies({
+      sendMetaTemplateMessage: async () => { throw providerError; },
+      RecipientModel: {
+        updateOne: async (_query, update) => {
+          mutation = update;
+          return { modifiedCount: 1 };
+        },
+      },
+    }),
+  });
+
+  assert.equal(result.status, "QUEUED");
+  assert.equal(result.retry, true);
+  assert.equal(mutation.$set.failureCode, "2");
+  assert.equal(diagnostics[0].status, 503);
+  assert.equal(diagnostics[0].metaCode, "2");
+  assert.equal(diagnostics[0].metaSubcode, "1363030");
+  assert.equal(diagnostics[0].traceId, "trace-1");
+  assert.equal(diagnostics[0].outcomeUnknown, false);
+});
+
+test("post-acceptance persistence failures never retry the Meta send", async () => {
+  let writes = 0;
+  let failureMutation;
+  let sendCalls = 0;
+  const diagnostics = [];
+  const result = await processClaimedCampaignRecipient(recipient(), {
+    logger: { error: (_label, details) => diagnostics.push(details) },
+    dependencies: processingDependencies({
+      sendMetaTemplateMessage: async () => {
+        sendCalls += 1;
+        return { messages: [{ id: "wamid.accepted" }] };
+      },
+      RecipientModel: {
+        updateOne: async (_query, update) => {
+          writes += 1;
+          if (writes === 1) {
+            const error = new Error("database write failed");
+            error.code = "DB_WRITE_FAILED";
+            throw error;
+          }
+          failureMutation = update;
+          return { modifiedCount: 1 };
+        },
+      },
+    }),
+  });
+
+  assert.equal(sendCalls, 1);
+  assert.equal(result.status, "FAILED");
+  assert.equal(result.ambiguous, false);
+  assert.equal(failureMutation.$set.failureCode, "CAMPAIGN_ACCEPTANCE_PERSIST_FAILED");
+  assert.equal(failureMutation.$set.ambiguousFailure, false);
+  assert.equal(diagnostics[0].stage, "POST_ACCEPTANCE_PERSIST");
+  assert.equal(diagnostics[0].metaSubmissionAttempted, true);
+  assert.equal(diagnostics[0].outcomeUnknown, false);
+});
+
 test("restart recovery marks expired in-flight requests ambiguous instead of requeueing", async () => {
   let query;
   let update;
@@ -247,9 +470,19 @@ test("late webhook failures replace a premature completed campaign status", asyn
   assert.equal(mutation.$set["execution.completedAt"], undefined);
 });
 
-test("worker limits are configurable and bounded", () => {
+test("campaign worker is opt-in and retains bounded limits", () => {
+  assert.equal(getCampaignWorkerConfig({ WHATSAPP_MARKETING_ENABLED: "true" }).enabled, false);
+  assert.equal(getCampaignWorkerConfig({
+    WHATSAPP_MARKETING_ENABLED: "true",
+    WHATSAPP_MARKETING_CAMPAIGN_WORKER_ENABLED: "false",
+  }).enabled, false);
+  assert.equal(getCampaignWorkerConfig({
+    WHATSAPP_MARKETING_ENABLED: "false",
+    WHATSAPP_MARKETING_CAMPAIGN_WORKER_ENABLED: "true",
+  }).enabled, false);
   const config = getCampaignWorkerConfig({
     WHATSAPP_MARKETING_ENABLED: "true",
+    WHATSAPP_MARKETING_CAMPAIGN_WORKER_ENABLED: "true",
     WHATSAPP_MARKETING_CAMPAIGN_CONCURRENCY: "99",
     WHATSAPP_MARKETING_CAMPAIGN_RATE_PER_SECOND: "0",
   });

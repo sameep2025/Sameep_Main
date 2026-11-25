@@ -2,6 +2,7 @@ const assert = require("node:assert");
 const fs = require("node:fs");
 const path = require("node:path");
 const test = require("node:test");
+const cors = require("cors");
 
 const { corsOrigin, isAllowedOrigin } = require("../utils/corsPolicy");
 const {
@@ -85,26 +86,140 @@ test("M-01 sensitive routes use scoped rate limiters", () => {
   assert.match(source("routes/siteAnalyticsRoutes.js"), /router\.post\("\/track", analyticsIngestionLimiter/);
 });
 
-test("M-02 CORS permits approved exact, local and sameep subdomain origins only", () => {
-  assert.equal(isAllowedOrigin("https://main.d18xuzvz5wtiup.amplifyapp.com"), true);
-  assert.equal(isAllowedOrigin("https://beautyspot.sameep.app"), true);
-  assert.equal(isAllowedOrigin("https://sameep.app"), true);
+test("M-02 CORS permits only environment-configured roots and genuine subdomains", () => {
+  const testEnv = { CORS_ALLOWED_DOMAIN_SUFFIXES: " SAMEEP.APP " };
+  const preProdEnv = { CORS_ALLOWED_DOMAIN_SUFFIXES: "ynot-dev.co.in" };
+  const prodEnv = { CORS_ALLOWED_DOMAIN_SUFFIXES: "ynot.co.in" };
+
+  assert.equal(isAllowedOrigin("https://sameep.app", testEnv), true);
+  assert.equal(isAllowedOrigin("https://beautyspot.sameep.app", testEnv), true);
+  assert.equal(isAllowedOrigin("https://nested.beautyspot.sameep.app", testEnv), true);
+  assert.equal(isAllowedOrigin("https://admin.ynot-dev.co.in", preProdEnv), true);
+  assert.equal(isAllowedOrigin("https://vendor-preview.ynot-dev.co.in", preProdEnv), true);
+  assert.equal(isAllowedOrigin("https://hassan-urban-salon.ynot-dev.co.in", preProdEnv), true);
+  assert.equal(isAllowedOrigin("https://admin.ynot.co.in", prodEnv), true);
+
+  assert.equal(isAllowedOrigin("https://admin.ynot-dev.co.in", testEnv), false);
+  assert.equal(isAllowedOrigin("https://admin.ynot.co.in", preProdEnv), false);
+  assert.equal(isAllowedOrigin("https://admin.sameep.app", prodEnv), false);
+  assert.equal(isAllowedOrigin("https://sameep.app", {}), false);
+});
+
+test("M-02 CORS preserves exact origins and approved localhost development", () => {
+  const exactEnv = {
+    CORS_ALLOWED_ORIGINS: " https://admin.example.net, https://preview.example.net:8443 ",
+  };
+  assert.equal(isAllowedOrigin("https://admin.example.net", exactEnv), true);
+  assert.equal(isAllowedOrigin("https://preview.example.net:8443", exactEnv), true);
+  assert.equal(isAllowedOrigin("https://other.example.net", exactEnv), false);
   assert.equal(isAllowedOrigin("http://localhost:4000"), true);
   assert.equal(isAllowedOrigin("http://hairaffairprsalonspa.localhost:4000"), true);
   assert.equal(isAllowedOrigin("http://deep.localhost:4000"), true);
+  assert.equal(isAllowedOrigin(undefined), true);
+});
+
+test("M-02 CORS rejects unsafe suffix configuration and malicious origins", () => {
+  const env = { CORS_ALLOWED_DOMAIN_SUFFIXES: "ynot.co.in" };
+  const invalidSuffixes = [
+    "*.ynot.co.in",
+    ".ynot.co.in",
+    "https://ynot.co.in",
+    "ynot.co.in/path",
+    "127.0.0.1",
+    "localhost",
+    "ynot.co.in:443",
+  ];
+  for (const suffix of invalidSuffixes) {
+    assert.equal(
+      isAllowedOrigin("https://salon.ynot.co.in", { CORS_ALLOWED_DOMAIN_SUFFIXES: suffix }),
+      false,
+      suffix
+    );
+  }
+
+  assert.equal(isAllowedOrigin("https://evilynot.co.in", env), false);
+  assert.equal(isAllowedOrigin("https://ynot.co.in.attacker.example", env), false);
+  assert.equal(isAllowedOrigin("https://sameep.app.attacker.example", env), false);
+  assert.equal(isAllowedOrigin("http://salon.ynot.co.in", env), false);
+  assert.equal(isAllowedOrigin("wss://salon.ynot.co.in", env), false);
+  assert.equal(isAllowedOrigin("https://salon.ynot.co.in:8443", env), false);
+  assert.equal(isAllowedOrigin("not-an-origin", env), false);
   assert.equal(isAllowedOrigin("https://sameep.app.attacker.example"), false);
   assert.equal(isAllowedOrigin("http://localhost.attacker.example:4000"), false);
   assert.equal(isAllowedOrigin("http://evil-localhost:4000"), false);
   assert.equal(isAllowedOrigin("https://hairaffairprsalonspa.localhost:4000"), false);
   assert.equal(isAllowedOrigin("https://evil-example.com"), false);
   assert.equal(isAllowedOrigin("http://localhost:9999"), false);
-  assert.equal(isAllowedOrigin("https://approved.example", { CORS_ALLOWED_ORIGINS: "https://approved.example" }), true);
 
   let deniedError = null;
   corsOrigin("https://evil-example.com", (error) => {
     deniedError = error;
   });
   assert.equal(deniedError?.statusCode, 403);
+});
+
+test("M-02 CORS preflight allows configured applications and rejects other environments", async (t) => {
+  const originalSuffixes = process.env.CORS_ALLOWED_DOMAIN_SUFFIXES;
+  const originalOrigins = process.env.CORS_ALLOWED_ORIGINS;
+  process.env.CORS_ALLOWED_DOMAIN_SUFFIXES = "ynot-dev.co.in";
+  delete process.env.CORS_ALLOWED_ORIGINS;
+  t.after(() => {
+    if (originalSuffixes === undefined) delete process.env.CORS_ALLOWED_DOMAIN_SUFFIXES;
+    else process.env.CORS_ALLOWED_DOMAIN_SUFFIXES = originalSuffixes;
+    if (originalOrigins === undefined) delete process.env.CORS_ALLOWED_ORIGINS;
+    else process.env.CORS_ALLOWED_ORIGINS = originalOrigins;
+  });
+
+  const corsMiddleware = cors({
+    origin: corsOrigin,
+    methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization"],
+    credentials: false,
+  });
+
+  function preflight(origin) {
+    return new Promise((resolve) => {
+      const headers = {};
+      const req = {
+        method: "OPTIONS",
+        headers: {
+          origin,
+          "access-control-request-method": "POST",
+          "access-control-request-headers": "content-type",
+        },
+      };
+      const res = {
+        statusCode: 200,
+        setHeader(name, value) {
+          headers[String(name).toLowerCase()] = String(value);
+        },
+        getHeader(name) {
+          return headers[String(name).toLowerCase()];
+        },
+        end() {
+          resolve({ status: this.statusCode, headers });
+        },
+      };
+      corsMiddleware(req, res, (error) => {
+        resolve({ status: Number(error?.statusCode) || 500, headers, error });
+      });
+    });
+  }
+
+  for (const origin of [
+    "https://admin.ynot-dev.co.in",
+    "https://vendor-preview.ynot-dev.co.in",
+    "https://hassan-urban-salon.ynot-dev.co.in",
+  ]) {
+    const response = await preflight(origin);
+    assert.equal(response.status, 204, origin);
+    assert.equal(response.headers["access-control-allow-origin"], origin);
+    assert.match(response.headers.vary || "", /Origin/);
+  }
+
+  const rejected = await preflight("https://admin.sameep.app");
+  assert.equal(rejected.status, 403);
+  assert.equal(rejected.headers["access-control-allow-origin"], undefined);
 });
 
 test("M-02 proxy trust is restricted to loopback and private network addresses", () => {

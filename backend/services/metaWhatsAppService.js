@@ -1053,6 +1053,8 @@ async function sendMetaTemplateMessage({
   if (!id || !accessToken || !recipient || !name) {
     const error = new Error("Phone number ID, access token, recipient, and template name are required");
     error.code = "meta_test_send_payload_invalid";
+    error.metaRequestAttempted = false;
+    error.metaOutcomeUnknown = false;
     throw error;
   }
 
@@ -1076,6 +1078,8 @@ async function sendMetaTemplateMessage({
   } else if (headerParameter) {
     const error = new Error("A valid image or document template header is required");
     error.code = "meta_test_send_header_invalid";
+    error.metaRequestAttempted = false;
+    error.metaOutcomeUnknown = false;
     throw error;
   }
   if (bodyParameters.length) {
@@ -1101,8 +1105,11 @@ async function sendMetaTemplateMessage({
     },
   };
 
+  let metaRequestAttempted = false;
   try {
-    const response = await httpClient.post(graphUrl(`${id}/messages`), payload, {
+    const endpoint = graphUrl(`${id}/messages`);
+    metaRequestAttempted = true;
+    const response = await httpClient.post(endpoint, payload, {
       headers: {
         Authorization: `Bearer ${accessToken}`,
         "Content-Type": "application/json",
@@ -1116,6 +1123,8 @@ async function sendMetaTemplateMessage({
     const wrapped = new Error("Unable to send WhatsApp test message through Meta");
     wrapped.code = "meta_test_send_failed";
     wrapped.metaError = metaError;
+    wrapped.metaRequestAttempted = metaRequestAttempted;
+    wrapped.metaOutcomeUnknown = metaRequestAttempted && !error?.response;
     throw wrapped;
   }
 }

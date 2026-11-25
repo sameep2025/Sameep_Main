@@ -16,6 +16,12 @@ const { loadVendorMetaConnection } = require("../controllers/vendorWhatsappMarke
 const ACTIVE_CAMPAIGN_STATUSES = ["QUEUED", "RUNNING"];
 const TERMINAL_RECIPIENT_STATUSES = ["ACCEPTED", "SENT", "DELIVERED", "READ", "FAILED", "CANCELLED"];
 const SAFE_RETRY_HTTP_STATUSES = new Set([429, 500, 502, 503, 504]);
+const AMBIGUOUS_TRANSPORT_CODES = new Set([
+  "ECONNABORTED",
+  "ECONNRESET",
+  "ETIMEDOUT",
+  "ERR_NETWORK",
+]);
 
 function sanitizeFailureValue(value, maxLength) {
   return String(value || "").replace(/[\r\n\t\0]/g, " ").trim().slice(0, maxLength);
@@ -64,26 +70,66 @@ function buildCampaignSendPayload(campaign, recipient) {
   return { bodyParameters, headerParameter };
 }
 
-function classifyCampaignSendFailure(error, attemptCount, maxAttempts) {
-  const status = Number(error?.metaError?.status || 0);
-  const safeToRetry = SAFE_RETRY_HTTP_STATUSES.has(status) && attemptCount < maxAttempts;
-  const ambiguous = !status;
+function classifyCampaignSendFailure(error, attemptCount, maxAttempts, context = {}) {
+  const status = Number(error?.metaError?.status || error?.statusCode || 0);
+  const processingStage = String(context.processingStage || "PRE_REQUEST");
+  const metaAccepted = context.metaAccepted === true;
+  const metaSubmissionAttempted = context.metaSubmissionAttempted === true ||
+    error?.metaRequestAttempted === true ||
+    AMBIGUOUS_TRANSPORT_CODES.has(String(error?.code || ""));
+  const explicitUnknown = error?.metaOutcomeUnknown === true;
+  const explicitKnown = error?.metaOutcomeUnknown === false;
+  const ambiguous = !metaAccepted && !status && !explicitKnown && (
+    explicitUnknown || metaSubmissionAttempted
+  );
+  const safeToRetry = !metaAccepted && !ambiguous &&
+    SAFE_RETRY_HTTP_STATUSES.has(status) && attemptCount < maxAttempts;
+  const originalCode = error?.metaError?.code || error?.code || "";
+  const failureCode = metaAccepted
+    ? "CAMPAIGN_ACCEPTANCE_PERSIST_FAILED"
+    : ambiguous
+      ? "META_REQUEST_OUTCOME_UNKNOWN"
+      : originalCode || (processingStage === "PRE_REQUEST"
+        ? "CAMPAIGN_PRE_REQUEST_FAILED"
+        : "META_REJECTED");
+  const failureMessage = metaAccepted
+    ? "Meta accepted the message, but its acceptance could not be persisted"
+    : ambiguous
+      ? "Meta request outcome is unknown; automatic retry was blocked"
+      : error?.metaError?.message || error?.message || "Campaign message processing failed";
   return {
     retry: safeToRetry,
     ambiguous,
-    code: sanitizeFailureValue(
-      ambiguous
-        ? "META_REQUEST_OUTCOME_UNKNOWN"
-        : error?.metaError?.code || error?.code || "META_REJECTED",
-      80
-    ),
-    message: sanitizeFailureValue(
-      ambiguous
-        ? "Meta request outcome is unknown; automatic retry was blocked"
-        : error?.metaError?.message || error?.message || "Meta rejected the campaign message",
-      240
-    ),
+    code: sanitizeFailureValue(failureCode, 80),
+    message: sanitizeFailureValue(failureMessage, 240),
+    processingStage,
+    metaSubmissionAttempted,
+    metaAccepted,
+    status: status || null,
   };
+}
+
+function buildCampaignProcessingDiagnostic(error, recipient, failure) {
+  const metaError = error?.metaError || {};
+  return {
+    campaignId: sanitizeFailureValue(recipient?.campaignId, 64),
+    recipientId: sanitizeFailureValue(recipient?._id, 64),
+    stage: sanitizeFailureValue(failure.processingStage, 40),
+    code: sanitizeFailureValue(error?.code || "campaign_processing_failed", 80),
+    status: failure.status,
+    metaCode: sanitizeFailureValue(metaError.code, 80),
+    metaSubcode: sanitizeFailureValue(metaError.subcode, 80),
+    traceId: sanitizeFailureValue(metaError.fbtraceId, 160),
+    metaSubmissionAttempted: failure.metaSubmissionAttempted,
+    outcomeUnknown: failure.ambiguous,
+  };
+}
+
+function logCampaignProcessingFailure(error, recipient, failure, logger = console) {
+  logger.error(
+    "[WhatsApp Marketing Campaign Processing Error]",
+    buildCampaignProcessingDiagnostic(error, recipient, failure)
+  );
 }
 
 async function ensureCampaignRecipientRecords(campaign, dependencies = {}) {
@@ -349,58 +395,62 @@ async function processClaimedCampaignRecipient(recipient, options = {}) {
   const TemplateModel = dependencies.TemplateModel || WhatsappMarketingTemplate;
   const sendMessage = dependencies.sendMetaTemplateMessage || sendMetaTemplateMessage;
   const loadConnection = dependencies.loadVendorMetaConnection || loadVendorMetaConnection;
+  const logger = options.logger || console;
   const maxAttempts = Math.max(1, Number(options.maxAttempts || 3));
-  const campaign = await CampaignModel.findOne({
-    _id: recipient.campaignId,
-    vendorId: recipient.vendorId,
-    status: { $in: ACTIVE_CAMPAIGN_STATUSES },
-    "execution.runId": recipient.runId,
-  }).lean();
-  if (!campaign) {
-    await RecipientModel.updateOne(
-      { _id: recipient._id, status: "PROCESSING", leaseToken: recipient.leaseToken },
-      { $set: { status: "CANCELLED", failureCode: "CAMPAIGN_NOT_ACTIVE", lastStatusAt: new Date() } }
-    );
-    return { status: "CANCELLED" };
-  }
-  const consent = await ConsentModel.findOne({
-    vendorId: recipient.vendorId,
-    customerId: recipient.customerId,
-  }).lean();
-  if (consent?.status !== "OPTED_IN") {
-    const failureCode = consent?.status === "OPTED_OUT" ? "MARKETING_OPT_OUT" : "MARKETING_CONSENT_REQUIRED";
-    await RecipientModel.updateOne(
-      { _id: recipient._id, status: "PROCESSING", leaseToken: recipient.leaseToken },
-      {
-        $set: { status: "CANCELLED", failureCode, lastStatusAt: new Date() },
-        $unset: { leaseToken: "", leaseExpiresAt: "" },
-      }
-    );
-    return { status: "CANCELLED", code: failureCode };
-  }
-  const template = await TemplateModel.findOne({
-    _id: campaign.templateId,
-    vendorId: recipient.vendorId,
-    status: "APPROVED",
-    "metaTemplate.status": "APPROVED",
-    "metaTemplate.templateId": campaign.templateSnapshot.metaTemplateId,
-  }).lean();
-  if (!template) {
-    await RecipientModel.updateOne(
-      { _id: recipient._id, status: "PROCESSING", leaseToken: recipient.leaseToken },
-      {
-        $set: {
-          status: "FAILED",
-          failureCode: "CAMPAIGN_TEMPLATE_NOT_APPROVED",
-          failureMessage: "The approved template is no longer available",
-          lastStatusAt: new Date(),
-        },
-        $unset: { leaseToken: "", leaseExpiresAt: "" },
-      }
-    );
-    return { status: "FAILED" };
-  }
+  let processingStage = "PRE_REQUEST";
+  let metaSubmissionAttempted = false;
+  let metaAccepted = false;
   try {
+    const campaign = await CampaignModel.findOne({
+      _id: recipient.campaignId,
+      vendorId: recipient.vendorId,
+      status: { $in: ACTIVE_CAMPAIGN_STATUSES },
+      "execution.runId": recipient.runId,
+    }).lean();
+    if (!campaign) {
+      await RecipientModel.updateOne(
+        { _id: recipient._id, status: "PROCESSING", leaseToken: recipient.leaseToken },
+        { $set: { status: "CANCELLED", failureCode: "CAMPAIGN_NOT_ACTIVE", lastStatusAt: new Date() } }
+      );
+      return { status: "CANCELLED" };
+    }
+    const consent = await ConsentModel.findOne({
+      vendorId: recipient.vendorId,
+      customerId: recipient.customerId,
+    }).lean();
+    if (consent?.status !== "OPTED_IN") {
+      const failureCode = consent?.status === "OPTED_OUT" ? "MARKETING_OPT_OUT" : "MARKETING_CONSENT_REQUIRED";
+      await RecipientModel.updateOne(
+        { _id: recipient._id, status: "PROCESSING", leaseToken: recipient.leaseToken },
+        {
+          $set: { status: "CANCELLED", failureCode, lastStatusAt: new Date() },
+          $unset: { leaseToken: "", leaseExpiresAt: "" },
+        }
+      );
+      return { status: "CANCELLED", code: failureCode };
+    }
+    const template = await TemplateModel.findOne({
+      _id: campaign.templateId,
+      vendorId: recipient.vendorId,
+      status: "APPROVED",
+      "metaTemplate.status": "APPROVED",
+      "metaTemplate.templateId": campaign.templateSnapshot.metaTemplateId,
+    }).lean();
+    if (!template) {
+      await RecipientModel.updateOne(
+        { _id: recipient._id, status: "PROCESSING", leaseToken: recipient.leaseToken },
+        {
+          $set: {
+            status: "FAILED",
+            failureCode: "CAMPAIGN_TEMPLATE_NOT_APPROVED",
+            failureMessage: "The approved template is no longer available",
+            lastStatusAt: new Date(),
+          },
+          $unset: { leaseToken: "", leaseExpiresAt: "" },
+        }
+      );
+      return { status: "FAILED" };
+    }
     const connection = await loadConnection(String(recipient.vendorId));
     if (String(connection.phoneNumberId) !== String(campaign.execution.phoneNumberId)) {
       throw new WhatsappMarketingCampaignError(
@@ -410,6 +460,8 @@ async function processClaimedCampaignRecipient(recipient, options = {}) {
       );
     }
     const payload = buildCampaignSendPayload(campaign, recipient);
+    processingStage = "META_REQUEST";
+    metaSubmissionAttempted = true;
     const result = await sendMessage({
       phoneNumberId: connection.phoneNumberId,
       accessToken: connection.accessToken,
@@ -423,8 +475,12 @@ async function processClaimedCampaignRecipient(recipient, options = {}) {
     if (!metaMessageId) {
       const error = new Error("Meta did not return a message identifier");
       error.code = "meta_campaign_message_id_missing";
+      error.metaRequestAttempted = true;
+      error.metaOutcomeUnknown = true;
       throw error;
     }
+    metaAccepted = true;
+    processingStage = "POST_ACCEPTANCE_PERSIST";
     const now = new Date();
     await RecipientModel.updateOne(
       { _id: recipient._id, status: "PROCESSING", leaseToken: recipient.leaseToken },
@@ -443,7 +499,12 @@ async function processClaimedCampaignRecipient(recipient, options = {}) {
     );
     return { status: "ACCEPTED", metaMessageId };
   } catch (error) {
-    const failure = classifyCampaignSendFailure(error, recipient.attemptCount, maxAttempts);
+    const failure = classifyCampaignSendFailure(error, recipient.attemptCount, maxAttempts, {
+      processingStage,
+      metaSubmissionAttempted,
+      metaAccepted,
+    });
+    logCampaignProcessingFailure(error, recipient, failure, logger);
     const now = new Date();
     if (failure.retry) {
       const retryDelayMs = Math.min(60000, 1000 * (2 ** Math.max(recipient.attemptCount - 1, 0)));
@@ -481,12 +542,14 @@ async function processClaimedCampaignRecipient(recipient, options = {}) {
 
 module.exports = {
   ACTIVE_CAMPAIGN_STATUSES,
+  buildCampaignProcessingDiagnostic,
   buildCampaignSendPayload,
   cancelCampaignExecution,
   claimCampaignRecipient,
   classifyCampaignSendFailure,
   ensureCampaignRecipientRecords,
   getDeliveryCounts,
+  logCampaignProcessingFailure,
   processClaimedCampaignRecipient,
   queueCampaignExecution,
   recoverExpiredRecipientClaims,

@@ -19,7 +19,7 @@ function getCampaignWorkerConfig(env = process.env) {
   return {
     enabled:
       isWhatsappMarketingEnabled(env) &&
-      String(env.WHATSAPP_MARKETING_CAMPAIGN_WORKER_ENABLED || "true").toLowerCase() !== "false",
+      String(env.WHATSAPP_MARKETING_CAMPAIGN_WORKER_ENABLED || "").trim().toLowerCase() === "true",
     concurrency: boundedInteger(env.WHATSAPP_MARKETING_CAMPAIGN_CONCURRENCY, 2, 1, 10),
     ratePerSecond: boundedInteger(env.WHATSAPP_MARKETING_CAMPAIGN_RATE_PER_SECOND, 2, 1, 20),
     pollMs: boundedInteger(env.WHATSAPP_MARKETING_CAMPAIGN_POLL_MS, 1000, 250, 30000),
