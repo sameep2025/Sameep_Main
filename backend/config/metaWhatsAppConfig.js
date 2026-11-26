@@ -24,6 +24,14 @@ function getMetaWhatsAppConfig() {
   const tokenEncryptionKey = trimEnv("META_TOKEN_ENCRYPTION_KEY");
   const systemUserAccessToken = trimEnv("META_SYSTEM_USER_ACCESS_TOKEN");
   const webhookVerifyToken = trimEnv("META_WHATSAPP_WEBHOOK_VERIFY_TOKEN");
+  const ynotWabaId = trimEnv("YNOT_META_WABA_ID");
+  const ynotPhoneNumberId = trimEnv("YNOT_META_PHONE_NUMBER_ID");
+  const ynotBillTemplateName =
+    trimEnv("YNOT_META_BILL_TEMPLATE_NAME") || "ynot_bill_standard_v1";
+  const ynotBillTemplateLanguage =
+    trimEnv("YNOT_META_BILL_TEMPLATE_LANGUAGE") || "en";
+  const isYnotDefaultBillingEnabled =
+    trimEnv("YNOT_META_DEFAULT_BILLING_ENABLED") === "true";
 
   return {
     appId,
@@ -36,6 +44,11 @@ function getMetaWhatsAppConfig() {
     tokenEncryptionKey,
     systemUserAccessToken,
     webhookVerifyToken,
+    ynotWabaId,
+    ynotPhoneNumberId,
+    ynotBillTemplateName,
+    ynotBillTemplateLanguage,
+    isYnotDefaultBillingEnabled,
     isEmbeddedSignupConfigured: Boolean(appId && embeddedSignupConfigId),
     isCoexistenceEmbeddedSignupConfigured: Boolean(
       isCoexistenceOnboardingEnabled && appId && coexistenceEmbeddedSignupConfigId

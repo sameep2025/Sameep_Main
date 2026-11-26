@@ -372,14 +372,14 @@ test("billing provider decision falls back to ynot_msg91 for Meta-configured but
   assert.equal(decision.provider, "ynot_msg91");
 });
 
-test("billing completion warning metadata is tied only to ynot_msg91 zero balance", () => {
+test("billing completion warning metadata supports both YNOT default providers", () => {
   const source = fs.readFileSync(path.join(__dirname, "../controllers/billingController.js"), "utf8");
 
   assert.match(source, /resolveBillingWhatsappProvider\(\{ vendor \}\)/);
-  assert.match(source, /decision\.provider !== "ynot_msg91"/);
+  assert.match(source, /\["ynot_msg91", "ynot_meta"\]\.includes\(decision\.provider\)/);
   assert.match(source, /isProviderDecisionPendingMetaReadiness\(\{ vendor, decision \}\)/);
   assert.match(source, /hasAvailableWhatsAppBalance\(billing\.vendorId\)/);
-  assert.match(source, /provider: "ynot_msg91"/);
+  assert.match(source, /provider: decision\.provider/);
   assert.match(source, /sendExpected: false/);
   assert.match(source, /reason: "insufficient_balance"/);
 });

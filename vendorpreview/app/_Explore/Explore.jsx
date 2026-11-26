@@ -1631,7 +1631,7 @@ function ExploreContent({ onReady, onOpenServices }) {
   const getWhatsAppBillingWarning = (response) => {
     const whatsapp = response?.whatsapp || {};
     if (
-      whatsapp.provider === "ynot_msg91" &&
+      ["ynot_msg91", "ynot_meta"].includes(whatsapp.provider) &&
       whatsapp.sendExpected === false &&
       whatsapp.reason === "insufficient_balance"
     ) {

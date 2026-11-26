@@ -1,3 +1,4 @@
+const crypto = require("crypto");
 const Customer = require("../models/Customer");
 const Vendor = require("../models/DummyVendor");
 const { calculateCustomerBalance } = require("./loyaltyService");
@@ -19,7 +20,10 @@ const {
 const {
   prepareManeaDiagnosticSend,
 } = require("./maneaWhatsappDiagnostic");
-const { deductWhatsApp } = require("./vendorWalletService");
+const {
+  deductWhatsApp,
+  deductWhatsAppForBillingDelivery,
+} = require("./vendorWalletService");
 const {
   buildPublicBillPath,
   buildPublicBillUrl,
@@ -33,6 +37,20 @@ function getBillingCustomerPhone({ billing, customer }) {
     customer?.phone ||
     ""
   ).trim();
+}
+
+function buildBillingDeliveryIdentity({ billingId, referencePrefix, randomUUID = crypto.randomUUID }) {
+  const billId = String(billingId || "");
+  if (referencePrefix === "billing-resend") {
+    return {
+      sendPurpose: "HISTORICAL_RESEND",
+      operationId: `billing:${billId}:resend:${randomUUID()}`,
+    };
+  }
+  return {
+    sendPurpose: "AUTOMATIC_COMPLETION",
+    operationId: `billing:${billId}:completion`,
+  };
 }
 
 async function sendCompletedBillWhatsApp({ billing, referencePrefix = "billing" }) {
@@ -186,11 +204,16 @@ async function sendCompletedBillWhatsApp({ billing, referencePrefix = "billing" 
     billUrl,
     billPath,
   };
+  const deliveryIdentity = buildBillingDeliveryIdentity({
+    billingId: billing._id,
+    referencePrefix,
+  });
 
   const sendResult = await sendRoutedWhatsAppBillingMessage({
     vendor: vendorForWhatsApp,
     vendorId: billing.vendorId,
     billId: billing._id,
+    ...deliveryIdentity,
     msg91Payload: messagePayload,
     metaPayload: {
       vendor: vendorForWhatsApp,
@@ -211,6 +234,17 @@ async function sendCompletedBillWhatsApp({ billing, referencePrefix = "billing" 
   if (sendResult?.status === "accepted" && sendResult?.provider === "ynot_msg91") {
     await deductWhatsApp(billing.vendorId, `${referencePrefix}:${billing._id}`);
   }
+  if (
+    sendResult?.status === "accepted" &&
+    sendResult?.provider === "ynot_meta" &&
+    sendResult?.result?.deliveryId
+  ) {
+    await deductWhatsAppForBillingDelivery({
+      vendorId: billing.vendorId,
+      deliveryId: sendResult.result.deliveryId,
+      reference: deliveryIdentity.operationId,
+    });
+  }
 
   return {
     success: sendResult?.status === "accepted",
@@ -223,6 +257,7 @@ async function sendCompletedBillWhatsApp({ billing, referencePrefix = "billing" 
 }
 
 module.exports = {
+  buildBillingDeliveryIdentity,
   getBillingCustomerPhone,
   sendCompletedBillWhatsApp,
 };

@@ -1,5 +1,7 @@
+const mongoose = require("mongoose");
 const VendorWallet = require("../models/VendorWallet");
 const VendorWalletLedger = require("../models/VendorWalletLedger");
+const WhatsappBillingDelivery = require("../models/WhatsappBillingDelivery");
 
 function isDuplicateKeyError(error) {
   return error?.code === 11000 || String(error?.message || "").includes("E11000");
@@ -131,9 +133,68 @@ async function deductOTP(vendorId, reference) {
   return wallet.otpBalance;
 }
 
+async function deductWhatsAppForBillingDelivery({
+  vendorId,
+  deliveryId,
+  reference,
+  dependencies = {},
+}) {
+  const WalletModel = dependencies.WalletModel || VendorWallet;
+  const LedgerModel = dependencies.LedgerModel || VendorWalletLedger;
+  const DeliveryModel = dependencies.DeliveryModel || WhatsappBillingDelivery;
+  const startSession = dependencies.startSession || (() => mongoose.startSession());
+  const session = await startSession();
+  let balanceAfter = null;
+  let alreadyDeducted = false;
+
+  try {
+    await session.withTransaction(async () => {
+      const delivery = await DeliveryModel.findOne({
+        _id: deliveryId,
+        vendorId,
+        provider: "ynot_meta",
+        status: { $in: ["ACCEPTED", "SENT", "DELIVERED", "READ"] },
+      }).session(session);
+      if (!delivery) throw new Error("Accepted YNOT Meta billing delivery not found");
+      if (delivery.walletDeductedAt) {
+        alreadyDeducted = true;
+        balanceAfter = null;
+        return;
+      }
+
+      const wallet = await WalletModel.findOneAndUpdate(
+        { vendorId, whatsappBalance: { $gt: 0 } },
+        { $inc: { whatsappBalance: -1 } },
+        { new: true, session }
+      );
+      if (!wallet) throw new Error("Insufficient WhatsApp balance");
+      balanceAfter = wallet.whatsappBalance;
+
+      await LedgerModel.create(
+        [{
+          vendorId,
+          type: "BILL_MESSAGE",
+          channel: "WHATSAPP",
+          quantity: -1,
+          reference,
+          balanceAfter,
+        }],
+        { session }
+      );
+      delivery.walletDeductedAt = new Date();
+      delivery.walletReference = reference;
+      await delivery.save({ session });
+    });
+    return { alreadyDeducted, balanceAfter };
+  } finally {
+    await session.endSession();
+  }
+}
+
 module.exports = {
   hasAvailableOTPBalance,
   hasAvailableWhatsAppBalance,
   deductWhatsApp,
+  deductWhatsAppForBillingDelivery,
   deductOTP,
 };

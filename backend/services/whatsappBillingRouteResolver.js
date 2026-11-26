@@ -5,6 +5,7 @@ const {
 
 const ROUTES = {
   VENDOR_META: "vendor_meta",
+  YNOT_META: "ynot_meta",
   YNOT_MSG91: "ynot_msg91",
 };
 
@@ -36,7 +37,7 @@ function resolveWhatsAppBillingRoute(vendorContext = {}, options = {}) {
     billingTemplateApproved: Boolean(eligibility.checks.billingTemplateApproved),
     testMessageSuccessful: Boolean(eligibility.checks.testMessageSuccessful),
   };
-  const route =
+  const vendorMetaEligible =
     checks.providerMeta &&
     checks.explicitlyEnabled &&
     checks.connectionReady &&
@@ -44,13 +45,18 @@ function resolveWhatsAppBillingRoute(vendorContext = {}, options = {}) {
     checks.messagingOperational &&
     checks.displayNameSendReady &&
     checks.billingTemplateApproved &&
-    checks.testMessageSuccessful
-      ? ROUTES.VENDOR_META
+    checks.testMessageSuccessful;
+  const route = vendorMetaEligible
+    ? ROUTES.VENDOR_META
+    : options.ynotMetaDefaultEnabled === true
+      ? ROUTES.YNOT_META
       : ROUTES.YNOT_MSG91;
 
   const reason =
     route === ROUTES.VENDOR_META
       ? "vendor_meta_enabled_and_ready"
+      : route === ROUTES.YNOT_META
+      ? "ynot_meta_default_enabled"
       : checks.providerMeta && eligibility.eligible && !checks.explicitlyEnabled
       ? "vendor_meta_ready_but_not_enabled"
       : "vendor_meta_not_available";

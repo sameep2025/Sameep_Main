@@ -9,6 +9,7 @@ const {
   getSafeErrorCode,
   sendVendorMetaBillMessage,
 } = require("./vendorMetaBillSender");
+const { sendYnotMetaBillMessage } = require("./ynotMetaBillSender");
 const {
   getManeaSendDiagnosticAuthorization,
   prepareManeaDiagnosticSend,
@@ -28,7 +29,12 @@ function isVendorMetaBillRoutingEnabled(env = process.env) {
   return String(env.WHATSAPP_VENDOR_META_BILL_ROUTING_ENABLED || "").trim() === "true";
 }
 
+function isYnotMetaDefaultBillingEnabled(env = process.env) {
+  return String(env.YNOT_META_DEFAULT_BILLING_ENABLED || "").trim() === "true";
+}
+
 function isUncertainSendError(error) {
+  if (typeof error?.metaOutcomeUnknown === "boolean") return error.metaOutcomeUnknown;
   const code = String(error?.code || "").trim();
   if (UNCERTAIN_ERROR_CODES.has(code)) return true;
   if (error?.response) return false;
@@ -43,11 +49,14 @@ function isUncertainSendError(error) {
 }
 
 function resolveBillingWhatsappProvider({ vendor, env = process.env } = {}) {
+  const ynotMetaDefaultEnabled = isYnotMetaDefaultBillingEnabled(env);
   if (!isVendorMetaBillRoutingEnabled(env)) {
     return {
-      route: ROUTES.YNOT_MSG91,
-      provider: ROUTES.YNOT_MSG91,
-      reason: "global_vendor_meta_routing_disabled",
+      route: ynotMetaDefaultEnabled ? ROUTES.YNOT_META : ROUTES.YNOT_MSG91,
+      provider: ynotMetaDefaultEnabled ? ROUTES.YNOT_META : ROUTES.YNOT_MSG91,
+      reason: ynotMetaDefaultEnabled
+        ? "ynot_meta_default_enabled"
+        : "global_vendor_meta_routing_disabled",
     };
   }
 
@@ -58,7 +67,10 @@ function resolveBillingWhatsappProvider({ vendor, env = process.env } = {}) {
   });
   const decision = resolveWhatsAppBillingRoute(
     { whatsappBusiness: vendor?.whatsappBusiness || {} },
-    { phoneRegistrationReadyOverride: diagnosticAuthorization.allowed }
+    {
+      phoneRegistrationReadyOverride: diagnosticAuthorization.allowed,
+      ynotMetaDefaultEnabled,
+    }
   );
 
   return {
@@ -114,6 +126,8 @@ async function sendRoutedWhatsAppBillingMessage(
     billId,
     msg91Payload,
     metaPayload,
+    operationId,
+    sendPurpose,
     diagnosticContext: suppliedDiagnosticContext,
   },
   deps = {}
@@ -122,6 +136,7 @@ async function sendRoutedWhatsAppBillingMessage(
   const logger = deps.logger || console;
   const sendMsg91 = deps.sendMsg91 || sendBillWhatsapp;
   const sendVendorMeta = deps.sendVendorMeta || sendVendorMetaBillMessage;
+  const sendYnotMeta = deps.sendYnotMeta || sendYnotMetaBillMessage;
   const hasMsg91Balance = deps.hasMsg91Balance || hasAvailableWhatsAppBalance;
   const resolveRoute = deps.resolveRoute || resolveWhatsAppBillingRoute;
   const prepareDiagnosticSend = deps.prepareDiagnosticSend || prepareManeaDiagnosticSend;
@@ -161,65 +176,26 @@ async function sendRoutedWhatsAppBillingMessage(
     };
   }
 
-  if (!isVendorMetaBillRoutingEnabled(env)) {
-    logBillingTrace({
-      stage: "route",
-      vendorId,
-      billId: String(billId || ""),
-      route: ROUTES.YNOT_MSG91,
-      reason: "global_vendor_meta_routing_disabled",
-    }, logger);
-    logBillingTrace({
-      stage: "msg91_selected",
-      vendorId,
-      billId: String(billId || ""),
-      reason: "global_vendor_meta_routing_disabled",
-    }, logger);
-    logSafeBillingSendEvent("[WhatsApp Billing Send Route]", {
-      vendorId,
-      billId: String(billId || ""),
-      selectedProvider: ROUTES.YNOT_MSG91,
-      reason: "global_vendor_meta_routing_disabled",
-    }, logger);
-
-    if (!(await hasMsg91Balance(vendorId))) {
-      logBillingTrace({
-        stage: "msg91_skipped",
-        vendorId,
-        billId: String(billId || ""),
-        reason: "insufficient_whatsapp_balance",
-      }, logger);
-      return {
-        provider: ROUTES.YNOT_MSG91,
-        route: ROUTES.YNOT_MSG91,
-        status: "skipped",
-        reason: "insufficient_whatsapp_balance",
+  const vendorMetaRoutingEnabled = isVendorMetaBillRoutingEnabled(env);
+  const ynotMetaDefaultEnabled = isYnotMetaDefaultBillingEnabled(env);
+  let decision = vendorMetaRoutingEnabled
+    ? resolveRoute(
+        { whatsappBusiness: vendor?.whatsappBusiness || {} },
+        { ynotMetaDefaultEnabled }
+      )
+    : {
+        route: ynotMetaDefaultEnabled ? ROUTES.YNOT_META : ROUTES.YNOT_MSG91,
+        reason: ynotMetaDefaultEnabled
+          ? "ynot_meta_default_enabled"
+          : "global_vendor_meta_routing_disabled",
+        checks: {},
+        blockers: [],
       };
-    }
 
-    const result = await sendMsg91(msg91Payload);
-    logBillingTrace({
-      stage: "msg91_completed",
-      vendorId,
-      billId: String(billId || ""),
-    }, logger);
-    return {
-      provider: ROUTES.YNOT_MSG91,
-      route: ROUTES.YNOT_MSG91,
-      status: "accepted",
-      reason: "global_vendor_meta_routing_disabled",
-      result,
-    };
-  }
-
-  let decision = resolveRoute({
-    whatsappBusiness: vendor?.whatsappBusiness || {},
-  });
-
-  if (diagnosticContext.diagnostic) {
+  if (vendorMetaRoutingEnabled && diagnosticContext.diagnostic) {
     decision = resolveRoute(
       { whatsappBusiness: vendor?.whatsappBusiness || {} },
-      { phoneRegistrationReadyOverride: true }
+      { phoneRegistrationReadyOverride: true, ynotMetaDefaultEnabled }
     );
     if (decision.route === ROUTES.VENDOR_META) {
       decision = {
@@ -240,7 +216,7 @@ async function sendRoutedWhatsAppBillingMessage(
     blockers: Array.isArray(decision.blockers) ? decision.blockers : [],
   }, logger);
 
-  if (decision.route !== ROUTES.VENDOR_META) {
+  if (decision.route === ROUTES.YNOT_MSG91) {
     logBillingTrace({
       stage: "msg91_selected",
       vendorId,
@@ -284,6 +260,66 @@ async function sendRoutedWhatsAppBillingMessage(
       routeDecision: decision,
       result,
     };
+  }
+
+  if (decision.route === ROUTES.YNOT_META) {
+    logSafeBillingSendEvent("[WhatsApp Billing Send Route]", {
+      vendorId,
+      billId: String(billId || ""),
+      selectedProvider: ROUTES.YNOT_META,
+      reason: decision.reason,
+    }, logger);
+    if (!(await hasMsg91Balance(vendorId))) {
+      return {
+        provider: ROUTES.YNOT_META,
+        route: ROUTES.YNOT_META,
+        status: "skipped",
+        reason: "insufficient_whatsapp_balance",
+        routeDecision: decision,
+      };
+    }
+    try {
+      const result = await sendYnotMeta({
+        ...metaPayload,
+        vendorId,
+        billId,
+        operationId,
+        sendPurpose,
+      });
+      return {
+        provider: ROUTES.YNOT_META,
+        route: ROUTES.YNOT_META,
+        status: result?.status || "accepted",
+        reason: result?.reason || decision.reason,
+        routeDecision: decision,
+        result,
+      };
+    } catch (error) {
+      const safeErrorCode = getSafeErrorCode(error);
+      const status = isUncertainSendError(error) ? "uncertain" : "failed";
+      const metaError = error?.metaError || {};
+      logBillingTrace({
+        stage: status === "uncertain" ? "ynot_meta_uncertain" : "ynot_meta_failed",
+        vendorId,
+        billId: String(billId || ""),
+        status,
+        safeErrorCode,
+        httpStatus: metaError.status || null,
+        metaCode: metaError.code || "",
+        metaSubcode: metaError.subcode || "",
+        traceId: metaError.fbtraceId || "",
+      }, logger, "error");
+      return {
+        provider: ROUTES.YNOT_META,
+        route: ROUTES.YNOT_META,
+        status,
+        reason: decision.reason,
+        safeErrorCode,
+        deliveryId: error?.deliveryId || null,
+        routeDecision: decision,
+        attemptedAt: new Date(),
+      };
+    }
   }
 
   // Once vendor_meta is selected, never fallback to MSG91. A retry/fallback could
@@ -357,6 +393,7 @@ module.exports = {
   isProviderDecisionPendingMetaReadiness,
   isUncertainSendError,
   isVendorMetaBillRoutingEnabled,
+  isYnotMetaDefaultBillingEnabled,
   resolveBillingWhatsappProvider,
   sendRoutedWhatsAppBillingMessage,
 };

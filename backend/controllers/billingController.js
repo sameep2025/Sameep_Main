@@ -1390,14 +1390,14 @@ async function buildWhatsAppCompletionStatus(billing) {
   }
 
   const decision = resolveBillingWhatsappProvider({ vendor });
-  if (decision.provider !== "ynot_msg91") return null;
+  if (!["ynot_msg91", "ynot_meta"].includes(decision.provider)) return null;
   if (isProviderDecisionPendingMetaReadiness({ vendor, decision })) return null;
 
   const hasMsg91Balance = await hasAvailableWhatsAppBalance(billing.vendorId);
   if (hasMsg91Balance) return null;
 
   return {
-    provider: "ynot_msg91",
+    provider: decision.provider,
     sendExpected: false,
     reason: "insufficient_balance",
   };
