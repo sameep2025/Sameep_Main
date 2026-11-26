@@ -68,6 +68,11 @@ import {
   getMembershipVerificationGate,
   resolveSelectedDiscountMembershipId,
 } from "./membershipVerificationUi.mjs";
+import {
+  getQuickBillingCustomerSearchPlacement,
+  normalizeQuickBillingCustomerSearch,
+  validateQuickBillingCustomerSearch,
+} from "./quickBillingCustomerUi.mjs";
 import MultiStylistSelector from "./components/MultiStylistSelector";
 import {
   getCartStylistAllocationError,
@@ -1436,6 +1441,8 @@ function ExploreContent({ onReady, onOpenServices }) {
   const [customerSearchLoading, setCustomerSearchLoading] = useState(false);
   const [customerSearchError, setCustomerSearchError] = useState("");
   const [customerSearchOpen, setCustomerSearchOpen] = useState(false);
+  const [customerSearchRetryNonce, setCustomerSearchRetryNonce] = useState(0);
+  const [customerFirstSearchPinned, setCustomerFirstSearchPinned] = useState(false);
   const [billingCustomerIsNew, setBillingCustomerIsNew] = useState(false);
   const [customerName, setCustomerName] = useState("");
   const [loadedCustomerName, setLoadedCustomerName] = useState("");
@@ -1743,10 +1750,7 @@ function ExploreContent({ onReady, onOpenServices }) {
 
   const handleBillingCustomerInputChange = (value) => {
     const inputValue = String(value || "");
-    const digits = inputValue.replace(/\D/g, "");
-    const isPhoneInput = /^[\d\s()+-]*$/.test(inputValue);
-    const localDigits = digits.startsWith("91") && digits.length === 12 ? digits.slice(2) : digits;
-    const nextMobile = isPhoneInput && localDigits.length === 10 ? localDigits : "";
+    const nextMobile = normalizeQuickBillingCustomerSearch(inputValue).mobile;
 
     customerSearchRequestRef.current += 1;
     customerVerificationRequestRef.current += 1;
@@ -1922,48 +1926,75 @@ function ExploreContent({ onReady, onOpenServices }) {
     setPrepaidOtpError("");
   };
 
-  const renderBillingCustomerSearch = () => (
-    <div style={{ marginBottom: "10px", position: "relative" }}>
-      <label style={{ color: "#e6c37a", fontSize: "14px" }}>
-        Customer
+  const requestBillingCustomerSearch = () => {
+    const validation = validateQuickBillingCustomerSearch(customerSearch);
+    if (!validation.valid) {
+      setCustomerSearchError(validation.error);
+      setCustomerSearchOpen(true);
+      return;
+    }
+    setCustomerSearchError("");
+    setCustomerSearchOpen(true);
+    setCustomerSearchRetryNonce((current) => current + 1);
+  };
+
+  const renderBillingCustomerSearch = ({ customerFirst = false } = {}) => {
+    const packageCount = getPrepaidPackageWallets(prepaidWallets).length;
+    const valueWalletCount = prepaidWallets.filter(
+      (wallet) => wallet?.walletType === "PREPAID_VALUE" && Number(wallet.remainingAmountPaise) > 0
+    ).length;
+
+    if (customerId) {
+      return (
+        <section className={`quick-billing-customer-summary${customerFirst ? " customer-first" : ""}`}>
+          <div className="quick-billing-customer-summary-copy">
+            <span>Selected Customer</span>
+            <strong>{customerName || "Customer"}</strong>
+            <small>+91 {customerMobile}</small>
+          </div>
+          <div className="quick-billing-customer-summary-meta">
+            {loyaltyWalletStatus === "ready" ? <span>{availablePoints} loyalty points</span> : null}
+            {packageCount > 0 ? <span>{packageCount} prepaid package{packageCount === 1 ? "" : "s"}</span> : null}
+            {valueWalletCount > 0 ? <span>{valueWalletCount} prepaid wallet{valueWalletCount === 1 ? "" : "s"} available</span> : null}
+          </div>
+          <button type="button" onClick={() => handleBillingCustomerInputChange("")}>
+            Change
+          </button>
+        </section>
+      );
+    }
+
+    return (
+    <div className={`quick-billing-customer-search${customerFirst ? " customer-first" : ""}`}>
+      <label>
+        Customer Search <span>(Optional)</span>
       </label>
-      <input
-        value={customerSearch}
-        onChange={(e) => handleBillingCustomerInputChange(e.target.value)}
-        onFocus={() => {
-          if (customerSearchResults.length || customerSearchLoading || customerSearchError) {
-            setCustomerSearchOpen(true);
-          }
-        }}
-        placeholder="Search by name or enter mobile"
-        autoComplete="off"
-        style={{
-          width: "100%",
-          background: "#111",
-          border: "1px solid #444",
-          borderRadius: "8px",
-          color: "#fff",
-          marginTop: "6px",
-          padding: "10px",
-        }}
-      />
-      {customerSearchOpen && (customerSearchLoading || customerSearchError || customerSearchResults.length > 0 || customerSearch.trim().length >= 2) ? (
-        <div
-          style={{
-            position: "absolute",
-            zIndex: 20,
-            left: 0,
-            right: 0,
-            top: "100%",
-            marginTop: "6px",
-            background: "#111",
-            border: "1px solid #4b3a1d",
-            borderRadius: "10px",
-            boxShadow: "0 16px 30px rgba(0,0,0,0.35)",
-            maxHeight: "240px",
-            overflowY: "auto",
+      <div className="quick-billing-customer-search-row">
+        <input
+          value={customerSearch}
+          onChange={(e) => handleBillingCustomerInputChange(e.target.value)}
+          onFocus={() => {
+            if (customerFirst) setCustomerFirstSearchPinned(true);
+            if (customerSearchResults.length || customerSearchLoading || customerSearchError) {
+              setCustomerSearchOpen(true);
+            }
           }}
-        >
+          onKeyDown={(event) => {
+            if (event.key === "Enter") {
+              event.preventDefault();
+              requestBillingCustomerSearch();
+            }
+          }}
+          placeholder="Enter customer mobile number"
+          inputMode="tel"
+          autoComplete="tel"
+        />
+        <button type="button" onClick={requestBillingCustomerSearch} disabled={customerSearchLoading}>
+          {customerSearchLoading ? "Searching..." : "Search"}
+        </button>
+      </div>
+      {customerSearchOpen && (customerSearchLoading || customerSearchError || customerSearchResults.length > 0 || customerSearch.trim().length >= 2) ? (
+        <div className="quick-billing-customer-search-results">
           {customerSearchLoading ? (
             <div style={{ padding: "10px", color: "#aaa", fontSize: "13px" }}>Searching...</div>
           ) : customerSearchError ? (
@@ -1974,16 +2005,7 @@ function ExploreContent({ onReady, onOpenServices }) {
                 key={`${result.customerId}-${result.fullNumber || result.phone}`}
                 type="button"
                 onClick={() => selectBillingCustomerSearchResult(result)}
-                style={{
-                  width: "100%",
-                  textAlign: "left",
-                  background: "transparent",
-                  border: "none",
-                  borderBottom: "1px solid #26211a",
-                  color: "#fff",
-                  padding: "10px 12px",
-                  cursor: "pointer",
-                }}
+                className="quick-billing-customer-search-result"
               >
                 <div style={{ fontWeight: 700 }}>{result.name || result.fullNumber || result.phone || "Customer"}</div>
                 {result.name ? (
@@ -2002,7 +2024,9 @@ function ExploreContent({ onReady, onOpenServices }) {
       ) : null}
       {customerMobile ? (
         <div style={{ color: "#aaa", fontSize: "12px", marginTop: "6px" }}>
-          {billingCustomerIsNew ? "New customer" : "Billing mobile"}: +91 {customerMobile}
+          {billingCustomerIsNew
+            ? `No existing customer found for +91 ${customerMobile}. Continue billing to create this customer.`
+            : `Billing mobile: +91 ${customerMobile}`}
         </div>
       ) : customerSearch.trim() ? (
         <div style={{ color: "#aaa", fontSize: "12px", marginTop: "6px" }}>
@@ -2010,7 +2034,8 @@ function ExploreContent({ onReady, onOpenServices }) {
         </div>
       ) : null}
     </div>
-  );
+    );
+  };
 
   const renderMembershipPreviewCard = () => {
     if (membershipVerification.pending) {
@@ -4393,11 +4418,14 @@ function ExploreContent({ onReady, onOpenServices }) {
 
   useEffect(() => {
     const query = customerSearch.trim();
-    const digitCount = query.replace(/\D/g, "").length;
+    const normalizedCustomerSearch = normalizeQuickBillingCustomerSearch(query);
     const hasTextSearch = /[^\d\s()+-]/.test(query) && query.length >= 2;
     const isSelectedCustomerLabel = selectedBillingCustomerLabelRef.current === query;
     const canSearch = Boolean(
-      vendorId && !isSelectedCustomerLabel && (hasTextSearch || digitCount >= 3)
+      vendorId &&
+        !isSelectedCustomerLabel &&
+        (hasTextSearch ||
+          (normalizedCustomerSearch.isPhoneInput && Boolean(normalizedCustomerSearch.mobile)))
     );
 
     if (!canSearch) {
@@ -4471,7 +4499,7 @@ function ExploreContent({ onReady, onOpenServices }) {
       clearTimeout(handle);
       controller.abort();
     };
-  }, [customerSearch, vendorId]);
+  }, [customerSearch, customerSearchRetryNonce, vendorId]);
 
   useEffect(() => {
     const requestId = membershipPreviewRequestRef.current + 1;
@@ -4925,10 +4953,47 @@ function ExploreContent({ onReady, onOpenServices }) {
   const addVendorBillingItem = (node, nodePath = [], categoryPathIds = []) =>
     addToCart(node, nodePath, categoryPathIds, CART_ORIGIN_BILLING);
   const clearCart = () => {
-    resetBillingState({
-      nextCartOrigin:
-        viewMode === "menu" && hasCurrentVendorSession() ? CART_ORIGIN_BILLING : null,
-    });
+    const preserveBillingCustomer = viewMode === "menu" && hasCurrentVendorSession() && customerId;
+    if (!preserveBillingCustomer) {
+      resetBillingState({
+        nextCartOrigin:
+          viewMode === "menu" && hasCurrentVendorSession() ? CART_ORIGIN_BILLING : null,
+      });
+      return;
+    }
+
+    membershipPreviewRequestRef.current += 1;
+    gstPreviewRequestRef.current += 1;
+    setCartItems([]);
+    setTrackedCartOrigin(CART_ORIGIN_BILLING);
+    setCartOpen(false);
+    setMembershipPreview(null);
+    setMembershipPreviewResolvedKey("");
+    setMembershipPreviewLoading(false);
+    setMembershipPreviewError("");
+    setMembershipPreviewErrorKey("");
+    setDiscountMemberships([]);
+    setSelectedDiscountMembershipId("");
+    setGstPreview(null);
+    setGstPreviewLoading(false);
+    setGstPreviewError("");
+    setBillingId(null);
+    setShowOtpInput(false);
+    setOtp("");
+    setOtpAttemptToken("");
+    setDiscountAmount(0);
+    setDiscountPercent(0);
+    setAppliedDiscount(0);
+    setDiscountMode(null);
+    setShowDiscountPopup(false);
+    setRedeemPoints(0);
+    setStandardPaymentMode("ONLINE");
+    setSelectedPaymentMode("STANDARD");
+    setPrepaidWallet(null);
+    setPrepaidPackageShortcutError("");
+    clearPrepaidAuthorization();
+    setMenuSearch("");
+    localStorage.removeItem("ynot_cart");
   };
 
   const resetBillingState = ({ nextCartOrigin = null } = {}) => {
@@ -4949,6 +5014,7 @@ function ExploreContent({ onReady, onOpenServices }) {
     setCustomerSearchLoading(false);
     setCustomerSearchError("");
     setCustomerSearchOpen(false);
+    setCustomerFirstSearchPinned(false);
     setBillingCustomerIsNew(false);
     customerMobileLookupRef.current = "";
     selectedBillingCustomerLabelRef.current = "";
@@ -5793,6 +5859,12 @@ function ExploreContent({ onReady, onOpenServices }) {
       ),
     [menuTree, rootCategoryId]
   );
+
+  const customerSearchPlacement = getQuickBillingCustomerSearchPlacement({
+    cartItemCount: cartItems.length,
+    customerId,
+    customerFirstPinned: customerFirstSearchPinned,
+  });
 
   const prepaidPackageWallets = useMemo(
     () => getPrepaidPackageWallets(prepaidWallets),
@@ -6765,7 +6837,12 @@ function ExploreContent({ onReady, onOpenServices }) {
 
               <div className="menu-overlay-layout">
                 <div className={`menu-overlay-main ${isMobile ? "mobile" : "desktop"}`}>
-                  {renderPrepaidPackageShortcuts()}
+                  {customerSearchPlacement.customerFirst ? (
+                    <div className="quick-billing-customer-first-panel">
+                      {renderBillingCustomerSearch({ customerFirst: true })}
+                      {renderPrepaidPackageShortcuts()}
+                    </div>
+                  ) : null}
                   <div className="menu-search-wrap">
                     <input
                       ref={quickBillingSearchInputRef}
@@ -7125,7 +7202,7 @@ function ExploreContent({ onReady, onOpenServices }) {
                                   paddingTop: "15px",
                                 }}
                                 >
-                                  {renderBillingCustomerSearch()}
+                                  {customerSearchPlacement.cart ? renderBillingCustomerSearch() : null}
                                 {customerMobile && customerMobile.length === 10 && (
                                   <div style={{ marginBottom: "10px" }}>
                                     <label style={{ color: "#e6c37a", fontSize: "14px" }}>
@@ -7613,7 +7690,7 @@ function ExploreContent({ onReady, onOpenServices }) {
                                     paddingTop: "15px",
                                   }}
                                   >
-                                  {renderBillingCustomerSearch()}
+                                  {customerSearchPlacement.cart ? renderBillingCustomerSearch() : null}
                                   {customerMobile && customerMobile.length === 10 && (
                                     <div style={{ marginBottom: "10px" }}>
                                       <label style={{ color: "#e6c37a", fontSize: "14px" }}>
