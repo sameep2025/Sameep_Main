@@ -2,6 +2,71 @@ function normalizeIdentity(value) {
   return String(value || "").trim();
 }
 
+export function getPrepaidPackageWallets(wallets = []) {
+  return (Array.isArray(wallets) ? wallets : []).filter(
+    (wallet) =>
+      wallet?.walletType === "PREPAID_SESSIONS" &&
+      normalizeIdentity(wallet.id) &&
+      normalizeIdentity(wallet.eligibleItem?.itemId) &&
+      normalizeIdentity(wallet.eligibleItem?.itemSource) &&
+      Number.isSafeInteger(Number(wallet.remainingQuantity)) &&
+      Number(wallet.remainingQuantity) > 0
+  );
+}
+
+export function getQuickBillingItemSource(node, pricingSource) {
+  if (node?.sourceType === "custom_package") return "custom_package";
+  return pricingSource === "self_managed" ? "vendor_menu_node" : "vendor_price_node";
+}
+
+export function resolvePrepaidPackageService({ wallet, services = [], pricingSource } = {}) {
+  const eligibleItemId = normalizeIdentity(wallet?.eligibleItem?.itemId);
+  const eligibleItemSource = normalizeIdentity(wallet?.eligibleItem?.itemSource);
+  if (!eligibleItemId || !eligibleItemSource) return null;
+
+  return (
+    (Array.isArray(services) ? services : []).find((service) => {
+      const node = service?.node;
+      const itemId = normalizeIdentity(node?._id || node?.id || node?.categoryId);
+      return (
+        itemId === eligibleItemId &&
+        getQuickBillingItemSource(node, pricingSource) === eligibleItemSource
+      );
+    }) || null
+  );
+}
+
+export function getPrepaidPackageSelectionState({
+  wallet,
+  cartItems = [],
+  selectedWallet,
+  selectedPaymentMode = "STANDARD",
+} = {}) {
+  const eligibleItemId = normalizeIdentity(wallet?.eligibleItem?.itemId);
+  const eligibleItemSource = normalizeIdentity(wallet?.eligibleItem?.itemSource);
+  const items = Array.isArray(cartItems) ? cartItems : [];
+  const sameItemPresent = items.some(
+    (item) =>
+      normalizeIdentity(item?.itemId) === eligibleItemId &&
+      normalizeIdentity(item?.itemSource) === eligibleItemSource
+  );
+  const hasIncompatibleCartItems = items.some(
+    (item) =>
+      normalizeIdentity(item?.itemId) !== eligibleItemId ||
+      normalizeIdentity(item?.itemSource) !== eligibleItemSource
+  );
+  const hasDifferentPrepaidSelection =
+    selectedPaymentMode !== "STANDARD" &&
+    normalizeIdentity(selectedWallet?.id) !== normalizeIdentity(wallet?.id);
+
+  return {
+    sameItemPresent,
+    hasIncompatibleCartItems,
+    hasDifferentPrepaidSelection,
+    requiresConfirmation: hasIncompatibleCartItems || hasDifferentPrepaidSelection,
+  };
+}
+
 function toOptionalNonNegativeInteger(value) {
   if (value === undefined || value === null || value === "") return null;
   const number = Number(value);

@@ -57,8 +57,11 @@ import {
 import {
   buildPrepaidBillPresentation,
   createPrepaidAuthorizationBinding,
+  getPrepaidPackageSelectionState,
+  getPrepaidPackageWallets,
   getPrepaidWalletSelectionAction,
   getPrepaidWalletQuote,
+  resolvePrepaidPackageService,
 } from "./prepaidWalletUi.mjs";
 import {
   createMembershipPreviewRequestKey,
@@ -1407,6 +1410,7 @@ function ExploreContent({ onReady, onOpenServices }) {
   const [prepaidWallet, setPrepaidWallet] = useState(null);
   const [prepaidWalletStatus, setPrepaidWalletStatus] = useState("idle");
   const [prepaidWalletError, setPrepaidWalletError] = useState("");
+  const [prepaidPackageShortcutError, setPrepaidPackageShortcutError] = useState("");
   const [prepaidAuthorization, setPrepaidAuthorization] = useState(null);
   const [prepaidOtp, setPrepaidOtp] = useState("");
   const [prepaidOtpError, setPrepaidOtpError] = useState("");
@@ -1781,6 +1785,7 @@ function ExploreContent({ onReady, onOpenServices }) {
     setPrepaidWallet(null);
     setPrepaidWalletStatus("idle");
     setPrepaidWalletError("");
+    setPrepaidPackageShortcutError("");
     setPrepaidAuthorization(null);
     setPrepaidOtp("");
     setPrepaidOtpError("");
@@ -1908,6 +1913,7 @@ function ExploreContent({ onReady, onOpenServices }) {
       setPrepaidWallet(null);
       setPrepaidWalletStatus(nextCustomerId ? "loading" : "idle");
       setPrepaidWalletError("");
+      setPrepaidPackageShortcutError("");
     } else if (prepaidSelectionAction === "RETRY") {
       fetchPrepaidWallet(nextCustomerId);
     }
@@ -4837,13 +4843,20 @@ function ExploreContent({ onReady, onOpenServices }) {
     setCartOrigin(origin);
   };
 
-  const addToCart = (node, nodePath = [], categoryPathIds = [], origin = CART_ORIGIN_PUBLIC) => {
+  const addToCart = (
+    node,
+    nodePath = [],
+    categoryPathIds = [],
+    origin = CART_ORIGIN_PUBLIC,
+    options = {}
+  ) => {
     if (origin === CART_ORIGIN_PUBLIC && hasCurrentVendorSession()) return;
 
     const previousOrigin = cartOriginRef.current;
     setTrackedCartOrigin(origin);
     setCartItems(prev => {
-      const sourceItems = previousOrigin && previousOrigin !== origin ? [] : prev;
+      const sourceItems =
+        options.replaceCart || (previousOrigin && previousOrigin !== origin) ? [] : prev;
       const safePathIds = (categoryPathIds || []).filter(Boolean);
       const itemId = node._id || node.id || node.categoryId;
       const cartKey = node.cartKey || itemId;
@@ -4853,10 +4866,13 @@ function ExploreContent({ onReady, onOpenServices }) {
         : Array.isArray(node.nodePath)
           ? node.nodePath
           : [];
-      const minQty = getQuickBillingInitialQuantity(node.minQty);
+      const minQty = Number.isSafeInteger(options.initialQuantity) && options.initialQuantity > 0
+        ? options.initialQuantity
+        : getQuickBillingInitialQuantity(node.minQty);
       const stepQty = Math.max(1, Number(node.stepQty) || 1);
       const existing = sourceItems.find(i => (i.cartKey || i.itemId) === cartKey);
       if (existing) {
+        if (options.incrementExisting === false) return sourceItems;
         return sourceItems.map(i => {
           if ((i.cartKey || i.itemId) !== cartKey) return i;
           const qty = getQuickBillingIncrementedQuantity(i.qty, i.stepQty);
@@ -4982,6 +4998,7 @@ function ExploreContent({ onReady, onOpenServices }) {
     setPrepaidWallet(null);
     setPrepaidWalletStatus("idle");
     setPrepaidWalletError("");
+    setPrepaidPackageShortcutError("");
     setPrepaidAuthorization(null);
     setPrepaidOtp("");
     setPrepaidOtpError("");
@@ -5776,6 +5793,121 @@ function ExploreContent({ onReady, onOpenServices }) {
       ),
     [menuTree, rootCategoryId]
   );
+
+  const prepaidPackageWallets = useMemo(
+    () => getPrepaidPackageWallets(prepaidWallets),
+    [prepaidWallets]
+  );
+
+  const prepaidPackageServices = useMemo(() => {
+    const resolved = new Map();
+    prepaidPackageWallets.forEach((wallet) => {
+      resolved.set(
+        String(wallet.id),
+        resolvePrepaidPackageService({
+          wallet,
+          services: quickBillingServices,
+          pricingSource: vendorInfo?.pricingSource,
+        })
+      );
+    });
+    return resolved;
+  }, [prepaidPackageWallets, quickBillingServices, vendorInfo?.pricingSource]);
+
+  const handleUsePrepaidPackage = (wallet) => {
+    setPrepaidPackageShortcutError("");
+    const service = prepaidPackageServices.get(String(wallet?.id));
+    if (!service) {
+      setPrepaidPackageShortcutError(
+        `${wallet?.eligibleItem?.itemName || "This package's service"} is archived or unavailable in the current menu.`
+      );
+      return;
+    }
+
+    const selectionState = getPrepaidPackageSelectionState({
+      wallet,
+      cartItems,
+      selectedWallet: prepaidWallet,
+      selectedPaymentMode,
+    });
+    if (
+      selectionState.requiresConfirmation &&
+      !window.confirm(
+        "Using this prepaid package will replace the incompatible cart or prepaid selection. Continue?"
+      )
+    ) {
+      return;
+    }
+
+    if (!selectionState.sameItemPresent || selectionState.hasIncompatibleCartItems) {
+      addToCart(
+        service.node,
+        service.nodePath,
+        service.categoryPathIds,
+        CART_ORIGIN_BILLING,
+        {
+          replaceCart: selectionState.hasIncompatibleCartItems,
+          incrementExisting: false,
+          initialQuantity: 1,
+        }
+      );
+    }
+    setPrepaidWallet(wallet);
+    setSelectedPaymentMode("PREPAID_SESSIONS");
+    paymentHasUserEditedRef.current = false;
+    setPaymentAllocationError("");
+    clearPrepaidAuthorization();
+  };
+
+  const renderPrepaidPackageShortcuts = () => {
+    if (!customerId || prepaidPackageWallets.length === 0) return null;
+    return (
+      <section className="quick-billing-package-shortcuts" aria-labelledby="prepaid-package-shortcuts-title">
+        <div className="quick-billing-package-shortcuts-heading">
+          <div>
+            <h3 id="prepaid-package-shortcuts-title">Customer&apos;s Prepaid Packages</h3>
+            <p>Select a package to add its eligible service.</p>
+          </div>
+          <span>{prepaidPackageWallets.length}</span>
+        </div>
+        <div className="quick-billing-package-shortcut-list">
+          {prepaidPackageWallets.map((wallet) => {
+            const selected =
+              selectedPaymentMode === "PREPAID_SESSIONS" && prepaidWallet?.id === wallet.id;
+            return (
+              <article
+                className={`quick-billing-package-shortcut${selected ? " selected" : ""}`}
+                key={wallet.id}
+              >
+                <div className="quick-billing-package-shortcut-copy">
+                  <strong>{wallet.planName || "Prepaid Package"}</strong>
+                  <span>{wallet.eligibleItem?.itemName || "Eligible service"}</span>
+                  <small>
+                    {wallet.remainingQuantity} session{Number(wallet.remainingQuantity) === 1 ? "" : "s"}
+                    {" · "}Expires {wallet.expiresAt
+                      ? new Date(wallet.expiresAt).toLocaleDateString("en-IN")
+                      : "-"}
+                  </small>
+                </div>
+                <button
+                  type="button"
+                  disabled={selected}
+                  onClick={() => handleUsePrepaidPackage(wallet)}
+                >
+                  {selected ? "Selected" : "Use Package"}
+                </button>
+              </article>
+            );
+          })}
+        </div>
+        {prepaidPackageShortcutError ? (
+          <p className="quick-billing-package-shortcut-error" role="alert">
+            {prepaidPackageShortcutError}
+          </p>
+        ) : null}
+      </section>
+    );
+  };
 
   const quickBillingCategoryTree = useMemo(
     () => buildQuickBillingCategoryTree(menuTree),
@@ -6633,6 +6765,7 @@ function ExploreContent({ onReady, onOpenServices }) {
 
               <div className="menu-overlay-layout">
                 <div className={`menu-overlay-main ${isMobile ? "mobile" : "desktop"}`}>
+                  {renderPrepaidPackageShortcuts()}
                   <div className="menu-search-wrap">
                     <input
                       ref={quickBillingSearchInputRef}

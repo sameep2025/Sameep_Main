@@ -22,6 +22,127 @@ async function loadHelpers() {
   return import("../app/_Explore/prepaidWalletUi.mjs");
 }
 
+test("prepaid package shortcuts include every available session membership instance", async () => {
+  const { getPrepaidPackageWallets } = await loadHelpers();
+  const wallets = [
+    {
+      id: "sessions-1",
+      customerMembershipId: "membership-1",
+      walletType: "PREPAID_SESSIONS",
+      planName: "Hair Spa Pack",
+      remainingQuantity: 3,
+      eligibleItem: { itemId: "service-1", itemSource: "vendor_price_node" },
+    },
+    {
+      id: "sessions-2",
+      customerMembershipId: "membership-2",
+      walletType: "PREPAID_SESSIONS",
+      planName: "Hair Spa Pack",
+      remainingQuantity: 2,
+      eligibleItem: { itemId: "service-1", itemSource: "vendor_price_node" },
+    },
+    {
+      id: "value-1",
+      walletType: "PREPAID_VALUE",
+      remainingAmountPaise: 50000,
+    },
+    {
+      id: "exhausted-1",
+      walletType: "PREPAID_SESSIONS",
+      remainingQuantity: 0,
+      eligibleItem: { itemId: "service-1", itemSource: "vendor_price_node" },
+    },
+  ];
+
+  assert.deepEqual(
+    getPrepaidPackageWallets(wallets).map((wallet) => wallet.id),
+    ["sessions-1", "sessions-2"]
+  );
+  assert.deepEqual(getPrepaidPackageWallets([]), []);
+});
+
+test("prepaid package service resolution requires exact active menu identity and source", async () => {
+  const { resolvePrepaidPackageService } = await loadHelpers();
+  const wallet = {
+    eligibleItem: { itemId: "service-1", itemSource: "vendor_price_node" },
+  };
+  const activeService = {
+    node: { _id: "service-1", name: "Hair Spa", price: 800 },
+    nodePath: ["Hair", "Hair Spa"],
+    categoryPathIds: ["root", "hair", "service-1"],
+  };
+
+  assert.equal(
+    resolvePrepaidPackageService({ wallet, services: [activeService], pricingSource: "platform" }),
+    activeService
+  );
+  assert.equal(
+    resolvePrepaidPackageService({ wallet, services: [activeService], pricingSource: "self_managed" }),
+    null
+  );
+  assert.equal(resolvePrepaidPackageService({ wallet, services: [], pricingSource: "platform" }), null);
+
+  const customPackage = {
+    node: { _id: "package-1", sourceType: "custom_package", name: "Bridal Pack", price: 2000 },
+  };
+  assert.equal(
+    resolvePrepaidPackageService({
+      wallet: { eligibleItem: { itemId: "package-1", itemSource: "custom_package" } },
+      services: [customPackage],
+      pricingSource: "platform",
+    }),
+    customPackage
+  );
+});
+
+test("prepaid package selection confirms only incompatible cart or membership changes", async () => {
+  const { getPrepaidPackageSelectionState } = await loadHelpers();
+  const wallet = {
+    id: "wallet-1",
+    eligibleItem: { itemId: "service-1", itemSource: "vendor_price_node" },
+  };
+  const matchingCart = [{ itemId: "service-1", itemSource: "vendor_price_node", qty: 1 }];
+
+  assert.deepEqual(
+    getPrepaidPackageSelectionState({ wallet, cartItems: [] }),
+    {
+      sameItemPresent: false,
+      hasIncompatibleCartItems: false,
+      hasDifferentPrepaidSelection: false,
+      requiresConfirmation: false,
+    }
+  );
+  assert.equal(
+    getPrepaidPackageSelectionState({ wallet, cartItems: matchingCart }).requiresConfirmation,
+    false
+  );
+  assert.equal(
+    getPrepaidPackageSelectionState({
+      wallet,
+      cartItems: [...matchingCart, { itemId: "service-2", itemSource: "vendor_price_node" }],
+    }).requiresConfirmation,
+    true
+  );
+  assert.equal(
+    getPrepaidPackageSelectionState({
+      wallet,
+      cartItems: matchingCart,
+      selectedPaymentMode: "PREPAID_SESSIONS",
+      selectedWallet: { id: "wallet-2" },
+    }).requiresConfirmation,
+    true
+  );
+  assert.equal(
+    getPrepaidPackageSelectionState({
+      wallet,
+      cartItems: matchingCart,
+      selectedPaymentMode: "PREPAID_SESSIONS",
+      selectedWallet: wallet,
+    }).requiresConfirmation,
+    false
+  );
+});
+
 test("value wallet uses the discounted and loyalty-adjusted final payable", async () => {
   const { getPrepaidWalletQuote } = await loadHelpers();
   const wallet = { walletType: "PREPAID_VALUE", remainingAmountPaise: 1200000 };
@@ -169,11 +290,30 @@ test("Quick Billing capability-gates wallet lookup and preserves ordinary paymen
   assert.match(source, /discountMembershipId:\s*selectedDiscountMembershipId \|\| undefined/);
 });
 
+test("Quick Billing renders package shortcuts and reuses existing prepaid settlement state", () => {
+  assert.match(source, /Customer&apos;s Prepaid Packages/);
+  assert.match(source, /getPrepaidPackageWallets\(prepaidWallets\)/);
+  assert.match(source, /resolvePrepaidPackageService\(\{/);
+  assert.match(source, /setPrepaidWallet\(wallet\)/);
+  assert.match(source, /setSelectedPaymentMode\("PREPAID_SESSIONS"\)/);
+  assert.match(source, /initialQuantity:\s*1/);
+  assert.match(source, /incrementExisting:\s*false/);
+  assert.match(source, /disabled=\{selected\}/);
+  assert.match(source, /window\.confirm\(/);
+  assert.match(source, /replace the incompatible cart or prepaid selection/);
+  assert.match(source, /archived or unavailable in the current menu/);
+  assert.match(source, /clearPrepaidAuthorization\(\)/);
+  assert.match(source, /setPrepaidPackageShortcutError\(""\)/);
+});
+
 test("prepaid controls remain compact on narrow mobile layouts", () => {
   assert.match(css, /\.quick-billing-prepaid-card/);
   assert.match(css, /\.quick-billing-prepaid-otp-actions/);
   assert.match(css, /@media \(max-width: 380px\)/);
   assert.match(css, /min-height:\s*44px/);
+  assert.match(css, /\.quick-billing-package-shortcuts/);
+  assert.match(css, /\.quick-billing-package-shortcut-list/);
+  assert.match(css, /@media \(max-width: 768px\)[\s\S]*\.quick-billing-package-shortcut-list\s*\{[\s\S]*grid-template-columns:\s*1fr/);
 });
 
 test("completed prepaid transaction snapshots produce customer-safe receipt presentation", async () => {
