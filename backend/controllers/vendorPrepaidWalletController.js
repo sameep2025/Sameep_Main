@@ -433,13 +433,19 @@ exports.prepareAuthorization = async (req, res) => {
       eligibleItemSource: undefined,
       exactQuantity: undefined,
       exactAmountPaise: undefined,
+      loyaltyRedemptionAmount: 0,
     };
     if (wallet.walletType === "PREPAID_VALUE") {
       const amount = Number(req.body?.amountPaise);
+      const loyaltyRedemptionAmount = Number(req.body?.loyaltyRedemptionAmount || 0);
       if (!Number.isSafeInteger(amount) || amount < 1 || amount > wallet.remainingAmountPaise) {
         throw createPublicError("Requested wallet amount is invalid", "invalid_prepaid_amount");
       }
+      if (!Number.isSafeInteger(loyaltyRedemptionAmount) || loyaltyRedemptionAmount < 0) {
+        throw createPublicError("Requested loyalty redemption is invalid", "invalid_loyalty_redemption");
+      }
       binding.exactAmountPaise = amount;
+      binding.loyaltyRedemptionAmount = loyaltyRedemptionAmount;
     } else {
       const item = membership.prepaidSessionsSnapshot;
       const availableInCart = getEligibleSessionQuantity(
@@ -476,11 +482,25 @@ exports.prepareAuthorization = async (req, res) => {
         authorization.authorizationType === binding.authorizationType &&
         authorization.cartFingerprint === fingerprint &&
         Number(authorization.exactAmountPaise || 0) === Number(binding.exactAmountPaise || 0) &&
+        Number(authorization.loyaltyRedemptionAmount || 0) === binding.loyaltyRedemptionAmount &&
         Number(authorization.exactQuantity || 0) === Number(binding.exactQuantity || 0) &&
         String(authorization.eligibleItemId || "") === String(binding.eligibleItemId || "") &&
         String(authorization.eligibleItemSource || "") === String(binding.eligibleItemSource || "");
       if (!sameBinding) throw createPublicError("Bill or redemption details changed", "prepaid_authorization_binding_changed", 409);
       assertAuthorizationCanResend(authorization, now);
+    }
+
+    const billingBinding = await BillingSession.updateOne(
+      { _id: billing._id, vendorId, customerId: billing.customerId, status: "ACTIVE" },
+      {
+        $set: {
+          pointsRedeemed: binding.loyaltyRedemptionAmount,
+          otpVerified: false,
+        },
+      }
+    );
+    if (billingBinding.matchedCount !== 1) {
+      throw createPublicError("Billing session changed before OTP authorization", "prepaid_authorization_binding_changed", 409);
     }
 
     if (!(await hasAvailableOTPBalance(vendorId))) {
@@ -632,6 +652,9 @@ exports.verifyAuthorization = async (req, res) => {
     if (fingerprint !== authorization.cartFingerprint) {
       throw createPublicError("Billing cart changed after OTP request", "prepaid_authorization_binding_changed", 409);
     }
+    if (Number(billing.pointsRedeemed || 0) !== Number(authorization.loyaltyRedemptionAmount || 0)) {
+      throw createPublicError("Loyalty redemption changed after OTP request", "prepaid_authorization_binding_changed", 409);
+    }
     const { membership, wallet } = await loadAvailableWallet(
       vendorId,
       authorization.customerId,
@@ -730,6 +753,23 @@ exports.verifyAuthorization = async (req, res) => {
         { $set: { status: "PENDING", verifiedAt: null } }
       ).catch(() => {});
       throw error;
+    }
+    const verifiedBilling = await BillingSession.updateOne(
+      {
+        _id: authorization.billingSessionId,
+        vendorId,
+        customerId: authorization.customerId,
+        status: "ACTIVE",
+        pointsRedeemed: Number(authorization.loyaltyRedemptionAmount || 0),
+      },
+      { $set: { otpVerified: true } }
+    );
+    if (verifiedBilling.modifiedCount !== 1) {
+      await PrepaidRedemptionAuthorization.updateOne(
+        { _id: authorization._id, status: "VERIFIED", verifiedAt: now },
+        { $set: { status: "PENDING", verifiedAt: null } }
+      ).catch(() => {});
+      throw createPublicError("Billing authorization could not be finalized", "prepaid_authorization_binding_changed", 409);
     }
     return res.json({ success: true, authorization: { id: String(verified._id), status: verified.status, verifiedAt: verified.verifiedAt } });
   } catch (error) {

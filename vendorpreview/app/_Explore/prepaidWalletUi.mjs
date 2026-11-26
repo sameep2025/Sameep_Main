@@ -27,12 +27,10 @@ export function getPrepaidWalletQuote({
   redeemPoints = 0,
 }) {
   if (!wallet) return { eligible: false, reason: "No active prepaid wallet is available." };
-  if (Number(redeemPoints) > 0 || (wallet.walletType !== "PREPAID_VALUE" && hasManualDiscount)) {
+  if (wallet.walletType !== "PREPAID_VALUE" && (Number(redeemPoints) > 0 || hasManualDiscount)) {
     return {
       eligible: false,
-      reason: wallet.walletType === "PREPAID_VALUE"
-        ? "Prepaid wallet payment cannot be combined with loyalty redemption."
-        : "Prepaid Package payment cannot be combined with discounts or loyalty redemption.",
+      reason: "Prepaid Package payment cannot be combined with discounts or loyalty redemption.",
     };
   }
 
@@ -100,6 +98,7 @@ export function createPrepaidAuthorizationBinding({
   finalPayablePaise = 0,
   amountPaise = 0,
   quantity = 0,
+  loyaltyRedemptionAmount = 0,
 }) {
   const items = cartItems.map((item) => ({
     itemId: normalizeIdentity(item?.itemId),
@@ -114,6 +113,7 @@ export function createPrepaidAuthorizationBinding({
     finalPayablePaise: Number(finalPayablePaise),
     amountPaise: Number(amountPaise),
     quantity: Number(quantity),
+    loyaltyRedemptionAmount: Number(loyaltyRedemptionAmount),
   });
 }
 

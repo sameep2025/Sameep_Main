@@ -6,6 +6,7 @@ const WhatsappMarketingTemplate = require("../models/WhatsappMarketingTemplate")
 const WhatsappMarketingTestSend = require("../models/WhatsappMarketingTestSend");
 const WhatsappMarketingCampaignRecipient = require("../models/WhatsappMarketingCampaignRecipient");
 const WhatsappBillingDelivery = require("../models/WhatsappBillingDelivery");
+const Enquiry = require("../models/Enquiry");
 const { getMetaWhatsAppConfig } = require("../config/metaWhatsAppConfig");
 const { mapMetaMarketingStatus } = require("./whatsappMarketingMetaService");
 const {
@@ -504,6 +505,61 @@ async function processYnotBillingDeliveryStatuses(item, dependencies = {}) {
   return results;
 }
 
+async function processYnotEnquiryDeliveryStatuses(item, dependencies = {}) {
+  const EnquiryModel = dependencies.EnquiryModel || Enquiry;
+  const config = dependencies.config || getMetaWhatsAppConfig();
+  const senderPhoneNumberId = String(config.ynotPhoneNumberId || "").trim();
+  if (!senderPhoneNumberId || String(item?.phoneNumberId || "") !== senderPhoneNumberId) {
+    return [];
+  }
+  const statuses = Array.isArray(item?.value?.statuses) ? item.value.statuses : [];
+  const results = [];
+  for (const statusEvent of statuses) {
+    const metaMessageId = sanitizeWebhookLogValue(statusEvent?.id, 256);
+    const status = mapMarketingTestDeliveryStatus(statusEvent?.status);
+    if (!metaMessageId || !status) continue;
+    const error = Array.isArray(statusEvent?.errors) ? statusEvent.errors[0] : null;
+    const allowedCurrentStatuses = {
+      SENT: ["UNKNOWN", "ACCEPTED"],
+      DELIVERED: ["UNKNOWN", "ACCEPTED", "SENT"],
+      READ: ["UNKNOWN", "ACCEPTED", "SENT", "DELIVERED"],
+      FAILED: ["UNKNOWN", "ACCEPTED", "SENT"],
+    }[status];
+    const now = new Date();
+    const set = {
+      "meta.vendorWhatsappStatus": status === "FAILED" ? "failed" : "sent",
+      "meta.vendorWhatsappDeliveryStatus": status,
+      "meta.vendorWhatsappLastStatusAt": now,
+      "meta.vendorWhatsappOutcomeUnknown": false,
+      "meta.vendorWhatsappErrorCode": status === "FAILED"
+        ? sanitizeWebhookLogValue(error?.code, 80)
+        : "",
+      "meta.vendorWhatsappError": status === "FAILED"
+        ? sanitizeWebhookLogValue(error?.title || error?.message, 240)
+        : "",
+    };
+    if (status === "SENT") set["meta.vendorWhatsappSentAt"] = now;
+    if (status === "DELIVERED") set["meta.vendorWhatsappDeliveredAt"] = now;
+    if (status === "READ") set["meta.vendorWhatsappReadAt"] = now;
+    if (status === "FAILED") set["meta.vendorWhatsappFailedAt"] = now;
+    const result = await EnquiryModel.updateOne(
+      {
+        "meta.vendorWhatsappProvider": "ynot_meta",
+        "meta.vendorWhatsappSenderPhoneNumberId": senderPhoneNumberId,
+        "meta.vendorWhatsappMessageId": metaMessageId,
+        "meta.vendorWhatsappDeliveryStatus": { $in: allowedCurrentStatuses },
+      },
+      { $set: set }
+    );
+    results.push({
+      metaMessageId,
+      status,
+      updated: result?.matchedCount === 1,
+    });
+  }
+  return results;
+}
+
 async function processMetaWhatsappWebhook(payload, options = {}) {
   const metadata = extractWebhookMetadata(payload);
   const logger = options.logger || console;
@@ -511,6 +567,7 @@ async function processMetaWhatsappWebhook(payload, options = {}) {
   const results = [];
   const marketing = [];
   const billing = [];
+  const enquiries = [];
 
   for (const item of metadata) {
     if (item.field === MARKETING_TEMPLATE_STATUS_FIELD) {
@@ -537,6 +594,7 @@ async function processMetaWhatsappWebhook(payload, options = {}) {
     }
 
     let billingUpdates = [];
+    let enquiryUpdates = [];
     if (options.signatureVerified === true) {
       try {
         billingUpdates = await processYnotBillingDeliveryStatuses(item, options);
@@ -546,6 +604,14 @@ async function processMetaWhatsappWebhook(payload, options = {}) {
           code: sanitizeWebhookLogValue(error?.code || "billing_status_update_failed", 80),
         });
       }
+      try {
+        enquiryUpdates = await processYnotEnquiryDeliveryStatuses(item, options);
+        enquiries.push(...enquiryUpdates);
+      } catch (error) {
+        logger.warn("YNOT Meta enquiry delivery status update failed", {
+          code: sanitizeWebhookLogValue(error?.code || "enquiry_status_update_failed", 80),
+        });
+      }
     }
 
     const vendorMatch = await findStandardVendor({
@@ -553,7 +619,10 @@ async function processMetaWhatsappWebhook(payload, options = {}) {
       phoneNumberId: item.phoneNumberId,
     });
     if (!vendorMatch) {
-      if (!billingUpdates.some((entry) => entry.updated)) {
+      if (
+        !billingUpdates.some((entry) => entry.updated) &&
+        !enquiryUpdates.some((entry) => entry.updated)
+      ) {
         logger.warn("Meta WhatsApp webhook has no vendor match", {
           wabaId: item.wabaId,
           phoneNumberId: item.phoneNumberId,
@@ -588,7 +657,7 @@ async function processMetaWhatsappWebhook(payload, options = {}) {
     }
   }
 
-  return { processed: metadata.length, coexistence: results, marketing, billing };
+  return { processed: metadata.length, coexistence: results, marketing, billing, enquiries };
 }
 
 module.exports = {
@@ -606,6 +675,7 @@ module.exports = {
   processMarketingCampaignDeliveryStatuses,
   processMarketingTestDeliveryStatuses,
   processYnotBillingDeliveryStatuses,
+  processYnotEnquiryDeliveryStatuses,
   recordCoexistenceEvent,
   resolveVerifiedCoexistenceVendor,
   verifyWebhookSignature,

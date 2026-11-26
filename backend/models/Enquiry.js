@@ -105,5 +105,16 @@ EnquirySchema.index(
     partialFilterExpression: { 'appointment.submissionKey': { $type: 'string', $gt: '' } },
   }
 );
+EnquirySchema.index(
+  { 'meta.vendorWhatsappMessageId': 1 },
+  {
+    name: 'ynot_meta_enquiry_message_id_unique',
+    unique: true,
+    partialFilterExpression: {
+      'meta.vendorWhatsappProvider': 'ynot_meta',
+      'meta.vendorWhatsappMessageId': { $type: 'string' },
+    },
+  }
+);
 
 module.exports = mongoose.model('Enquiry', EnquirySchema);

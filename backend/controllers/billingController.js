@@ -2352,6 +2352,7 @@ exports.completeBillingSession = async (req, res) => {
       const isGstInvoice = ["TEST", "LIVE"].includes(billing.gstInvoiceMode);
       const isGstTestInvoice = billing.gstInvoiceMode === "TEST";
       const isPrepaidPayment = isPrepaidPaymentMode(paymentMode);
+      const isPrepaidValuePayment = String(paymentMode || "").trim().toUpperCase() === "PREPAID_VALUE";
 
       if (isPrepaidPayment) {
         assertPrepaidRequestContract({ paymentMode, paymentBreakdown, authorizationId: prepaidAuthorizationId });
@@ -2367,8 +2368,8 @@ exports.completeBillingSession = async (req, res) => {
           error.publicMessage = error.message;
           throw error;
         }
-        if (Number(billing.pointsRedeemed || 0) !== 0) {
-          const error = new Error("Prepaid wallet bills cannot redeem loyalty points");
+        if (!isPrepaidValuePayment && Number(billing.pointsRedeemed || 0) !== 0) {
+          const error = new Error("Prepaid Package bills cannot redeem loyalty points");
           error.statusCode = 400;
           error.publicMessage = error.message;
           throw error;
@@ -2388,7 +2389,7 @@ exports.completeBillingSession = async (req, res) => {
       let rewardCreditBucketsForRedemption = [];
       const now = new Date();
 
-      if (!isPrepaidPayment && effectiveRedeemPoints > 0) {
+      if ((!isPrepaidPayment || isPrepaidValuePayment) && effectiveRedeemPoints > 0) {
         const rewardBalance = await calculateRewardBalance({
           vendorId: billing.vendorId,
           customerId: billing.customerId,

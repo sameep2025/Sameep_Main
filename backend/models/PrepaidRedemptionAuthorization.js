@@ -45,6 +45,7 @@ const PrepaidRedemptionAuthorizationSchema = new mongoose.Schema(
     },
     exactQuantity: { type: Number, min: 1, default: undefined, immutable: true },
     exactAmountPaise: { type: Number, min: 1, default: undefined, immutable: true },
+    loyaltyRedemptionAmount: { type: Number, min: 0, default: 0, immutable: true },
     cartFingerprint: { type: String, required: true, trim: true, maxlength: 128, immutable: true },
     otpHash: {
       type: String,
@@ -86,7 +87,8 @@ PrepaidRedemptionAuthorizationSchema.pre("validate", function validateAuthorizat
 
   if (
     this.authorizationType === "PREPAID_SESSIONS" &&
-    (!this.eligibleItemId || !ITEM_SOURCES.includes(this.eligibleItemSource) || !hasQuantity || this.exactAmountPaise != null)
+    (!this.eligibleItemId || !ITEM_SOURCES.includes(this.eligibleItemSource) || !hasQuantity ||
+      this.exactAmountPaise != null || Number(this.loyaltyRedemptionAmount || 0) !== 0)
   ) {
     this.invalidate(
       "exactQuantity",

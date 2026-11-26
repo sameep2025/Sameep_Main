@@ -19,6 +19,7 @@ const BillingSession = require("../../models/BillingSession");
 const Customer = require("../../models/Customer");
 const CustomerMembership = require("../../models/CustomerMembership");
 const DummyVendor = require("../../models/DummyVendor");
+const LoyaltyLedger = require("../../models/LoyaltyLedger");
 const PrepaidMembershipWallet = require("../../models/PrepaidMembershipWallet");
 const PrepaidRedemptionAuthorization = require("../../models/PrepaidRedemptionAuthorization");
 const PrepaidWalletLedger = require("../../models/PrepaidWalletLedger");
@@ -283,14 +284,16 @@ async function createAndUpdateBill(fixture, options = {}) {
   return { billingId, cartItems, grossAmount };
 }
 
-async function authorizeBill(fixture, bill, { amountPaise, quantity } = {}) {
+async function authorizeBill(fixture, bill, { amountPaise, quantity, loyaltyRedemptionAmount = 0 } = {}) {
   const prepared = await request(app)
     .post(`/api/vendor/prepaid-wallets/${fixture.vendor._id}/authorizations/prepare`)
     .set(auth(fixture.token))
     .send({
       walletId: fixture.wallet._id,
       billingSessionId: bill.billingId,
-      ...(fixture.wallet.walletType === "PREPAID_VALUE" ? { amountPaise } : { quantity }),
+      ...(fixture.wallet.walletType === "PREPAID_VALUE"
+        ? { amountPaise, loyaltyRedemptionAmount }
+        : { quantity }),
     });
   assert.equal(prepared.status, 200, JSON.stringify(prepared.body));
   const authorizationId = prepared.body.authorization.id;
@@ -438,6 +441,66 @@ test("Value Wallet completion applies manual discount before authorization and s
   assert.equal(wallet.status, "DEPLETED");
   assert.equal(membership.status, "DEPLETED");
   assert.equal(ledger.amountPaise, 125000);
+});
+
+test("Value Wallet deducts the final amount after manual discount and loyalty redemption", async () => {
+  const fixture = await createPrepaidFixture({
+    type: "PREPAID_VALUE",
+    suffix: "114",
+    balance: 100000,
+  });
+  await LoyaltyLedger.create({
+    type: "EARN",
+    vendorId: fixture.vendor._id,
+    customerId: fixture.customer._id,
+    transactionId: oid(),
+    points: 200,
+    remainingPoints: 200,
+  });
+  const bill = await createAndUpdateBill(fixture, { price: 1000, discountAmount: 100 });
+  const authorizationId = await authorizeBill(fixture, bill, {
+    amountPaise: 80000,
+    loyaltyRedemptionAmount: 100,
+  });
+  const completed = await completeBill(fixture, bill.billingId, authorizationId);
+  assert.equal(completed.status, 200, JSON.stringify(completed.body));
+
+  const [storedBill, transaction, wallet, redemption] = await Promise.all([
+    BillingSession.findById(bill.billingId).lean(),
+    Transaction.findOne({ billingSessionId: bill.billingId }).lean(),
+    PrepaidMembershipWallet.findById(fixture.wallet._id).lean(),
+    LoyaltyLedger.findOne({ billingSessionId: bill.billingId, type: "REDEEM" }).lean(),
+  ]);
+  assert.equal(storedBill.totalAmount, 900);
+  assert.equal(storedBill.pointsRedeemed, 100);
+  assert.equal(storedBill.pointsEarned, 0);
+  assert.equal(transaction.redeemValue, 100);
+  assert.equal(transaction.prepaidSettlementSnapshot.authorizedAmountPaise, 80000);
+  assert.equal(wallet.remainingAmountPaise, 20000);
+  assert.equal(redemption.points, -100);
+
+  const requested = await request(app)
+    .post(`/api/billing/${bill.billingId}/cancel/request-otp`)
+    .set(auth(fixture.token))
+    .send({ reason: "WRONG_SERVICES" });
+  assert.equal(requested.status, 200, JSON.stringify(requested.body));
+  const cancelled = await request(app)
+    .post(`/api/billing/${bill.billingId}/cancel/verify-otp`)
+    .set(auth(fixture.token))
+    .send({
+      otp: "123456",
+      cancelOtpAttemptToken: requested.body.data.cancelOtpAttemptToken,
+      reason: "WRONG_SERVICES",
+    });
+  assert.equal(cancelled.status, 200, JSON.stringify(cancelled.body));
+  const [restoredWallet, restoredEarn, loyaltyReversal] = await Promise.all([
+    PrepaidMembershipWallet.findById(fixture.wallet._id).lean(),
+    LoyaltyLedger.findOne({ customerId: fixture.customer._id, type: "EARN" }).lean(),
+    LoyaltyLedger.findOne({ billingSessionId: bill.billingId, type: "REDEEM_REVERSAL" }).lean(),
+  ]);
+  assert.equal(restoredWallet.remainingAmountPaise, 100000);
+  assert.equal(restoredEarn.remainingPoints, 200);
+  assert.equal(loyaltyReversal.points, 100);
 });
 
 test("authenticated Sessions Wallet flow consumes the exact eligible quantity", async () => {

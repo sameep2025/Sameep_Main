@@ -2746,13 +2746,20 @@ function ExploreContent({ onReady, onOpenServices }) {
     Number.isInteger(gstPreview?.totals?.estimatedCustomerPayablePaise) && gstPreviewAvailable
       ? gstPreview.totals.estimatedCustomerPayablePaise
       : Math.round(
-          ((prepaidSelected ? finalTotal : getAuthoritativeCartTotal()) + Number.EPSILON) * 100
+          ((prepaidSelected
+            ? Math.max(finalTotal - (selectedPaymentMode === "PREPAID_VALUE" ? redeemPoints : 0), 0)
+            : getAuthoritativeCartTotal()) + Number.EPSILON) * 100
         ),
     0
   );
 
   useEffect(() => {
     if (selectedPaymentMode !== "PREPAID_SESSIONS") return;
+    setDiscountAmount(0);
+    setDiscountPercent(0);
+    setAppliedDiscount(0);
+    setDiscountMode(null);
+    setShowDiscountPopup(false);
     setRedeemPoints(0);
     setShowOtpInput(false);
     setOtp("");
@@ -2909,7 +2916,7 @@ function ExploreContent({ onReady, onOpenServices }) {
         cartItems,
         finalPayablePaise: paymentFinalPayablePaise,
         hasManualDiscount: Number(appliedDiscount) > 0,
-        redeemPoints: prepaidSelected ? 0 : redeemPoints,
+        redeemPoints: selectedPaymentMode === "PREPAID_SESSIONS" ? 0 : redeemPoints,
       }),
     [
       prepaidWallet,
@@ -2917,7 +2924,7 @@ function ExploreContent({ onReady, onOpenServices }) {
       paymentFinalPayablePaise,
       appliedDiscount,
       redeemPoints,
-      prepaidSelected,
+      selectedPaymentMode,
     ]
   );
   const prepaidBinding = createPrepaidAuthorizationBinding({
@@ -2927,6 +2934,7 @@ function ExploreContent({ onReady, onOpenServices }) {
     finalPayablePaise: paymentFinalPayablePaise,
     amountPaise: prepaidWalletQuote.amountPaise,
     quantity: prepaidWalletQuote.quantity,
+    loyaltyRedemptionAmount: selectedPaymentMode === "PREPAID_VALUE" ? redeemPoints : 0,
   });
 
   const clearPrepaidAuthorization = (message = "") => {
@@ -3056,7 +3064,10 @@ function ExploreContent({ onReady, onOpenServices }) {
             walletId: prepaidWallet.id,
             billingSessionId,
             ...(prepaidWallet.walletType === "PREPAID_VALUE"
-              ? { amountPaise: prepaidWalletQuote.amountPaise }
+              ? {
+                  amountPaise: prepaidWalletQuote.amountPaise,
+                  loyaltyRedemptionAmount: redeemPoints,
+                }
               : { quantity: prepaidWalletQuote.quantity }),
           }),
         }
@@ -3228,6 +3239,14 @@ function ExploreContent({ onReady, onOpenServices }) {
                 onChange={() => {
                   setPrepaidWallet(wallet);
                   setSelectedPaymentMode(wallet.walletType);
+                  paymentHasUserEditedRef.current = false;
+                  cashAmountInputRef.current = "0.00";
+                  onlineAmountInputRef.current = "0.00";
+                  cardAmountInputRef.current = "0.00";
+                  setCashAmountInput("0.00");
+                  setOnlineAmountInput("0.00");
+                  setCardAmountInput("0.00");
+                  setPaymentAllocationError("");
                   clearPrepaidAuthorization();
                 }}
               />
@@ -3245,7 +3264,7 @@ function ExploreContent({ onReady, onOpenServices }) {
         </div>
       ) : null}
 
-      <div className="quick-billing-standard-methods" role="radiogroup" aria-label="Payment method">
+      {selectedPaymentMode === "STANDARD" ? <div className="quick-billing-standard-methods" role="radiogroup" aria-label="Payment method">
         {[
               ["ONLINE", "UPI"],
               ["CASH", "Cash"],
@@ -3268,7 +3287,7 @@ function ExploreContent({ onReady, onOpenServices }) {
                 {label}
               </label>
             ))}
-      </div>
+      </div> : null}
 
       {selectedPaymentMode === "STANDARD" ? (
         <>
@@ -3339,6 +3358,18 @@ function ExploreContent({ onReady, onOpenServices }) {
               Discount Membership benefits are not applied when prepaid payment is selected.
             </p>
           ) : null}
+          <button
+            type="button"
+            className="quick-billing-prepaid-standard-action"
+            onClick={() => {
+              setSelectedPaymentMode("STANDARD");
+              setStandardPaymentMode("ONLINE");
+              setPrepaidWallet(null);
+              clearPrepaidAuthorization();
+            }}
+          >
+            Use regular payment instead
+          </button>
           {!prepaidWalletQuote.eligible ? (
             <div className="quick-billing-payment-error" role="alert">{prepaidWalletQuote.reason}</div>
           ) : null}
@@ -4615,7 +4646,9 @@ function ExploreContent({ onReady, onOpenServices }) {
                 ? 0
                 : discountPercent,
             },
-            redemption: { amount: prepaidSelected ? 0 : redeemPoints },
+            redemption: {
+              amount: selectedPaymentMode === "PREPAID_SESSIONS" ? 0 : redeemPoints,
+            },
           }),
         });
         const payload = await response.json().catch(() => null);
@@ -4649,6 +4682,7 @@ function ExploreContent({ onReady, onOpenServices }) {
     discountPercent,
     redeemPoints,
     prepaidSelected,
+    selectedPaymentMode,
     prepaidWallet?.walletType,
     gstPreviewRetryNonce,
   ]);
@@ -6905,7 +6939,7 @@ function ExploreContent({ onReady, onOpenServices }) {
                               </div>
                             )}
                           </div>
-                          {loyaltyEnabled && getAuthoritativeEarnPoints() > 0 && (
+                          {!prepaidSelected && loyaltyEnabled && getAuthoritativeEarnPoints() > 0 && (
                             <div style={{ marginTop: 6 }}>
                               You will earn: {getAuthoritativeEarnPoints()} points
                             </div>
@@ -6927,7 +6961,7 @@ function ExploreContent({ onReady, onOpenServices }) {
                                 >
                                   Clear Cart
                                 </button>
-                                <button
+                                {selectedPaymentMode !== "PREPAID_SESSIONS" ? <button
                                   onClick={() => {
                                     if (appliedDiscount > 0) {
                                       setDiscountAmount(0);
@@ -6949,7 +6983,7 @@ function ExploreContent({ onReady, onOpenServices }) {
                                   }}
                                 >
                                   {appliedDiscount > 0 ? "Clear Discount" : "Discount"}
-                                </button>
+                                </button> : null}
                               </div>
                               <div
                                 style={{
@@ -7393,7 +7427,7 @@ function ExploreContent({ onReady, onOpenServices }) {
                                 </div>
                               )}
                             </div>
-                            {loyaltyEnabled && getAuthoritativeEarnPoints() > 0 && (
+                            {!prepaidSelected && loyaltyEnabled && getAuthoritativeEarnPoints() > 0 && (
                               <div style={{ marginTop: 6 }}>
                                 You will earn: {getAuthoritativeEarnPoints()} points
                               </div>
@@ -7415,7 +7449,7 @@ function ExploreContent({ onReady, onOpenServices }) {
                                   >
                                     Clear Cart
                                   </button>
-                                  <button
+                                  {selectedPaymentMode !== "PREPAID_SESSIONS" ? <button
                                     onClick={() => {
                                       if (appliedDiscount > 0) {
                                         setDiscountAmount(0);
@@ -7437,7 +7471,7 @@ function ExploreContent({ onReady, onOpenServices }) {
                                     }}
                                   >
                                     {appliedDiscount > 0 ? "Clear Discount" : "Discount"}
-                                  </button>
+                                  </button> : null}
                                 </div>
                                 <div
                                   style={{

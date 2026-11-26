@@ -353,7 +353,7 @@ test("feature gates and real transaction requirement fail closed", async () => {
   });
 });
 
-test("prepaid value permits a consistent manual discount but rejects stacking and session discounts", () => {
+test("prepaid value permits manual discount and loyalty but rejects membership stacking", () => {
   assert.throws(() => assertPrepaidRequestContract({
     paymentMode: "PREPAID_VALUE",
     authorizationId: ids.authorization,
@@ -374,10 +374,25 @@ test("prepaid value permits a consistent manual discount but rejects stacking an
     billing: { pointsRedeemed: 0, discountAmount: 10 },
     authoritativeFinancials: { discountAmount: 10, additionalManualDiscountAmount: 10 },
   }), (error) => error.code === "prepaid_discounts_or_rewards_not_allowed");
+  assert.doesNotThrow(() => assertNoPrepaidDiscountsOrRewards({
+    paymentMode: "PREPAID_VALUE",
+    billing: { pointsRedeemed: 10, discountAmount: 10 },
+    authoritativeFinancials: {
+      discountAmount: 10,
+      additionalManualDiscountAmount: 10,
+      membershipDiscountAmount: 0,
+      membership: null,
+    },
+  }));
   assert.throws(() => assertNoPrepaidDiscountsOrRewards({
     paymentMode: "PREPAID_VALUE",
-    billing: { pointsRedeemed: 10, discountAmount: 0 },
-    authoritativeFinancials: { discountAmount: 0 },
+    billing: { pointsRedeemed: 10, discountAmount: 10 },
+    authoritativeFinancials: {
+      discountAmount: 20,
+      additionalManualDiscountAmount: 10,
+      membershipDiscountAmount: 10,
+      membership: { id: "discount-membership" },
+    },
   }), (error) => error.code === "prepaid_discounts_or_rewards_not_allowed");
   assert.throws(() => assertNoPrepaidDiscountsOrRewards({
     paymentMode: "PREPAID_SESSIONS",

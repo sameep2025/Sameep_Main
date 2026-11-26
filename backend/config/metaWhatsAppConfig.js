@@ -32,6 +32,12 @@ function getMetaWhatsAppConfig() {
     trimEnv("YNOT_META_BILL_TEMPLATE_LANGUAGE") || "en";
   const isYnotDefaultBillingEnabled =
     trimEnv("YNOT_META_DEFAULT_BILLING_ENABLED") === "true";
+  const isYnotMetaEnquiryEnabled =
+    trimEnv("YNOT_META_ENQUIRY_ENABLED") === "true";
+  const ynotEnquiryTemplateName =
+    trimEnv("YNOT_META_ENQUIRY_TEMPLATE_NAME") || "vendor_enquiry";
+  const ynotEnquiryTemplateLanguage =
+    trimEnv("YNOT_META_ENQUIRY_TEMPLATE_LANGUAGE") || "en";
 
   return {
     appId,
@@ -49,6 +55,9 @@ function getMetaWhatsAppConfig() {
     ynotBillTemplateName,
     ynotBillTemplateLanguage,
     isYnotDefaultBillingEnabled,
+    isYnotMetaEnquiryEnabled,
+    ynotEnquiryTemplateName,
+    ynotEnquiryTemplateLanguage,
     isEmbeddedSignupConfigured: Boolean(appId && embeddedSignupConfigId),
     isCoexistenceEmbeddedSignupConfigured: Boolean(
       isCoexistenceOnboardingEnabled && appId && coexistenceEmbeddedSignupConfigId

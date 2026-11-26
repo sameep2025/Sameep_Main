@@ -131,6 +131,7 @@ test("prepaid package selection clears and hides loyalty redemption", () => {
   assert.match(source, /selectedPaymentMode !== "PREPAID_SESSIONS"/);
   assert.match(
     source,
-    /if \(selectedPaymentMode !== "PREPAID_SESSIONS"\) return;[\s\S]*setRedeemPoints\(0\)/
+    /if \(selectedPaymentMode !== "PREPAID_SESSIONS"\) return;[\s\S]*setDiscountMode\(null\)[\s\S]*setRedeemPoints\(0\)/
   );
+  assert.match(source, /selectedPaymentMode !== "PREPAID_SESSIONS" \? <button/);
 });

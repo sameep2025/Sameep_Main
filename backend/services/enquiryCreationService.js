@@ -1,16 +1,37 @@
 const Enquiry = require("../models/Enquiry");
 const DummyVendor = require("../models/DummyVendor");
 const { sendVendorEnquiryWhatsapp, normalizeWhatsAppMobile } = require("../utils/whatsappService");
-const { deductWhatsApp } = require("./vendorWalletService");
+const { getWhatsAppEnquiryConfig } = require("../utils/whatsappEnquiryConfig");
+const {
+  deductWhatsApp,
+  deductWhatsAppForEnquiry,
+  hasAvailableWhatsAppBalance,
+} = require("./vendorWalletService");
+const {
+  buildEnquiryOperationId,
+  isYnotMetaEnquiryEnabled,
+  sendYnotMetaEnquiryNotification,
+} = require("./ynotMetaEnquirySender");
 
-async function sendVendorWhatsappForEnquiry(doc, vendorId) {
+async function sendVendorWhatsappForEnquiry(doc, vendorId, dependencies = {}) {
+  const VendorModel = dependencies.VendorModel || DummyVendor;
+  const EnquiryModel = dependencies.EnquiryModel || Enquiry;
+  const sendMsg91 = dependencies.sendVendorEnquiryWhatsapp || sendVendorEnquiryWhatsapp;
+  const sendMeta = dependencies.sendYnotMetaEnquiryNotification || sendYnotMetaEnquiryNotification;
+  const deductMsg91 = dependencies.deductWhatsApp || deductWhatsApp;
+  const hasWhatsAppBalance =
+    dependencies.hasAvailableWhatsAppBalance || hasAvailableWhatsAppBalance;
+  const getEnquiryConfig = dependencies.getWhatsAppEnquiryConfig || getWhatsAppEnquiryConfig;
+  const metaEnabled = (dependencies.isYnotMetaEnquiryEnabled || isYnotMetaEnquiryEnabled)(
+    dependencies.env || process.env
+  );
   try {
-    const vendor = await DummyVendor.findById(vendorId).lean();
+    const vendor = await VendorModel.findById(vendorId).lean();
     const vendorMobile = vendor?.phone ? String(vendor.phone).trim() : "";
     const normalizedVendorMobile = normalizeWhatsAppMobile(vendorMobile);
 
     if (!normalizedVendorMobile) {
-      await Enquiry.findByIdAndUpdate(doc._id, {
+      await EnquiryModel.findByIdAndUpdate(doc._id, {
         $set: {
           "meta.vendorWhatsappStatus": "skipped",
           "meta.vendorWhatsappError": "Vendor phone not found",
@@ -19,12 +40,57 @@ async function sendVendorWhatsappForEnquiry(doc, vendorId) {
       return;
     }
 
-    const response = await sendVendorEnquiryWhatsapp({
+    if (metaEnabled) {
+      const enquiryConfig = await getEnquiryConfig();
+      if (!enquiryConfig.enabled) {
+        await EnquiryModel.findByIdAndUpdate(doc._id, {
+          $set: {
+            "meta.vendorWhatsappProvider": "ynot_meta",
+            "meta.vendorWhatsappTemplate":
+              String((dependencies.env || process.env).YNOT_META_ENQUIRY_TEMPLATE_NAME || "").trim() ||
+              "vendor_enquiry",
+            "meta.vendorWhatsappStatus": "skipped",
+            "meta.vendorWhatsappError": "disabled",
+          },
+        });
+        return { provider: "ynot_meta", status: "skipped", reason: "disabled" };
+      }
+      if (!(await hasWhatsAppBalance(vendorId))) {
+        await EnquiryModel.findByIdAndUpdate(doc._id, {
+          $set: {
+            "meta.vendorWhatsappProvider": "ynot_meta",
+            "meta.vendorWhatsappTemplate":
+              String((dependencies.env || process.env).YNOT_META_ENQUIRY_TEMPLATE_NAME || "").trim() ||
+              "vendor_enquiry",
+            "meta.vendorWhatsappStatus": "skipped",
+            "meta.vendorWhatsappError": "Insufficient WhatsApp balance",
+          },
+        });
+        return {
+          provider: "ynot_meta",
+          status: "skipped",
+          reason: "insufficient_whatsapp_balance",
+        };
+      }
+      return await sendMeta({
+        enquiryId: doc._id,
+        vendorId,
+        recipientPhoneNumber: normalizedVendorMobile,
+      }, {
+        env: dependencies.env || process.env,
+        deductWhatsAppForEnquiry: (args) => deductWhatsAppForEnquiry({
+          ...args,
+          dependencies: dependencies.walletDependencies || {},
+        }),
+      });
+    }
+
+    const response = await sendMsg91({
       mobile: normalizedVendorMobile,
     });
 
     if (response?.skipped) {
-      await Enquiry.findByIdAndUpdate(doc._id, {
+      await EnquiryModel.findByIdAndUpdate(doc._id, {
         $set: {
           "meta.vendorWhatsappTemplate": "vendor_enquiry",
           "meta.vendorWhatsappStatus": "skipped",
@@ -34,7 +100,7 @@ async function sendVendorWhatsappForEnquiry(doc, vendorId) {
       return;
     }
 
-    await deductWhatsApp(String(vendorId), `enquiry:${doc._id}`);
+    await deductMsg91(String(vendorId), `enquiry:${doc._id}`);
 
     const responseId =
       response?.data?.message_id ||
@@ -42,7 +108,7 @@ async function sendVendorWhatsappForEnquiry(doc, vendorId) {
       response?.id ||
       "";
 
-    await Enquiry.findByIdAndUpdate(doc._id, {
+    await EnquiryModel.findByIdAndUpdate(doc._id, {
       $set: {
         "meta.vendorWhatsappTemplate": "vendor_enquiry",
         "meta.vendorWhatsappSentAt": new Date(),
@@ -53,12 +119,40 @@ async function sendVendorWhatsappForEnquiry(doc, vendorId) {
       },
     });
   } catch (sendError) {
-    console.error("Vendor enquiry WhatsApp send failed:", sendError?.message || sendError);
-    await Enquiry.findByIdAndUpdate(doc._id, {
+    if (metaEnabled) {
+      console.error("YNOT Meta enquiry notification failed", {
+        code: String(sendError?.code || "ynot_meta_enquiry_send_failed").slice(0, 80),
+      });
+      if (sendError?.operationId) return;
+    } else {
+      console.error("Vendor enquiry WhatsApp send failed:", sendError?.message || sendError);
+    }
+    const set = metaEnabled
+      ? {
+          "meta.vendorWhatsappProvider": "ynot_meta",
+          "meta.vendorWhatsappOperationId": buildEnquiryOperationId(doc._id),
+          "meta.vendorWhatsappTemplate":
+            String((dependencies.env || process.env).YNOT_META_ENQUIRY_TEMPLATE_NAME || "").trim() ||
+            "vendor_enquiry",
+          "meta.vendorWhatsappStatus": "failed",
+          "meta.vendorWhatsappDeliveryStatus":
+            sendError?.metaOutcomeUnknown === true ? "UNKNOWN" : "FAILED",
+          "meta.vendorWhatsappOutcomeUnknown": sendError?.metaOutcomeUnknown === true,
+          "meta.vendorWhatsappErrorCode": String(
+            sendError?.code || "ynot_meta_enquiry_send_failed"
+          ).slice(0, 80),
+          "meta.vendorWhatsappError": sendError?.metaOutcomeUnknown === true
+            ? "Meta request outcome is unknown; automatic retry was blocked"
+            : "Meta enquiry notification failed",
+        }
+      : {
+          "meta.vendorWhatsappTemplate": "vendor_enquiry",
+          "meta.vendorWhatsappStatus": "failed",
+          "meta.vendorWhatsappError": String(sendError?.message || sendError || "Unknown error"),
+        };
+    await EnquiryModel.findByIdAndUpdate(doc._id, {
       $set: {
-        "meta.vendorWhatsappTemplate": "vendor_enquiry",
-        "meta.vendorWhatsappStatus": "failed",
-        "meta.vendorWhatsappError": String(sendError?.message || sendError || "Unknown error"),
+        ...set,
       },
     }).catch(() => {});
   }
@@ -76,4 +170,5 @@ async function createEnquiryAndNotify(payload) {
 
 module.exports = {
   createEnquiryAndNotify,
+  sendVendorWhatsappForEnquiry,
 };

@@ -2782,6 +2782,17 @@
   background: #080808;
 }
 
+.quick-billing-prepaid-standard-action {
+  width: 100%;
+  min-height: 44px;
+  margin-top: 10px;
+  border: 1px solid #6b5a32;
+  border-radius: 8px;
+  background: #211d14;
+  color: #f5d97a;
+  cursor: pointer;
+}
+
 .quick-billing-prepaid-heading,
 .quick-billing-prepaid-lines > div {
   display: flex;

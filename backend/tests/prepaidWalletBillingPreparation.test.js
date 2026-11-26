@@ -363,6 +363,7 @@ test("authorization schema binds exactly one wallet dimension and stores no plai
     ...common,
     authorizationType: "PREPAID_VALUE",
     exactAmountPaise: 10000,
+    loyaltyRedemptionAmount: 250,
   }).validate();
   await new PrepaidRedemptionAuthorization({
     ...common,
@@ -378,11 +379,32 @@ test("authorization schema binds exactly one wallet dimension and stores no plai
     exactAmountPaise: 10000,
     exactQuantity: 1,
   }).validate(), /value authorization/);
+  await assert.rejects(new PrepaidRedemptionAuthorization({
+    ...common,
+    billingSessionId: id("690000000000000000000012"),
+    authorizationType: "PREPAID_SESSIONS",
+    eligibleItemId: id(ids.item),
+    eligibleItemSource: "vendor_menu_node",
+    exactQuantity: 1,
+    loyaltyRedemptionAmount: 1,
+  }).validate(), /session authorization/);
   assert.equal(PrepaidRedemptionAuthorization.schema.path("otp"), undefined);
   assert.equal(PrepaidRedemptionAuthorization.schema.path("otpHash").options.select, false);
   assert.equal(PrepaidRedemptionAuthorization.schema.path("sendReservationToken").options.select, false);
   assert.equal(PrepaidRedemptionAuthorization.schema.path("otpGeneration").options.min, 0);
   assert.equal(PrepaidRedemptionAuthorization.schema.path("providerSubmissionCount").options.min, 0);
+  assert.equal(PrepaidRedemptionAuthorization.schema.path("loyaltyRedemptionAmount").options.immutable, true);
+});
+
+test("prepaid OTP binds loyalty redemption and finalizes billing authorization", () => {
+  const controller = fs.readFileSync(
+    path.join(__dirname, "../controllers/vendorPrepaidWalletController.js"),
+    "utf8"
+  );
+  assert.match(controller, /binding\.loyaltyRedemptionAmount\s*=\s*loyaltyRedemptionAmount/);
+  assert.match(controller, /pointsRedeemed:\s*binding\.loyaltyRedemptionAmount/);
+  assert.match(controller, /pointsRedeemed:\s*Number\(authorization\.loyaltyRedemptionAmount \|\| 0\)/);
+  assert.match(controller, /\{ \$set: \{ otpVerified: true \} \}/);
 });
 
 test("verification finalization is generation-bound and no response exposes OTP state", () => {

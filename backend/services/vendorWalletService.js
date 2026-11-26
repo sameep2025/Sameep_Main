@@ -2,6 +2,7 @@ const mongoose = require("mongoose");
 const VendorWallet = require("../models/VendorWallet");
 const VendorWalletLedger = require("../models/VendorWalletLedger");
 const WhatsappBillingDelivery = require("../models/WhatsappBillingDelivery");
+const Enquiry = require("../models/Enquiry");
 
 function isDuplicateKeyError(error) {
   return error?.code === 11000 || String(error?.message || "").includes("E11000");
@@ -191,10 +192,74 @@ async function deductWhatsAppForBillingDelivery({
   }
 }
 
+async function deductWhatsAppForEnquiry({
+  vendorId,
+  enquiryId,
+  operationId,
+  dependencies = {},
+}) {
+  const WalletModel = dependencies.WalletModel || VendorWallet;
+  const LedgerModel = dependencies.LedgerModel || VendorWalletLedger;
+  const EnquiryModel = dependencies.EnquiryModel || Enquiry;
+  const startSession = dependencies.startSession || (() => mongoose.startSession());
+  const session = await startSession();
+  let balanceAfter = null;
+  let alreadyDeducted = false;
+
+  try {
+    await session.withTransaction(async () => {
+      const enquiry = await EnquiryModel.findOne({
+        _id: enquiryId,
+        vendorId: String(vendorId),
+        "meta.vendorWhatsappProvider": "ynot_meta",
+        "meta.vendorWhatsappOperationId": operationId,
+        "meta.vendorWhatsappDeliveryStatus": {
+          $in: ["ACCEPTED", "SENT", "DELIVERED", "READ"],
+        },
+      }).session(session);
+      if (!enquiry) throw new Error("Accepted YNOT Meta enquiry notification not found");
+      if (enquiry.meta?.vendorWhatsappWalletDeductedAt) {
+        alreadyDeducted = true;
+        return;
+      }
+
+      const wallet = await WalletModel.findOneAndUpdate(
+        { vendorId, whatsappBalance: { $gt: 0 } },
+        { $inc: { whatsappBalance: -1 } },
+        { new: true, session }
+      );
+      if (!wallet) throw new Error("Insufficient WhatsApp balance");
+      balanceAfter = wallet.whatsappBalance;
+
+      await LedgerModel.create(
+        [{
+          vendorId,
+          type: "ENQUIRY_MESSAGE",
+          channel: "WHATSAPP",
+          quantity: -1,
+          reference: operationId,
+          balanceAfter,
+        }],
+        { session }
+      );
+      enquiry.meta = enquiry.meta || {};
+      enquiry.meta.vendorWhatsappWalletDeductedAt = new Date();
+      enquiry.meta.vendorWhatsappWalletReference = operationId;
+      enquiry.meta.vendorWhatsappWalletError = "";
+      enquiry.markModified("meta");
+      await enquiry.save({ session });
+    });
+    return { alreadyDeducted, balanceAfter };
+  } finally {
+    await session.endSession();
+  }
+}
+
 module.exports = {
   hasAvailableOTPBalance,
   hasAvailableWhatsAppBalance,
   deductWhatsApp,
   deductWhatsAppForBillingDelivery,
+  deductWhatsAppForEnquiry,
   deductOTP,
 };

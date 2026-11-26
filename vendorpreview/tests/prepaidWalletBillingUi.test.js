@@ -22,7 +22,7 @@ async function loadHelpers() {
   return import("../app/_Explore/prepaidWalletUi.mjs");
 }
 
-test("value wallet uses the discounted final payable while still rejecting loyalty", async () => {
+test("value wallet uses the discounted and loyalty-adjusted final payable", async () => {
   const { getPrepaidWalletQuote } = await loadHelpers();
   const wallet = { walletType: "PREPAID_VALUE", remainingAmountPaise: 1200000 };
   assert.deepEqual(getPrepaidWalletQuote({ wallet, finalPayablePaise: 100000 }), {
@@ -54,8 +54,8 @@ test("value wallet uses the discounted final payable while still rejecting loyal
     }
   );
   assert.equal(
-    getPrepaidWalletQuote({ wallet, finalPayablePaise: 100000, redeemPoints: 5 }).eligible,
-    false
+    getPrepaidWalletQuote({ wallet, finalPayablePaise: 95000, redeemPoints: 5 }).eligible,
+    true
   );
 });
 
@@ -105,6 +105,10 @@ test("authorization binding changes with customer, cart, quantity, amount, or wa
     cartItems: [{ ...base.cartItems[0], qty: 2 }],
   }));
   assert.notEqual(binding, createPrepaidAuthorizationBinding({ ...base, finalPayablePaise: 49000 }));
+  assert.notEqual(binding, createPrepaidAuthorizationBinding({
+    ...base,
+    loyaltyRedemptionAmount: 100,
+  }));
 });
 
 test("same-customer selection preserves active wallet requests and safely retries failures", async () => {
@@ -154,7 +158,11 @@ test("Quick Billing capability-gates wallet lookup and preserves ordinary paymen
   assert.match(source, /"Prepaid Wallet" : "Prepaid Packages"/);
   assert.match(source, /Discount Membership benefits are not applied when prepaid payment is selected/);
   assert.match(source, /prepaidWallet\?\.walletType !== "PREPAID_VALUE"/);
-  assert.match(source, /prepaidSelected \? finalTotal : getAuthoritativeCartTotal\(\)/);
+  assert.match(source, /selectedPaymentMode === "PREPAID_VALUE" \? redeemPoints : 0/);
+  assert.match(source, /loyaltyRedemptionAmount:\s*redeemPoints/);
+  assert.match(source, /selectedPaymentMode === "STANDARD" \? <div className="quick-billing-standard-methods"/);
+  assert.match(source, /Use regular payment instead/);
+  assert.match(source, /cashAmountInputRef\.current = "0\.00"/);
   assert.match(source, /prepaidWallets\.map\(\(wallet\) =>/);
   assert.match(source, /setPrepaidWallet\(wallet\)/);
   assert.match(source, /discountMemberships\.map\(\(membership\) =>/);

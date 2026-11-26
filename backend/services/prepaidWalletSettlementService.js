@@ -81,8 +81,8 @@ function assertNoPrepaidDiscountsOrRewards({ billing, authoritativeFinancials, p
   const membershipDiscount = Number(authoritativeFinancials?.membershipDiscountAmount || 0);
   const manualDiscount = Number(authoritativeFinancials?.additionalManualDiscountAmount || 0);
   const totalDiscount = Number(authoritativeFinancials?.discountAmount || 0);
-  const hasForbiddenBenefit = pointsRedeemed !== 0 || membershipDiscount !== 0 ||
-    Boolean(authoritativeFinancials?.membership);
+  const hasForbiddenBenefit = membershipDiscount !== 0 || Boolean(authoritativeFinancials?.membership);
+  const hasForbiddenSessionReward = mode !== "PREPAID_VALUE" && pointsRedeemed !== 0;
   const hasForbiddenSessionDiscount = mode !== "PREPAID_VALUE" && (
     storedDiscount !== 0 || manualDiscount !== 0 || totalDiscount !== 0
   );
@@ -90,10 +90,13 @@ function assertNoPrepaidDiscountsOrRewards({ billing, authoritativeFinancials, p
     Math.abs(storedDiscount - manualDiscount) > 0.001 ||
     Math.abs(totalDiscount - manualDiscount) > 0.001
   );
-  if (hasForbiddenBenefit || hasForbiddenSessionDiscount || hasInconsistentValueDiscount) {
+  if (
+    hasForbiddenBenefit || hasForbiddenSessionReward ||
+    hasForbiddenSessionDiscount || hasInconsistentValueDiscount
+  ) {
     throw createPublicError(
       mode === "PREPAID_VALUE"
-        ? "Prepaid wallet bills cannot use Discount Membership benefits or loyalty redemption"
+        ? "Prepaid wallet bills cannot use Discount Membership benefits"
         : "Prepaid Package bills cannot use discounts, Discount Membership benefits, or loyalty redemption",
       "prepaid_discounts_or_rewards_not_allowed"
     );
@@ -196,6 +199,9 @@ async function consumePrepaidAuthorization({
   });
   if (fingerprint !== authorization.cartFingerprint) {
     throw createPublicError("Billing cart changed after OTP verification", "prepaid_authorization_binding_changed", 409);
+  }
+  if (Number(authorization.loyaltyRedemptionAmount || 0) !== Number(billing.pointsRedeemed || 0)) {
+    throw createPublicError("Loyalty redemption changed after OTP verification", "prepaid_authorization_binding_changed", 409);
   }
 
   let deduction;
